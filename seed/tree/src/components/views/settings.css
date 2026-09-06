@@ -1,0 +1,46 @@
+/* What the agent reports about a runtime: its version and what it bills. */
+.connection__reported {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* A sign-in in flight: where to go, the one-time code to enter, and the field
+   the flow asks for a code back in. */
+.sign-in {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.sign-in__url,
+.sign-in__code {
+  margin: 0;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.sign-in__code strong {
+  font-family: var(--font-mono);
+  letter-spacing: 0.05em;
+}
+
+/* The code the flow asks for, and the control that spends it. A field with no
+   trigger reads as a dead end at the one moment the flow is asking for
+   something, so the button sits beside it the way every other control on this
+   surface does. */
+.sign-in__ask {
+  display: flex;
+  align-items: end;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+/* The code is one-time and already spent, so what replaces the field is a
+   statement rather than another control. */
+.sign-in__sent {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}

@@ -1,0 +1,25 @@
+{
+  "label": "ext.blocktype ext.source",
+  "checkStatement": "MATCH (b:ext.blocktype {id: $id}) RETURN GRAPH b",
+  "checkParameters": {
+    "id": "ext.source"
+  },
+  "createStatement": "CREATE (b:ext.blocktype {id: $id, name: $name, properties: $properties, requiredProperties: $requiredProperties, semantics: $semantics, status: $status})",
+  "createParameters": {
+    "id": "ext.source",
+    "name": "ext.source",
+    "properties": {
+      "code": "the file content: a string for text sources, or the blob reference object (_kind: blob, hash, mediaType, size, optional filename) for binary assets uploaded through CCGW's blob surface",
+      "hash": "content hash of the file bytes, sha256:\u003chex\u003e; for a binary source it equals the blob reference's hash",
+      "id": "member Block id, conventionally \u003cextId\u003e.\u003cpath\u003e",
+      "language": "the source language; absent for binary sources",
+      "path": "relative file path within the extension",
+      "rootMapped": "optional; true materializes the Block to \u003cpath\u003e at the working-tree root instead of src/extensions/\u003cextId\u003e/\u003cpath\u003e; root-mapped paths are reserved for elevated-review extensions"
+    },
+    "requiredProperties": [
+      "id"
+    ],
+    "semantics": "A source file as a versioned Block. Materializes to src/extensions/\u003cextId\u003e/\u003cpath\u003e, or to the working-tree root when rootMapped — which is how the shell owns package.json, the pnpm lockfile, vite.config, and the framework entry files. A binary source embeds its asset as code holding the blob reference object; consumers branch on the value's shape, and the materializer fetches the bytes through CCGW's blob route, verifying the hash.",
+    "status": "established"
+  }
+}

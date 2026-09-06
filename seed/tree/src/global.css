@@ -1,0 +1,62 @@
+:root {
+  --font-ui:
+    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-narrative: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --font-mono: "Fira Code", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+  font-family: var(--font-ui);
+}
+
+@font-face {
+  font-family: "Fira Code";
+  src: url("/fonts/fira-code.woff2") format("woff2");
+  font-weight: 300 700;
+  font-display: swap;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--text);
+}
+
+.calliopa {
+  max-width: 40rem;
+  margin: 4rem auto;
+  padding: 0 1rem;
+}
+
+.identity-header {
+  display: flex;
+  align-items: center;
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  font-size: 2rem;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+}
+
+.wordmark__laurel {
+  width: 1.2em;
+  height: 1.55em;
+  object-fit: contain;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

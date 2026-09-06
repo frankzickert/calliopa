@@ -1,0 +1,27 @@
+{
+  "label": "ext.blocktype ext.intention",
+  "checkStatement": "MATCH (b:ext.blocktype {id: $id}) RETURN GRAPH b",
+  "checkParameters": {
+    "id": "ext.intention"
+  },
+  "createStatement": "CREATE (b:ext.blocktype {id: $id, name: $name, properties: $properties, requiredProperties: $requiredProperties, semantics: $semantics, status: $status})",
+  "createParameters": {
+    "id": "ext.intention",
+    "name": "ext.intention",
+    "properties": {
+      "completionRule": "what finishing means under this intention; an intention without a stopping point is a topic",
+      "id": "member Block id, conventionally \u003cextId\u003e.intention",
+      "label": "the stance in the reader's words — Extend, Understand, Apply, Discuss, Stay tuned",
+      "marks": "the value a block carries when it is marked with this intention, and what selects it: unique among declarations, and one of the permitted values the content types enumerate. The extension's own id is not it — extend is declared by calliopa-extension",
+      "ownedTypes": "optional; the block type names that exist only because of this intention, matching the extension's own ext.blocktype definitions. Absent when an intention's vocabulary is code-registered rather than owned in the graph, which is true of extend and of nothing else"
+    },
+    "requiredProperties": [
+      "id",
+      "label",
+      "completionRule",
+      "marks"
+    ],
+    "semantics": "Declares that an extension is an intention: a standing stance selecting vocabulary, agent knowledge, surface and completion over one shared graph. Attaches to its extension's manifest by partOf like every other member and never materializes to the working tree. The declaration selects knowledge and never fences — a run under any intention may still stage anything, and the authority model stays CCGW identity policy plus human acceptance. BO_0142",
+    "status": "established"
+  }
+}

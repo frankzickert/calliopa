@@ -1,0 +1,25 @@
+{
+  "label": "ext.blocktype ext.skill",
+  "checkStatement": "MATCH (b:ext.blocktype {id: $id}) RETURN GRAPH b",
+  "checkParameters": {
+    "id": "ext.skill"
+  },
+  "createStatement": "CREATE (b:ext.blocktype {id: $id, name: $name, properties: $properties, requiredProperties: $requiredProperties, semantics: $semantics, status: $status})",
+  "createParameters": {
+    "id": "ext.skill",
+    "name": "ext.skill",
+    "properties": {
+      "examples": "worked examples of correct executions",
+      "goal": "what executing the skill accomplishes",
+      "id": "member Block id, conventionally \u003cextId\u003e.\u003cshort-name\u003e",
+      "outputContract": "what a correct execution produces",
+      "permittedOperations": "the CCGW operations the skill may use",
+      "preconditions": "what must hold before the skill runs"
+    },
+    "requiredProperties": [
+      "id"
+    ],
+    "semantics": "A structured Hermes procedure — versioned, diffable, and referenceable by other skills; never freeform prompt text. Skills may carry further structured fields beyond the required format.",
+    "status": "established"
+  }
+}

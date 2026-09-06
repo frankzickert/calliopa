@@ -1,0 +1,542 @@
+/* The block editor.
+ *
+ * Reading is the resting state, so the surface is quiet: no block borders, no
+ * control chrome until a block is reached by pointer or keyboard. The active
+ * block keeps the same type and the same box it had while being read, because
+ * text that shifts when you click it reads as two documents rather than one. */
+
+.view--block-editor {
+  /* The bar's height as one value: the bar takes it and the block rows clear
+   * it. Two numbers that had to agree would drift, and a block would end up
+   * activated under the bar. */
+  --block-bar-height: 2.5rem;
+  /* The room a block reserves on each side for its grips. One number, so the
+   * gutter the row holds open and the box the grips sit in cannot drift apart
+   * and leave a grip over the text. */
+  --block-grip-gutter: 1.75rem;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 0.5rem;
+}
+
+/* The editor owns the whole tab region while it is presenting a document. It
+ * negates the region's inset on the three edges the bar docks to, so the bar's
+ * own edges are the region's, and the content below puts the reading inset
+ * back. The bottom keeps the inset: nothing docks there, and the gap holds the
+ * document off the command dock.
+ *
+ * Only the branch that presents a document, which is the branch that carries a
+ * mode. A view that could not read its document renders a notice and nothing
+ * else, and a notice has no bar to dock, so it keeps the region's inset as
+ * every other view does. That is also why the inset is named here rather than
+ * on the view: where it is undefined, the fallback leaves the region's own
+ * padding alone. */
+.view--block-editor[data-editor-mode] {
+  --editor-region-inset: var(--workspace-inset, 0px);
+  margin: calc(-1 * var(--editor-region-inset))
+    calc(-1 * var(--editor-region-inset)) 0;
+}
+
+/* What the editor says in its own voice — a notice, or that it is still
+ * reading — is inset like the document it speaks about, rather than left
+ * against the region's edge by the negation above. Named rather than every
+ * paragraph, so the announcement region keeps the offsets that hide it. */
+.view--block-editor[data-editor-mode] > .block-notice,
+.view--block-editor[data-editor-mode] > [data-block-loading] {
+  margin-inline: var(--editor-region-inset);
+}
+
+/* The bar is out of the document's flow, docked to the top of the tab region.
+ * In flow it would push the document down the moment a block was activated.
+ * The space it lands on belongs to the headline and is reserved on the surface
+ * whether or not a bar ever appears, which is why showing and hiding the bar
+ * moves nothing. The editor negates the region's inset, so `top` and
+ * `inset-inline` of zero are the region's own edges. */
+.block-toolbar {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  z-index: 2;
+  box-sizing: border-box;
+  min-height: var(--block-bar-height);
+  display: flex;
+  /* No wrap: a second row would double what the bar covers, and the scroll
+   * margin below is one bar high on every viewport. Controls that do not fit
+   * scroll sideways instead. */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.5rem;
+  /* Docked rather than floating, so it is bordered the way the command dock is:
+   * one line on the edge facing the content, none on the three edges that are
+   * the region's, and no radius. The header already draws a line above, and a
+   * second one a pixel below it would read as a doubled seam. */
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  /* Opaque: the surface scrolls underneath it. */
+  background: var(--panel-raised);
+}
+
+.toolbar-group {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.block-toolbar button {
+  min-width: 2rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.block-toolbar button:hover:not(:disabled),
+.block-toolbar button:focus-visible {
+  border-color: var(--border);
+  background: var(--panel);
+}
+
+.block-toolbar button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.block-toolbar button:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.block-toolbar [data-mark="bold"] {
+  font-weight: 700;
+}
+
+.block-toolbar [data-mark="italic"] {
+  font-style: italic;
+}
+
+.block-toolbar [data-mark="strikethrough"] {
+  text-decoration: line-through;
+}
+
+.block-toolbar [data-mark="code"] {
+  font-family: var(--font-mono);
+}
+
+/* A refused save, on the block it belongs to. */
+.block-failure {
+  margin: 0.25rem 0 0;
+  color: var(--error);
+  font-size: 0.85rem;
+}
+
+.block-notice {
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--error);
+  border-radius: 0.4rem;
+  color: var(--error);
+}
+
+.block-surface {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* The reading inset the view negated on the region, put back here so the
+   * document keeps the line length it had and only the vertical arrangement
+   * changed. The surface itself reaches the region's edges, which is what lets
+   * the document scroll under the full height of the bar.
+   *
+   * The top is the headline's own space rather than a slot held for the bar:
+   * it is here whether or not a block is active, so showing and hiding the bar
+   * still moves no document content, and the bar lands on it rather than on
+   * the title. It is padding inside the scrolling element, so the surface
+   * still reaches the region's top edge and the document still scrolls under
+   * the whole bar. Same expression as a block row's clearance, so the space
+   * above the headline cannot drift from the space above a block. */
+  padding: calc(var(--block-bar-height) + 0.5rem)
+    calc(var(--editor-region-inset, 0px) + 0.25rem) 2rem;
+}
+
+/* The document's name, and the largest text in the tab. The shell renders no
+ * heading above a view, so this is the headline the reader sees, presented at
+ * first-level scale whatever its semantic level. */
+.document-title {
+  margin: 0 0 1rem;
+  font-family: var(--font-narrative);
+  font-size: 2rem;
+  line-height: 1.2;
+}
+
+/* Reading and editing the title are the same box, so clicking it moves
+ * nothing. Only the colour says it is editable. */
+.document-title__text {
+  display: block;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  outline: none;
+  /* The title is tabbable, so focus reaching it from further down the document
+   * scrolls it into view. Without this it would stop under the bar there, the
+   * one route the space above cannot cover. Same expression a block row
+   * carries, on the box that takes the focus. */
+  scroll-margin-top: calc(var(--block-bar-height) + 0.5rem);
+}
+
+.document-title__text:focus {
+  border-color: var(--accent);
+  background: var(--panel);
+}
+
+.block-row {
+  position: relative;
+  /* Held open whether or not the block is active, so a grip appearing changes
+   * colour and never geometry. */
+  padding-inline: var(--block-grip-gutter);
+  /* What keeps an activated block clear of the one bar above it. Scroll margin
+   * costs nothing until something scrolls to this row, so a block already clear
+   * stays where it is. */
+  scroll-margin-top: calc(var(--block-bar-height) + 0.5rem);
+  scroll-margin-bottom: 0.5rem;
+}
+
+/* Where a dragged block would land. Reserved rather than inserted, so the
+ * document does not jump as the pointer crosses a boundary. */
+.drop-mark {
+  display: block;
+  height: 2px;
+  margin: 0.1rem 0;
+  border-radius: 1px;
+  background: transparent;
+}
+
+.drop-mark[data-drop-active="true"] {
+  background: var(--accent);
+}
+
+/* The two gestures that move a block, on the block's own edges: the grip the
+ * drag starts from at the leading edge, the arrows at the trailing one. Out of
+ * the row's flow and inside the gutter the row already holds open, so a grip
+ * appearing moves no text. Everything else acting on the active block is in the
+ * bar at the top of the editor area; repositioning is the one operation whose
+ * meaning is spatial, so it is the one that gets a place. */
+.block-grip {
+  position: absolute;
+  top: 0.4rem;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+.block-grip--start {
+  inset-inline-start: 0;
+}
+
+.block-grip--end {
+  inset-inline-end: 0;
+}
+
+.block-grip button {
+  min-width: 1.4rem;
+  padding: 0.05rem 0.2rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.block-grip button:hover:not(:disabled),
+.block-grip button:focus-visible {
+  background: var(--panel);
+  color: var(--text);
+}
+
+.block-grip button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.block-handle {
+  cursor: grab;
+  touch-action: none;
+}
+
+/* A block marked as a reference, which only command mode draws: leaving the
+ * mode leaves no trace on any block. An outline rather than a border, and on
+ * the row rather than on the text, so marking changes colour and never
+ * geometry. Dashed and around the whole block, it is visibly neither the active
+ * block's solid accent border nor anything the document could have authored. */
+.view--block-editor[data-editor-mode="command"] .block-row[data-reference] {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+  border-radius: 0.35rem;
+}
+
+.view--block-editor[data-editor-mode="command"] .block-row {
+  cursor: pointer;
+}
+
+.view--block-editor[data-editor-mode="command"] .block-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The number, in the gutter the grips use and out of the row's flow. The state
+ * never rests on colour alone: the mark is an outline and a number a reader can
+ * name. */
+.block-reference {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.4rem;
+  z-index: 1;
+  min-width: 1.4rem;
+  padding: 0.05rem 0.2rem;
+  /* The accent is the border rather than the ground: reversed out of it, text
+   * this size does not reach the contrast a number has to be read at. The
+   * raised ground is what carries it against the reading surface. */
+  border: 1px solid var(--accent);
+  border-radius: 0.25rem;
+  background: var(--panel-raised);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+}
+
+/* Where width is scarce the row gives up one gutter rather than two, and it
+ * gives up the trailing one. The handle is what a reader reaches for first and
+ * what a drag is aimed at, so it keeps its room and sits beside the text
+ * instead of over it; the arrows overlay the trailing edge and are opaque,
+ * because the text runs underneath them. One number still governs the room and
+ * the grip box, so the leading side cannot drift; only the padding on the far
+ * side is taken away. Activation still moves nothing: the row's padding is the
+ * same before and after. */
+@media (max-width: 640px) {
+  .block-row {
+    padding-inline-end: 0;
+  }
+
+  .block-grip--end {
+    border: 1px solid var(--border);
+    border-radius: 0.35rem;
+    background: var(--panel-raised);
+  }
+}
+
+/* One box for reading and for editing. The border is reserved transparently
+ * while reading rather than added on activation, so becoming an editor changes
+ * colour and never geometry, and an inactive block shows its content and
+ * nothing else. An empty block still occupies its line, which is why the
+ * minimum height is here and not on a marker element. */
+.block-text {
+  margin: 0.25rem 0;
+  padding: 0.15rem 0.35rem;
+  min-height: 1.6em;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  font-family: var(--font-narrative);
+  line-height: 1.6;
+  cursor: text;
+}
+
+.block-text[data-block-reading]:focus-visible {
+  border-color: var(--accent);
+}
+
+.block-text--active {
+  border-color: var(--accent);
+  background: var(--panel);
+  outline: none;
+  cursor: text;
+}
+
+blockquote.block-text {
+  border-left: 3px solid var(--border);
+  padding-left: 0.75rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.block-text code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+/* A document that says nothing yet: a blank page, not a row reporting that a
+ * block is empty. The hint sits where the first line will be, so the caret
+ * arrives where the reader was already looking. */
+.document-empty {
+  display: block;
+  width: 100%;
+  min-height: 12rem;
+  margin: 0;
+  padding: 0.15rem 0.35rem;
+  border: 1px solid transparent;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: text;
+}
+
+.document-empty__hint {
+  color: var(--text-muted);
+  font-family: var(--font-narrative);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+/* The rest of the page below the last block. Clicking it continues writing, so
+ * the blank area means the same thing whether or not the document holds
+ * anything. */
+.document-append {
+  display: block;
+  width: 100%;
+  min-height: 6rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: text;
+}
+
+.run-link {
+  color: var(--accent);
+}
+
+.block-unsupported {
+  margin: 0.25rem 0;
+  padding: 0.35rem 0.5rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.3rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+hr[data-block-divider] {
+  margin: 0.75rem 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+/*
+ * A retired block shown in place. It must be unmistakable: with the toggle on
+ * after a merge, the absorbed block sits beside the text that now contains it,
+ * which reads as duplication unless the retired one is obviously not content.
+ * Distinct by more than colour — a dashed rule, an inset, and a standing label
+ * — so it survives a monochrome or high-contrast rendering.
+ */
+.retired-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0.35rem 0;
+  padding: 0.35rem 0.6rem;
+  border: 1px dashed var(--border);
+  border-left: 3px solid var(--text-muted);
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--panel) 60%, transparent);
+}
+
+.retired-row__mark {
+  margin: 0;
+  flex: none;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.retired-row__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+  text-decoration: line-through;
+  overflow-wrap: anywhere;
+}
+
+.retired-row button {
+  flex: none;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+/*
+ * A proposed change, against the block it concerns.
+ *
+ * It has to be unmistakable against two neighbours: a retired block, which is
+ * dashed and struck through, and a marked block, which command mode tints. So
+ * this is solid rather than dashed, takes the accent edge rather than a muted
+ * one, and carries a standing label — three signals, none of them colour
+ * alone, for a reader who has both toggles on at once.
+ */
+.proposal-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0.35rem 0;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--accent);
+  border-left: 3px solid var(--accent);
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+}
+
+.proposal-row__mark {
+  margin: 0;
+  flex: none;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  /* The accent reads as 3.46:1 against this row's own tint at label size,
+     which is below AA. The border and the solid ground already carry the
+     accent; the label carries the words, so it takes the readable colour. */
+  color: var(--text);
+}
+
+.proposal-row__text {
+  flex: 1 1 12rem;
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.proposal-row__answers {
+  flex: none;
+  display: flex;
+  gap: 0.35rem;
+}
+
+.proposal-row button {
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  background: var(--panel-raised);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.proposal-row button:hover {
+  border-color: var(--accent);
+}

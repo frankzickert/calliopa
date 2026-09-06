@@ -1,0 +1,29 @@
+{
+  "label": "ext.blocktype ext.blocktype",
+  "checkStatement": "MATCH (b:ext.blocktype {id: $id}) RETURN GRAPH b",
+  "checkParameters": {
+    "id": "ext.blocktype"
+  },
+  "createStatement": "CREATE (b:ext.blocktype {id: $id, name: $name, properties: $properties, requiredProperties: $requiredProperties, semantics: $semantics, status: $status})",
+  "createParameters": {
+    "id": "ext.blocktype",
+    "name": "ext.blocktype",
+    "properties": {
+      "block": "true marks the type a block: addressable, ordered, containable through CONTAINS",
+      "id": "the described node type's name",
+      "name": "the domain node type the Block describes; unique among established definitions, so the definition set is an unambiguous namespace",
+      "optionalProperties": "content properties the described type may carry and need not; declaring one is what makes it enforceable, since an undeclared property stays tolerated",
+      "permittedChildTypes": "block types this type may contain; empty on a leaf",
+      "permittedValues": "map of property name to the values that property may hold; applies to required and optional properties alike, and a property absent from the map is unconstrained in value. Narrowing a set is a breaking definition change, widening is not",
+      "requiredProperties": "content properties the described type requires",
+      "runProperties": "content properties holding formatted text as runs",
+      "singleOpenCandidate": "true keeps at most one open candidate revision per node",
+      "uniqueProperties": "content properties unique among established revisions of the type"
+    },
+    "requiredProperties": [
+      "id"
+    ],
+    "semantics": "Describes a domain node type an extension defines. Validation enforces established definitions: content claiming the type is checked for required properties and the block-vocabulary declarations, a definition never shadows a code-registered type, and a breaking definition change requires an ext.migration Block in its proposal group. The meta-schema's own definition Blocks are ext.blocktype Blocks, so the conventions describe themselves.",
+    "status": "established"
+  }
+}

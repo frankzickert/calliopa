@@ -1,0 +1,21 @@
+{
+  "label": "ext.blocktype ext.settings",
+  "checkStatement": "MATCH (b:ext.blocktype {id: $id}) RETURN GRAPH b",
+  "checkParameters": {
+    "id": "ext.settings"
+  },
+  "createStatement": "CREATE (b:ext.blocktype {id: $id, name: $name, properties: $properties, requiredProperties: $requiredProperties, semantics: $semantics, status: $status})",
+  "createParameters": {
+    "id": "ext.settings",
+    "name": "ext.settings",
+    "properties": {
+      "id": "member Block id, conventionally \u003cextId\u003e.settings",
+      "settings": "the settings object: shell or extension settings as ordinary graph content"
+    },
+    "requiredProperties": [
+      "id"
+    ],
+    "semantics": "Shell and extension settings as a versioned Block — only ephemeral cache lives outside the graph. Attaches to its extension's manifest by partOf like every other member and never materializes to the working tree; settings are runtime state read and written through CCGW. BO_0099_006",
+    "status": "established"
+  }
+}

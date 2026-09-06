@@ -1,0 +1,34 @@
+{
+  "name": "calliopa-shell",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=11"
+  },
+  "scripts": {
+    "build": "vite build && vite build -c adapters/node-server/vite.config.ts",
+    "dev": "node scripts/serve.mjs --dev",
+    "serve": "node scripts/serve.mjs",
+    "typecheck": "tsc --noEmit",
+    "check": "vitest run --project unit --project behavior",
+    "test:unit": "vitest run --project unit",
+    "test:behavior": "vitest run --project behavior",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@builder.io/qwik": "1.20.0",
+    "@builder.io/qwik-city": "1.20.0",
+    "@types/node": "22.10.5",
+    "prettier": "3.9.6",
+    "typescript": "5.9.3",
+    "vite": "7.3.6",
+    "vite-tsconfig-paths": "5.1.4",
+    "vitest": "3.2.7"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1111.0",
+    "postgres": "3.4.9"
+  }
+}

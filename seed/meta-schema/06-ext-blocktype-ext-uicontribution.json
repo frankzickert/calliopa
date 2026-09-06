@@ -1,0 +1,26 @@
+{
+  "label": "ext.blocktype ext.uicontribution",
+  "checkStatement": "MATCH (b:ext.blocktype {id: $id}) RETURN GRAPH b",
+  "checkParameters": {
+    "id": "ext.uicontribution"
+  },
+  "createStatement": "CREATE (b:ext.blocktype {id: $id, name: $name, properties: $properties, requiredProperties: $requiredProperties, semantics: $semantics, status: $status})",
+  "createParameters": {
+    "id": "ext.uicontribution",
+    "name": "ext.uicontribution",
+    "properties": {
+      "command": "command kind: the command id",
+      "component": "route and panel kinds: a source path within the same extension",
+      "id": "the contribution id, equal to its contributions/\u003cid\u003e.json file name; the materializer commit path refuses a contribution file whose content id differs",
+      "kind": "route, panel, or command",
+      "path": "route kind: the route path",
+      "slot": "panel kind: the panel slot contributed into",
+      "title": "command kind: the command title"
+    },
+    "requiredProperties": [
+      "id"
+    ],
+    "semantics": "Declares UI surface consumed by the shell's build-time registry. Materializes to src/extensions/\u003cextId\u003e/contributions/\u003cid\u003e.json — one file per Block, so the materializer lockfile maps each file to one (blockId, version).",
+    "status": "established"
+  }
+}

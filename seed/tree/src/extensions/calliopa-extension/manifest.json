@@ -1,0 +1,12 @@
+{
+  "capabilities": {
+    "ccgwScopes": [
+      "query",
+      "propose"
+    ],
+    "renders": []
+  },
+  "category": "bundled",
+  "id": "calliopa-extension",
+  "version": "1.0.0"
+}

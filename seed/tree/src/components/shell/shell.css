@@ -1,0 +1,1008 @@
+/* The frame is bounded to the viewport, so the page itself never scrolls and
+ * the header and the dock stay where they are put. While the page could
+ * scroll, every region moved together no matter what each one declared: the
+ * drawers and the editor's surface have always asked for their own overflow
+ * and never got it, because nothing above them bounded a height.
+ *
+ * `dvh` so a phone browser collapsing its own chrome does not leave the dock
+ * under the address bar; the `vh` line before it is the fallback. The viewport
+ * meta carries `interactive-widget=resizes-content`, so an on-screen keyboard
+ * shrinks this frame rather than covering the dock. */
+.shell {
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template:
+    "header header header" auto
+    "left workspace right" minmax(0, 1fr)
+    "left dock right" auto /
+    16rem minmax(0, 1fr) 18rem;
+  background: var(--canvas);
+  color: var(--text);
+}
+
+.shell-header {
+  grid-area: header;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--panel-raised);
+  border-bottom: 1px solid var(--border);
+}
+
+.shell-header .wordmark {
+  font-size: 1.2rem;
+  flex: 0 0 auto;
+}
+
+.tab-strip {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 0.25rem;
+  align-self: stretch;
+  align-items: end;
+  margin-bottom: -0.5rem;
+  overflow-x: auto;
+}
+
+/* The active view's save state. Quiet chrome: it is read when looked for, not
+ * something that competes with the document for attention. */
+.save-status {
+  margin: 0;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.dock button,
+/* Chrome controls carry no resting border; the surface arrives on hover. */
+.layout-control,
+.theme-toggle,
+.settings-control,
+.process-indicator,
+.tab-action,
+.sheet-close {
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--text);
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+}
+
+.layout-control:hover,
+.theme-toggle:hover,
+.settings-control:hover,
+.process-indicator:hover,
+.tab-action:hover,
+.sheet-close:hover {
+  background: var(--panel-raised);
+  border-color: var(--border);
+}
+
+.library-action {
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--text);
+  padding: 0.1rem 0.4rem;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.library-action:hover {
+  background: var(--panel-raised);
+  border-color: var(--border);
+}
+
+/* A tab is a shape seated on the header's bottom edge, not a button in a row. */
+.tab-wrap {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 14rem;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 0.4rem 0.4rem 0 0;
+  background: var(--panel);
+}
+
+.tab-wrap[data-active="true"] {
+  background: var(--panel-raised);
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 0.4rem 0.5rem;
+  cursor: pointer;
+}
+
+.tab__label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tab__unsaved,
+.tab__marker {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+}
+
+.tab__unsaved {
+  background: var(--warning);
+}
+
+.tab__marker--running {
+  background: var(--running);
+}
+
+.tab__marker--failed {
+  background: var(--error);
+}
+
+/* The count stays quiet at zero and takes the running colour when work is on. */
+.process-indicator__count {
+  display: inline-block;
+  min-width: 1.5rem;
+  border-radius: 999px;
+  padding: 0.1rem 0.4rem;
+  background: var(--panel);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.process-indicator:not([data-running="0"]) .process-indicator__count {
+  background: var(--running);
+  color: var(--canvas);
+}
+
+.layout-control,
+.theme-toggle,
+.settings-control,
+.process-indicator {
+  flex: 0 0 auto;
+}
+
+/* Each region scrolls its own content, so scrolling one moves nothing in the
+ * other two. Scroll arrives from overflow: a region whose content fits shows
+ * no scrollbar. Vertical only — horizontal overflow belongs to the content
+ * that has it, not to the region around it. */
+.drawer {
+  min-width: 0;
+  padding: 1rem;
+  background: var(--panel);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.drawer h2,
+.workspace h2 {
+  margin-top: 0;
+}
+
+.drawer--left {
+  grid-area: left;
+  border-right: 1px solid var(--border);
+}
+
+.drawer--right {
+  grid-area: right;
+  border-left: 1px solid var(--border);
+}
+
+/* The library's categories. A category header is its name and the one control
+   that adds to it, so creating sits beside the things it creates. */
+.library-category__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.library-category__heading {
+  margin: 0;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.library-category__toggle {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  padding: 0.25rem 0;
+  cursor: pointer;
+}
+
+.library-category__toggle::before {
+  content: "▾";
+  display: inline-block;
+  width: 1rem;
+  color: var(--text-muted);
+}
+
+.library-category[data-state="collapsed"] .library-category__toggle::before {
+  content: "▸";
+}
+
+.library-list {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.library-entry {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  padding: 0.3rem 0.45rem;
+  cursor: pointer;
+}
+
+.library-entry:hover {
+  background: var(--panel-raised);
+  border-color: var(--border);
+}
+
+/* The open document is marked, not merely tinted: the state has to survive a
+   reader who cannot tell the two backgrounds apart. */
+.library-entry[data-current="true"] {
+  background: var(--panel-raised);
+  border-color: var(--border);
+  font-weight: 600;
+}
+
+.library-entry__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-entry__marker {
+  flex: 0 0 auto;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.library-empty {
+  margin: 0.4rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.workspace {
+  grid-area: workspace;
+  /* The region's inset, named once. A view that means to reach the region's own
+   * edges negates exactly this rather than repeating the number and the phone
+   * one below it, which would drift apart at the breakpoint. The region does
+   * not know which views negate it. */
+  --workspace-inset: 2rem;
+  min-width: 0;
+  padding: var(--workspace-inset);
+  background: var(--canvas);
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* A column so the host takes the region's height rather than its content's.
+   * A view is handed a bounded height and sizes itself against it; the block
+   * editor spends it on a surface that scrolls under its own bar. */
+  display: flex;
+  flex-direction: column;
+}
+
+/* One row, stretched to the host's height, so a view that manages its own
+ * scrolling gets a definite height to manage. */
+.view-host {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.eyebrow {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.dock {
+  grid-area: dock;
+  display: grid;
+  padding: 0.75rem;
+  background: var(--panel-raised);
+  border-top: 1px solid var(--border);
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.sheet-handle,
+.sheet-close {
+  display: none;
+}
+
+/* `.dock button` is more specific than a lone class, so the handle qualifies. */
+.dock .dock__handle {
+  display: block;
+  width: 100%;
+  min-height: 2rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  touch-action: none;
+}
+
+.dock__handle span {
+  display: block;
+  width: 3rem;
+  height: 0.25rem;
+  margin: auto;
+  border-radius: 1rem;
+  background: var(--border);
+}
+
+/* The action area rides with the composer: present at the dock's composer and
+ * console positions, gone at the collapsed handle. A view's way into a mode of
+ * its own is reachable wherever the composer is, and the keyboard still opens
+ * one from a collapsed dock. */
+.dock-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.shell[data-dock="collapsed"] .dock-actions,
+.shell[data-dock="collapsed"] .composer,
+.shell[data-dock="collapsed"] .console,
+.shell[data-dock="composer"] .console {
+  display: none;
+}
+
+.shell[data-dock="console"] .console {
+  display: block;
+  min-height: 8rem;
+}
+
+.console {
+  margin-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.6rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.process-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.process-entry {
+  width: 100%;
+  text-align: start;
+  font: inherit;
+}
+
+.process-entry[data-state="running"],
+.process-entry[data-state="queued"],
+.process-entry[data-state="waiting-for-input"] {
+  color: var(--running);
+}
+
+.process-entry[data-state="failed"] {
+  color: var(--error);
+}
+
+.process-entry[data-state="completed"] {
+  color: var(--success);
+}
+
+.process-entry--selected {
+  border-color: var(--accent);
+  background: var(--selection);
+}
+
+.tab-wrap[data-process="running"] {
+  border-color: var(--running);
+}
+
+.tab-wrap[data-process="failed"] {
+  border-color: var(--error);
+}
+
+.process-detail h3 {
+  margin-bottom: 0.3rem;
+}
+
+.process-detail [data-process-step] {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.process-error {
+  color: var(--error);
+}
+
+.attachment,
+.undo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.5rem 0 0;
+  color: var(--text-muted);
+}
+
+.attachment {
+  grid-column: 1 / -1;
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  padding: 0.25rem 0.5rem;
+}
+
+/* A message is off the shell's layout: raising or lowering one moves no content
+ * in the header, either drawer, the workspace, or the dock. The layer spans the
+ * viewport so the card is centred without depending on the height of the header
+ * or the dock, and it sits on the drag preview's layer rather than inventing one
+ * of its own. It passes pointer events through, so the layer covers nothing the
+ * message itself does not. */
+.message-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  pointer-events: none;
+}
+
+.message {
+  pointer-events: auto;
+  width: min(26rem, 100%);
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--panel-raised);
+  color: var(--text);
+}
+
+.message__headline {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+}
+
+.message__body {
+  margin: 0 0 0.7rem;
+  color: var(--text-muted);
+}
+
+.message__answers {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.message__answer {
+  padding: 0.3rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.message__answer[data-destructive] {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.drag-preview {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  z-index: 40;
+  pointer-events: none;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  background: var(--panel-raised);
+  color: var(--text);
+}
+
+.shell[data-dragging] [data-drop-target] {
+  outline: 1px dashed var(--border);
+}
+
+.shell[data-dragging] [data-drop-target][data-drop-active] {
+  outline: 2px solid var(--accent);
+}
+
+.dock textarea {
+  min-height: 2.5rem;
+  resize: vertical;
+  font: inherit;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.shell[data-left="compact"] {
+  grid-template-columns: 4rem minmax(0, 1fr) 18rem;
+}
+
+.shell[data-left="hidden"] {
+  grid-template-columns: 0 minmax(0, 1fr) 18rem;
+}
+
+.shell[data-right="compact"] {
+  grid-template-columns: 16rem minmax(0, 1fr) 4rem;
+}
+
+.shell[data-right="compact"] .drawer--right p,
+.shell[data-right="compact"] .drawer--right h2 {
+  writing-mode: vertical-rl;
+}
+
+.shell[data-right="hidden"] {
+  grid-template-columns: 16rem minmax(0, 1fr) 0;
+}
+
+.shell[data-left="hidden"] .drawer--left,
+.shell[data-right="hidden"] .drawer--right {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .shell {
+    grid-template:
+      "header" auto
+      "workspace" minmax(0, 1fr)
+      "dock" auto / minmax(0, 1fr);
+  }
+
+  .shell-header {
+    flex-wrap: wrap;
+    padding-inline: 2.25rem;
+  }
+
+  .shell-header .layout-control {
+    display: none;
+  }
+
+  .shell-header .tab-strip {
+    display: flex;
+    order: 10;
+    flex: 1 0 100%;
+    scroll-snap-type: x mandatory;
+  }
+
+  .tab {
+    scroll-snap-align: start;
+  }
+
+  .tab-wrap,
+  .process-entry {
+    touch-action: pan-x pan-y;
+  }
+
+  .shell[data-dragging] [data-drop-target] {
+    min-height: 3rem;
+  }
+
+  .workspace {
+    --workspace-inset: 1.25rem;
+  }
+
+  .drawer {
+    display: none;
+    position: fixed;
+    z-index: 20;
+    inset-block: 0;
+    width: min(82vw, 20rem);
+    box-sizing: border-box;
+  }
+
+  .drawer--left {
+    inset-inline-start: 0;
+  }
+
+  .drawer--right {
+    inset-inline-end: 0;
+  }
+
+  .shell[data-sheet="left"] .drawer--left,
+  .shell[data-sheet="right"] .drawer--right {
+    display: block;
+  }
+
+  .sheet-handle,
+  .sheet-close {
+    display: block;
+  }
+
+  .sheet-handle {
+    position: fixed;
+    border: 1px solid var(--border);
+    background: var(--panel-raised);
+    color: var(--text);
+    z-index: 10;
+    inset-block-start: 0.7rem;
+    min-width: 2rem;
+    min-height: 2.75rem;
+  }
+
+  .sheet-handle--left {
+    inset-inline-start: 0;
+  }
+
+  .sheet-handle--right {
+    inset-inline-end: 0;
+  }
+
+  .sheet-close {
+    float: right;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+
+  .composer {
+    grid-template-columns: 1fr auto;
+  }
+
+  .composer label {
+    grid-column: 1 / -1;
+  }
+}
+
+.view-fallback {
+  border: 1px solid var(--warning);
+  border-radius: 0.375rem;
+  color: var(--text);
+  padding: 0.5rem 0.75rem;
+}
+
+.outline {
+  color: var(--text-muted);
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.view-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/*
+ * The inspector renders a view's contributed facts and actions in the shell's
+ * own idiom, so every view's panel reads as the same drawer.
+ */
+.view-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.inspector-facts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.inspector-fact {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.inspector-fact dt {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.inspector-fact dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.inspector-actions button {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.inspector-actions button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--panel-raised);
+}
+
+.inspector-actions button[data-destructive] {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+/* Settings: a sectioned tab. `Connections` is the first section, and a row
+ * shows what is stored about a key without ever showing the key. */
+.view--settings {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1rem 0;
+}
+
+.settings-section__heading {
+  margin: 0 0 0.25rem;
+  font-size: 1.1rem;
+}
+
+.settings-section__lead,
+.settings-empty {
+  margin: 0 0 1rem;
+  color: var(--text-muted);
+}
+
+.settings-error {
+  margin: 0 0 1rem;
+  color: var(--error);
+}
+
+.connection-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.connection {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--panel);
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.connection__name {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.connection__purpose,
+.connection__state {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.connection[data-state="verified"] .connection__state {
+  color: var(--success);
+}
+
+.connection[data-state="failing"] .connection__state {
+  color: var(--error);
+}
+
+.connection__error {
+  margin: 0;
+  color: var(--error);
+}
+
+/* The agent's row says what stands between it and its work, which is a list
+   rather than one error: more than one thing can be missing at once. */
+.agent-report__ready {
+  margin: 0;
+  color: var(--success);
+}
+
+.agent-report__needs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.agent-report__need {
+  color: var(--error);
+}
+
+/* Memory is named because the reader deserves the whole picture, not because
+   it stops anything, so it does not read as a failure. */
+.agent-report__need[data-blocking="false"] {
+  color: var(--text-muted);
+}
+
+/* The one step the product cannot take, shown as it must be typed. */
+.agent-report__command {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  color: var(--text);
+}
+
+.agent-report__command code {
+  font-family: var(--font-mono);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  padding: 0.15rem 0.4rem;
+  user-select: all;
+}
+
+.agent-report__copied {
+  color: var(--text-muted);
+}
+
+.connection__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem;
+}
+
+.connection__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1 1 16rem;
+}
+
+.connection__label {
+  color: var(--text-muted);
+}
+
+.connection__input {
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--canvas);
+  color: var(--text);
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  min-width: 0;
+}
+
+.connection__action {
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--panel-raised);
+  color: var(--text);
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+}
+
+.connection__action[disabled] {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.connection__action--clear {
+  color: var(--error);
+}
+
+/* What the dock says about the last goal, beside the control that sent it.
+   A refusal is not worth taking the whole frame for. */
+.composer__notice {
+  margin: 0;
+  color: var(--error);
+  font-size: 0.85rem;
+}
+
+/* The run's activity, above the list of processes it is one of. */
+.run-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.5rem;
+}
+
+.run-activity__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 8rem;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.run-activity__cancel {
+  align-self: flex-start;
+}
+
+/* What a run proposed, listed in the inspector under the process it belongs to. */
+.proposed {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.proposed__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.proposed__list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.proposed__list span {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}

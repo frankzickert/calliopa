@@ -1,0 +1,14 @@
+{
+  "label": "ext.relationtype partOf",
+  "checkStatement": "MATCH (b:ext.relationtype {id: $id}) RETURN GRAPH b",
+  "checkParameters": {
+    "id": "partOf"
+  },
+  "createStatement": "CREATE (b:ext.relationtype {id: $id, name: $name, semantics: $semantics, status: $status})",
+  "createParameters": {
+    "id": "partOf",
+    "name": "partOf",
+    "semantics": "Attaches a member Block to its extension's manifest, member to manifest. The members of an extension are one incoming-partOf traversal from its manifest. Extension structure deliberately does not reuse the page-block containment vocabulary.",
+    "status": "established"
+  }
+}

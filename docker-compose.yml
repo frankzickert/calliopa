@@ -1,0 +1,305 @@
+name: calliopa
+
+# The Calliopa stack. Image references are pinned via .env; until published
+# images exist, the defaults point at locally built tags.
+
+services:
+  bootstrap:
+    image: ${CALLIOPA_CELL_IMAGE:-calliopa-bootstrap-app}
+    command: ["/usr/local/bin/bootstrap"]
+    environment:
+      CALLIOPA_SECRET_DIR: /run/secrets/calliopa
+    volumes:
+      - calliopa-secrets:/run/secrets/calliopa
+    restart: "no"
+
+  postgres:
+    image: ${CALLIOPA_POSTGRES_IMAGE:-calliopa-bootstrap-postgres}
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-calliopa}
+      POSTGRES_USER: ${POSTGRES_USER:-calliopa}
+      POSTGRES_PASSWORD_FILE: /run/secrets/calliopa/postgres_password
+    ports:
+      - "${CALLIOPA_HOST_BIND:-127.0.0.1}:5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - calliopa-secrets:/run/secrets/calliopa:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    image: ${CALLIOPA_CELL_IMAGE:-calliopa-bootstrap-app}
+    command: ["/usr/local/bin/migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-calliopa}
+      POSTGRES_USER: ${POSTGRES_USER:-calliopa}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_SSLMODE: disable
+      POSTGRES_PASSWORD_FILE: /run/secrets/calliopa/postgres_password
+      # The shell's own database and the memory service's, created beside
+      # the graph's by this one-shot.
+      CALLIOPA_APP_DB: ${CALLIOPA_APP_DB:-calliopa_app}
+      CALLIOPA_MEMORY_DB: ${CALLIOPA_MEMORY_DB:-honcho}
+    volumes:
+      - calliopa-secrets:/run/secrets/calliopa:ro
+    restart: "no"
+
+  app:
+    image: ${CALLIOPA_CELL_IMAGE:-calliopa-bootstrap-app}
+    command: ["/usr/local/bin/app"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      garage-init:
+        condition: service_completed_successfully
+    environment:
+      APP_BIND_ADDR: 0.0.0.0:8080
+      POSTGRES_DB: ${POSTGRES_DB:-calliopa}
+      POSTGRES_USER: ${POSTGRES_USER:-calliopa}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_SSLMODE: disable
+      POSTGRES_PASSWORD_FILE: /run/secrets/calliopa/postgres_password
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_EMBEDDING_MODEL: ${OPENROUTER_EMBEDDING_MODEL:-}
+      GARAGE_S3_ENDPOINT: http://garage:3900
+      GARAGE_S3_REGION: garage
+      GARAGE_CONTENT_BUCKET: ${GARAGE_CONTENT_BUCKET:-calliopa-content}
+      GARAGE_CONTENT_KEY_ID_FILE: /run/secrets/calliopa/garage_content_key_id
+      GARAGE_CONTENT_KEY_SECRET_FILE: /run/secrets/calliopa/garage_content_key_secret
+      BLOB_MAX_BYTES: ${BLOB_MAX_BYTES:-104857600}
+      BLOB_STAGING_TTL_SECONDS: ${BLOB_STAGING_TTL_SECONDS:-604800}
+      BLOB_GC_INTERVAL_SECONDS: ${BLOB_GC_INTERVAL_SECONDS:-86400}
+    # No published port: browser and host traffic reach only the kernel, and
+    # the kernel reaches CCGW on the compose network. The CLI runs in-stack
+    # (docker compose exec kernel …). BO_0103_007
+    volumes:
+      - calliopa-secrets:/run/secrets/calliopa:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  garage:
+    image: ${CALLIOPA_GARAGE_IMAGE:-calliopa-bootstrap-garage}
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    ports:
+      - "${CALLIOPA_HOST_BIND:-127.0.0.1}:3900:3900"
+    volumes:
+      - garage-data:/var/lib/garage
+      - calliopa-secrets:/run/secrets/calliopa:ro
+    healthcheck:
+      test: ["CMD", "/garage", "status"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  garage-init:
+    image: ${CALLIOPA_GARAGE_INIT_IMAGE:-calliopa-bootstrap-garage-init}
+    depends_on:
+      garage:
+        condition: service_healthy
+    environment:
+      CALLIOPA_SECRET_DIR: /run/secrets/calliopa
+      GARAGE_BACKUP_BUCKET: ${GARAGE_BACKUP_BUCKET:-calliopa-backups}
+      GARAGE_CONTENT_BUCKET: ${GARAGE_CONTENT_BUCKET:-calliopa-content}
+      GARAGE_APP_BUCKET: ${GARAGE_APP_BUCKET:-calliopa-app}
+      GARAGE_LAYOUT_CAPACITY: ${GARAGE_LAYOUT_CAPACITY:-10000000000}
+    volumes:
+      - calliopa-secrets:/run/secrets/calliopa
+    restart: "no"
+
+  backup:
+    image: ${CALLIOPA_BACKUP_IMAGE:-calliopa-bootstrap-backup}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      garage:
+        condition: service_healthy
+      garage-init:
+        condition: service_completed_successfully
+    environment:
+      CALLIOPA_SECRET_DIR: /run/secrets/calliopa
+      POSTGRES_DB: ${POSTGRES_DB:-calliopa}
+      POSTGRES_USER: ${POSTGRES_USER:-calliopa}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      GARAGE_BACKUP_BUCKET: ${GARAGE_BACKUP_BUCKET:-calliopa-backups}
+      GARAGE_CONTENT_BUCKET: ${GARAGE_CONTENT_BUCKET:-calliopa-content}
+      GARAGE_APP_BUCKET: ${GARAGE_APP_BUCKET:-calliopa-app}
+      CALLIOPA_APP_DB: ${CALLIOPA_APP_DB:-calliopa_app}
+      CALLIOPA_MEMORY_DB: ${CALLIOPA_MEMORY_DB:-honcho}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      RCLONE_CONFIG_OFFSITE_TYPE: ${RCLONE_CONFIG_OFFSITE_TYPE:-}
+      RCLONE_CONFIG_OFFSITE_ACCESS_KEY_ID: ${RCLONE_CONFIG_OFFSITE_ACCESS_KEY_ID:-}
+      RCLONE_CONFIG_OFFSITE_SECRET_ACCESS_KEY: ${RCLONE_CONFIG_OFFSITE_SECRET_ACCESS_KEY:-}
+      RCLONE_CONFIG_OFFSITE_ENDPOINT: ${RCLONE_CONFIG_OFFSITE_ENDPOINT:-}
+      RCLONE_CONFIG_OFFSITE_REGION: ${RCLONE_CONFIG_OFFSITE_REGION:-}
+      RCLONE_CONFIG_OFFSITE_PROVIDER: ${RCLONE_CONFIG_OFFSITE_PROVIDER:-}
+      OFFSITE_PATH: ${OFFSITE_PATH:-}
+      OFFSITE_CONTENT_PATH: ${OFFSITE_CONTENT_PATH:-}
+      OFFSITE_APP_PATH: ${OFFSITE_APP_PATH:-}
+    volumes:
+      - calliopa-secrets:/run/secrets/calliopa:ro
+
+  # Hermes: the agent. The pinned upstream Hermes Agent with the Codex and
+  # Claude sign-in broker, holding two Calliopa toolsets: the shell's own
+  # API (reached through the kernel's port with the credential
+  # scripts/agent-credential.sh issues) and the kernel's code toolset. It
+  # reaches the graph only through those, holds no database credentials,
+  # publishes no host port, and keeps its state on a named volume. The
+  # unconfigured state (API up, no agent signed in yet) is a defined healthy
+  # state the settings view renders with the sign-in action.
+  hermes:
+    image: ${CALLIOPA_HERMES_IMAGE:-calliopa-bootstrap-hermes}
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    environment:
+      HERMES_HOME: /var/lib/hermes
+      CALLIOPA_HERMES_API_SECRET_FILE: /run/secrets/calliopa/hermes_api_key
+      CALLIOPA_AGENT_TOOLS_BEARER_FILE: /run/secrets/calliopa/agent_tools_bearer
+      CALLIOPA_KERNEL_TOOLS_URL: http://kernel:8090/__kernel/agent-tools
+      CALLIOPA_AGENT_TOOLS_TOKEN_FILE: /run/secrets/calliopa/agent_tools_token
+      CALLIOPA_AGENT_TOOLS_URL: http://kernel:8090/api/v1/mcp
+      CALLIOPA_AGENT_CONFIG_DIR: /var/lib/calliopa/agent-config
+    volumes:
+      - hermes-data:/var/lib/hermes
+      - agent-config:/var/lib/calliopa/agent-config
+      - calliopa-secrets:/run/secrets/calliopa:ro
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8642/health',timeout=4).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # The UI kernel: bootloader and CLI. Prod serve materializes the promoted
+  # release pin from the graph, builds it, and serves it behind the kernel
+  # proxy on port 8090. The served tree is the shell, whose runtime
+  # environment the kernel carries below and passes through. With no release pin set — a fresh install before any
+  # release content — it idles cleanly serving its built-in fallback scaffold
+  # and reports the no-pin state as healthy on /__kernel/healthz. The health
+  # probe uses node because the slim kernel image carries no wget.
+  kernel:
+    image: ${CALLIOPA_KERNEL_IMAGE:-calliopa-bootstrap-kernel}
+    command: ["serve", "--mode", "prod", "--port", "8090", "--principal", "${CALLIOPA_KERNEL_PRINCIPAL:-human:operator}"]
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      CALLIOPA_CCGW_URL: http://app:8080
+      CALLIOPA_KERNEL_DATA: /var/lib/calliopa-kernel
+      # The confirmation origin binds wide inside the container; the host
+      # publish below stays loopback, and browsers reach it at the published
+      # address. BO_0103_003
+      CALLIOPA_KERNEL_CONFIRM_BIND: 0.0.0.0
+      CALLIOPA_KERNEL_CONFIRM_URL: ${CALLIOPA_KERNEL_CONFIRM_URL:-http://127.0.0.1:8091}
+      # The agent bridge: the kernel half of the Hermes agent service.
+      # BO_0089_012
+      CALLIOPA_HERMES_URL: http://hermes:8642
+      CALLIOPA_HERMES_BEARER_FILE: /run/secrets/calliopa/hermes_api_key
+      CALLIOPA_AGENT_TOOLS_BEARER_FILE: /run/secrets/calliopa/agent_tools_bearer
+      CALLIOPA_AGENT_CONFIG_DIR: /var/lib/calliopa/agent-config
+      # The shell's runtime environment: its database, its bucket, its
+      # at-rest key. Every secret stays a file; the tree assembles the plain
+      # variables before its server starts.
+      CALLIOPA_APP_DB_HOST: postgres
+      CALLIOPA_APP_DB_PORT: "5432"
+      CALLIOPA_APP_DB_NAME: ${CALLIOPA_APP_DB:-calliopa_app}
+      CALLIOPA_APP_DB_USER: ${POSTGRES_USER:-calliopa}
+      CALLIOPA_APP_DB_PASSWORD_FILE: /run/secrets/calliopa/postgres_password
+      CALLIOPA_GARAGE_ENDPOINT: http://garage:3900
+      CALLIOPA_GARAGE_REGION: garage
+      CALLIOPA_GARAGE_BUCKET: ${GARAGE_APP_BUCKET:-calliopa-app}
+      CALLIOPA_GARAGE_KEY_ID_FILE: /run/secrets/calliopa/garage_app_key_id
+      CALLIOPA_GARAGE_KEY_SECRET_FILE: /run/secrets/calliopa/garage_app_key_secret
+      CALLIOPA_SECRETS_KEY_PATH: /run/secrets/calliopa/secrets_key
+    ports:
+      - "${CALLIOPA_HOST_BIND:-127.0.0.1}:8090:8090"
+      - "${CALLIOPA_HOST_BIND:-127.0.0.1}:8091:8091"
+    volumes:
+      - kernel-data:/var/lib/calliopa-kernel
+      - agent-config:/var/lib/calliopa/agent-config
+      - calliopa-secrets:/run/secrets/calliopa:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/__kernel/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # The agent's memory. Honcho refuses to start without an LLM key, and the
+  # key lives in the shell's connection store rather than in .env, so both
+  # services sit under a profile: scripts/memory-up.sh reads the stored key
+  # through the shell and turns the profile on with it. An instance with no
+  # stored key simply has no memory service. Each container starts as root
+  # only to read the database password file, then drops to the image's own
+  # user.
+  honcho:
+    image: ${CALLIOPA_HONCHO_IMAGE:-ghcr.io/plastic-labs/honcho:v3.1.0}
+    profiles: ["memory"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    user: "0"
+    command:
+      - sh
+      - -c
+      - >-
+        export DB_CONNECTION_URI="postgresql+psycopg://${POSTGRES_USER:-calliopa}:$$(cat /run/secrets/calliopa/postgres_password)@postgres:5432/${CALLIOPA_MEMORY_DB:-honcho}"
+        && exec setpriv --reuid=app --regid=app --init-groups
+        sh -c '/app/.venv/bin/alembic upgrade head && exec fastapi run --host 0.0.0.0 src/main.py'
+    environment:
+      VECTOR_STORE_TYPE: pgvector
+      AUTH_USE_AUTH: "false"
+      LLM_OPENAI_API_KEY: ${LLM_OPENAI_API_KEY:-}
+    volumes:
+      - calliopa-secrets:/run/secrets/calliopa:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+  honcho-deriver:
+    image: ${CALLIOPA_HONCHO_IMAGE:-ghcr.io/plastic-labs/honcho:v3.1.0}
+    profiles: ["memory"]
+    depends_on:
+      honcho:
+        condition: service_healthy
+    user: "0"
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        export DB_CONNECTION_URI="postgresql+psycopg://${POSTGRES_USER:-calliopa}:$$(cat /run/secrets/calliopa/postgres_password)@postgres:5432/${CALLIOPA_MEMORY_DB:-honcho}"
+        && exec setpriv --reuid=app --regid=app --init-groups
+        /app/.venv/bin/python -m src.deriver
+    environment:
+      VECTOR_STORE_TYPE: pgvector
+      AUTH_USE_AUTH: "false"
+      LLM_OPENAI_API_KEY: ${LLM_OPENAI_API_KEY:-}
+    volumes:
+      - calliopa-secrets:/run/secrets/calliopa:ro
+
+volumes:
+  calliopa-secrets:
+  postgres-data:
+  garage-data:
+  kernel-data:
+  hermes-data:
+  agent-config:

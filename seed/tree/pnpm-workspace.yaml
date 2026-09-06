@@ -1,0 +1,11 @@
+packages:
+  - "."
+
+# Qwik and Vite use platform binaries installed by these build scripts.
+allowBuilds:
+  esbuild: true
+  sharp: true
+
+# Qwik City's image toolchain may resolve an older sharp; keep libvips current.
+overrides:
+  sharp: ">=0.35.0"

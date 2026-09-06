@@ -1,0 +1,3 @@
+# Your instance's configuration and secrets. Created by install.sh from
+# .env.example; never committed.
+.env

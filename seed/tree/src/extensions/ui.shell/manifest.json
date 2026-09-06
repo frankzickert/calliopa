@@ -1,0 +1,11 @@
+{
+  "capabilities": {
+    "renders": [
+      "routes",
+      "views"
+    ]
+  },
+  "category": "bundled",
+  "id": "ui.shell",
+  "version": "0.1.0"
+}

@@ -1,0 +1,21 @@
+{
+  "label": "ext.blocktype ext.relationtype",
+  "checkStatement": "MATCH (b:ext.blocktype {id: $id}) RETURN GRAPH b",
+  "checkParameters": {
+    "id": "ext.relationtype"
+  },
+  "createStatement": "CREATE (b:ext.blocktype {id: $id, name: $name, properties: $properties, requiredProperties: $requiredProperties, semantics: $semantics, status: $status})",
+  "createParameters": {
+    "id": "ext.relationtype",
+    "name": "ext.relationtype",
+    "properties": {
+      "id": "the described relation type's name",
+      "name": "the domain relation type the Block describes; unique among established definitions, so the definition set is an unambiguous namespace"
+    },
+    "requiredProperties": [
+      "id"
+    ],
+    "semantics": "Describes a relation type an extension defines. Validation enforces established definitions: relations claiming the type resolve against them, a definition never shadows a code-registered type, and a breaking definition change requires an ext.migration Block in its proposal group. Relations store no properties, so relation-adjacent data lives in endpoint Block content.",
+    "status": "established"
+  }
+}

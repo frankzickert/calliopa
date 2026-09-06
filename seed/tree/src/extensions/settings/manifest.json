@@ -1,0 +1,13 @@
+{
+  "capabilities": {
+    "renders": [
+      "views"
+    ]
+  },
+  "category": "bundled",
+  "dependencies": {
+    "ui.shell": "\u003e=0.1.0"
+  },
+  "id": "settings",
+  "version": "1.0.0"
+}

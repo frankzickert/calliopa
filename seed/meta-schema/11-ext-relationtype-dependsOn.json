@@ -1,0 +1,14 @@
+{
+  "label": "ext.relationtype dependsOn",
+  "checkStatement": "MATCH (b:ext.relationtype {id: $id}) RETURN GRAPH b",
+  "checkParameters": {
+    "id": "dependsOn"
+  },
+  "createStatement": "CREATE (b:ext.relationtype {id: $id, name: $name, semantics: $semantics, status: $status})",
+  "createParameters": {
+    "id": "dependsOn",
+    "name": "dependsOn",
+    "semantics": "Connects an extension manifest to a manifest it depends on. The semver range for each dependency lives in the depending manifest's dependencies map keyed by extension id, because a relation stores no properties; the relation makes the dependency traversable.",
+    "status": "established"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "label": "ext.blocktype ext.manifest",
+  "checkStatement": "MATCH (b:ext.blocktype {id: $id}) RETURN GRAPH b",
+  "checkParameters": {
+    "id": "ext.manifest"
+  },
+  "createStatement": "CREATE (b:ext.blocktype {id: $id, name: $name, properties: $properties, requiredProperties: $requiredProperties, semantics: $semantics, status: $status})",
+  "createParameters": {
+    "id": "ext.manifest",
+    "name": "ext.manifest",
+    "properties": {
+      "capabilities": "what the extension may render and which CCGW scopes its skills need",
+      "category": "distribution category: bundled ships with calliopa as open source, individual stays private to its instance; absent means individual, and the release export refuses anything not explicitly bundled",
+      "dependencies": "map of extension id to semver range, one entry per dependsOn relation; the range lives here because a relation stores no properties",
+      "entrypoint": "a source path within the extension's own subtree; absent when the extension ships no executable UI code",
+      "id": "the extension id; the manifest is the subtree root and its id names the extension",
+      "version": "the extension's semver version"
+    },
+    "requiredProperties": [
+      "id"
+    ],
+    "semantics": "The subtree root of an extension. Every member Block carries a partOf relation to its manifest; dependsOn relations connect manifest to manifest. Materializes to src/extensions/\u003cextId\u003e/manifest.json.",
+    "status": "established"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "label": "ext.blocktype ext.migration",
+  "checkStatement": "MATCH (b:ext.blocktype {id: $id}) RETURN GRAPH b",
+  "checkParameters": {
+    "id": "ext.migration"
+  },
+  "createStatement": "CREATE (b:ext.blocktype {id: $id, name: $name, properties: $properties, requiredProperties: $requiredProperties, semantics: $semantics, status: $status})",
+  "createParameters": {
+    "id": "ext.migration",
+    "name": "ext.migration",
+    "properties": {
+      "id": "member Block id, conventionally \u003cextId\u003e.\u003cshort-name\u003e",
+      "migrates": "the type names whose breaking definition changes this Block covers",
+      "rationale": "why the breaking definition change is safe or worth its cost"
+    },
+    "requiredProperties": [
+      "id"
+    ],
+    "semantics": "The migration Block a breaking type-definition change must travel with: a reviewed manual artifact whose authority is the ordinary human review of its proposal group. The operations that transform existing content are staged as ordinary operations in the same group; nothing executes the Block. Validation refuses a breaking ext.blocktype or ext.relationtype change whose group carries no ext.migration covering the type. Never materializes to the working tree. BO_0109_007",
+    "status": "established"
+  }
+}

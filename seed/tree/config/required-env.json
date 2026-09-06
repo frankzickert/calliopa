@@ -1,0 +1,22 @@
+{
+  "comment": "The one list of required application environment variables.",
+  "app": [
+    "CALLIOPA_DATABASE_URL",
+    "CALLIOPA_GARAGE_ENDPOINT",
+    "CALLIOPA_GARAGE_REGION",
+    "CALLIOPA_GARAGE_BUCKET",
+    "CALLIOPA_GARAGE_ACCESS_KEY_ID",
+    "CALLIOPA_GARAGE_SECRET_ACCESS_KEY",
+    "CALLIOPA_SECRETS_KEY",
+    "CALLIOPA_HERMES_API_KEY",
+    "CALLIOPA_HERMES_URL"
+  ],
+  "composeComment": "Variables used by Compose to configure data services.",
+  "compose": [
+    "CALLIOPA_POSTGRES_DB",
+    "CALLIOPA_POSTGRES_USER",
+    "CALLIOPA_POSTGRES_PASSWORD",
+    "CALLIOPA_GARAGE_RPC_SECRET",
+    "CALLIOPA_GARAGE_ADMIN_TOKEN"
+  ]
+}
