@@ -249,6 +249,10 @@ services:
       # human commands and the bridge, its own for its serve principal, the
       # agent accounts' for the toolset per run. BO_0206_008
       CALLIOPA_SECRET_DIR: /run/secrets/calliopa
+      # The owner's name, so the pre-seed hook and the account and licence verbs
+      # run in this container find the owner's credential without a flag.
+      # BO_0215_002
+      CALLIOPA_OWNER_PRINCIPAL: ${CALLIOPA_OWNER_PRINCIPAL:-owner}
       CALLIOPA_KERNEL_DATA: /var/lib/calliopa-kernel
       # The confirmation origin binds wide inside the container; the host
       # publish below stays loopback, and browsers reach it at the published

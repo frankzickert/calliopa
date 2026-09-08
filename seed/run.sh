@@ -31,10 +31,15 @@ here="$(cd "$(dirname "$0")" && pwd)"
 # as it, presenting the token the bootstrap wrote under credentials/.
 principal="${CALLIOPA_OWNER_PRINCIPAL:-owner}"
 secret_dir="${CALLIOPA_SECRET_DIR:-/run/secrets/calliopa}"
-if [ -f "$secret_dir/credentials/$principal" ]; then
-  CALLIOPA_CREDENTIAL="$(cat "$secret_dir/credentials/$principal")"
-  export CALLIOPA_CREDENTIAL
+# Without it every write below would be refused; fail here, naming the path,
+# rather than after a half-applied seed. BO_0215_001
+if [ ! -f "$secret_dir/credentials/$principal" ]; then
+  echo "pre-seed: no credential for the owner '$principal' at $secret_dir/credentials/$principal;" >&2
+  echo "pre-seed: the bootstrap writes it — check CALLIOPA_OWNER_PRINCIPAL matches the name it was given" >&2
+  exit 1
 fi
+CALLIOPA_CREDENTIAL="$(cat "$secret_dir/credentials/$principal")"
+export CALLIOPA_CREDENTIAL
 
 echo "pre-seed: extension meta-schema (install profile)"
 node "$here/ccgw.mjs" apply "$base" "$principal" "$here/meta-schema"

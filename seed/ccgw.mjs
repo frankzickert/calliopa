@@ -15,10 +15,20 @@ import { join } from "node:path";
 
 const PURPOSE = "calliopa-install-seed";
 
+// Every write presents the owner's credential, which run.sh exports from the
+// secrets volume: since BO_0206 a mutation without one is refused. BO_0215_001
+function headers() {
+  const out = { "content-type": "application/json" };
+  if (process.env.CALLIOPA_CREDENTIAL) {
+    out.authorization = `Bearer ${process.env.CALLIOPA_CREDENTIAL}`;
+  }
+  return out;
+}
+
 async function post(base, route, body) {
   const response = await fetch(`${base.replace(/\/+$/, "")}${route}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: headers(),
     body: JSON.stringify(body),
   });
   const envelope = await response.json().catch(() => ({}));
