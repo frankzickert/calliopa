@@ -53,10 +53,52 @@ if ! version_at_least "$compose" "2.24"; then
   exit 1
 fi
 
+# The owner's account name (BO_0220_001): asked once, on the run that creates
+# .env, because it is immutable after the first boot — the provenance stamp on
+# what the install seeds, the core's key, and the credential file's name.
+# CALLIOPA_OWNER_PRINCIPAL in the environment answers silently (a scripted
+# install); otherwise the terminal is asked, so the one-line curl install can
+# answer too; no terminal, or an empty answer, keeps the default. Letters,
+# digits, '.', '_', '-' and ':' only: the name is a file name and a path
+# segment. The name is not a secret; the install stays zero-secret.
+owner_name_rule="the owner's name uses letters, digits, '.', '_', '-' and ':' only"
+owner_name_valid() {
+  printf '%s' "$1" | grep -Eq '^[A-Za-z0-9._:-]+$'
+}
+choose_owner_name() {
+  if [ -n "${CALLIOPA_OWNER_PRINCIPAL:-}" ]; then
+    owner_name_valid "$CALLIOPA_OWNER_PRINCIPAL" || {
+      echo "error: CALLIOPA_OWNER_PRINCIPAL='${CALLIOPA_OWNER_PRINCIPAL}': ${owner_name_rule}" >&2
+      exit 1
+    }
+    printf '%s' "$CALLIOPA_OWNER_PRINCIPAL"
+    return
+  fi
+  if ! { : < /dev/tty; } 2>/dev/null; then
+    printf 'owner'
+    return
+  fi
+  while :; do
+    printf 'Your account name — you sign in with it (letters, digits, . _ - : only) [owner]: ' > /dev/tty
+    IFS= read -r answer < /dev/tty || answer=""
+    if [ -z "$answer" ]; then
+      printf 'owner'
+      return
+    fi
+    if owner_name_valid "$answer"; then
+      printf '%s' "$answer"
+      return
+    fi
+    echo "${owner_name_rule} — try again" > /dev/tty
+  done
+}
+
 # Configuration: create .env on first run; on re-run add missing keys only.
 if [ ! -f .env ]; then
+  owner="$(choose_owner_name)"
   cp .env.example .env
-  echo "created .env from .env.example"
+  sed -i "s|^CALLIOPA_OWNER_PRINCIPAL=.*|CALLIOPA_OWNER_PRINCIPAL=${owner}|" .env
+  echo "created .env from .env.example (the owner's account: ${owner})"
 else
   while IFS= read -r line; do
     case "$line" in ''|\#*) continue ;; esac

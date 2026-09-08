@@ -58,21 +58,35 @@ export function gatewayConfigured(): boolean {
   return gatewayUrl() !== null;
 }
 
-async function ask(path: string, init: RequestInit, timeoutMs: number): Promise<GatewayReply<string>> {
+async function ask(
+  path: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<GatewayReply<string>> {
   const base = gatewayUrl();
   if (base === null) {
-    return { ok: false, detail: "The knowledge graph is not reachable: CALLIOPA_CCGW_URL is not set." };
+    return {
+      ok: false,
+      detail:
+        "The knowledge graph is not reachable: CALLIOPA_CCGW_URL is not set.",
+    };
   }
   try {
     const response = await fetch(`${base}${path}`, {
       ...init,
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
       signal: AbortSignal.timeout(timeoutMs),
     });
     const body = await response.text();
     return response.ok
       ? { ok: true, value: body }
-      : { ok: false, detail: `The gateway answered ${response.status}: ${body.slice(0, 200)}` };
+      : {
+          ok: false,
+          detail: `The gateway answered ${response.status}: ${body.slice(0, 200)}`,
+        };
   } catch (error) {
     const detail =
       error instanceof Error && error.name === "TimeoutError"
@@ -93,9 +107,22 @@ export function parseQueryAnswer(body: string): GatewayReply<GraphResult> {
   if (typeof parsed !== "object" || parsed === null) {
     return { ok: false, detail: "The gateway's answer was not an object." };
   }
-  const answer = parsed as { status?: unknown; result?: unknown; error?: { message?: unknown } };
+  const answer = parsed as {
+    status?: unknown;
+    result?: unknown;
+    error?: { message?: unknown };
+  };
+  // A read that matched nothing is an answer, not a refusal: an instance
+  // before its first release pin, or without a kernel extension state Block,
+  // reads as empty rather than unreachable. BO_0218_010
+  if (answer.status === "no_result") {
+    return { ok: true, value: { roots: [], nodes: [], relations: [] } };
+  }
   if (answer.status !== "success") {
-    const message = typeof answer.error?.message === "string" ? answer.error.message : String(answer.status);
+    const message =
+      typeof answer.error?.message === "string"
+        ? answer.error.message
+        : String(answer.status);
     return { ok: false, detail: `The gateway refused the read: ${message}` };
   }
   const result = (answer.result ?? {}) as Partial<GraphResult>;
@@ -110,7 +137,9 @@ export function parseQueryAnswer(body: string): GatewayReply<GraphResult> {
     value: {
       roots: Array.isArray(result.roots) ? (result.roots as string[]) : [],
       nodes,
-      relations: Array.isArray(result.relations) ? (result.relations as GraphRelation[]) : [],
+      relations: Array.isArray(result.relations)
+        ? (result.relations as GraphRelation[])
+        : [],
     },
   };
 }
@@ -141,8 +170,11 @@ export async function readHead(): Promise<GatewayReply<number>> {
   const reply = await ask("/v1/head", { method: "GET" }, 5_000);
   if (!reply.ok) return reply;
   try {
-    const head = (JSON.parse(reply.value) as { dataRevision?: unknown }).dataRevision;
-    return typeof head === "number" ? { ok: true, value: head } : { ok: false, detail: "The gateway named no head." };
+    const head = (JSON.parse(reply.value) as { dataRevision?: unknown })
+      .dataRevision;
+    return typeof head === "number"
+      ? { ok: true, value: head }
+      : { ok: false, detail: "The gateway named no head." };
   } catch {
     return { ok: false, detail: "The gateway's head was not JSON." };
   }
@@ -152,7 +184,8 @@ export async function readElevated(): Promise<GatewayReply<readonly string[]>> {
   const reply = await ask("/v1/schema", { method: "GET" }, 5_000);
   if (!reply.ok) return reply;
   try {
-    const set = (JSON.parse(reply.value) as { elevatedExtensions?: unknown }).elevatedExtensions;
+    const set = (JSON.parse(reply.value) as { elevatedExtensions?: unknown })
+      .elevatedExtensions;
     return { ok: true, value: Array.isArray(set) ? (set as string[]) : [] };
   } catch {
     return { ok: false, detail: "The gateway's schema was not JSON." };
@@ -174,11 +207,14 @@ export function nodesOfType(result: GraphResult, type: string): GraphNode[] {
  * read of every pair and the relations it returns is how membership resolves
  * — the same way the kernel's own member export does it.
  */
-export function membersByManifest(result: GraphResult): Map<string, GraphNode[]> {
+export function membersByManifest(
+  result: GraphResult,
+): Map<string, GraphNode[]> {
   const byId = new Map(result.nodes.map((node) => [node.id, node] as const));
   const grouped = new Map<string, GraphNode[]>();
   for (const relation of result.relations) {
-    if (relation.type !== "partOf" || relation.to.nodeId === undefined) continue;
+    if (relation.type !== "partOf" || relation.to.nodeId === undefined)
+      continue;
     const member = byId.get(relation.fromNodeId);
     if (member === undefined) continue;
     const list = grouped.get(relation.to.nodeId) ?? [];
@@ -188,7 +224,10 @@ export function membersByManifest(result: GraphResult): Map<string, GraphNode[]>
   return grouped;
 }
 
-export function stringOf(content: Record<string, unknown>, key: string): string {
+export function stringOf(
+  content: Record<string, unknown>,
+  key: string,
+): string {
   const value = content[key];
   return typeof value === "string" ? value : "";
 }

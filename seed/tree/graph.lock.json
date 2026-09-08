@@ -1,5 +1,5 @@
 {
-  "dataRevision": 98,
+  "dataRevision": 113,
   "files": {
     "README.md": {
       "blockId": "node:ui.shell.README.md",
@@ -25,6 +25,16 @@
       "blockId": "node:ui.shell.docs/changes/BO_0209_FEAT_shell-sign-in-and-people.md",
       "revision": "rev:165f436aa8c1f251",
       "hash": "sha256:fc67dca20706d2f7c1ae4920a28a5facf60e4b0ab5c38c7b8ca7362201fc7d15"
+    },
+    "docs/changes/BO_0218_FEAT_extension-activation.md": {
+      "blockId": "node:ui.shell.docs/changes/BO_0218_FEAT_extension-activation.md",
+      "revision": "rev:80c9fa7182f2ab73",
+      "hash": "sha256:0fa18413ec01bff6cb2d49c73ec9ba552b53f573dd2a8d1e285f4628691ec25e"
+    },
+    "docs/changes/BO_0219_FEAT_extension-versions.md": {
+      "blockId": "node:ui.shell.docs/changes/BO_0219_FEAT_extension-versions.md",
+      "revision": "rev:b623b721bded6d15",
+      "hash": "sha256:c8da8be5670c9d1c7ff20b7aea6f8ba080dab7c16f5751c4a7e515b962256551"
     },
     "docs/changes/CA_0035_BUILD_production-backups.md": {
       "blockId": "node:ui.shell.docs/changes/CA_0035_BUILD_production-backups.md",
@@ -308,8 +318,8 @@
     },
     "docs/system/workspace/contribution-contract.md": {
       "blockId": "node:ui.shell.docs/system/workspace/contribution-contract.md",
-      "revision": "rev:d78da87214ae13c7",
-      "hash": "sha256:3ba67cf30fbcecada1823d55959fefc2465f7eda4e05a68f2690e3d7ff0d256e"
+      "revision": "rev:4733555d38cecd23",
+      "hash": "sha256:35038046adf8f333c028eab5ea6fbbc73daf3533a1a733ff0ccd838697751767"
     },
     "docs/system/workspace/drag-and-drop.md": {
       "blockId": "node:ui.shell.docs/system/workspace/drag-and-drop.md",
@@ -407,13 +417,13 @@
     },
     "scripts/registry.d.mts": {
       "blockId": "node:ui.shell.scripts/registry.d.mts",
-      "revision": "rev:3e96ac62e9047e0f",
-      "hash": "sha256:c0d5da832f8fb72835d3b264d155157e470dc4459364cb4fd8135dceb3437ab2"
+      "revision": "rev:a776181872f9f30a",
+      "hash": "sha256:a3aede09ba13ff6524afa49f64a4bc6ebefc469ca7b62c6682ce1891d41557e7"
     },
     "scripts/registry.mjs": {
       "blockId": "node:ui.shell.scripts/registry.mjs",
-      "revision": "rev:a4a6add498b8547d",
-      "hash": "sha256:66af57a6a795cd31d24e968839d08334b1d8fc2ba1bec9476515d2a841a53c3b"
+      "revision": "rev:6bde72c8e1fea39a",
+      "hash": "sha256:a633ad9eabbebb79afe870e283c329b4647099705df60617cd6b97f03adfe5c8"
     },
     "scripts/serve.mjs": {
       "blockId": "node:ui.shell.scripts/serve.mjs",
@@ -422,8 +432,8 @@
     },
     "src/components/library/extensions-section.tsx": {
       "blockId": "node:ui.shell.src/components/library/extensions-section.tsx",
-      "revision": "rev:869442c205ee0af9",
-      "hash": "sha256:b82fe193c890d0f7fb3f7f26c1942751c4c9c3273c1cc38ad1a87501f1125854"
+      "revision": "rev:3747e2a24083133d",
+      "hash": "sha256:767929d2246d2772fe14f24bfd89c14854eb04591ece6ff8c912e0326e3e00fc"
     },
     "src/components/router-head/router-head.tsx": {
       "blockId": "node:ui.shell.src/components/router-head/router-head.tsx",
@@ -437,8 +447,8 @@
     },
     "src/components/shell/shell.css": {
       "blockId": "node:ui.shell.src/components/shell/shell.css",
-      "revision": "rev:1b095a5b444decc0",
-      "hash": "sha256:d1352e40cf4e428103d276084069e3be041ac92ecb83a00ffa803e0c0b5d9046"
+      "revision": "rev:403a9859c5b4a5e5",
+      "hash": "sha256:74321f04b65eedf527c01609b3a75c0ea80ccd5422eedb87849aae6d41602a74"
     },
     "src/components/shell/shell.tsx": {
       "blockId": "node:ui.shell.src/components/shell/shell.tsx",
@@ -482,8 +492,8 @@
     },
     "src/components/views/extension.tsx": {
       "blockId": "node:ui.shell.src/components/views/extension.tsx",
-      "revision": "rev:f6d353cac855a934",
-      "hash": "sha256:c1d047827d852b77b355b9c02e820b377d3467bf5df54f77802f6f7b4e70768c"
+      "revision": "rev:671209404fd4349f",
+      "hash": "sha256:f6480e36aef54fc19950727f3d00dd36d7420688891d160bbaa9d00c26af29c7"
     },
     "src/components/views/settings.css": {
       "blockId": "node:ui.shell.src/components/views/settings.css",
@@ -627,8 +637,8 @@
     },
     "src/extensions/ui.shell/contributions.server.ts": {
       "blockId": "node:ui.shell.contributions.server.ts",
-      "revision": "rev:3ee728007289855f",
-      "hash": "sha256:d78cdf9af4e0031837a0f45714e54c55e6fa43f39501c728195f201531b880de"
+      "revision": "rev:813fe7bbe5553c94",
+      "hash": "sha256:a0b408d8686061c6ce66bdfa790f18665813a159a090a20cba969d7e9853b2c5"
     },
     "src/extensions/ui.shell/contributions.ts": {
       "blockId": "node:ui.shell.contributions.ts",
@@ -677,8 +687,8 @@
     },
     "src/lib/library.ts": {
       "blockId": "node:ui.shell.src/lib/library.ts",
-      "revision": "rev:bf5faf81e62fe317",
-      "hash": "sha256:dd55e2c4854a1e323d4a35fa03d1d6666308c258ce3d0ca3b9bb4659f0a5303d"
+      "revision": "rev:5e83d858e3aaa4dd",
+      "hash": "sha256:821675f8d74d05c81775e04419a73163f9e3c519574397ec874e413eeb8ef627"
     },
     "src/lib/licence.test.ts": {
       "blockId": "node:ui.shell.src/lib/licence.test.ts",
@@ -817,8 +827,8 @@
     },
     "src/registry-scan.test.ts": {
       "blockId": "node:ui.shell.src/registry-scan.test.ts",
-      "revision": "rev:eff1e4e976b495a1",
-      "hash": "sha256:c8a6ed9b87b80fa6c0d7f5700956c7c81bc26beede43dd4c020e268afc26c457"
+      "revision": "rev:66df386dfe5e2c3d",
+      "hash": "sha256:436278d09f8cc6ca0aac7afb8fede1fb1bab92d0d4bfcaed79307295447f28ff"
     },
     "src/registry.test.ts": {
       "blockId": "node:ui.shell.src/registry.test.ts",
@@ -1007,13 +1017,13 @@
     },
     "src/server/extensions.test.ts": {
       "blockId": "node:ui.shell.src/server/extensions.test.ts",
-      "revision": "rev:1c7dd2eeb4291dfc",
-      "hash": "sha256:664cd88747e89ad233972f0c82cb4e7124125f14c8e2e0cbd93596385c340b34"
+      "revision": "rev:5527af89d66a26f2",
+      "hash": "sha256:cbdcbeaa2b259ec20567b8341bf8a1113c43821ac14699110cb38d568c6bc583"
     },
     "src/server/extensions.ts": {
       "blockId": "node:ui.shell.src/server/extensions.ts",
-      "revision": "rev:0ac7a556e8eb67bc",
-      "hash": "sha256:f3064f5846e694591b71dc201b3cb4610f1e183fbfab7419f6ae099085a218b4"
+      "revision": "rev:c117c3db90a2e497",
+      "hash": "sha256:d25b284c09b7c53276a952e54d5c7f760b24ef453b7066cabd9154e59791648f"
     },
     "src/server/fixtures/gateway/depends.json": {
       "blockId": "node:ui.shell.src/server/fixtures/gateway/depends.json",
@@ -1067,8 +1077,8 @@
     },
     "src/server/graph-gateway.ts": {
       "blockId": "node:ui.shell.src/server/graph-gateway.ts",
-      "revision": "rev:958bdb9c3414d4ab",
-      "hash": "sha256:b04c5d8faa8282533bcf1e3205256c6338dc12b4ac7b85a02a03febc67da0b50"
+      "revision": "rev:992ff61adf908723",
+      "hash": "sha256:1d5c849f1aa90bae1303375873db1c2ae84eac16bbb5264a83c2096c8a8c66bc"
     },
     "src/server/health.test.ts": {
       "blockId": "node:ui.shell.src/server/health.test.ts",
@@ -1094,6 +1104,11 @@
       "blockId": "node:ui.shell.src/server/kernel/client.ts",
       "revision": "rev:731e4011b36dee03",
       "hash": "sha256:b5b01cab8a0075b4409a82af01c569d9b064d29adc0e7216b371dfa98c60ceec"
+    },
+    "src/server/kernel/extensions.ts": {
+      "blockId": "node:ui.shell.src/server/kernel/extensions.ts",
+      "revision": "rev:3189c0b51b31d253",
+      "hash": "sha256:be717ee797b105a08f3a4463d41e7fc28e8b435551a3cb5175e02c815b90f519"
     },
     "src/server/licence.ts": {
       "blockId": "node:ui.shell.src/server/licence.ts",
@@ -1149,6 +1164,11 @@
       "blockId": "node:ui.shell.tests/behavior/documents.test.ts",
       "revision": "rev:40425533a7a65c57",
       "hash": "sha256:a24b4dc5785f508d1a26a4fbb9147e342cc702ec380cf34bfa80ee5002707156"
+    },
+    "tests/behavior/extensions.test.ts": {
+      "blockId": "node:ui.shell.tests/behavior/extensions.test.ts",
+      "revision": "rev:2814af8c7da4269b",
+      "hash": "sha256:9449363f0964bd1d737f7b7a69537aa0598e9bae31dc3cea71f80cb1dcaa27e3"
     },
     "tests/behavior/kernel-surfaces.test.ts": {
       "blockId": "node:ui.shell.tests/behavior/kernel-surfaces.test.ts",

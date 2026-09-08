@@ -1133,12 +1133,100 @@
   padding: 1rem 1.25rem 3rem;
   max-width: 48rem;
 }
-.owner-heading--1 { font-size: 1.6rem; margin: 0 0 0.75rem; }
-.owner-heading--2 { font-size: 1.15rem; margin: 1.5rem 0 0.5rem; }
-.owner-heading--3 { font-size: 1rem; margin: 1rem 0 0.4rem; color: var(--text-muted); }
-.owner-paragraph { margin: 0.35rem 0; line-height: 1.5; }
-.owner-quote { margin: 0.5rem 0; padding: 0.25rem 0.75rem; border-left: 3px solid var(--border); color: var(--text-muted); }
-.owner-badge { font-size: 0.75rem; padding: 0.05rem 0.35rem; border-radius: 0.3rem; background: var(--panel-raised); border: 1px solid var(--border); }
-.owner-link { border: none; background: transparent; color: var(--accent, inherit); font: inherit; padding: 0; cursor: pointer; text-decoration: underline; }
-.owner-divider { border: none; border-top: 1px solid var(--border); margin: 0.75rem 0; }
-.extension-status { color: var(--text-muted); padding: 1rem 1.25rem; }
+.owner-heading--1 {
+  font-size: 1.6rem;
+  margin: 0 0 0.75rem;
+}
+.owner-heading--2 {
+  font-size: 1.15rem;
+  margin: 1.5rem 0 0.5rem;
+}
+.owner-heading--3 {
+  font-size: 1rem;
+  margin: 1rem 0 0.4rem;
+  color: var(--text-muted);
+}
+.owner-paragraph {
+  margin: 0.35rem 0;
+  line-height: 1.5;
+}
+.owner-quote {
+  margin: 0.5rem 0;
+  padding: 0.25rem 0.75rem;
+  border-left: 3px solid var(--border);
+  color: var(--text-muted);
+}
+.owner-badge {
+  font-size: 0.75rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 0.3rem;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+}
+.owner-link {
+  border: none;
+  background: transparent;
+  color: var(--accent, inherit);
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.owner-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.75rem 0;
+}
+.extension-status {
+  color: var(--text-muted);
+  padding: 1rem 1.25rem;
+}
+
+/* The Extensions section's activation and pin markers (BO_0218_010, BO_0219_006). */
+.library-entry[data-active="false"] .library-entry__label {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+.library-entry__state,
+.library-entry__pinned {
+  font-size: 0.7rem;
+  line-height: 1;
+  padding: 0.15rem 0.4rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  margin-left: 0.35rem;
+}
+
+/* The control row at the top of the extension view (BO_0218_009, BO_0219_006). */
+.extension-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.extension-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+.extension-toggle input:disabled + span {
+  color: var(--text-muted);
+}
+.extension-note {
+  color: var(--text-muted);
+}
+.extension-note[data-extension-note="refused"] {
+  color: var(--error);
+}
+.extension-served {
+  font-variant-numeric: tabular-nums;
+}
+.extension-version-select {
+  font: inherit;
+  max-width: 28rem;
+}

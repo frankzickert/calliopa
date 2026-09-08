@@ -26,4 +26,9 @@ export interface ExtensionSummary {
   readonly newestRevision: number;
   readonly servedPin: number | null;
   readonly ahead: boolean;
+  /** Whether the kernel's extension state serves it at all (`BO_0218_010`). */
+  readonly active: boolean;
+  /** Whether it is served at a revision of its own rather than the release pin (`BO_0219_006`). */
+  readonly pinned: boolean;
+  readonly pinnedAt: number | null;
 }

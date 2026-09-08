@@ -15,3 +15,5 @@ export function writeRegistry(root: string): {
   readonly entries: ScannedExtension[];
   readonly written: string[];
 };
+/** Whether a version satisfies a dependency range, in the grammar the kernel's flip check reads. BO_0219_007 */
+export function satisfies(version: string, range: string): boolean;

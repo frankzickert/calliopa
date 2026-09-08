@@ -4,7 +4,13 @@
 // `src/registry.gen.ts` and `src/registry.server.gen.ts` importing every
 // present entrypoint. The merge itself, with its collision errors, is
 // `src/registry.ts`. Plain JavaScript so node runs it without a build. BO_0202_001
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 export class RegistryScanError extends Error {
@@ -37,14 +43,20 @@ export function scanExtensions(root) {
     if (!statSync(dir).isDirectory()) continue;
     const manifestPath = join(dir, "manifest.json");
     if (!existsSync(manifestPath)) {
-      throw new RegistryScanError("manifest_missing", `src/extensions/${name} has no manifest.json`);
+      throw new RegistryScanError(
+        "manifest_missing",
+        `src/extensions/${name} has no manifest.json`,
+      );
     }
     /** @type {Record<string, unknown>} */
     let manifest;
     try {
       manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
     } catch (error) {
-      throw new RegistryScanError("manifest_unreadable", `src/extensions/${name}/manifest.json: ${String(error)}`);
+      throw new RegistryScanError(
+        "manifest_unreadable",
+        `src/extensions/${name}/manifest.json: ${String(error)}`,
+      );
     }
     if (manifest.id !== name) {
       throw new RegistryScanError(
@@ -55,11 +67,21 @@ export function scanExtensions(root) {
     let client = null;
     let server = null;
     if (manifest.entrypoint !== undefined) {
-      if (typeof manifest.entrypoint !== "string" || manifest.entrypoint === "" || manifest.entrypoint.includes("/")) {
-        throw new RegistryScanError("entrypoint_shape", `${name}: entrypoint must be a module name beside the manifest`);
+      if (
+        typeof manifest.entrypoint !== "string" ||
+        manifest.entrypoint === "" ||
+        manifest.entrypoint.includes("/")
+      ) {
+        throw new RegistryScanError(
+          "entrypoint_shape",
+          `${name}: entrypoint must be a module name beside the manifest`,
+        );
       }
       const stem = join(dir, manifest.entrypoint);
-      client = [".ts", ".tsx"].map((ext) => stem + ext).find((file) => existsSync(file)) ?? null;
+      client =
+        [".ts", ".tsx"]
+          .map((ext) => stem + ext)
+          .find((file) => existsSync(file)) ?? null;
       server = existsSync(`${stem}.server.ts`) ? `${stem}.server.ts` : null;
       if (client === null && server === null) {
         throw new RegistryScanError(
@@ -68,23 +90,44 @@ export function scanExtensions(root) {
         );
       }
       if (client !== null && !CLIENT_SHAPE.test(readFileSync(client, "utf8"))) {
-        throw new RegistryScanError("entrypoint_shape", `${name}: ${relativeTo(root, client)} does not export \`contributions\``);
+        throw new RegistryScanError(
+          "entrypoint_shape",
+          `${name}: ${relativeTo(root, client)} does not export \`contributions\``,
+        );
       }
       if (server !== null && !SERVER_SHAPE.test(readFileSync(server, "utf8"))) {
-        throw new RegistryScanError("entrypoint_shape", `${name}: ${relativeTo(root, server)} does not export \`contributions\``);
+        throw new RegistryScanError(
+          "entrypoint_shape",
+          `${name}: ${relativeTo(root, server)} does not export \`contributions\``,
+        );
       }
     }
     entries.push({ id: name, dir, manifest, client, server });
   }
-  const present = new Set(entries.map((entry) => entry.id));
+  const present = new Map(entries.map((entry) => [entry.id, entry]));
   for (const entry of entries) {
     const dependencies = entry.manifest.dependencies;
     if (typeof dependencies !== "object" || dependencies === null) continue;
-    for (const dependency of Object.keys(dependencies)) {
-      if (!present.has(dependency)) {
+    for (const [dependency, range] of Object.entries(dependencies)) {
+      const target = present.get(dependency);
+      if (target === undefined) {
         throw new RegistryScanError(
           "dependency_missing",
           `${entry.id} depends on ${dependency}, which the tree does not hold`,
+        );
+      }
+      // The range the manifest declares against the version the tree holds:
+      // a tree assembled by any path — a pinned extension beside one at head —
+      // fails by name here, as the kernel refuses the flip before writing it.
+      // BO_0219_007
+      const version =
+        typeof target.manifest.version === "string"
+          ? target.manifest.version
+          : "";
+      if (!satisfies(version, typeof range === "string" ? range : "*")) {
+        throw new RegistryScanError(
+          "dependency_out_of_range",
+          `${entry.id} requires ${dependency} ${String(range)}, but the tree holds ${dependency} ${version || "without a version"}`,
         );
       }
     }
@@ -92,9 +135,164 @@ export function scanExtensions(root) {
   return entries;
 }
 
+/**
+ * Whether a version satisfies a dependency range, in the grammar the kernel's
+ * flip check reads: comparator sets joined by `||`, each a whitespace-separated
+ * conjunction of `^x.y.z`, `~x.y.z`, `>=`, `>`, `<=`, `<`, `=` or a bare
+ * version, with `*`, `x` and partial versions as x-ranges. A prerelease orders
+ * before its release; build metadata is ignored. An unreadable version or
+ * range does not satisfy. BO_0219_007
+ * @param {string} version @param {string} range
+ */
+export function satisfies(version, range) {
+  const parsed = parseVersion(version);
+  if (parsed === null) return false;
+  const alternatives = String(range).split("||");
+  for (const alternative of alternatives) {
+    const tokens = alternative
+      .trim()
+      .split(/\s+/u)
+      .filter((token) => token !== "");
+    let ok = true;
+    for (const token of tokens) {
+      const comparators = parseComparator(token);
+      if (comparators === null) return false;
+      if (!comparators.every(([op, bound]) => compareWith(op, parsed, bound))) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return true;
+  }
+  return false;
+}
+
+/** @param {string} raw @returns {{ parts: number, v: [number, number, number], pre: string } | null} */
+function parsePartial(raw) {
+  let text = String(raw).trim().replace(/^v/u, "");
+  if (text === "") return null;
+  const plus = text.indexOf("+");
+  if (plus >= 0) text = text.slice(0, plus);
+  let pre = "";
+  const dash = text.indexOf("-");
+  if (dash >= 0) {
+    pre = text.slice(dash + 1);
+    text = text.slice(0, dash);
+  }
+  const fields = text.split(".");
+  if (fields.length > 3) return null;
+  /** @type {[number, number, number]} */
+  const v = [0, 0, 0];
+  let parts = 0;
+  for (let i = 0; i < fields.length; i += 1) {
+    const field = fields[i];
+    if (field === "x" || field === "X" || field === "*") break;
+    if (!/^\d+$/u.test(field)) return null;
+    v[i] = Number(field);
+    parts = i + 1;
+  }
+  if (parts === 0 && !["x", "X", "*"].includes(fields[0])) return null;
+  return { parts, v, pre };
+}
+
+/** @param {string} raw */
+function parseVersion(raw) {
+  const parsed = parsePartial(raw);
+  return parsed !== null && parsed.parts === 3 ? parsed : null;
+}
+
+/** @param {{ v: [number, number, number], pre: string }} a @param {{ v: [number, number, number], pre: string }} b */
+function compare(a, b) {
+  for (let i = 0; i < 3; i += 1) {
+    if (a.v[i] !== b.v[i]) return a.v[i] - b.v[i];
+  }
+  if (a.pre === b.pre) return 0;
+  if (a.pre === "") return 1;
+  if (b.pre === "") return -1;
+  return a.pre < b.pre ? -1 : 1;
+}
+
+/** @param {string} op @param {{ v: [number, number, number], pre: string }} a @param {{ v: [number, number, number], pre: string }} b */
+function compareWith(op, a, b) {
+  const d = compare(a, b);
+  switch (op) {
+    case ">=":
+      return d >= 0;
+    case ">":
+      return d > 0;
+    case "<=":
+      return d <= 0;
+    case "<":
+      return d < 0;
+    default:
+      return d === 0;
+  }
+}
+
+/** @param {[number, number, number]} v @param {string} pre */
+const bound = (v, pre = "") => ({ v, pre });
+
+/**
+ * @param {string} token
+ * @returns {[string, { v: [number, number, number], pre: string }][] | null}
+ */
+function parseComparator(token) {
+  if (token === "*" || token === "x" || token === "X") return [];
+  const ops = [">=", "<=", ">", "<", "="];
+  for (const op of ops) {
+    if (token.startsWith(op)) {
+      const v = parseVersion(token.slice(op.length));
+      return v === null ? null : [[op, v]];
+    }
+  }
+  if (token.startsWith("^") || token.startsWith("~")) {
+    const parsed = parsePartial(token.slice(1));
+    if (parsed === null) return null;
+    const [major, minor, patch] = parsed.v;
+    let upper;
+    if (token.startsWith("~")) {
+      upper =
+        parsed.parts < 2
+          ? bound([major + 1, 0, 0])
+          : bound([major, minor + 1, 0]);
+    } else if (major !== 0 || parsed.parts === 1) {
+      upper = bound([major + 1, 0, 0]);
+    } else if (minor !== 0 || parsed.parts === 2) {
+      upper = bound([major, minor + 1, 0]);
+    } else {
+      upper = bound([major, minor, patch + 1]);
+    }
+    return [
+      [">=", parsed],
+      ["<", upper],
+    ];
+  }
+  const parsed = parsePartial(token);
+  if (parsed === null) return null;
+  const [major, minor] = parsed.v;
+  switch (parsed.parts) {
+    case 0:
+      return [];
+    case 1:
+      return [
+        [">=", parsed],
+        ["<", bound([major + 1, 0, 0])],
+      ];
+    case 2:
+      return [
+        [">=", parsed],
+        ["<", bound([major, minor + 1, 0])],
+      ];
+    default:
+      return [["=", parsed]];
+  }
+}
+
 /** @param {string} root @param {string} file */
 function relativeTo(root, file) {
-  return file.startsWith(root) ? file.slice(root.length).replace(/^[\\/]/u, "") : file;
+  return file.startsWith(root)
+    ? file.slice(root.length).replace(/^[\\/]/u, "")
+    : file;
 }
 
 const HEADER =
@@ -109,13 +307,17 @@ export function emitClient(entries) {
     'import { buildRegistry } from "~/registry";',
     'import { HOST_CONTRIBUTIONS } from "~/components/shell/host-contributions";',
     ...withClient.map(
-      (entry, index) => `import { contributions as ext${index} } from "~/extensions/${entry.id}/${moduleName(entry.client)}";`,
+      (entry, index) =>
+        `import { contributions as ext${index} } from "~/extensions/${entry.id}/${moduleName(entry.client)}";`,
     ),
     "",
     `export const PRESENT_EXTENSIONS: readonly string[] = ${JSON.stringify(entries.map((entry) => entry.id))};`,
     "",
     "export const REGISTRY = buildRegistry(HOST_CONTRIBUTIONS, [",
-    ...withClient.map((entry, index) => `  { id: ${JSON.stringify(entry.id)}, contributions: ext${index} },`),
+    ...withClient.map(
+      (entry, index) =>
+        `  { id: ${JSON.stringify(entry.id)}, contributions: ext${index} },`,
+    ),
     "]);",
     "",
   ];
@@ -129,13 +331,17 @@ export function emitServer(entries) {
     HEADER,
     'import { buildServerRegistry } from "~/registry";',
     ...withServer.map(
-      (entry, index) => `import { contributions as ext${index} } from "~/extensions/${entry.id}/${moduleName(entry.server)}";`,
+      (entry, index) =>
+        `import { contributions as ext${index} } from "~/extensions/${entry.id}/${moduleName(entry.server)}";`,
     ),
     "",
     `export const PRESENT_EXTENSIONS: readonly string[] = ${JSON.stringify(entries.map((entry) => entry.id))};`,
     "",
     "export const SERVER_REGISTRY = buildServerRegistry([",
-    ...withServer.map((entry, index) => `  { id: ${JSON.stringify(entry.id)}, contributions: ext${index} },`),
+    ...withServer.map(
+      (entry, index) =>
+        `  { id: ${JSON.stringify(entry.id)}, contributions: ext${index} },`,
+    ),
     "]);",
     "",
   ];
@@ -144,7 +350,12 @@ export function emitServer(entries) {
 
 /** @param {string | null} file */
 function moduleName(file) {
-  return (file ?? "").split(/[\\/]/u).pop()?.replace(/\.tsx?$/u, "") ?? "";
+  return (
+    (file ?? "")
+      .split(/[\\/]/u)
+      .pop()
+      ?.replace(/\.tsx?$/u, "") ?? ""
+  );
 }
 
 /**
