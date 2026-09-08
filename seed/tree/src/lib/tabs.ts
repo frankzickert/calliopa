@@ -1,20 +1,36 @@
-export const TAB_KINDS = [
-  "document",
-  "episode",
-  // A destination's front. Its identity is the channel, because a front is the
-  // destination's own document and no record here stands behind it.
-  "front",
-  // Instance chrome rather than content: a settings tab resolves to nothing in
-  // the graph, and its target is synthetic so a tab is still found by one.
-  "settings",
-  "script",
-  "scene",
-  "storyboard",
-  "media",
-  "timeline",
-  "process-result",
-] as const;
-export type TabKind = (typeof TAB_KINDS)[number];
+/**
+ * A tab kind is a string qualified by the extension that contributes it —
+ * `ui.shell:document`, `settings:settings` — so a collision is impossible
+ * rather than caught (`BO_0202_004`). The frame's one kind of its own stays
+ * bare: `process-result`, which the process registry owns. The story-development
+ * placeholders that stood beside it were dropped with `BO_0203_005`. What kinds
+ * exist is the registry's answer, `src/registry.gen.ts`; this module only
+ * names the host's.
+ */
+export type TabKind = string;
+
+export const HOST_KINDS = ["process-result"] as const;
+
+/**
+ * The kinds stored before they were qualified, and what each became, plus the
+ * kinds `ui.shell` held for one pin before they became `calliopa-video`'s
+ * (`BO_0203_006`). A tab or a process item read back with one of these is
+ * rewritten on the way in, so a workspace saved before opens unchanged; the
+ * next save stores the current kind.
+ */
+export const LEGACY_TAB_KINDS: Readonly<Record<string, string>> = {
+  document: "ui.shell:document",
+  episode: "calliopa-video:episode",
+  front: "calliopa-video:front",
+  extension: "ui.shell:extension",
+  settings: "settings:settings",
+  "ui.shell:episode": "calliopa-video:episode",
+  "ui.shell:front": "calliopa-video:front",
+};
+
+export function migrateTabKind(kind: string): string {
+  return LEGACY_TAB_KINDS[kind] ?? kind;
+}
 
 /**
  * A tab's target is its item identity and item kind. The view type presenting

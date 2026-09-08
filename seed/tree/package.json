@@ -7,15 +7,21 @@
     "pnpm": ">=11"
   },
   "scripts": {
+    "prebuild": "node scripts/gen-registry.mjs",
     "build": "vite build && vite build -c adapters/node-server/vite.config.ts",
     "dev": "node scripts/serve.mjs --dev",
     "serve": "node scripts/serve.mjs",
+    "pretypecheck": "node scripts/gen-registry.mjs",
     "typecheck": "tsc --noEmit",
+    "precheck": "node scripts/gen-registry.mjs",
     "check": "vitest run --project unit --project behavior",
+    "pretest:unit": "node scripts/gen-registry.mjs",
     "test:unit": "vitest run --project unit",
+    "pretest:behavior": "node scripts/gen-registry.mjs",
     "test:behavior": "vitest run --project behavior",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "gen": "node scripts/gen-registry.mjs"
   },
   "devDependencies": {
     "@builder.io/qwik": "1.20.0",
@@ -26,9 +32,5 @@
     "vite": "7.3.6",
     "vite-tsconfig-paths": "5.1.4",
     "vitest": "3.2.7"
-  },
-  "dependencies": {
-    "@aws-sdk/client-s3": "3.1111.0",
-    "postgres": "3.4.9"
   }
 }

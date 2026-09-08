@@ -1,7 +1,9 @@
+import type { ConfigurationField } from "~/contract";
+
 /**
  * Connections are the outbound half of credentials: one record per external
  * party Calliopa presents a credential to. The inbound half — who is calling
- * Calliopa — is `src/server/api-clients.mjs` and is unrelated to this.
+ * Calliopa — is the core's (`BO_0206`) and is unrelated to this.
  *
  * The set of parties is application source, not user data. A party arrives with
  * the change that needs it; nothing adds, renames, or removes one at runtime.
@@ -15,72 +17,16 @@ export const CONNECTION_STATES = [
 ] as const;
 export type ConnectionState = (typeof CONNECTION_STATES)[number];
 
-export const CONNECTION_PARTIES = [
-  "honcho",
-  "hermes",
-  "codex",
-  "claude-code",
-  "homepage",
-  "bunny",
-] as const;
-export type ConnectionParty = (typeof CONNECTION_PARTIES)[number];
-
 /**
- * The channels: destinations the author's work goes to, as opposed to services
- * Calliopa needs to run. A channel is an ordinary connection that also holds
- * configuration, and the split exists because the two read as different things
- * to the person entering credentials for them.
- *
- * This roster is application source like the party list it draws from. A
- * channel arrives with the change that needs it, and holding its credential
- * grants no authority to publish: that is `docs/system/publishing.md`.
+ * The parties are contributions: each extension's server half declares the
+ * parties it presents a credential to, and the registry is the roster
+ * (`BO_0202_008`). The settings surface reads what it needs of a descriptor —
+ * label, purpose, whether the party is a channel, the fields it holds beside
+ * its key — off the record the listing answers, so this module holds no
+ * roster and no per-party table.
  */
-export const CHANNEL_PARTIES = ["homepage", "bunny"] as const;
-export type ChannelParty = (typeof CHANNEL_PARTIES)[number];
 
-export function isChannelParty(value: string): value is ChannelParty {
-  return (CHANNEL_PARTIES as readonly string[]).includes(value);
-}
-
-/** One value a channel needs beside its secret, in the reader's words. */
-export interface ConfigurationField {
-  readonly key: string;
-  readonly label: string;
-  readonly hint: string;
-}
-
-/**
- * What each channel holds besides its key.
- *
- * `homepage` needs the address of the instance this Calliopa publishes to. It
- * is entered rather than fixed because the instances are separate: a
- * development Calliopa points at a development homepage while a production one
- * points at the real site, and a hardcoded address would make a development
- * experiment write to the live site.
- *
- * `bunny` needs the video library its uploads go to. Every call of the channel
- * lives under that library, so an id is what makes the key reach anything at
- * all. The playback hostname is not held here: the destination that plays a
- * video holds its own, and a second copy would be a second thing to keep true.
- */
-export const CHANNEL_CONFIGURATION: Readonly<
-  Record<ChannelParty, readonly ConfigurationField[]>
-> = {
-  homepage: [
-    {
-      key: "address",
-      label: "Address",
-      hint: "Where this homepage answers, for example http://100.114.122.91:4460",
-    },
-  ],
-  bunny: [
-    {
-      key: "libraryId",
-      label: "Library",
-      hint: "The numeric id of the Bunny Stream video library, for example 512345",
-    },
-  ],
-};
+export type { ConfigurationField };
 
 /**
  * Whether a configuration is usable, in the words a reader is shown.
@@ -90,48 +36,37 @@ export const CHANNEL_CONFIGURATION: Readonly<
  * address at all.
  */
 export function configurationRefusal(
-  party: string,
+  party: {
+    readonly id: string;
+    readonly kind: "service" | "channel";
+    readonly fields: readonly ConfigurationField[];
+  },
   configuration: Readonly<Record<string, string>>,
 ): string | null {
-  if (!isChannelParty(party)) {
+  if (party.kind !== "channel") {
     return Object.keys(configuration).length === 0
       ? null
-      : `${party} takes no configuration.`;
+      : `${party.id} takes no configuration.`;
   }
-  const fields = CHANNEL_CONFIGURATION[party];
   const unknown = Object.keys(configuration).find(
-    (key) => !fields.some((field) => field.key === key),
+    (key) => !party.fields.some((field) => field.key === key),
   );
   if (unknown !== undefined) {
-    return `${party} takes no ${unknown}.`;
+    return `${party.id} takes no ${unknown}.`;
   }
-  for (const field of fields) {
+  for (const field of party.fields) {
     const value = (configuration[field.key] ?? "").trim();
     if (value === "") {
       return `${field.label} is required.`;
     }
-    if (field.key === "address" && !isAddress(value)) {
+    if (field.check === "address" && !isAddress(value)) {
       return `${field.label} must be an http or https address.`;
     }
-    if (field.key === "libraryId" && !isLibraryId(value)) {
+    if (field.check === "numeric" && !/^\d+$/u.test(value)) {
       return `${field.label} is the library's numeric id, not its name.`;
     }
   }
   return null;
-}
-
-/**
- * A Bunny library is identified by a number. Refusing anything else here is
- * what stops a name being entered and every later call reaching an address
- * that cannot exist.
- */
-export function isLibraryId(value: string): boolean {
-  return /^\d+$/.test(value);
-}
-
-/** The Stream API root of a library. Every call of the channel lives under it. */
-export function bunnyLibraryUrl(libraryId: string): string {
-  return `https://video.bunnycdn.com/library/${libraryId}`;
 }
 
 function isAddress(value: string): boolean {
@@ -153,49 +88,21 @@ function isAddress(value: string): boolean {
 export const CONNECTION_KINDS = ["apiKey", "status"] as const;
 export type ConnectionKind = (typeof CONNECTION_KINDS)[number];
 
-export interface PartyDetail {
-  readonly name: string;
-  readonly purpose: string;
-}
-
-/** What a row is called and what its key is for, in the reader's words. */
-export const CONNECTION_PARTY_DETAIL: Readonly<
-  Record<ConnectionParty, PartyDetail>
-> = {
-  honcho: {
-    name: "Honcho",
-    purpose: "OpenAI API key for the agent's memory",
-  },
-  hermes: {
-    name: "Hermes",
-    purpose: "The agent Calliopa hands goals to",
-  },
-  codex: {
-    name: "Codex",
-    purpose: "Reasons for the agent, on your ChatGPT subscription",
-  },
-  "claude-code": {
-    name: "Claude Code",
-    purpose: "Writes code for the agent, on your Claude subscription",
-  },
-  homepage: {
-    name: "Homepage",
-    purpose: "Publishing credential for the site this instance writes to",
-  },
-  bunny: {
-    name: "Bunny Stream",
-    purpose: "The video host a published film's bytes go to",
-  },
-};
-
 /**
  * What a connection is outside the database. There is no field a secret could
  * travel in: a row carries whether a key is set and its last characters, and
  * that is the whole of what is ever said about one.
  */
 export interface ConnectionRecord {
-  readonly party: ConnectionParty;
+  readonly party: string;
   readonly kind: ConnectionKind;
+  /** What the descriptor says the party is, so the surface needs no table of its own. BO_0202_008 */
+  readonly label: string;
+  readonly purpose: string;
+  /** A channel: somewhere the author's work goes, as opposed to a service Calliopa needs to run. */
+  readonly channel: boolean;
+  /** The fields a channel holds beside its key. Empty for a party that takes none. */
+  readonly fields: readonly ConfigurationField[];
   readonly state: ConnectionState;
   readonly keySet: boolean;
   readonly secretSuffix: string | null;
@@ -236,10 +143,6 @@ export interface RuntimeStatus {
   readonly billing: string;
 }
 
-export function isConnectionParty(value: string): value is ConnectionParty {
-  return (CONNECTION_PARTIES as readonly string[]).includes(value);
-}
-
 /**
  * One thing standing between the agent and its work, in the reader's words.
  *
@@ -256,18 +159,6 @@ export interface AgentNeed {
   /** A command only a terminal can run, when that is what the need asks for. */
   readonly command?: string;
 }
-
-/**
- * The one step the product cannot take for the reader.
- *
- * The application holds no control over the Docker daemon and a token it could
- * write into `.env.dev` would be a secret inside a surface built to hold none,
- * so the command is what it offers instead of the action. The client name is
- * not incidental and nothing may paraphrase it: a run's owner is resolved by
- * the name `hermes`. CA_0026_004
- */
-export const AGENT_CREDENTIAL_COMMAND =
-  "pnpm run client issue hermes --proposer";
 
 /**
  * Everything standing between the agent and its work, read off the rows the
@@ -301,8 +192,7 @@ export function agentNeeds(
       blocking: true,
     });
   } else if (!(reasoning.status?.authenticated ?? false)) {
-    const name =
-      CONNECTION_PARTY_DETAIL[reasoning.party]?.name ?? reasoning.party;
+    const name = reasoning.label || reasoning.party;
     needs.push({
       key: "signIn",
       text: `${name} reasons for the agent and is not signed in. Its own row is where signing in happens.`,
@@ -310,12 +200,15 @@ export function agentNeeds(
     });
   }
 
+  // The kernel toolset's bearer is generated at install (BO_0089_002), so a
+  // missing credential is an install that did not run rather than a step the
+  // reader takes; a registration that failed with the credential in hand is
+  // the one thing left to report. BO_0207_015
   if (!agent.credential) {
     needs.push({
       key: "credential",
-      text: "The agent holds no credential for Calliopa's documents, so it can neither read them nor propose changes to them. Issue one at a terminal on this machine, put the token it prints once into `.env.dev` as CALLIOPA_AGENT_TOOLS_TOKEN, and restart the agent, which reads it at start.",
+      text: "The agent holds no credential for the kernel's toolset. The stack's bootstrap generates it; the agent's own log says why it was not read.",
       blocking: true,
-      command: AGENT_CREDENTIAL_COMMAND,
     });
   } else if (!agent.toolset) {
     needs.push({

@@ -14,42 +14,16 @@ export interface DocumentSummary {
 }
 
 /**
- * What the `Episodes` category shows. Identity and title, for the same reason
- * a document summary carries no blocks: the drawer never pays for the assets
- * it does not render.
+ * What the `Extensions` category shows: every extension the knowledge graph
+ * holds, by id and version, with whether newer truth than the served release
+ * pin waits for promotion. Read from the graph's gateway, never from this
+ * application's own store. BO_0201_005
  */
-export interface EpisodeSummary {
-  readonly episodeId: string;
-  readonly title: string;
-}
-
-/**
- * What the `Standing Assets` category shows: the assets no episode holds. A
- * label is what the author wrote to tell several items in one slot apart, so a
- * listing falls back to the role where none was written.
- */
-export interface AssetSummary {
-  readonly assetId: string;
-  readonly label: string | null;
-  readonly role: string;
-  readonly medium: string;
-}
-
-/**
- * What the `Destinations` category shows: the destinations that have a front,
- * whether or not one has been written for them yet. A destination with nothing
- * written is listed rather than hidden, because otherwise the first front could
- * never be opened to be written.
- */
-export interface FrontSummary {
-  readonly channel: string;
-  readonly headline: string | null;
-  readonly state: "never" | "published";
-}
-
-/** What a front may name as its entry point. */
-export interface SerialSummary {
-  readonly serialId: string;
-  readonly name: string;
-  readonly ordered: boolean;
+export interface ExtensionSummary {
+  readonly id: string;
+  readonly version: string;
+  readonly category: "bundled" | "individual";
+  readonly newestRevision: number;
+  readonly servedPin: number | null;
+  readonly ahead: boolean;
 }

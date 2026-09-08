@@ -5,49 +5,35 @@ import { healthResponse, probe } from "./health";
 const reachable = { reachable: true } as const;
 
 describe("health reporting", () => {
-  it("Given both dependencies are reachable, When health is reported, Then it answers 200 and ok", () => {
+  it("Given the graph and the kernel are reachable, When health is reported, Then it answers 200 and ok", () => {
     const response = healthResponse(reachable, reachable);
 
     expect(response.statusCode).toBe(200);
     expect(response.report.status).toBe("ok");
-    expect(response.report.postgres).toEqual(reachable);
-    expect(response.report.garage).toEqual(reachable);
+    expect(response.report.ccgw).toEqual(reachable);
+    expect(response.report.kernel).toEqual(reachable);
   });
 
-  it("Given Postgres is unreachable, When health is reported, Then it answers 503 with the failure", () => {
-    const response = healthResponse(
-      { reachable: false, error: "connection refused" },
-      reachable,
-    );
+  it("Given CCGW is unreachable, When health is reported, Then it answers 503 with the failure", () => {
+    const response = healthResponse({ reachable: false, error: "connection refused" }, reachable);
 
     expect(response.statusCode).toBe(503);
     expect(response.report.status).toBe("unhealthy");
-    expect(response.report.postgres).toEqual({
-      reachable: false,
-      error: "connection refused",
-    });
+    expect(response.report.ccgw).toEqual({ reachable: false, error: "connection refused" });
   });
 
-  it("Given Garage is unreachable, When health is reported, Then it answers 503 with the failure", () => {
-    const response = healthResponse(reachable, {
-      reachable: false,
-      error: "no such bucket",
-    });
+  it("Given the kernel is unreachable, When health is reported, Then it answers 503 with the failure", () => {
+    const response = healthResponse(reachable, { reachable: false, error: "503 from the kernel" });
 
     expect(response.statusCode).toBe(503);
-    expect(response.report.garage).toEqual({
+    expect(response.report.kernel).toEqual({ reachable: false, error: "503 from the kernel" });
+  });
+
+  it("Given a probe that throws, When it is run, Then the state carries the message rather than the exception", async () => {
+    expect(await probe(() => Promise.reject(new Error("gone"))).then((state) => state)).toEqual({
       reachable: false,
-      error: "no such bucket",
+      error: "gone",
     });
-  });
-
-  it("Given a probe throws, When it runs, Then the error becomes an unreachable state", async () => {
-    const state = await probe(() => Promise.reject(new Error("unreachable")));
-
-    expect(state).toEqual({ reachable: false, error: "unreachable" });
-  });
-
-  it("Given a probe resolves, When it runs, Then it becomes reachable", async () => {
-    await expect(probe(() => Promise.resolve())).resolves.toEqual(reachable);
+    expect(await probe(() => Promise.resolve("fine"))).toEqual({ reachable: true });
   });
 });

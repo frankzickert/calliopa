@@ -14,6 +14,7 @@ import {
   dockAfterTap,
   nextDrawerState,
   nextSectionState,
+  sectionState,
   type Layout,
 } from "~/lib/layout";
 import { ThemeToggle } from "./theme-toggle";
@@ -44,18 +45,15 @@ import {
   type DragPayload,
   type DropTarget,
 } from "~/lib/drag";
-import type {
-  AssetSummary,
-  DocumentSummary,
-  EpisodeSummary,
-  FrontSummary,
-} from "~/lib/library";
+import type { LibraryItem, OpenTarget } from "~/contract";
+import { qualify } from "~/registry";
+import { REGISTRY } from "~/registry.gen";
 import type { RunEvent } from "~/server/agent/run-events";
 import type { ProposedDocument } from "~/server/agent/proposed";
 import { describeRunEvent } from "~/lib/runs";
 import type { WorkspaceRecord } from "~/lib/workspace";
+import type { Person } from "~/server/session";
 import {
-  defaultViewFor,
   preferredView,
   rememberView,
   resolveView,
@@ -66,9 +64,22 @@ import { ViewHost } from "./view-host";
 /**
  * Settings has no content to be the target of, so it carries one synthetic
  * instance-wide target. A tab is found by its target, and this is what keeps
- * that rule true for a tab that resolves to nothing in the graph.
+ * that rule true for a tab that resolves to nothing in the graph. The kind is
+ * the settings extension's contribution; the header's control appears only
+ * while the build holds it. BO_0202_004
  */
+const SETTINGS_KIND = "settings:settings";
 const SETTINGS_TARGET = "instance";
+
+/**
+ * What a run proposes are documents, and the process inspector opens them
+ * under the document kind `ui.shell` contributes. BO_0202_004
+ */
+const DOCUMENT_KIND = "ui.shell:document";
+
+/** The element id a section's header and body are paired by. */
+const sectionElementId = (key: string): string =>
+  `library-${key.replace(/[^a-zA-Z0-9]+/gu, "-")}`;
 import {
   ViewBridgeContext,
   type ViewBridge,
@@ -137,11 +148,13 @@ function targetUnder(x: number, y: number): DropTarget | null {
 export const Shell = component$<{
   workspace: WorkspaceRecord;
   processes: readonly ProcessRecord[];
-  documents: readonly DocumentSummary[];
-  episodes: readonly EpisodeSummary[];
-  standing: readonly AssetSummary[];
-  fronts: readonly FrontSummary[];
-}>(({ workspace, processes, documents, episodes, standing, fronts }) => {
+  /** Every library section's data by section key, as the loaders read it. BO_0202_005 */
+  library: Readonly<Record<string, unknown>>;
+  /** Whose authority this page acts under, as the kernel resolved the session. BO_0209_003 */
+  person: Person | null;
+  /** The licence's expiry warning while one is live; never dismissible. BO_0209_005 */
+  licenceWarning: string | null;
+}>(({ workspace, processes, library: served, person, licenceWarning }) => {
   const layout = useStore<Layout>({ ...workspace.layout });
   const registry = useStore<{
     items: ProcessRecord[];
@@ -155,19 +168,14 @@ export const Shell = component$<{
     dockPressY: null as number | null,
   });
   const drag = useStore<DragState>({ ...idleDrag(), drop: null, drops: 0 });
-  // The library is rendered from the listing the page was served with, and
-  // re-read whenever this session changes what it holds.
+  // The library is rendered from what the page was served with, section by
+  // section as the registry names them, and a section is re-read whenever
+  // this session changes what it holds. BO_0202_003
   const library = useStore<{
-    documents: DocumentSummary[];
-    episodes: EpisodeSummary[];
-    standing: AssetSummary[];
-    fronts: FrontSummary[];
+    data: Record<string, unknown>;
     reads: number;
   }>({
-    documents: [...documents],
-    episodes: [...episodes],
-    standing: [...standing],
-    fronts: [...fronts],
+    data: { ...served },
     /** Rises on every listing read, so the rendered list is rebuilt rather
      * than reconciled. Entries move and are renamed at the same time, and a
      * keyed diff over that leaves stale names on reused rows. */
@@ -243,21 +251,6 @@ export const Shell = component$<{
     layout.dock = dock;
     await save$(tabs, { ...layout, dock });
   });
-  const newContext$ = $(() => {
-    const index = tabs.tabs.length + 1;
-    const itemId = `item-${index}`;
-    const tab: Tab = {
-      id: `context-${index}`,
-      kind: "scene",
-      title: `Context ${index}`,
-      itemId,
-      viewType: preferredView(preferred.value, itemId, "scene").id,
-      selection: null,
-      drawerContext: "scene",
-      unsaved: false,
-    };
-    applyTabs$(openTab(tabs, tab));
-  });
   /**
    * Choosing another view never rewrites this tab: it opens the target again
    * in the chosen view and remembers that choice for the target's next tab.
@@ -277,7 +270,7 @@ export const Shell = component$<{
           ...tab,
           id,
           title: `${tab.title.split(" · ")[0] ?? tab.title} · ${
-            resolveView(tab.kind, viewId).view.name
+            resolveView(REGISTRY, tab.kind, viewId).view.name
           }`,
           viewType: viewId,
           selection: null,
@@ -482,137 +475,56 @@ export const Shell = component$<{
     tabs.activeTabId = previous.activeTabId;
     await save$(previous, layout);
   });
-  /** Re-reads the listing the category renders. */
-  const refreshLibrary$ = $(async () => {
-    const response = await fetch("/api/documents");
-    const outcome = (await response.json()) as
-      { outcome: "success"; result: DocumentSummary[] } | { outcome: string };
-    if (outcome.outcome !== "success") return;
-    library.documents = (outcome as { result: DocumentSummary[] }).result;
+  /**
+   * Opens a target in a tab, in the view remembered for it. `openTab` reveals
+   * a tab already showing this target rather than opening a second one, so
+   * activating an entry twice lands on the same tab. The kind is qualified as
+   * the registry names it. BO_0202_004
+   */
+  const openTarget$ = $(async (target: OpenTarget) => {
+    const tab: Tab = {
+      id: `${target.kind}-${target.itemId}`,
+      kind: target.kind,
+      title: target.title,
+      itemId: target.itemId,
+      viewType: preferredView(REGISTRY, preferred.value, target.itemId, target.kind).id,
+      selection: null,
+      drawerContext: target.kind,
+      unsaved: false,
+    };
+    await applyTabs$(openTab(tabs, tab));
+  });
+  /** Re-reads one section through the host's library route. BO_0202_005 */
+  const refreshSection$ = $(async (key: string) => {
+    const section = REGISTRY.sections.find((candidate) => candidate.key === key);
+    if (section === undefined || section.component !== undefined) return;
+    const response = await fetch(`/api/library/${section.extension}/${section.name}`);
+    if (!response.ok) return;
+    library.data[key] = (await response.json()) as unknown;
     library.reads += 1;
   });
-  /** Re-reads the episodes the second category renders. */
-  const refreshEpisodes$ = $(async () => {
-    const response = await fetch("/api/episodes");
-    const outcome = (await response.json()) as
-      { outcome: "success"; result: EpisodeSummary[] } | { outcome: string };
-    if (outcome.outcome !== "success") return;
-    library.episodes = (outcome as { result: EpisodeSummary[] }).result;
-    library.reads += 1;
+  /** Re-reads every section whose rows open the given kind. */
+  const refreshKind$ = $(async (kind: string) => {
+    for (const section of REGISTRY.sections) {
+      if (section.opens === kind) await refreshSection$(section.key);
+    }
   });
   /**
-   * Opens an episode in a tab. As with a document, `openTab` reveals a tab
-   * already showing this episode rather than opening a second one.
+   * A section's create control: the contribution makes the item and says what
+   * to open; the shell opens it and re-reads the section. BO_0202_003
    */
-  const openEpisode$ = $(async (episodeId: string, title: string) => {
-    const tab: Tab = {
-      id: `episode-${episodeId}`,
-      kind: "episode",
-      title,
-      itemId: episodeId,
-      viewType: preferredView(preferred.value, episodeId, "episode").id,
-      selection: null,
-      drawerContext: "episode",
-      unsaved: false,
-    };
-    await applyTabs$(openTab(tabs, tab));
+  const createIn$ = $(async (key: string) => {
+    const section = REGISTRY.sections.find((candidate) => candidate.key === key);
+    if (section?.create$ === undefined) return;
+    const made = await section.create$();
+    if (made === null) return;
+    await openTarget$({ ...made, kind: qualify(section.extension, made.kind) });
+    await refreshSection$(key);
   });
-  const newEpisode$ = $(async () => {
-    const response = await fetch("/api/episodes", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: "Untitled episode" }),
-    });
-    const outcome = (await response.json()) as
-      | { outcome: "success"; result: { episodeId: string } }
-      | { outcome: string };
-    if (outcome.outcome !== "success") return;
-    const episodeId = (outcome as { result: { episodeId: string } }).result
-      .episodeId;
-    await openEpisode$(episodeId, "Untitled episode");
-    await refreshEpisodes$();
-  });
-  const toggleEpisodes$ = $(async () => {
-    const next = { ...layout, episodes: nextSectionState(layout.episodes) };
-    layout.episodes = next.episodes;
-    await save$(tabs, next);
-  });
-  const toggleStanding$ = $(async () => {
-    const next = { ...layout, standing: nextSectionState(layout.standing) };
-    layout.standing = next.standing;
-    await save$(tabs, next);
-  });
-  const toggleDestinations$ = $(async () => {
-    const next = {
-      ...layout,
-      destinations: nextSectionState(layout.destinations),
-    };
-    layout.destinations = next.destinations;
-    await save$(tabs, next);
-  });
-  /**
-   * Opens a destination's front. Its identity is the channel, because a front
-   * is the destination's own document and no record here stands behind it.
-   */
-  const openFront$ = $(async (channel: string) => {
-    const tab: Tab = {
-      id: `front-${channel}`,
-      kind: "front",
-      title: `${channel} front`,
-      itemId: channel,
-      viewType: preferredView(preferred.value, channel, "front").id,
-      selection: null,
-      drawerContext: "front",
-      unsaved: false,
-    };
-    await applyTabs$(openTab(tabs, tab));
-  });
-  /**
-   * Opens a document in a tab. `openTab` reveals a tab already showing this
-   * document rather than opening a second one, so activating an entry twice
-   * lands on the same tab.
-   */
-  const openDocument$ = $(async (documentId: string, title: string) => {
-    const tab: Tab = {
-      id: `document-${documentId}`,
-      kind: "document",
-      title,
-      itemId: documentId,
-      viewType: preferredView(preferred.value, documentId, "document").id,
-      selection: null,
-      drawerContext: "document",
-      unsaved: false,
-    };
-    await applyTabs$(openTab(tabs, tab));
-  });
-  /**
-   * A new document, opened in its own tab. The graph owns the document; the
-   * tab only names it, so this is a create followed by an ordinary open.
-   */
-  const newDocument$ = $(async () => {
-    const response = await fetch("/api/documents", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: "Untitled document" }),
-    });
-    const outcome = (await response.json()) as
-      | { outcome: "success"; result: { documentId: string } }
-      | { outcome: string };
-    if (outcome.outcome !== "success") return;
-    const documentId = (outcome as { result: { documentId: string } }).result
-      .documentId;
-    const tab: Tab = {
-      id: `document-${documentId}`,
-      kind: "document",
-      title: "Untitled document",
-      itemId: documentId,
-      viewType: preferredView(preferred.value, documentId, "document").id,
-      selection: null,
-      drawerContext: "document",
-      unsaved: false,
-    };
-    await applyTabs$(openTab(tabs, tab));
-    await refreshLibrary$();
+  const toggleSection$ = $(async (key: string) => {
+    const sections = { ...layout.sections, [key]: nextSectionState(sectionState(layout, key)) };
+    layout.sections = sections;
+    await save$(tabs, { ...layout, sections });
   });
   /**
    * Settings is a tab like any other. Its target is synthetic and instance-wide,
@@ -620,23 +532,7 @@ export const Shell = component$<{
    * and the reveal rule needs no case of its own for a tab that is not content.
    */
   const openSettings$ = $(async () => {
-    await applyTabs$(
-      openTab(tabs, {
-        id: `settings-${SETTINGS_TARGET}`,
-        kind: "settings",
-        title: "Settings",
-        itemId: SETTINGS_TARGET,
-        viewType: defaultViewFor("settings").id,
-        selection: null,
-        drawerContext: null,
-        unsaved: false,
-      }),
-    );
-  });
-  const toggleLibrary$ = $(async () => {
-    const next = { ...layout, library: nextSectionState(layout.library) };
-    layout.library = next.library;
-    await save$(tabs, next);
+    await openTarget$({ kind: SETTINGS_KIND, itemId: SETTINGS_TARGET, title: "Settings" });
   });
 
   const inspector = useStore<ViewInspector>({
@@ -689,11 +585,13 @@ export const Shell = component$<{
       for (const tab of tabs.tabs.filter((open) => open.itemId === itemId)) {
         next = closeTab(next, tab.id);
       }
+      const gone = tabs.tabs.find((open) => open.itemId === itemId);
       tabs.tabs = next.tabs;
       tabs.activeTabId = next.activeTabId;
       await save$(next, layout);
-      await refreshLibrary$();
+      if (gone !== undefined) await refreshKind$(gone.kind);
     }),
+    openTarget$,
     setTitle$: $(async (title: string) => {
       const id = tabs.activeTabId;
       if (id === null) return;
@@ -704,7 +602,7 @@ export const Shell = component$<{
       // The listing is read again rather than re-sorted here: title order is
       // the server's, and keeping one sort keeps the drawer from disagreeing
       // with what the next read would say.
-      await refreshLibrary$();
+      await refreshKind$(current.kind);
       await save$(next, layout);
     }),
     setSaveState$: $(async (tabId: string, state: SaveState) => {
@@ -733,7 +631,7 @@ export const Shell = component$<{
   const detail = registry.items.find(({ id }) => id === registry.selectedId);
   const active = activeTab(tabs);
   const activeView = active
-    ? resolveView(active.kind, active.viewType).view
+    ? resolveView(REGISTRY, active.kind, active.viewType).view
     : undefined;
 
   return (
@@ -791,8 +689,8 @@ export const Shell = component$<{
                         itemId: tab.itemId ?? tab.id,
                         kind: tab.kind,
                         source: "tab-strip",
-                        operations: resolveView(tab.kind, tab.viewType).view
-                          .drag,
+                        operations: resolveView(REGISTRY, tab.kind, tab.viewType)
+                          .view.drag,
                         preview: tab.title,
                       },
                       event,
@@ -833,14 +731,6 @@ export const Shell = component$<{
                 </button>
               </span>
             ))}
-            <button
-              type="button"
-              class="tab-action"
-              aria-label="Open context"
-              onClick$={newContext$}
-            >
-              +
-            </button>
           </nav>
           <SaveStatus save={save} />
           <button
@@ -869,14 +759,50 @@ export const Shell = component$<{
               {side === "left" ? "◧" : "◨"}
             </button>
           ))}
-          <button
-            type="button"
-            class="settings-control"
-            aria-label="Settings"
-            onClick$={() => openSettings$()}
-          >
-            ⚙
-          </button>
+          {licenceWarning !== null && (
+            // The licensor's word, not a toast: it stays until the licence
+            // does. BO_0209_005
+            <p class="licence-warning" role="status" data-licence-warning>
+              {licenceWarning}
+            </p>
+          )}
+          {person !== null && (
+            // Whose authority the reader acts under, said before they act:
+            // acting as the wrong person is the mistake multi-party review
+            // exists to make visible. Sign-out is the kernel's; the reload
+            // that follows lands on its sign-in page. BO_0209_003
+            <span
+              class="identity"
+              data-identity={person.name}
+              data-identity-class={person.class}
+            >
+              <span class="identity__name">{person.name}</span>
+              <span class="identity__class">
+                {person.class === "human" ? "may establish" : "proposes"}
+              </span>
+              <button
+                type="button"
+                class="sign-out"
+                aria-label={`Signed in as ${person.name}. Sign out`}
+                onClick$={async () => {
+                  await fetch("/__kernel/session/sign-out", { method: "POST" });
+                  window.location.assign("/__kernel/session/sign-in");
+                }}
+              >
+                Sign out
+              </button>
+            </span>
+          )}
+          {REGISTRY.kinds[SETTINGS_KIND] !== undefined && (
+            <button
+              type="button"
+              class="settings-control"
+              aria-label="Settings"
+              onClick$={() => openSettings$()}
+            >
+              ⚙
+            </button>
+          )}
           <ThemeToggle />
         </header>
 
@@ -906,266 +832,121 @@ export const Shell = component$<{
           >
             ×
           </button>
-          <section
-            class="library-category"
-            aria-labelledby="library-documents"
-            data-library="documents"
-            data-state={layout.library}
-          >
-            <div class="library-category__header">
-              <h2 class="library-category__heading">
-                <button
-                  type="button"
-                  class="library-category__toggle"
-                  id="library-documents"
-                  aria-expanded={layout.library === "expanded"}
-                  aria-controls="library-documents-list"
-                  onClick$={toggleLibrary$}
-                >
-                  Documents
-                </button>
-              </h2>
-              <button
-                type="button"
-                class="library-action"
-                aria-label="New document"
-                data-new-document
-                onClick$={newDocument$}
+          {REGISTRY.sections.map((section) => {
+            // The closures below capture strings, never the section itself:
+            // a contribution carries a component and a QRL, and the shell
+            // reaches both through the registry module rather than by
+            // serializing them into a listener.
+            const key = section.key;
+            const name = section.name;
+            const state = sectionState(layout, key);
+            const elementId = sectionElementId(key);
+            const Body = section.component;
+            const items = Body === undefined
+              ? ((library.data[key] as readonly LibraryItem[] | undefined) ?? [])
+              : [];
+            return (
+              <section
+                class="library-category"
+                aria-labelledby={elementId}
+                data-library={name}
+                data-section={key}
+                data-state={state}
+                key={key}
               >
-                +
-              </button>
-            </div>
-            <div
-              id="library-documents-list"
-              class="library-category__body"
-              hidden={layout.library === "collapsed"}
-            >
-              {library.documents.length === 0 ? (
-                <p class="library-empty" data-library-empty>
-                  No documents yet
-                </p>
-              ) : (
-                <ul class="library-list" key={library.reads}>
-                  {library.documents.map((document) => {
-                    const current = active?.itemId === document.documentId;
-                    return (
-                      <li key={document.documentId}>
-                        <button
-                          type="button"
-                          class="library-entry"
-                          data-document-id={document.documentId}
-                          data-current={current ? "true" : undefined}
-                          aria-current={current ? "true" : undefined}
-                          onClick$={() =>
-                            openDocument$(document.documentId, document.title)
-                          }
-                        >
-                          <span class="library-entry__label">
-                            {document.title}
-                          </span>
-                          {/* The marker is the sighted reader's non-colour
-                            signal. `aria-current` above already says the same
-                            thing, so naming the marker too would append it to
-                            the entry's name. */}
-                          {current && (
-                            <span
-                              class="library-entry__marker"
-                              aria-hidden="true"
-                            />
-                          )}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          </section>
-
-          <section
-            class="library-category"
-            aria-labelledby="library-episodes"
-            data-library="episodes"
-            data-state={layout.episodes}
-          >
-            <div class="library-category__header">
-              <h2 class="library-category__heading">
-                <button
-                  type="button"
-                  class="library-category__toggle"
-                  id="library-episodes"
-                  aria-expanded={layout.episodes === "expanded"}
-                  aria-controls="library-episodes-list"
-                  onClick$={toggleEpisodes$}
+                <div class="library-category__header">
+                  <h2 class="library-category__heading">
+                    <button
+                      type="button"
+                      class="library-category__toggle"
+                      id={elementId}
+                      aria-expanded={state === "expanded"}
+                      aria-controls={`${elementId}-list`}
+                      onClick$={() => toggleSection$(key)}
+                    >
+                      {section.title}
+                    </button>
+                  </h2>
+                  {section.createLabel !== undefined && (
+                    <button
+                      type="button"
+                      class="library-action"
+                      aria-label={section.createLabel}
+                      data-new={name}
+                      onClick$={() => createIn$(key)}
+                    >
+                      +
+                    </button>
+                  )}
+                </div>
+                <div
+                  id={`${elementId}-list`}
+                  class="library-category__body"
+                  hidden={state === "collapsed"}
                 >
-                  Episodes
-                </button>
-              </h2>
-              <button
-                type="button"
-                class="library-action"
-                aria-label="New episode"
-                data-new-episode
-                onClick$={newEpisode$}
-              >
-                +
-              </button>
-            </div>
-            <div
-              id="library-episodes-list"
-              class="library-category__body"
-              hidden={layout.episodes === "collapsed"}
-            >
-              {library.episodes.length === 0 ? (
-                <p class="library-empty" data-library-empty="episodes">
-                  No episodes yet
-                </p>
-              ) : (
-                <ul class="library-list" key={library.reads}>
-                  {library.episodes.map((episode) => {
-                    const current = active?.itemId === episode.episodeId;
-                    return (
-                      <li key={episode.episodeId}>
-                        <button
-                          type="button"
-                          class="library-entry"
-                          data-episode-id={episode.episodeId}
-                          data-current={current ? "true" : undefined}
-                          aria-current={current ? "true" : undefined}
-                          onClick$={() =>
-                            openEpisode$(episode.episodeId, episode.title)
-                          }
-                        >
-                          <span class="library-entry__label">
-                            {episode.title}
-                          </span>
-                          {current && (
-                            <span
-                              class="library-entry__marker"
-                              aria-hidden="true"
-                            />
-                          )}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          </section>
-
-          <section
-            class="library-category"
-            aria-labelledby="library-standing"
-            data-library="standing"
-            data-state={layout.standing}
-          >
-            <div class="library-category__header">
-              <h2 class="library-category__heading">
-                <button
-                  type="button"
-                  class="library-category__toggle"
-                  id="library-standing"
-                  aria-expanded={layout.standing === "expanded"}
-                  aria-controls="library-standing-list"
-                  onClick$={toggleStanding$}
-                >
-                  Standing Assets
-                </button>
-              </h2>
-            </div>
-            <div
-              id="library-standing-list"
-              class="library-category__body"
-              hidden={layout.standing === "collapsed"}
-            >
-              {library.standing.length === 0 ? (
-                <p class="library-empty" data-library-empty="standing">
-                  No standing assets yet
-                </p>
-              ) : (
-                <ul class="library-list" key={library.reads}>
-                  {library.standing.map((asset) => (
-                    // Named and not opened: no view presents an asset on its
-                    // own yet, and a control that opened nothing would say
-                    // there is somewhere to go.
-                    <li key={asset.assetId}>
-                      <span
-                        class="library-entry library-entry--inert"
-                        data-asset-id={asset.assetId}
-                      >
-                        <span class="library-entry__label">
-                          {asset.label ?? asset.role}
-                        </span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </section>
-
-          <section
-            class="library-category"
-            aria-labelledby="library-destinations"
-            data-library="destinations"
-            data-state={layout.destinations}
-          >
-            <div class="library-category__header">
-              <h2 class="library-category__heading">
-                <button
-                  type="button"
-                  class="library-category__toggle"
-                  id="library-destinations"
-                  aria-expanded={layout.destinations === "expanded"}
-                  aria-controls="library-destinations-list"
-                  onClick$={toggleDestinations$}
-                >
-                  Destinations
-                </button>
-              </h2>
-            </div>
-            <div
-              id="library-destinations-list"
-              class="library-category__body"
-              hidden={layout.destinations === "collapsed"}
-            >
-              {library.fronts.length === 0 ? (
-                <p class="library-empty" data-library-empty="destinations">
-                  No destination shows a front
-                </p>
-              ) : (
-                <ul class="library-list" key={library.reads}>
-                  {library.fronts.map((front) => {
-                    const current = active?.itemId === front.channel;
-                    return (
-                      <li key={front.channel}>
-                        <button
-                          type="button"
-                          class="library-entry"
-                          data-front-channel={front.channel}
-                          data-front-state={front.state}
-                          data-current={current ? "true" : undefined}
-                          aria-current={current ? "true" : undefined}
-                          onClick$={() => openFront$(front.channel)}
-                        >
-                          <span class="library-entry__label">
-                            {front.channel}
-                          </span>
-                          {current && (
-                            <span
-                              class="library-entry__marker"
-                              aria-hidden="true"
-                            />
-                          )}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          </section>
+                  {Body !== undefined ? (
+                    <Body
+                      data={library.data[key] ?? null}
+                      activeItemId={active?.itemId ?? null}
+                      sectionKey={key}
+                    />
+                  ) : items.length === 0 ? (
+                    <p class="library-empty" data-library-empty={name}>
+                      {section.empty}
+                    </p>
+                  ) : (
+                    <ul class="library-list" key={library.reads}>
+                      {items.map((item) => {
+                        const open = item.open;
+                        const current = open !== undefined && active?.itemId === open.itemId;
+                        return (
+                          <li key={item.id}>
+                            {open === undefined ? (
+                              // Named and not opened: no view presents it on
+                              // its own, and a control that opened nothing
+                              // would say there is somewhere to go.
+                              <span
+                                class="library-entry library-entry--inert"
+                                data-item-id={item.id}
+                              >
+                                <span class="library-entry__label">{item.label}</span>
+                                {item.badge !== undefined && (
+                                  <span class="library-entry__badge">{item.badge}</span>
+                                )}
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                class="library-entry"
+                                data-item-id={item.id}
+                                data-item-kind={open.kind}
+                                data-badge={item.badge}
+                                data-current={current ? "true" : undefined}
+                                aria-current={current ? "true" : undefined}
+                                onClick$={() => openTarget$(open)}
+                              >
+                                <span class="library-entry__label">{item.label}</span>
+                                {item.badge !== undefined && (
+                                  <span class="library-entry__badge">{item.badge}</span>
+                                )}
+                                {/* The marker is the sighted reader's non-colour
+                                  signal. `aria-current` above already says the
+                                  same thing, so naming the marker too would
+                                  append it to the entry's name. */}
+                                {current && (
+                                  <span class="library-entry__marker" aria-hidden="true" />
+                                )}
+                              </button>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </section>
+            );
+          })}
         </aside>
 
         <section
@@ -1187,15 +968,17 @@ export const Shell = component$<{
             // is leaving, and per-tab view-local state must not leak sideways.
             <ViewHost key={active.id} tab={active} />
           ) : (
-            <p>Open a story context to begin.</p>
+            // With no tab open the workspace names the library: a document is
+            // opened or created there, and nothing opens on its own. BO_0203_005
+            <p data-workspace-empty>Open a document from the library to begin.</p>
           )}
-          {active && viewsFor(active.kind).length > 1 && (
+          {active && viewsFor(REGISTRY, active.kind).length > 1 && (
             <div
               class="view-choice"
               role="group"
               aria-label={`Views for ${active.title}`}
             >
-              {viewsFor(active.kind)
+              {viewsFor(REGISTRY, active.kind)
                 .filter((view) => view.id !== activeView?.id)
                 .map((view) => (
                   <button
@@ -1245,7 +1028,11 @@ export const Shell = component$<{
                             type="button"
                             data-proposed-document={document.documentId}
                             onClick$={() =>
-                              openDocument$(document.documentId, document.title)
+                              openTarget$({
+                                kind: DOCUMENT_KIND,
+                                itemId: document.documentId,
+                                title: document.title,
+                              })
                             }
                           >
                             {document.title}

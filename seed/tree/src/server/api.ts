@@ -10,7 +10,7 @@ export async function api(
     await handler();
   } catch (error) {
     if (error instanceof HttpError) {
-      event.json(error.status, { error: error.message });
+      event.json(error.status, { error: error.message, ...(error.code === undefined ? {} : { code: error.code }) });
       return;
     }
     throw error;

@@ -514,6 +514,11 @@ hr[data-block-divider] {
   color: var(--text);
 }
 
+.proposal-row__by {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
 .proposal-row__text {
   flex: 1 1 12rem;
   min-width: 0;

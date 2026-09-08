@@ -1,9 +1,9 @@
 {
-  "version": "0.1.0",
-  "pin": 17,
+  "version": "0.3.0",
+  "pin": 97,
   "mapRoot": "ui.shell",
   "marker": "ui.shell",
-  "members": 3,
+  "members": 8,
   "extensions": [
     "calliopa-base",
     "calliopa-extension",

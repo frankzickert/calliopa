@@ -1,9 +1,6 @@
-import type { JSONValue } from "postgres";
-
 import { isOrderKey } from "../../lib/order";
 import { readRuns, TEXT_ROLES, type Run, type TextRole } from "../../lib/runs";
 import { asRecord } from "./content";
-import type { GraphSchema, NonEmpty } from "../graph/contract";
 
 /**
  * The run primitives are `src/lib/runs.ts`, not a second copy here. The editor
@@ -62,14 +59,14 @@ function validateOrder(content: Record<string, unknown>): string | null {
   return null;
 }
 
-function validateDocument(value: JSONValue): string | null {
+export function validateDocument(value: unknown): string | null {
   const content = asRecord(value);
   if (content === null) return "A document carries content.";
   if (typeof content["title"] !== "string") return "A document carries a title.";
   return null;
 }
 
-function validateText(value: JSONValue): string | null {
+export function validateText(value: unknown): string | null {
   const content = asRecord(value);
   if (content === null) return "A text block carries content.";
   const order = validateOrder(content);
@@ -85,7 +82,7 @@ function validateText(value: JSONValue): string | null {
   return null;
 }
 
-function validateDivider(value: JSONValue): string | null {
+export function validateDivider(value: unknown): string | null {
   const content = asRecord(value);
   if (content === null) return "A divider carries content.";
   const order = validateOrder(content);
@@ -96,45 +93,17 @@ function validateDivider(value: JSONValue): string | null {
   return null;
 }
 
-/** Relations may point at any block type, so widening the block vocabulary
- * does not also have to remember to widen containment. */
-const blockTargets = [...BLOCK_TYPES] as unknown as NonEmpty<string>;
-
 /**
- * The vocabulary the gateway validates document writes against.
- *
- * `contains` is the structural relation: a block has exactly one active
- * containment parent. `retired` is how a block leaves a document without being
- * deleted — closing containment alone would strand it beyond any rooted read,
- * so retirement is recorded as its own relation and the retired list is an
- * ordinary read from the document.
+ * The shell's own reading of a document's shape, kept beside the graph's
+ * declarations of the same vocabulary (`BO_0207_011`): CCGW's Validation
+ * enforces the declared properties on every write, and these say in the
+ * shell's words what a run, an order key and a role are before one is sent.
+ * `contains` is the structural relation — a block has exactly one active
+ * containment parent — and `retired` is how a block leaves a document without
+ * being deleted.
  */
-export const blockDocumentSchema: GraphSchema = {
-  nodes: {
-    document: {
-      semanticType: DOCUMENT_TYPE,
-      schemaVersion: 1,
-      validate: validateDocument,
-    },
-    text: { semanticType: "text", schemaVersion: 1, validate: validateText },
-    divider: {
-      semanticType: "divider",
-      schemaVersion: 1,
-      validate: validateDivider,
-    },
-  },
-  relations: {
-    contains: {
-      relationType: "contains",
-      schemaVersion: 1,
-      fromNodes: [DOCUMENT_TYPE],
-      toNodes: blockTargets,
-    },
-    retired: {
-      relationType: "retired",
-      schemaVersion: 1,
-      fromNodes: [DOCUMENT_TYPE],
-      toNodes: blockTargets,
-    },
-  },
+export const BLOCK_VALIDATORS: Readonly<Record<string, (value: unknown) => string | null>> = {
+  [DOCUMENT_TYPE]: validateDocument,
+  text: validateText,
+  divider: validateDivider,
 };

@@ -1,4 +1,5 @@
 import { createContextId, type QRL } from "@builder.io/qwik";
+import type { TabKind } from "~/lib/tabs";
 import type { DragOperation, DragPayload } from "~/lib/drag";
 
 /**
@@ -200,6 +201,13 @@ export interface ViewBridge {
    * region the control that raised it lives in does not matter.
    */
   readonly raiseMessage$: QRL<(message: Message) => void>;
+  /**
+   * Asks the shell to open a target in a tab, or to reveal the tab already
+   * showing it. A view that renders links between targets — the owner
+   * document's links between an extension's topics and changes — says which
+   * target; the shell owns the tabs and opens it. BO_0201_007
+   */
+  readonly openTarget$: QRL<(target: { kind: TabKind; itemId: string; title: string }) => void>;
 }
 
 export const ViewBridgeContext = createContextId<ViewBridge>(

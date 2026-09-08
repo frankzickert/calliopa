@@ -1,64 +1,63 @@
-import type postgres from "postgres";
-
 import {
   configurationRefusal,
-  isChannelParty,
-  isConnectionParty,
   type AgentStatus,
-  type ConnectionKind,
-  type ConnectionParty,
   type ConnectionRecord,
   type ConnectionState,
   type RuntimeStatus,
 } from "~/lib/connections";
-import { agentStatus, runtimeStatuses } from "./adapters";
-import { testConnection } from "./connection-tests";
 import { HttpError } from "~/server/http-error";
-import { decryptSecret, encryptSecret, parseSecretsKey } from "~/server/secrets.mjs";
+import { kernelSecrets, type PartyView } from "~/server/kernel/client";
+import type { RegisteredParty } from "~/registry";
+import { parties, partyOf } from "~/server/registry";
+import { agentStatus, runtimeStatuses } from "~/server/agent/adapters";
 
 /**
- * The store over the connection rows. Reading connections never decrypts: the
- * state and the stored suffix answer everything the settings surface shows, and
- * the one place a plaintext secret leaves this module is `connectionSecret`,
- * which server code calls to reach the party.
+ * The store over the parties, kept by the kernel (`ui-kernel.md`,
+ * `BO_0207_003`). Reading never reaches a secret: the kernel answers state,
+ * configuration and whether a key is set with its last characters, which is
+ * everything the settings surface shows, and nothing in this module or in any
+ * shell code holds a plaintext value. Proving a party is the kernel running
+ * the party's probe; presenting a key to a party is the kernel brokering the
+ * request. `BO_0207_013`
  */
-
-const SUFFIX_LENGTH = 4;
 
 /**
- * The key is handed in the way the SQL client is, so no caller depends on how
- * another reaches it and a test can run against a key of its own. This reads
- * the one variable it needs rather than the whole application environment,
- * which is validated at server startup and is not available everywhere the
- * store is.
+ * Which secret field a party's key is. Every key-holding party today has one
+ * key, named the same, so the settings surface's one write-only field maps to
+ * it. What proving a party means is the party's contributed probe, handed to
+ * the kernel with every save (`BO_0202_008`).
  */
-export function secretsKey(
-  source: Record<string, string | undefined> = process.env,
-): Buffer {
-  return parseSecretsKey(source.CALLIOPA_SECRETS_KEY ?? "");
-}
+const SECRET_FIELD = "apiKey";
 
-interface ConnectionRow {
-  readonly party: string;
-  readonly kind: string;
-  readonly secret: string | null;
-  readonly secret_suffix: string | null;
-  readonly configuration: Record<string, string>;
-  readonly state: string;
-  readonly last_tested_at: Date | null;
-  readonly last_error: string | null;
-}
+const STATES: readonly string[] = ["unconfigured", "configured", "verified", "failing"];
 
-function asRecord(row: ConnectionRow): ConnectionRecord {
-  return withConfiguration({
-    party: row.party as ConnectionParty,
-    kind: row.kind as ConnectionKind,
-    state: row.state as ConnectionState,
-    keySet: row.secret !== null,
-    secretSuffix: row.secret_suffix,
-    configuration: row.configuration ?? {},
-    lastTestedAt: row.last_tested_at?.toISOString() ?? null,
-    lastError: row.last_error,
+/**
+ * A record over the kernel's view of a party and the descriptor the party's
+ * extension contributed: what the surface shows of a party — its label, its
+ * purpose, whether it is a channel and the fields it holds — travels with the
+ * record, so the browser holds no roster of its own. BO_0202_008
+ */
+function asRecord(party: RegisteredParty, view: PartyView): ConnectionRecord {
+  const key = view.secretFields[SECRET_FIELD];
+  const kind = party.credential;
+  return withConfiguration(party, {
+    party: party.id,
+    kind,
+    label: party.label,
+    purpose: party.purpose,
+    channel: party.kind === "channel",
+    fields: party.fields,
+    state:
+      kind === "status"
+        ? "unconfigured"
+        : STATES.includes(view.state)
+          ? (view.state as ConnectionState)
+          : "unconfigured",
+    keySet: key?.set ?? false,
+    secretSuffix: key?.set ? (key.suffix ?? null) : null,
+    configuration: view.configuration ?? {},
+    lastTestedAt: view.lastTestedAt ?? null,
+    lastError: view.lastError ?? null,
     status: null,
     agent: null,
   });
@@ -72,9 +71,9 @@ function asRecord(row: ConnectionRow): ConnectionRecord {
  * are put together, for the reason a status row's state is read live: a second
  * copy of a derivable fact is a copy that can disagree.
  */
-function withConfiguration(record: ConnectionRecord): ConnectionRecord {
-  if (!isChannelParty(record.party)) return record;
-  const refusal = configurationRefusal(record.party, record.configuration);
+function withConfiguration(party: RegisteredParty, record: ConnectionRecord): ConnectionRecord {
+  if (party.kind !== "channel") return record;
+  const refusal = configurationRefusal(party, record.configuration);
   if (refusal === null) return record;
   return { ...record, state: "unconfigured", lastError: refusal };
 }
@@ -83,9 +82,9 @@ function withConfiguration(record: ConnectionRecord): ConnectionRecord {
  * Lays what the agent reports over a status row.
  *
  * A status row's state is not stored: the runtime's own answer is the truth,
- * and a copy in the database would be a second account of it that can go stale.
- * It is expressed in the states every connection already has, so the surface
- * reads one vocabulary rather than two.
+ * and a copy would be a second account of it that can go stale. It is
+ * expressed in the states every connection already has, so the surface reads
+ * one vocabulary rather than two.
  */
 export function withStatus(
   record: ConnectionRecord,
@@ -163,75 +162,71 @@ function asAgent(
   };
 }
 
-/** A party the application does not know is refused before any row is touched. */
-export function assertParty(party: string): ConnectionParty {
-  if (!isConnectionParty(party)) {
+/**
+ * A party nothing contributes is refused before anything is asked. A record
+ * the kernel still holds for one is kept and not shown, as the listing
+ * already did for an unknown party. BO_0202_008
+ */
+export function assertParty(party: string): RegisteredParty {
+  const registered = partyOf(party);
+  if (registered === undefined) {
     throw new HttpError(404, `unknown connection ${party}`);
   }
-  return party;
-}
-
-export async function listConnections(
-  sql: postgres.Sql | postgres.TransactionSql,
-): Promise<ConnectionRecord[]> {
-  const rows = await sql<ConnectionRow[]>`
-    select party, kind, secret, secret_suffix, configuration, state, last_tested_at, last_error
-    from connection
-    order by kind, party
-  `;
-  const status = rows.some((row) => row.kind === "status");
-  const reported = status ? await runtimeStatuses() : {};
-  const stamped = status ? await agentStatus() : null;
-  return rows.map((row) => withStatus(asRecord(row), reported, stamped));
-}
-
-export async function readConnection(
-  sql: postgres.Sql | postgres.TransactionSql,
-  party: string,
-): Promise<ConnectionRecord> {
-  const name = assertParty(party);
-  const [row] = await sql<ConnectionRow[]>`
-    select party, kind, secret, secret_suffix, configuration, state, last_tested_at, last_error
-    from connection
-    where party = ${name}
-  `;
-  if (row === undefined) {
-    throw new HttpError(404, `unknown connection ${party}`);
-  }
-  return asRecord(row);
+  return registered;
 }
 
 /**
- * Saving a key encrypts it, records its last characters, and returns the row to
- * `configured`: what a previous test said is no longer about the key that is
- * stored now.
+ * Every contributed party, by credential kind then name: the roster is the
+ * registry's, so a party the kernel holds nothing for still lists,
+ * unconfigured.
+ */
+export async function listConnections(): Promise<ConnectionRecord[]> {
+  const roster = [...parties()].sort((left, right) =>
+    left.credential === right.credential
+      ? left.id.localeCompare(right.id)
+      : left.credential.localeCompare(right.credential),
+  );
+  const records = await Promise.all(
+    roster.map(async (party) => asRecord(party, await kernelSecrets.read(party.id))),
+  );
+  const status = records.some((record) => record.kind === "status");
+  const reported = status ? await runtimeStatuses() : {};
+  const stamped = status ? await agentStatus() : null;
+  return records.map((record) => withStatus(record, reported, stamped));
+}
+
+export async function readConnection(party: string): Promise<ConnectionRecord> {
+  const registered = assertParty(party);
+  return asRecord(registered, await kernelSecrets.read(registered.id));
+}
+
+/**
+ * Saving a key hands it to the kernel, which records its last characters and
+ * returns the party to `configured`: what a previous test said is no longer
+ * about the key that is stored now. The party's probe and authorization travel
+ * with every save, so the kernel always holds the current spec.
  */
 export async function saveConnectionSecret(
-  sql: postgres.Sql,
-  key: Buffer,
   party: string,
   plain: string,
 ): Promise<ConnectionRecord> {
-  const name = assertParty(party);
+  const registered = assertParty(party);
   const secret = plain.trim();
   if (secret === "") {
     throw new HttpError(400, "a key is required");
   }
-  const [row] = await sql<ConnectionRow[]>`
-    update connection set
-      secret = ${encryptSecret(secret, key)},
-      secret_suffix = ${secret.slice(-SUFFIX_LENGTH)},
-      state = 'configured',
-      last_tested_at = null,
-      last_error = null,
-      updated_at = now()
-    where party = ${name}
-    returning party, kind, secret, secret_suffix, configuration, state, last_tested_at, last_error
-  `;
-  if (row === undefined) {
-    throw new HttpError(404, `unknown connection ${party}`);
+  if (registered.credential !== "apiKey") {
+    throw new HttpError(400, `${registered.id} takes no key`);
   }
-  return asRecord(row);
+  const spec = registered.probe;
+  return asRecord(
+    registered,
+    await kernelSecrets.write(registered.id, {
+      kind: registered.credential,
+      secrets: { [SECRET_FIELD]: secret },
+      ...(spec === undefined ? {} : { authorization: spec.authorization, test: spec.test }),
+    }),
+  );
 }
 
 /**
@@ -240,104 +235,42 @@ export async function saveConnectionSecret(
  * changed without retyping a token that has not changed.
  */
 export async function saveConnectionConfiguration(
-  sql: postgres.Sql,
   party: string,
   configuration: Readonly<Record<string, string>>,
 ): Promise<ConnectionRecord> {
-  const name = assertParty(party);
+  const registered = assertParty(party);
   const trimmed = Object.fromEntries(
     Object.entries(configuration).map(([field, value]) => [field, value.trim()]),
   );
-  const refusal = configurationRefusal(name, trimmed);
+  const refusal = configurationRefusal(registered, trimmed);
   if (refusal !== null) {
     throw new HttpError(400, refusal);
   }
-  const [row] = await sql<ConnectionRow[]>`
-    update connection set
-      configuration = ${sql.json(trimmed)},
-      updated_at = now()
-    where party = ${name}
-    returning party, kind, secret, secret_suffix, configuration, state, last_tested_at, last_error
-  `;
-  if (row === undefined) {
-    throw new HttpError(404, `unknown connection ${party}`);
-  }
-  return asRecord(row);
+  const spec = registered.probe;
+  return asRecord(
+    registered,
+    await kernelSecrets.write(registered.id, {
+      kind: registered.credential,
+      configuration: trimmed,
+      ...(spec === undefined ? {} : { authorization: spec.authorization, test: spec.test }),
+    }),
+  );
 }
 
-export async function clearConnectionSecret(
-  sql: postgres.Sql,
-  party: string,
-): Promise<ConnectionRecord> {
-  const name = assertParty(party);
-  const [row] = await sql<ConnectionRow[]>`
-    update connection set
-      secret = null,
-      secret_suffix = null,
-      state = 'unconfigured',
-      last_tested_at = null,
-      last_error = null,
-      updated_at = now()
-    where party = ${name}
-    returning party, kind, secret, secret_suffix, configuration, state, last_tested_at, last_error
-  `;
-  if (row === undefined) {
-    throw new HttpError(404, `unknown connection ${party}`);
-  }
-  return asRecord(row);
+/** Clearing removes the stored secret and returns the party to `unconfigured`. */
+export async function clearConnectionSecret(party: string): Promise<ConnectionRecord> {
+  const registered = assertParty(party);
+  await kernelSecrets.remove(registered.id);
+  return asRecord(registered, await kernelSecrets.read(registered.id));
 }
 
 /**
- * What the party answered. A connection with no stored key is never tested, so
- * an outcome always belongs to a key that was actually presented.
+ * The request-facing half: a request carrying a configuration, a key, or
+ * both. The configuration goes first, so a request carrying both leaves a
+ * record that is either wholly the new one or wholly the old: a refused
+ * address never lands beside a key that was accepted.
  */
-export async function recordTestOutcome(
-  sql: postgres.Sql,
-  party: string,
-  error: string | null,
-): Promise<ConnectionRecord> {
-  const name = assertParty(party);
-  const [row] = await sql<ConnectionRow[]>`
-    update connection set
-      state = ${error === null ? "verified" : "failing"},
-      last_tested_at = now(),
-      last_error = ${error},
-      updated_at = now()
-    where party = ${name} and secret is not null
-    returning party, kind, secret, secret_suffix, configuration, state, last_tested_at, last_error
-  `;
-  if (row === undefined) {
-    throw new HttpError(409, `${party} has no key stored`);
-  }
-  return asRecord(row);
-}
-
-/**
- * The one accessor server code reaches a party's credential through. Nothing
- * reads a party's key from `process.env`: the environment carries the key that
- * opens secrets, not the secrets.
- */
-export async function connectionSecret(
-  sql: postgres.Sql | postgres.TransactionSql,
-  key: Buffer,
-  party: string,
-): Promise<string | null> {
-  const name = assertParty(party);
-  const [row] = await sql<{ secret: string | null }[]>`
-    select secret from connection where party = ${name}
-  `;
-  return row?.secret == null ? null : decryptSecret(row.secret, key);
-}
-
-/**
- * The request-facing half. It takes the SQL client and the key the way the
- * store does, so a route supplies them and a test supplies its own; nothing
- * about how either is found is buried where it cannot be reached.
- */
-
 export async function writeConnectionSecret(
-  sql: postgres.Sql,
-  key: Buffer,
   party: string,
   body: unknown,
 ): Promise<ConnectionRecord> {
@@ -349,15 +282,12 @@ export async function writeConnectionSecret(
   if (typeof fields.secret !== "string" && configuration === null) {
     throw new HttpError(400, "a key is required");
   }
-  // The configuration goes first, so a request carrying both leaves a row that
-  // is either wholly the new one or wholly the old: a refused address never
-  // lands beside a key that was accepted.
   let record =
     configuration === null
-      ? await readConnection(sql, party)
-      : await saveConnectionConfiguration(sql, party, configuration);
+      ? await readConnection(party)
+      : await saveConnectionConfiguration(party, configuration);
   if (typeof fields.secret === "string") {
-    record = await saveConnectionSecret(sql, key, party, fields.secret);
+    record = await saveConnectionSecret(party, fields.secret);
   }
   return record;
 }
@@ -377,30 +307,24 @@ function asConfiguration(
 }
 
 /**
- * Proving a connection: the stored key against the real party. A connection
- * with no key is refused rather than reported as failing, because there is
- * nothing to have been refused.
+ * Proving a connection: the kernel presents the stored key to the real party.
+ * A connection with no key is refused rather than reported as failing, because
+ * there is nothing to have been refused; a channel with nowhere to send the
+ * request is refused for the same reason.
  */
-export async function proveConnection(
-  sql: postgres.Sql,
-  key: Buffer,
-  party: string,
-): Promise<ConnectionRecord> {
-  const name = assertParty(party);
-  const secret = await connectionSecret(sql, key, name);
-  if (secret === null) {
-    throw new HttpError(409, `${name} has no key stored`);
+export async function proveConnection(party: string): Promise<ConnectionRecord> {
+  const registered = assertParty(party);
+  const current = await readConnection(registered.id);
+  if (!current.keySet) {
+    throw new HttpError(409, `${registered.id} has no key stored`);
   }
-  // A channel with nowhere to send the request is refused rather than reported
-  // as failing, for the reason a row with no key is: nothing was refused.
-  const { configuration } = await readConnection(sql, name);
-  const refusal = configurationRefusal(name, configuration);
+  const refusal = configurationRefusal(registered, current.configuration);
   if (refusal !== null) {
     throw new HttpError(409, refusal);
   }
-  return recordTestOutcome(
-    sql,
-    name,
-    await testConnection(name, secret, configuration),
-  );
+  if (registered.probe === undefined) {
+    throw new HttpError(409, `${registered.id} holds no key to test.`);
+  }
+  await kernelSecrets.test(registered.id);
+  return readConnection(registered.id);
 }

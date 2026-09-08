@@ -24,6 +24,8 @@ export interface ProcessRecord {
   readonly acknowledged: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
+  /** The kernel run this process reports, when it is one. BO_0207_015 */
+  readonly runId?: string;
 }
 
 const ALLOWED: Readonly<Record<ProcessState, readonly ProcessState[]>> = {

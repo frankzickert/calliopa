@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import {
   canTransition,
   INITIAL_PROCESS_STATE,
@@ -5,11 +7,19 @@ import {
   type ProcessRecord,
   type ProcessState,
 } from "~/lib/process";
-import { TAB_KINDS, type TabKind } from "~/lib/tabs";
-import { db } from "./db";
+import { migrateTabKind, type TabKind } from "~/lib/tabs";
 import { HttpError } from "./http-error";
+import { kernelState } from "./kernel/client";
+import { isRegisteredKind } from "./registry";
 import { assertRecordId } from "./uuid";
 import { readWorkspace } from "./workspaces";
+
+/**
+ * The process registry lives in the kernel's per-instance state record, one
+ * JSON record per process (`ui-kernel.md`, `BO_0207_002`): a process is
+ * working state the registry polls, never content. The transition rule and
+ * the parsers are unchanged. `BO_0207_014`
+ */
 
 export interface ProcessInput {
   readonly title: string;
@@ -44,8 +54,11 @@ export function parseProcessInput(value: unknown): ProcessInput {
   if (title === null) throw new HttpError(400, "a process needs a title");
 
   const itemId = optionalText(input.itemId, "itemId");
-  const itemKind = optionalText(input.itemKind, "itemKind");
-  if (itemKind !== null && !TAB_KINDS.includes(itemKind as TabKind)) {
+  // The item kind is one the registry knows, qualified as the build names it;
+  // a kind stored or sent bare from before `BO_0202` is rewritten first.
+  const given = optionalText(input.itemKind, "itemKind");
+  const itemKind = given === null ? null : migrateTabKind(given);
+  if (itemKind !== null && !isRegisteredKind(itemKind)) {
     throw new HttpError(400, `unknown item kind ${itemKind}`);
   }
   if ((itemId === null) !== (itemKind === null)) {
@@ -77,69 +90,78 @@ export function parseTransitionInput(value: unknown): TransitionInput {
   };
 }
 
-type ProcessRow = {
-  id: string;
-  workspaceId: string;
-  title: string;
-  state: ProcessState;
-  step: string | null;
-  error: string | null;
-  itemId: string | null;
-  itemKind: TabKind | null;
-  acknowledged: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-};
+const byCreation = (left: ProcessRecord, right: ProcessRecord): number =>
+  left.createdAt < right.createdAt
+    ? -1
+    : left.createdAt > right.createdAt
+      ? 1
+      : left.id < right.id
+        ? -1
+        : left.id > right.id
+          ? 1
+          : 0;
 
-function record(row: ProcessRow): ProcessRecord {
-  return {
-    ...row,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-  };
+async function readStored(id: string): Promise<ProcessRecord | null> {
+  return kernelState.read<ProcessRecord>("processes", id);
 }
 
-const columns = () => db()`
-  id, workspace_id as "workspaceId", title, state, step, error,
-  item_id as "itemId", item_kind as "itemKind", acknowledged,
-  created_at as "createdAt", updated_at as "updatedAt"
-`;
+async function store(record: ProcessRecord): Promise<ProcessRecord> {
+  await kernelState.write("processes", record);
+  return record;
+}
 
-export async function listProcesses(
-  workspaceId: string,
-): Promise<ProcessRecord[]> {
+export async function listProcesses(workspaceId: string): Promise<ProcessRecord[]> {
   await readWorkspace(workspaceId);
-  const rows = await db()<ProcessRow[]>`
-    select ${columns()} from process
-    where workspace_id = ${workspaceId}
-    order by created_at, id
-  `;
-  return rows.map(record);
+  const ids = await kernelState.list("processes");
+  const records = await Promise.all(ids.map(readStored));
+  // A process naming an item kind no extension contributes any more is
+  // dropped from the listing, not from the record: absence tolerates what it
+  // finds, and nothing is purged. BO_0203_006
+  return records
+    .filter(
+      (record): record is ProcessRecord =>
+        record !== null &&
+        record.workspaceId === workspaceId &&
+        (record.itemKind === null || isRegisteredKind(migrateTabKind(record.itemKind))),
+    )
+    .map((record) =>
+      record.itemKind === null ? record : { ...record, itemKind: migrateTabKind(record.itemKind) },
+    )
+    .sort(byCreation);
 }
 
+/**
+ * Opens a process. The optional identity lets a producer that records the
+ * process beside its own record — the agent run — name it before it exists.
+ */
 export async function createProcess(
   workspaceId: string,
   input: unknown,
+  id: string = randomUUID(),
 ): Promise<ProcessRecord> {
   const { title, step, itemId, itemKind } = parseProcessInput(input);
   await readWorkspace(workspaceId);
-  const [row] = await db()<ProcessRow[]>`
-    insert into process (workspace_id, title, state, step, item_id, item_kind)
-    values (${workspaceId}, ${title}, ${INITIAL_PROCESS_STATE}, ${step},
-            ${itemId}, ${itemKind})
-    returning ${columns()}
-  `;
-  if (!row) throw new Error("process insert returned no row");
-  return record(row);
+  const now = new Date().toISOString();
+  return store({
+    id,
+    workspaceId,
+    title,
+    state: INITIAL_PROCESS_STATE,
+    step,
+    error: null,
+    itemId,
+    itemKind,
+    acknowledged: false,
+    createdAt: now,
+    updatedAt: now,
+  });
 }
 
 export async function readProcess(id: string): Promise<ProcessRecord> {
   assertRecordId(id, "process");
-  const [row] = await db()<ProcessRow[]>`
-    select ${columns()} from process where id = ${id}
-  `;
-  if (!row) throw new HttpError(404, `no process ${id}`);
-  return record(row);
+  const record = await readStored(id);
+  if (record === null) throw new HttpError(404, `no process ${id}`);
+  return record;
 }
 
 export async function transitionProcess(
@@ -154,13 +176,41 @@ export async function transitionProcess(
       `a ${current.state} process cannot become ${state}`,
     );
   }
-  const [row] = await db()<ProcessRow[]>`
-    update process set state = ${state}, step = ${step ?? current.step},
-      error = ${error}, updated_at = now()
-    where id = ${id} returning ${columns()}
-  `;
-  if (!row) throw new HttpError(404, `no process ${id}`);
-  return record(row);
+  return store({
+    ...current,
+    state,
+    step: step ?? current.step,
+    error,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+/**
+ * Moves a process the way its producer reports, without the transition rule:
+ * the agent run owns its process and moves it with the run's own lifecycle,
+ * which the rule already governs on the run.
+ */
+export async function moveProcess(
+  id: string,
+  change: { readonly state: ProcessState; readonly step: string | null; readonly error: string | null },
+): Promise<ProcessRecord | null> {
+  const current = await readStored(id);
+  if (current === null) return null;
+  return store({ ...current, ...change, updatedAt: new Date().toISOString() });
+}
+
+/** Names the kernel run a process reports. BO_0207_015 */
+export async function attachRun(id: string, runId: string): Promise<ProcessRecord | null> {
+  const current = await readStored(id);
+  if (current === null) return null;
+  return store({ ...current, runId, updatedAt: new Date().toISOString() });
+}
+
+/** Every process of every workspace, for the rare lookup by what it reports. */
+export async function listAllProcesses(): Promise<ProcessRecord[]> {
+  const ids = await kernelState.list("processes");
+  const records = await Promise.all(ids.map(readStored));
+  return records.filter((record): record is ProcessRecord => record !== null).sort(byCreation);
 }
 
 export async function acknowledgeProcess(id: string): Promise<ProcessRecord> {
@@ -168,10 +218,5 @@ export async function acknowledgeProcess(id: string): Promise<ProcessRecord> {
   if (current.state !== "failed") {
     throw new HttpError(409, "only a failed process can be acknowledged");
   }
-  const [row] = await db()<ProcessRow[]>`
-    update process set acknowledged = true, updated_at = now()
-    where id = ${id} returning ${columns()}
-  `;
-  if (!row) throw new HttpError(404, `no process ${id}`);
-  return record(row);
+  return store({ ...current, acknowledged: true, updatedAt: new Date().toISOString() });
 }

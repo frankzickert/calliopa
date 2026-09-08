@@ -10,6 +10,7 @@
           "humanWritesCostAConfirmation": "Every human-class write from the shell parks at the kernel bridge and waits for a confirmation on the kernel's own origin — no human mutation travels from the app origin to CCGW. Budget one cross-origin confirmation per write. That is proportionate for occasional truth like creating a channel and disproportionate for continuous editing, so a surface that writes on every keystroke needs a different shape than one that writes on a button.",
           "proofsAreNotProposals": "Never stage a proposal whose intended outcome is rejection. A proof-only group is indistinguishable from a real one at the review surface — the rationale is rendered as ordinary text — so after a run of proposals that all deserved acceptance, one that did not will be accepted by the same motion. Construct demonstrations so the refusal is the whole proof and stop there: a refused mutation stages nothing and opens no group. Acceptance is the one non-delegable human action in the architecture and its entire value is the attention behind it, so anything that produces frequent near-identical almost-always-correct proposals is spending that attention down.",
           "valuesTravelAsParameters": "How a statement says values, which the grammar will not let you guess:\n- Every value beyond a scalar travels beside the statement in the tool call's parameters field, which is one JSON object written as text — for example parameters: \"{\\\"bid\\\": \\\"art-x.b1\\\", \\\"runs\\\": [{\\\"text\\\": \\\"...\\\"}]}\". The statement writes $name where a value belongs; lists and objects have no literal form inside the statement itself, and runs: [{text: ...}] inline is a parse error every time.\n- Every $name in the statement must have a key in that JSON object. An empty parameters value beside a parameterized statement is always wrong, and resending a refused statement without filling it changes nothing.\n- A script is one or more statements separated by semicolons; CREATE ... RELATE ... in one breath is a parse error at RELATE. Aliases scope per statement but parameters are request-global, so one parameters object serves the whole script: the canonical block write is CREATE (n:Text {id: $bid, runs: $runs, order: $order}); RELATE childRef -[r:CONTAINS]-> parentRef, with bid, runs, order, childRef and parentRef all keys of the one JSON object.\n- RELATE endpoint refs resolve from parameters — <ref>NodeId first, then <ref> — and those values carry the node: prefix (childRef: \"node:art-x.b1\"), even though the id property inside CREATE content is bare. The ref names an existing node; the id property mints one.\n- When syntax is uncertain, calliopa_explain compiles a statement without executing it. Explain and correct rather than retrying a refusal unchanged — the diagnostics name what they want.",
+          "whereRequirementsLive": "An extension's requirements, open work and change history live in its own docs/ members (docs/system/**/*.md and docs/changes/*.md under the live-line protocol), read through calliopa_query like its code. A run that changes an extension's behaviour also updates those docs in the same proposal group. (BO_0201)",
           "writeShapeFollowsFrequency": "Choose the write path by how often the operation happens, not by what it touches. Continuous editing stages candidates with no confirmation and one deliberate act to establish them; an occasional deliberate act — creating a channel, filing something into one — takes the confirmation directly, where the ceremony is proportionate. Both are the same architecture; only the frequency differs, and reaching for one shape everywhere makes typing intolerable or truth too cheap."
         },
         "goal": "Stage work into Calliopa's graph as one reviewable proposal, whatever the reader's intention was.",
@@ -45,71 +46,78 @@
       "type": "ext.skill",
       "content": {
         "conventions": {
-          "authoringRoutes": "Two routes produce the same graph shape; pick one per change and never mix them. (1) Direct CCGW staging — what the examples below show: you write CREATE/SET and stage every partOf and dependsOn relation yourself. (2) The materializer round-trip — kernel checkout into a working tree, edit files, kernel commit — which derives partOf from the tree layout and dependsOn from the manifest dependencies map, so you never write a relation by hand. Human authoring defaults to the materializer route; a Block that does not materialize (ext.skill, ext.settings, ext.migration) can only be reached by route 1.",
-          "binaryAssets": "Text only for now. A binary file in the diff is refused pending the CCGW blob surface, so an extension cannot yet ship images or fonts through the materializer route.",
+          "authoringRoutes": "Two routes produce the same graph shape; pick one per change and never mix them. (1) Direct CCGW staging — what the examples below show: you write CREATE/SET and stage every partOf and dependsOn relation yourself. (2) The materializer round-trip — kernel checkout into a working tree, edit files, kernel commit — which derives partOf from the tree layout and dependsOn from the manifest dependencies map, so you never write a relation by hand. Human and agent authoring default to the materializer route — the kernel workspace tools are that route for a run; a Block that does not materialize (ext.skill, ext.settings, ext.migration, ext.blocktype, ext.relationtype, ext.intention) is reached by route 1, or carried by a members sidecar on kernel commit --members.",
+          "binaryAssets": "Binary files travel: a binary in the diff becomes an ext.source Block whose code is a blob reference, the bytes uploaded through PUT /v1/blobs before the referencing mutation and hash-verified. The shell's favicon, PNGs and font ship this way.",
           "breakingChanges": "Tightening an established definition is gated; loosening it is free. Adding a required property, adding a unique property already duplicated, narrowing permitted children, enabling singleOpenCandidate, renaming, or removing a definition are breaking *when the type has established content* — and only then, so the same change is refused on a populated type and permitted on an empty one. A breaking change needs an ext.migration Block in the same group naming the types it covers, with a rationale and the operations that transform existing content travelling alongside; its authority is the human review of that group, not machinery. Removing a required property needs none, because requiring less invalidates nothing.",
-          "capabilities": "The manifest capabilities object carries renders — the contribution kinds the extension may render, as plural nouns: routes, panels, commands — and ccgwScopes, the CCGW operations its skills need, absent when the extension reads nothing. Nothing validates the shape: the shell registry reads only id, version and category from a manifest, so a misspelled capabilities key builds clean and is never noticed.",
+          "capabilities": "The manifest capabilities object carries renders — the surface kinds the extension renders, as plural nouns: routes, views — and ccgwScopes, the CCGW operations its skills need, absent when the extension reads nothing. Nothing validates the shape, so a misspelled capabilities key builds clean and is never noticed.",
           "checkWhereEnforcementRuns": "A declaration is only enforced where something reads it. permittedChildTypes is honoured by the pages layer, and the pages layer is mounted in the production cell rather than the dogfood app — so in a dogfood deployment the declaration is real, resolved, and unenforced. Before relying on any declared constraint, find the code that acts on it and confirm that code is reachable from where the writes happen. When it is not, the surface owns the constraint and the gap belongs in the record.",
-          "crossExtensionImports": "An extension may import source from another: a relative path into a dependency's lib resolves and builds, which is how shared client code is reused. Nothing enforces the manifest's dependsOn against those imports, so the declaration is documentation for humans and the registry rather than a build constraint — declare what you import anyway, because the dependency edge is what makes the relationship traversable in the graph.",
+          "crossExtensionImports": "The shell imports its extensions and an extension may import the shell's lib and server modules by the ~/ alias; the tree is one pnpm package, so every import resolves and builds. Nothing enforces the manifest's dependsOn against those imports — declare what you import anyway, because the dependency edge is what makes the relationship traversable in the graph.",
           "declaredBaseline": "On the direct CCGW route the mutation must carry dataRevision — the pin the change was computed against. An auto-created proposal group records it as its baseDataRevision, and acceptance conflict-checks against that base. Omit it and the group bases at 0, so acceptance refuses with mutation_resolution_failed conflicts with truth that moved past its base revision 0 — a refusal that names a conflict but is really a missing baseline, and that only appears at acceptance, long after staging looked successful. The materializer route passes the checkout pin for you, which is why this trap belongs to route 1 alone.",
           "definitionShape": "Definition fields are data, not prose. In an ext.blocktype or ext.relationtype Block, requiredProperties, uniqueProperties, permittedChildTypes and runProperties are lists of property-name strings; block and singleOpenCandidate are booleans. A string where a list belongs parses to nothing at all — uniqueProperties: \"name among active channels\" declares no unique property and the rule silently never fires, which is far worse than a refusal because the definition still reads correctly to a human. Put the qualifier in a separate descriptive field, never inside the declaration. The same rule governs the manifest: dependencies is a map of extension id to semver range, capabilities is an object, and category is exactly bundled or individual.",
           "dependencyReferences": "A dependency on another extension is a dependsOn relation from the depending manifest to the dependency manifest, with the semver range recorded in the depending manifest dependencies map keyed by extension id — the range is content because a relation stores no properties, and the relation is what makes the dependency traversable. On the materializer route kernel commit derives the edge from the map; on the direct route you stage it. A dependencies entry naming an extension with no manifest, established or added by the same change, is refused. Two extensions added together may depend on each other.",
           "deploymentIsSeparate": "Acceptance and deployment are two acts. Accepting a proposal establishes truth at a new dataRevision; the kernel keeps serving the promoted release pin until kernel pin --to head moves it, building the candidate before it promotes. An accepted extension is therefore not yet a running one, and nothing warns that the two have diverged — verify the surface appears rather than inferring it from acceptance.",
-          "derivedFiles": "Files matching *.gen.* are build output, never content: the shell registry regenerates src/registry.gen.tsx on every build. Never stage one — committed build output is stale the moment any other extension changes and is owned by whoever built last. The commit path skips the pattern, so a working tree that has been built is still clean.",
-          "domainVocabulary": "A domain vocabulary is ext.blocktype and ext.relationtype Blocks in an extension of its own, depending on ui.shell — never inside the shell, which stays domain-neutral. Neither Block materializes, so the definitions can only be staged through direct CCGW while the extension's sources and contributions go through the materializer; that is one rung, two routes, and they must not be mixed inside a single change. Declare uniqueness with uniqueProperties and let the lifecycle carry the qualifier: declared uniqueness is scoped to established revisions, so retiring a node frees its unique values and a \"retired\" or \"archived\" flag kept in content does not, because a flagged node stays established and keeps claiming them.",
+          "derivedFiles": "Files matching *.gen.* are build output, never content, and the commit path skips them. The tree root's node_modules/, dist/ and server/ are the build's derived directories and are never committed either; a nested src/server/ is ordinary source.",
+          "docs": "An extension carries its owner's knowledge beside its code, as ext.source members under docs/: docs/system/<area>/<topic>.md under the live-line protocol — a list item's marker is its commitment (* fixed, - mutable), its checkbox its state ([ ] open, [x] claimed, none is truth), a line beginning 'Functional question' awaits the owner, and a task identifier (XX_0000_000) ties a line to the change that made it true — and docs/changes/<id>.md with a Status: line (idea, draft, ready, wip, completed), finished ones under docs/changes/completed/. docs/system/system.md's Purpose section is what the extension is for; README.md is the fallback; the skill's goal is the last resort. The shell's Extensions section renders these docs as a navigable network for the owner, so a change to an extension is not complete until its docs say so: convert the [x] lines you claimed into truth, add [ ] follow-ups for what remains, and keep the identifiers. Read the docs before changing the code; they are where the requirements live. (BO_0201)",
+          "domainVocabulary": "A domain vocabulary is ext.blocktype and ext.relationtype Blocks in an extension of its own, depending on ui.shell — never inside the shell, which stays domain-neutral. Neither Block materializes, so the definitions are staged through direct CCGW or a members sidecar while the extension's sources go through the materializer; that is one rung, two routes, and they must not be mixed inside a single change. Declare uniqueness with uniqueProperties and let the lifecycle carry the qualifier: declared uniqueness is scoped to established revisions, so retiring a node frees its unique values and a \"retired\" or \"archived\" flag kept in content does not, because a flagged node stays established and keeps claiming them.",
           "draftingSurfacesReadThroughTheirDraft": "A surface that stages before establishing has two halves, and the staged half is invisible by design. Staged content is a candidate and does not resolve at head, so every read in a drafting surface must carry the draft’s overlay — the list that finds unoffered drafts, and the read that shows what was just written. Getting this wrong does not produce an error: it produces a dead end, where the author is told to offer a draft they cannot see or reach. Verify that the author can see what they wrote, not only that the write succeeded.",
+          "featureExtensions": "A feature extension carries code, not values. The first is settings: src/extensions/settings/ holds the view (settings.tsx), the server modules (server/connections.ts, server/connection-tests.ts, server/adapters.ts) and the feature's migrations (migrations/*.sql, one sequence with the shell's own migrations/ ordered by file name and applied by the tree's serve entry). The shell keeps the thin route files under src/routes/api/settings/ importing from ~/extensions/settings/server/…, and its manifest declares dependencies {\"ui.shell\": \">=0.1.0\"}. Values the feature stores stay where the feature keeps them — the shell's encrypted connection store — never in ext.settings Blocks, which are plain graph content.",
           "freshNamesAreForced": "A graph definition may never shadow a code-registered type, so the frozen vocabulary’s names are unavailable: Page, Paragraph, Note and Document are all taken. Reincarnating a model therefore means fresh names carrying proven mechanics — which is the intended posture anyway, but the refusal enforces it whether or not you meant it.",
-          "naming": "The manifest id is the extension id, lowercase, dot- or hyphen-separated. Source Blocks are <extId>.<path>. Contribution Blocks are the exception: the commit path refuses a contribution whose content id differs from its file name, so a contribution Block id is its file name — the established shell uses bare names (home, graph-node), not <extId>-prefixed ones. Follow the file-name rule; it is enforced, and the prefix rule is not.",
+          "migrations": "The tree owns its schema. scripts/lib/migrations.mjs reads migrations/ and every src/extensions/<id>/migrations/ as one sequence ordered by file name, records each in schema_migrations, and the serve entry applies pending ones before it listens — except under the promotion gate's probe (CALLIOPA_SERVE_PROBE=1), which never migrates. Number a new migration after the highest existing one across both places.",
+          "naming": "The manifest id is the extension id, lowercase, dot- or hyphen-separated, and must equal its directory name under src/extensions/ — the commit path refuses a mismatch. Source Blocks are <extId>.<path>. A contribution Block, if one is ever staged, carries a content id equal to its file name.",
           "orderingLivesOnTheChild": "Ordering is a content property on the child block, never on the containment relation, because a Relation stores no properties — a core-model fact, not a design choice. Use a base-36 fractional string compared as an ordinary string, so inserting between two siblings mints a key between theirs and writes one block instead of renumbering the set.",
           "rulesTheGraphCannotExpress": "Some settled rules have no home in the meta-schema and end up enforced in surfaces: which node types are ineligible as a relation’s endpoints, and permitted children wherever the enforcing layer is unreachable. Record each one where the rule is written rather than letting the surface be its only statement, because a rule living only in a surface is a rule the next surface will not know.",
+          "shellShape": "The shell of this graph is calliopa-app, imported as ui.shell (BO_0200): a Qwik City application with file-convention routes under src/routes/ and compiled-in views (src/lib/views.ts), root-mapped as a whole. There is no runtime registry, no generated route map and no ext.uicontribution contract in this shell — the kernel still validates contribution Blocks on commit, but nothing reads them. An extension reaches the user through the shell's own source: the shell imports the extension's modules by path (~/extensions/<extId>/…) from a route file under src/routes/, a view entry in src/lib/views.ts, or a server module — so a new feature extension is one proposal that adds the subtree and the import lines in the shell, both root-mapped by the same kernel commit.",
           "structuralVocabularies": "A vocabulary with structure — containment, ordering, permitted children — is a different problem from a vocabulary of flat types. Reuse the code-registered CONTAINS relation rather than declaring a fresh containment type: the block machinery that enforces permitted children and nesting bounds resolves block types through the effective schema, so fresh graph-defined types inherit it, but every containment operation is written against CONTAINS. A fresh containment relation leaves permittedChildTypes declared and inert, which is the silent-no-op failure this system works hardest to avoid.",
           "subtreeShape": "One ext.manifest Block is the subtree root. Every member Block — ext.source, ext.blocktype, ext.relationtype, ext.skill, ext.uicontribution — carries a partOf relation to that manifest.",
-          "uiContributionContract": "UI surface is declared through ext.uicontribution Blocks: kind route (path plus component), panel (slot plus component), or command (command plus title); component references are source paths within the same extension. The shell registry consumes materialized manifests and contribution files at build time. The panel slot vocabulary is host-defined, not fixed: the slots that exist are the ones the shell frame renders — sidebar and statusbar today — read from the frame source at the pin you are authoring against. A slot naming a surface that does not exist builds clean and renders nowhere; it is the one registry failure that is silent rather than named by the build.",
+          "uiContributionContract": "Retired with the calliopa-app shell. ext.uicontribution Blocks are still a valid member kind the kernel validates on commit (kind route, panel or command; content id equal to the file name), but this shell reads none of them; declare UI through the shell's own imports instead (shellShape).",
           "wholeTreeCommits": "The materializer diff is whole-tree: kernel commit stages everything that differs from the lockfile, not the subtree you were working in. Running the repository's own formatter while authoring an extension can therefore rewrite another extension's sources and stage them alongside your work — observed rewriting className to class across ui.shell. Check kernel status before every commit and confirm the file list is only yours; a foreign file in the list is a signal to stop, not a detail to accept."
         },
         "examples": [
           {
-            "description": "A minimal notes extension contributing one route",
+            "description": "A feature extension the shell imports: the settings extension's shape. One proposal adds the subtree and the shell's import lines.",
             "manifest": {
               "capabilities": {
-                "ccgwScopes": [
-                  "query"
-                ],
                 "renders": [
-                  "routes"
+                  "views"
                 ]
               },
-              "category": "individual",
+              "category": "bundled",
               "dependencies": {
-                "ui.shell": "^1.0.0"
+                "ui.shell": ">=0.1.0"
               },
-              "entrypoint": "index.tsx",
-              "id": "example.notes",
+              "id": "settings",
               "type": "ext.manifest",
-              "version": "0.1.0"
+              "version": "1.0.0"
             },
             "members": [
               {
-                "code": "the route component source",
-                "hash": "content hash of code",
-                "id": "example.notes.index.tsx",
+                "code": "the view component, imported by src/components/shell/view-host.tsx as ~/extensions/settings/settings",
+                "id": "settings.settings.tsx",
                 "language": "tsx",
-                "path": "index.tsx",
+                "path": "settings.tsx",
                 "type": "ext.source"
               },
               {
-                "component": "index.tsx",
-                "id": "example.notes.route",
-                "kind": "route",
-                "path": "/notes",
-                "type": "ext.uicontribution"
+                "code": "the server module, imported by the route files under src/routes/api/settings/",
+                "id": "settings.server/connections.ts",
+                "language": "ts",
+                "path": "server/connections.ts",
+                "type": "ext.source"
+              },
+              {
+                "code": "the feature's schema, applied in sequence with the shell's migrations/",
+                "id": "settings.migrations/0006_connection.sql",
+                "language": "sql",
+                "path": "migrations/0006_connection.sql",
+                "type": "ext.source"
               }
             ],
-            "proposal": "one proposal group staging every Block and relation below, accepted or rejected as a unit",
+            "proposal": "one proposal group staging the subtree, its partOf relations, the dependsOn edge, and the shell's own files that import it — all produced by one kernel commit from the working tree",
             "relations": [
-              "example.notes.index.tsx partOf example.notes",
-              "example.notes.route partOf example.notes",
-              "example.notes dependsOn ui.shell"
+              "settings.settings.tsx partOf settings",
+              "settings.server/connections.ts partOf settings",
+              "settings.migrations/0006_connection.sql partOf settings",
+              "settings dependsOn ui.shell"
             ]
           },
           {
@@ -121,13 +129,12 @@
                   "propose"
                 ],
                 "renders": [
-                  "routes",
-                  "panels"
+                  "views"
                 ]
               },
               "category": "individual",
               "dependencies": {
-                "ui.shell": "^1.0.0"
+                "ui.shell": ">=0.1.0"
               },
               "id": "example.library",
               "type": "ext.manifest",
@@ -179,8 +186,135 @@
           "The extension meta-schema definition Blocks are established truth; read the ext.blocktype and ext.relationtype definitions before staging.",
           "The target extension id is decided and does not collide with an existing ext.manifest id.",
           "Every extension named in the manifest dependencies map has a manifest, established or added by this same change.",
-          "The mutation context declares an agent identity scoped to one open proposal group; a skill execution never writes established truth."
+          "The mutation context declares an agent identity scoped to one open proposal group; a skill execution never writes established truth.",
+          "The extension's docs/ members are read before its code is changed: docs/system/**/*.md carry the requirements and open work, docs/changes/*.md the changes and their status."
         ]
+      }
+    },
+    {
+      "extension": "ui.shell",
+      "nodeId": "node:divider",
+      "type": "ext.blocktype",
+      "content": {
+        "block": true,
+        "id": "divider",
+        "name": "divider",
+        "optionalProperties": [
+          "intention"
+        ],
+        "permittedChildTypes": [],
+        "properties": {
+          "id": "the block's identity, a UUID the shell mints; the node id is node:<id>",
+          "intention": "the marking a reader gave this block, as on text",
+          "order": "the block's place among its siblings, the same key text carries"
+        },
+        "requiredProperties": [
+          "id",
+          "order"
+        ],
+        "semantics": "A leaf block carrying no authored text and taking no editor: a horizontal rule in the reading order. It declares no run property, which is what makes split and merge meaningless on it rather than needing a rule of their own.",
+        "singleOpenCandidate": true
+      }
+    },
+    {
+      "extension": "ui.shell",
+      "nodeId": "node:document",
+      "type": "ext.blocktype",
+      "content": {
+        "id": "document",
+        "name": "document",
+        "optionalProperties": [
+          "intention",
+          "record"
+        ],
+        "permittedChildTypes": [
+          "text",
+          "divider"
+        ],
+        "properties": {
+          "id": "the document's identity, a UUID the shell mints; the node id is node:<id>",
+          "intention": "the marking a reader gave the whole document: the marks value of an established ext.intention declaration; unconstrained here because intention extensions are declared per instance and a permitted set in this declaration would refuse a marking the instance legitimately declares — the agent bridge refuses an unknown intention at run start",
+          "record": "the record slot carried over from the previous document type: names a record declaration; no permitted set, per the recorded non-enforcement of BO_0199_002",
+          "title": "the document's title"
+        },
+        "requiredProperties": [
+          "id",
+          "title"
+        ],
+        "semantics": "The one product-level document kind: a node with a title whose content is its ordered child blocks, held as CONTAINS relations from the document to each block rather than nested in its revision. A document is not itself a block: it is not ordered among siblings and nothing contains it. At most one open candidate per document. Declared by ui.shell under BO_0207_011; the previous gateway's TypeScript definition of the same type is retired with the gateway.",
+        "singleOpenCandidate": true
+      }
+    },
+    {
+      "extension": "ui.shell",
+      "nodeId": "node:text",
+      "type": "ext.blocktype",
+      "content": {
+        "block": true,
+        "id": "text",
+        "name": "text",
+        "optionalProperties": [
+          "role",
+          "intention"
+        ],
+        "permittedChildTypes": [],
+        "permittedValues": {
+          "role": [
+            "paragraph",
+            "h1",
+            "h2",
+            "h3",
+            "quote"
+          ]
+        },
+        "properties": {
+          "id": "the block's identity, a UUID the shell mints; the node id is node:<id>",
+          "intention": "the marking a reader gave this block, resolved own marking first, else the nearest marked ancestor, else the document's; the marks value of an established ext.intention declaration, unconstrained for the reason the document type records",
+          "order": "the block's place among its siblings: a fractional key compared as a string, so inserting between two siblings mints a key between theirs and writes one block",
+          "role": "the text's role; absent means paragraph, so an ordinary block stores no role property. Widening this set is an ordinary change; narrowing it is breaking, because established content may hold a value the narrower set forbids",
+          "runs": "the formatted text as an ordered list of runs, each carrying text and its own marks and no offsets; the core canonicalizes runs on every write"
+        },
+        "requiredProperties": [
+          "id",
+          "order",
+          "runs"
+        ],
+        "runProperties": [
+          "runs"
+        ],
+        "semantics": "A leaf block of formatted text, containable through CONTAINS, ordered by its order key, split and merged as a list of runs. The marks a run may carry — bold, italic, strikethrough, code, and a link — are a property of runs, not of the block, so they are enforced by the run decoder and the editor rather than by a permitted set on this declaration.",
+        "singleOpenCandidate": true
+      }
+    },
+    {
+      "extension": "ui.shell",
+      "nodeId": "node:retired",
+      "type": "ext.relationtype",
+      "content": {
+        "id": "retired",
+        "name": "retired",
+        "semantics": "Records that a block left a document's reading order without being deleted, directed from the document to the block. Retiring a block closes its CONTAINS validity and creates this relation in the same mutation; restoring closes this relation and creates a new CONTAINS. Closing containment alone would strand the block beyond any rooted read, so retirement is recorded as its own relation and the retired list is an ordinary read from the document. Containment itself is the core's CONTAINS relation and needs no declaration here."
+      }
+    },
+    {
+      "extension": "ui.shell",
+      "nodeId": "node:ui.shell.documents",
+      "type": "ext.skill",
+      "content": {
+        "conventions": {
+          "marks": "A run carries text and, when it has any, marks among bold, italic, strikethrough and code, and may carry a link. Marks are not declared in the graph's vocabulary; the editor's set is the one that renders.",
+          "readerAnswersPerItem": "Each item is decided on its own in the editor. Keep an item to one intent, so a reader can accept the heading and reject the rewrite."
+        },
+        "examples": {
+          "addAHeadingAbove": "propose_document_changes {documentId, rationale, items: [{kind: insert, block: {kind: text, role: h2, runs: [{text: 'Heading'}]}, placement: {before: blockId}}]}",
+          "dropAStrayDivider": "propose_document_changes {documentId, rationale, items: [{kind: remove, blockId}]}",
+          "rewriteAParagraph": "read_document {documentId} → find the block whose runs carry the sentence → propose_document_changes {documentId, rationale, items: [{kind: replace, blockId, runs: [{text: '...'}]}]}"
+        },
+        "goal": "Read and propose changes to the documents a reader writes in, through the kernel toolset's document tools, so a run's proposal lands exactly what the editor would have written and is reviewed per item.",
+        "id": "ui.shell.documents",
+        "outputContract": "One propose_document_changes call per coherent change to one document, with a rationale saying why. Report the group the tool answered and what it stages; never claim the change is accepted. A refusal envelope is an answer: read its diagnostics and adjust the items rather than retrying the same call.",
+        "permittedOperations": "list_documents to find a document by title; read_document for its blocks in reading order with their identities, kinds, roles and runs; propose_document_changes with items of kind replace (runs and/or role for a block), insert (a new text or divider block at a placement), remove (a block leaves the reading order, retired rather than deleted) and move (a block to a placement). Everything stages into this run's proposal group; nothing writes truth. The statement tools remain available for anything beyond documents.",
+        "preconditions": "The run holds the kernel toolset. The document to change exists at the run's pin; read it with read_document before proposing against it, because a replace or a move names a block by the identity that read answered."
       }
     }
   ],

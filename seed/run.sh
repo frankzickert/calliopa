@@ -27,7 +27,14 @@ set -eu
 
 base="${1:?usage: run.sh <ccgw-base-url>}"
 here="$(cd "$(dirname "$0")" && pwd)"
-principal="${CALLIOPA_PRINCIPAL:-installer}"
+# The owner's account, the one human the core knows (BO_0206): the hook acts
+# as it, presenting the token the bootstrap wrote under credentials/.
+principal="${CALLIOPA_OWNER_PRINCIPAL:-owner}"
+secret_dir="${CALLIOPA_SECRET_DIR:-/run/secrets/calliopa}"
+if [ -f "$secret_dir/credentials/$principal" ]; then
+  CALLIOPA_CREDENTIAL="$(cat "$secret_dir/credentials/$principal")"
+  export CALLIOPA_CREDENTIAL
+fi
 
 echo "pre-seed: extension meta-schema (install profile)"
 node "$here/ccgw.mjs" apply "$base" "$principal" "$here/meta-schema"

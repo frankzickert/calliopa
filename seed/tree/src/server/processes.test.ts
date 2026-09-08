@@ -9,13 +9,13 @@ describe("process input", () => {
         title: "Render opening",
         step: "queued for render",
         itemId: "placeholder-scene",
-        itemKind: "storyboard",
+        itemKind: "process-result",
       }),
     ).toEqual({
       title: "Render opening",
       step: "queued for render",
       itemId: "placeholder-scene",
-      itemKind: "storyboard",
+      itemKind: "process-result",
     });
   });
 

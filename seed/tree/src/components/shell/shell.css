@@ -94,6 +94,18 @@
   cursor: pointer;
 }
 
+/* A contributed section body may carry its own control, placed where the
+   header's would be but inside the body the section owns. BO_0202_003 */
+.library-action--body {
+  float: right;
+}
+
+.library-entry__badge {
+  margin-inline-start: auto;
+  font-size: 0.75em;
+  opacity: 0.7;
+}
+
 .library-action:hover {
   background: var(--panel-raised);
   border-color: var(--border);
@@ -178,6 +190,48 @@
 .settings-control,
 .process-indicator {
   flex: 0 0 auto;
+}
+
+/* Whose authority the page acts under, beside the instance chrome: the name,
+   what the class lets the person do, and the way out. BO_0209_003 */
+.identity {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.identity__name {
+  font-weight: 600;
+}
+
+.identity__class {
+  color: var(--text-muted);
+}
+
+.sign-out {
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--text);
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+}
+
+.sign-out:hover {
+  background: var(--panel-raised);
+  border-color: var(--border);
+}
+
+/* The licence's word, shown for as long as it holds. BO_0209_005 */
+.licence-warning {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--error);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
 }
 
 /* Each region scrolls its own content, so scrolling one moves nothing in the
@@ -939,6 +993,51 @@
   color: var(--error);
 }
 
+/* People: who holds authority, read from the kernel per request. A row says
+   who, what kind and class, what state, and when the account was last live;
+   the controls are the owner's, and the core refuses them independently.
+   BO_0209_004 */
+.person__facts {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.person[data-person-state="suspended"] .connection__state,
+.person[data-person-state="retired"] .connection__state {
+  color: var(--error);
+}
+
+.person__owner {
+  margin-left: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.people-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.people-form__title {
+  flex: 1 0 100%;
+  margin: 0;
+  font-size: 1rem;
+}
+
+.settings-refusal__code {
+  font-family: var(--font-mono);
+  margin-right: 0.4rem;
+}
+
+.licence-state {
+  margin: 0 0 1rem;
+  color: var(--text-muted);
+}
+
 /* What the dock says about the last goal, beside the control that sent it.
    A refusal is not worth taking the whole frame for. */
 .composer__notice {
@@ -1006,3 +1105,40 @@
   font-size: 0.8rem;
   white-space: nowrap;
 }
+
+/* The Extensions category: two groups, Core and Yours, and the dot that says
+   newer truth waits for promotion. BO_0201_005 */
+.library-group {
+  margin: 0.5rem 0 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.library-entry__version {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  flex: 0 0 auto;
+}
+.library-entry__ahead {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--accent, currentColor);
+  flex: 0 0 auto;
+}
+
+/* The owner document: an extension's docs as a read-only document. BO_0201_007 */
+.view--extension {
+  padding: 1rem 1.25rem 3rem;
+  max-width: 48rem;
+}
+.owner-heading--1 { font-size: 1.6rem; margin: 0 0 0.75rem; }
+.owner-heading--2 { font-size: 1.15rem; margin: 1.5rem 0 0.5rem; }
+.owner-heading--3 { font-size: 1rem; margin: 1rem 0 0.4rem; color: var(--text-muted); }
+.owner-paragraph { margin: 0.35rem 0; line-height: 1.5; }
+.owner-quote { margin: 0.5rem 0; padding: 0.25rem 0.75rem; border-left: 3px solid var(--border); color: var(--text-muted); }
+.owner-badge { font-size: 0.75rem; padding: 0.05rem 0.35rem; border-radius: 0.3rem; background: var(--panel-raised); border: 1px solid var(--border); }
+.owner-link { border: none; background: transparent; color: var(--accent, inherit); font: inherit; padding: 0; cursor: pointer; text-decoration: underline; }
+.owner-divider { border: none; border-top: 1px solid var(--border); margin: 0.75rem 0; }
+.extension-status { color: var(--text-muted); padding: 1rem 1.25rem; }

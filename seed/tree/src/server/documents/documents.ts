@@ -1,42 +1,32 @@
-import type postgres from "postgres";
-import type { JSONValue } from "postgres";
+import { randomBytes, randomUUID } from "node:crypto";
 
 import type { DocumentSummary } from "../../lib/library";
 import { orderBetween } from "../../lib/order";
-import { readChangeSummary } from "../graph/changes";
-import type {
-  AnsweredItem,
-  AssembledGraph,
-  ChangeSummary,
-  GraphActor,
-  GraphMutationResult,
-  GraphNodeView,
-  GraphOperation,
-  GraphOutcome,
-  NonEmpty,
-  ProposalAnswer,
-  ProposalItemRequest,
-  ProposalItemView,
-  StagedProposal,
-} from "../graph/contract";
-import { mutateGraph } from "../graph/mutate";
 import {
-  answerProposalItem,
-  listOpenProposalGroups,
-  readProposalGroup,
-  stageProposal,
-} from "../graph/proposals";
-import { readGraph } from "../graph/read";
-import { resolveRoots } from "../graph/roots";
-import { calliopaGraphSchema } from "../graph/schema";
-import { asContent, asRecord } from "./content";
+  decide,
+  query,
+  stage,
+  touchedSet,
+  write,
+  type ReadNode,
+  type ReadResult,
+} from "../ccgw/client";
+import type { GraphOutcome, NonEmpty } from "../outcome";
 import {
   assembleDocument,
   assembleRetired,
+  bareId,
+  CONTAINS,
+  contentOf,
+  documentNodeOf,
+  nodeRef,
+  RETIRED,
   toBlock,
+  typeOf,
   type BlockView,
   type DocumentView,
 } from "./assemble";
+import { sameRuns } from "../../lib/runs";
 import {
   DOCUMENT_TYPE,
   normalizeRuns,
@@ -46,22 +36,31 @@ import {
 } from "./vocabulary";
 
 /**
- * The document and block operations the editor works through.
+ * The document and block operations the editor works through, over the one
+ * graph. `BO_0207_012`
  *
- * Every read is rooted at a document and bounded, and every structural gesture
- * compiles into one gateway mutation, so a refusal leaves the document exactly
- * as it was. Nothing here reaches the graph tables; the gateway is the only
- * way in.
+ * Every read is a rooted, bounded CCGW statement at the current head. Every
+ * structural gesture compiles into one mutation script carried by the
+ * kernel's `write` verb, so a refusal leaves the document exactly as it was
+ * and what the shell may establish is the core's decision. Proposals stage
+ * through the kernel's `stage` verb into a CCGW group and are answered per
+ * member through its `accept` and `reject` verbs.
+ *
+ * Conflict on a stale base is the shell's check before it writes: CCGW's
+ * direct truth write archives and replaces whatever stands, so the operation
+ * compares the base the caller names with the revision the read found. The
+ * window between that read and the write is the one the shell's own gateway
+ * already had (`CA_0007_011`), and a proposal's staleness is CCGW's per-member
+ * drift judgement at acceptance rather than anything decided here.
  */
-
-const actor = { kind: "application" } as const;
 
 /**
  * Blocks hang directly off their document. The first container block type
  * raises this, and the read that walks it is already written in terms of
  * relations rather than one level.
  */
-const CONTAINMENT_DEPTH = 1;
+const CONTAINMENT_PATTERN = (relation: string, include = ""): string =>
+  `MATCH (d:${DOCUMENT_TYPE})-[c:${relation}]->(b) RETURN GRAPH d, c, b ROOT d${include}`;
 
 /** Where a block goes among its siblings. */
 export type Placement =
@@ -119,6 +118,18 @@ export interface SplitBlocks {
   readonly dataRevision: string;
 }
 
+/**
+ * How many times a document has been written, and when last.
+ *
+ * A data revision is one transaction, so a write that touched several of the
+ * document's records counts once however many it left behind.
+ */
+export interface ChangeSummary {
+  readonly changeCount: number;
+  /** Null only when nothing of the document has ever been written. */
+  readonly lastWrittenAt: string | null;
+}
+
 function refuse<T>(rule: string, detail: string): GraphOutcome<T> {
   return {
     outcome: "validationFailure",
@@ -126,30 +137,26 @@ function refuse<T>(rule: string, detail: string): GraphOutcome<T> {
   };
 }
 
-/** A node's stored content as a record, so an operation can rewrite one
- * property and leave everything else it does not model untouched. */
-function contentOf(graph: AssembledGraph, nodeId: string): Record<string, unknown> {
-  const node = graph.nodes.find((candidate) => candidate.nodeId === nodeId);
-  const content = node === undefined ? null : asRecord(node.content);
-  return content === null ? {} : { ...content };
+function conflict<T>(nodeId: string, expected: string, current: string | null): GraphOutcome<T> {
+  return {
+    outcome: "conflict",
+    conflicts: [{ nodeId, expectedRevisionId: expected, currentRevisionId: current }],
+  };
 }
 
-function nodeOf(graph: AssembledGraph, nodeId: string): GraphNodeView | undefined {
-  return graph.nodes.find((candidate) => candidate.nodeId === nodeId);
-}
+const nodeOf = (graph: ReadResult, id: string): ReadNode | undefined =>
+  graph.nodes.find((candidate) => candidate.id === nodeRef(id));
 
-const blockContent = (block: NewBlock, order: string): JSONValue =>
-  asContent(
-    block.kind === "divider"
-      ? { order }
-      : {
-          order,
-          runs: normalizeRuns(block.runs ?? []),
-          ...(block.role !== undefined && block.role !== "paragraph"
-            ? { role: block.role }
-            : {}),
-        },
-  );
+const blockContent = (block: NewBlock, order: string): Record<string, unknown> =>
+  block.kind === "divider"
+    ? { order }
+    : {
+        order,
+        runs: normalizeRuns(block.runs ?? []),
+        ...(block.role !== undefined && block.role !== "paragraph"
+          ? { role: block.role }
+          : {}),
+      };
 
 const blockType = (block: NewBlock): string => block.kind;
 
@@ -159,22 +166,17 @@ const blockType = (block: NewBlock): string => block.kind;
  * so a revision can preserve content this build does not model.
  */
 async function loadDocument(
-  db: postgres.Sql,
   documentId: string,
-  relationType: "contains" | "retired" = "contains",
+  relationType: typeof CONTAINS | typeof RETIRED = CONTAINS,
 ): Promise<
-  | { readonly ok: true; readonly graph: AssembledGraph; readonly document: DocumentView }
+  | { readonly ok: true; readonly graph: ReadResult; readonly document: DocumentView }
   | { readonly ok: false; readonly outcome: GraphOutcome<never> }
 > {
-  const outcome = await readGraph(db, {
-    roots: [documentId],
-    traverse: [
-      {
-        direction: "outgoing",
-        depth: CONTAINMENT_DEPTH,
-        relationTypes: [relationType],
-      },
-    ],
+  const outcome = await query({
+    statement: CONTAINMENT_PATTERN(relationType),
+    roots: [nodeRef(documentId)],
+    unbounded: true,
+    purpose: "document read",
   });
   if (outcome.outcome !== "success") {
     return { ok: false, outcome: outcome as GraphOutcome<never> };
@@ -244,75 +246,84 @@ function orderFor(
   };
 }
 
-async function commit<T>(
-  db: postgres.Sql,
-  operations: NonEmpty<GraphOperation>,
-  result: (written: GraphMutationResult) => T,
-): Promise<GraphOutcome<T>> {
-  const outcome = await mutateGraph(
-    db,
-    calliopaGraphSchema,
-    { operations },
-    actor,
-  );
-  if (outcome.outcome !== "success") return outcome as GraphOutcome<T>;
-  return { outcome: "success", result: result(outcome.result) };
+/**
+ * The revision a node carries at a data revision. A write answers only the
+ * data revision it landed at, so the revision the next write must name is
+ * read back at that pin.
+ */
+async function revisionAt(id: string, dataRevision: string): Promise<string> {
+  const outcome = await query({
+    statement: "MATCH (n {id: $id}) RETURN GRAPH n",
+    parameters: { id: bareId(id) },
+    dataRevision: Number(dataRevision),
+    purpose: "revision after write",
+  });
+  if (outcome.outcome !== "success") return "";
+  return nodeOf(outcome.result, id)?.revision.id ?? "";
 }
 
-/** The revision a mutation established for one node. */
-const revisionOf = (written: GraphMutationResult, nodeId: string): string =>
-  written.nodes.find((node) => node.nodeId === nodeId)?.revisionId ?? "";
-
-/**
- * Creates a document and its first block as one mutation, so a document never
- * exists without somewhere to type.
- */
-export async function createDocument(
-  db: postgres.Sql,
-  input: { readonly title: string; readonly block?: NewBlock },
-): Promise<GraphOutcome<CreatedDocument>> {
-  const block = input.block ?? { kind: "text" as const };
-  const operations: NonEmpty<GraphOperation> = [
-    {
-      op: "createNode",
-      ref: "document",
-      semanticType: DOCUMENT_TYPE,
-      content: { title: input.title },
-    },
-    {
-      op: "createNode",
-      ref: "block",
-      semanticType: blockType(block),
-      content: blockContent(block, orderBetween("", "")),
-    },
-    {
-      op: "createRelation",
-      relationType: "contains",
-      from: { kind: "ref", ref: "document" },
-      to: { kind: "node", node: { kind: "ref", ref: "block" } },
-    },
-  ];
-
-  const outcome = await mutateGraph(
-    db,
-    calliopaGraphSchema,
-    { operations },
-    actor,
-  );
-  if (outcome.outcome !== "success") {
-    return outcome as GraphOutcome<CreatedDocument>;
-  }
-  const written = new Map(
-    outcome.result.nodes.map((node) => [node.ref, node.nodeId]),
-  );
+/** Runs one content truth script and reads back the revisions it established. */
+async function commit<T>(
+  statement: string,
+  parameters: Record<string, unknown>,
+  rationale: string,
+  result: (dataRevision: string, revisionOf: (id: string) => Promise<string>) => Promise<T>,
+): Promise<GraphOutcome<T>> {
+  const written = await write(statement, parameters, rationale);
+  if (written.outcome !== "success") return written as GraphOutcome<T>;
+  const dataRevision = written.result.dataRevision;
   return {
     outcome: "success",
-    result: {
-      documentId: written.get("document") as string,
-      blockId: written.get("block") as string,
-      dataRevision: outcome.result.dataRevision,
-    },
+    result: await result(dataRevision, (id) => revisionAt(id, dataRevision)),
   };
+}
+
+/** The properties a CREATE writes, as statement text over named parameters. */
+const properties = (
+  alias: string,
+  content: Record<string, unknown>,
+  parameters: Record<string, unknown>,
+  established: boolean,
+): string => {
+  const pairs: string[] = [];
+  for (const [key, value] of Object.entries(content)) {
+    if (value === undefined) continue;
+    const name = `${alias}_${key}`;
+    parameters[name] = value;
+    pairs.push(`${key}: $${name}`);
+  }
+  if (established) pairs.push(`status: "established"`);
+  return pairs.join(", ");
+};
+
+/**
+ * Creates a document and its first block as one script, so a document never
+ * exists without somewhere to type. Identities are minted here and are the
+ * ids the API hands out: CCGW names the node `node:<id>` and the shell keeps
+ * the bare form.
+ */
+export async function createDocument(input: {
+  readonly title: string;
+  readonly block?: NewBlock;
+}): Promise<GraphOutcome<CreatedDocument>> {
+  const block = input.block ?? { kind: "text" as const };
+  const documentId = randomUUID();
+  const blockId = randomUUID();
+  const parameters: Record<string, unknown> = {
+    dref: nodeRef(documentId),
+    bref: nodeRef(blockId),
+  };
+  const statement = [
+    `CREATE (d:${DOCUMENT_TYPE} {${properties("d", { id: documentId, title: input.title }, parameters, true)}})`,
+    `CREATE (b:${blockType(block)} {${properties("b", { id: blockId, ...blockContent(block, orderBetween("", "")) }, parameters, true)}})`,
+    `RELATE dref -[c:${CONTAINS}]-> bref`,
+  ].join("; ");
+
+  return commit(statement, parameters, `create document ${documentId}`, async (dataRevision) => ({
+    documentId,
+    blockId,
+    dataRevision,
+  }));
 }
 
 /**
@@ -329,62 +340,46 @@ const byTitle = (left: DocumentSummary, right: DocumentSummary): number => {
 /**
  * The documents no document contains, each with its title.
  *
- * A `document` is never the target of `contains` today, so the parentless
+ * A `document` is never the target of a containment today, so the parentless
  * filter currently keeps every document. It is written as the rule so nesting
- * documents later narrows this listing rather than rewriting it.
- *
- * Roots come from the gateway in creation order and the sort is stable, so two
- * documents sharing a title keep the order they were created in rather than
- * swapping places between reads. Titles are read without assembling any
- * document's blocks: the library renders names, not content.
+ * documents later narrows this listing rather than rewriting it. A deleted
+ * document is retired in the graph and absent from a current read, so it
+ * never appears here.
  */
-export async function listDocuments(
-  db: postgres.Sql,
-): Promise<GraphOutcome<readonly DocumentSummary[]>> {
-  const resolved = await resolveRoots(db, { semanticType: DOCUMENT_TYPE });
-  if (resolved.outcome !== "success") {
-    return resolved as GraphOutcome<readonly DocumentSummary[]>;
-  }
-
-  const [first, ...rest] = resolved.result.nodeIds;
-  if (first === undefined) return { outcome: "success", result: [] };
-  const roots: NonEmpty<string> = [first, ...rest];
-
-  const outcome = await readGraph(db, {
-    roots,
-    traverse: [
-      {
-        direction: "incoming",
-        depth: CONTAINMENT_DEPTH,
-        relationTypes: ["contains"],
-      },
-    ],
+export async function listDocuments(): Promise<GraphOutcome<readonly DocumentSummary[]>> {
+  const outcome = await query({
+    statement: `MATCH (d:${DOCUMENT_TYPE}) RETURN GRAPH d`,
+    unbounded: true,
+    purpose: "document listing",
   });
+  if (outcome.outcome === "noResult") return { outcome: "success", result: [] };
   if (outcome.outcome !== "success") {
     return outcome as GraphOutcome<readonly DocumentSummary[]>;
   }
 
-  const contained = new Set(
-    outcome.result.relations
-      .filter(
-        (relation) =>
-          relation.relationType === "contains" &&
-          relation.validity.status === "active" &&
-          relation.target.kind === "node",
-      )
-      .map((relation) =>
-        relation.target.kind === "node" ? relation.target.nodeId : "",
-      ),
+  const contained = await query({
+    statement: `MATCH (p)-[c:${CONTAINS}]->(d:${DOCUMENT_TYPE}) RETURN GRAPH p, c, d`,
+    unbounded: true,
+    purpose: "contained documents",
+  });
+  const containedIds = new Set(
+    contained.outcome === "success"
+      ? contained.result.relations
+          .filter((relation) => relation.type === CONTAINS && relation.validity.status === "active")
+          .map((relation) => relation.to.nodeId ?? "")
+      : [],
   );
 
   const summaries: DocumentSummary[] = [];
-  for (const documentId of resolved.result.nodeIds) {
-    if (contained.has(documentId)) continue;
-    const node = nodeOf(outcome.result, documentId);
-    if (node === undefined || node.semanticType !== DOCUMENT_TYPE) continue;
-    const title = asRecord(node.content)?.["title"];
+  const seen = new Set<string>();
+  for (const node of outcome.result.nodes) {
+    if (typeOf(node) !== DOCUMENT_TYPE) continue;
+    if (node.revision.status !== "established") continue;
+    if (containedIds.has(node.id) || seen.has(node.id)) continue;
+    seen.add(node.id);
+    const title = contentOf(node)["title"];
     summaries.push({
-      documentId,
+      documentId: bareId(node.id),
       title: typeof title === "string" ? title : "",
     });
   }
@@ -398,11 +393,10 @@ export async function listDocuments(
  * not have to drop the first result.
  */
 export async function readDocument(
-  db: postgres.Sql,
   documentId: string,
   range?: DocumentRange,
 ): Promise<GraphOutcome<DocumentView>> {
-  const loaded = await loadDocument(db, documentId);
+  const loaded = await loadDocument(documentId);
   if (!loaded.ok) return loaded.outcome;
   if (range === undefined) {
     return { outcome: "success", result: loaded.document };
@@ -442,37 +436,27 @@ export async function readDocument(
 /**
  * Retitles a document. The title is the document node's own content, so this
  * revises the document rather than any block, and the blocks are untouched.
- *
- * Content the build does not model is preserved, the same as any block
- * revision, and a stale base is a conflict rather than a silent overwrite.
+ * A stale base is a conflict rather than a silent overwrite.
  */
-export async function renameDocument(
-  db: postgres.Sql,
-  input: {
-    readonly documentId: string;
-    readonly baseRevisionId: string;
-    readonly title: string;
-  },
-): Promise<GraphOutcome<WrittenDocument>> {
-  const loaded = await loadDocument(db, input.documentId);
+export async function renameDocument(input: {
+  readonly documentId: string;
+  readonly baseRevisionId: string;
+  readonly title: string;
+}): Promise<GraphOutcome<WrittenDocument>> {
+  const loaded = await loadDocument(input.documentId);
   if (!loaded.ok) return loaded.outcome;
+  if (loaded.document.revisionId !== input.baseRevisionId) {
+    return conflict(input.documentId, input.baseRevisionId, loaded.document.revisionId);
+  }
 
-  const content = contentOf(loaded.graph, input.documentId);
   return commit(
-    db,
-    [
-      {
-        op: "reviseNode",
-        nodeId: input.documentId,
-        baseRevisionId: input.baseRevisionId,
-        semanticType: DOCUMENT_TYPE,
-        content: asContent({ ...content, title: input.title }),
-      },
-    ],
-    (written) => ({
+    "SET d.title = $title",
+    { dNodeId: nodeRef(input.documentId), title: input.title },
+    `rename document ${input.documentId}`,
+    async (dataRevision, revisionOf) => ({
       documentId: input.documentId,
-      revisionId: revisionOf(written, input.documentId),
-      dataRevision: written.dataRevision,
+      revisionId: await revisionOf(input.documentId),
+      dataRevision,
     }),
   );
 }
@@ -483,11 +467,10 @@ export async function renameDocument(
  * itself, read without pulling in its siblings.
  */
 export async function readBlock(
-  db: postgres.Sql,
   documentId: string,
   blockId: string,
 ): Promise<GraphOutcome<BlockView>> {
-  const loaded = await loadDocument(db, documentId);
+  const loaded = await loadDocument(documentId);
   if (!loaded.ok) return loaded.outcome;
   const block = loaded.document.blocks.find(
     (candidate) => candidate.blockId === blockId,
@@ -502,108 +485,84 @@ export async function readBlock(
 }
 
 /** Inserts a new block at a placement among its siblings. */
-export async function insertBlock(
-  db: postgres.Sql,
-  input: {
-    readonly documentId: string;
-    readonly block: NewBlock;
-    readonly placement: Placement;
-  },
-): Promise<GraphOutcome<WrittenBlock>> {
-  const loaded = await loadDocument(db, input.documentId);
+export async function insertBlock(input: {
+  readonly documentId: string;
+  readonly block: NewBlock;
+  readonly placement: Placement;
+}): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
   if (!loaded.ok) return loaded.outcome;
 
   const order = orderFor(loaded.document.blocks, input.placement);
   if ("failure" in order) return order.failure;
 
-  const outcome = await mutateGraph(
-    db,
-    calliopaGraphSchema,
-    {
-      operations: [
-        {
-          op: "createNode",
-          ref: "block",
-          semanticType: blockType(input.block),
-          content: blockContent(input.block, order.order),
-        },
-        {
-          op: "createRelation",
-          relationType: "contains",
-          from: { kind: "id", nodeId: input.documentId },
-          to: { kind: "node", node: { kind: "ref", ref: "block" } },
-        },
-      ],
-    },
-    actor,
-  );
-  if (outcome.outcome !== "success") return outcome as GraphOutcome<WrittenBlock>;
-
-  const written = outcome.result.nodes.find((node) => node.ref === "block");
-  return {
-    outcome: "success",
-    result: {
-      blockId: written?.nodeId as string,
-      revisionId: written?.revisionId as string,
-      dataRevision: outcome.result.dataRevision,
-    },
+  const blockId = randomUUID();
+  const parameters: Record<string, unknown> = {
+    dref: nodeRef(input.documentId),
+    bref: nodeRef(blockId),
   };
+  const statement = [
+    `CREATE (b:${blockType(input.block)} {${properties("b", { id: blockId, ...blockContent(input.block, order.order) }, parameters, true)}})`,
+    `RELATE dref -[c:${CONTAINS}]-> bref`,
+  ].join("; ");
+
+  return commit(statement, parameters, `insert block into ${input.documentId}`, async (dataRevision, revisionOf) => ({
+    blockId,
+    revisionId: await revisionOf(blockId),
+    dataRevision,
+  }));
+}
+
+/** The block named by an operation, refused when it is not in the document
+ * or when the base the caller names is no longer the block's revision. */
+function locate(
+  document: DocumentView,
+  blockId: string,
+  baseRevisionId?: string,
+): { readonly block: BlockView } | { readonly failure: GraphOutcome<never> } {
+  const block = document.blocks.find((candidate) => candidate.blockId === blockId);
+  if (block === undefined) {
+    return { failure: refuse("unknownBlock", `Block ${blockId} is not in this document.`) };
+  }
+  if (baseRevisionId !== undefined && block.revisionId !== baseRevisionId) {
+    return { failure: conflict(blockId, baseRevisionId, block.revisionId) };
+  }
+  return { block };
 }
 
 /** Revises a text block's runs and role, keeping its identity and position. */
-export async function reviseTextBlock(
-  db: postgres.Sql,
-  input: {
-    readonly documentId: string;
-    readonly blockId: string;
-    readonly baseRevisionId: string;
-    readonly runs: readonly Run[];
-    readonly role?: TextRole;
-  },
-): Promise<GraphOutcome<WrittenBlock>> {
-  const loaded = await loadDocument(db, input.documentId);
+export async function reviseTextBlock(input: {
+  readonly documentId: string;
+  readonly blockId: string;
+  readonly baseRevisionId: string;
+  readonly runs: readonly Run[];
+  readonly role?: TextRole;
+}): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
   if (!loaded.ok) return loaded.outcome;
-
-  const block = loaded.document.blocks.find(
-    (candidate) => candidate.blockId === input.blockId,
-  );
-  if (block === undefined) {
-    return refuse("unknownBlock", `Block ${input.blockId} is not in this document.`);
-  }
-  if (block.kind !== "text") {
+  const located = locate(loaded.document, input.blockId, input.baseRevisionId);
+  if ("failure" in located) return located.failure;
+  if (located.block.kind !== "text") {
     return refuse(
       "blockKind",
-      `Block ${input.blockId} is a ${block.kind} block and carries no runs.`,
+      `Block ${input.blockId} is a ${located.block.kind} block and carries no runs.`,
     );
   }
 
-  const content = contentOf(loaded.graph, input.blockId);
-  const role = input.role ?? block.role;
-  const revised: Record<string, unknown> = {
-    ...content,
-    runs: normalizeRuns(input.runs),
-  };
-  if (role === "paragraph") {
-    delete revised["role"];
-  } else {
-    revised["role"] = role;
-  }
-
+  const role = input.role ?? located.block.role;
   return commit(
-    db,
-    [
-      {
-        op: "reviseNode",
-        nodeId: input.blockId,
-        baseRevisionId: input.baseRevisionId,
-        semanticType: "text",
-        content: asContent(revised),
-      },
-    ],
-    (written) => ({
+    "SET b.runs = $runs, b.role = $role",
+    {
+      bNodeId: nodeRef(input.blockId),
+      runs: normalizeRuns(input.runs),
+      // A null clears the property: an ordinary paragraph stores no role.
+      role: role === "paragraph" ? null : role,
+    },
+    `revise block ${input.blockId}`,
+    async (dataRevision, revisionOf) => ({
       blockId: input.blockId,
-      revisionId: revisionOf(written, input.blockId),
-      dataRevision: written.dataRevision,
+      revisionId: await revisionOf(input.blockId),
+      dataRevision,
     }),
   );
 }
@@ -614,24 +573,17 @@ export async function reviseTextBlock(
  * same role: a split is a structural gesture, and changing what the
  * continuation is called is a separate decision the editor makes.
  */
-export async function splitTextBlock(
-  db: postgres.Sql,
-  input: {
-    readonly documentId: string;
-    readonly blockId: string;
-    readonly baseRevisionId: string;
-    readonly at: number;
-  },
-): Promise<GraphOutcome<SplitBlocks>> {
-  const loaded = await loadDocument(db, input.documentId);
+export async function splitTextBlock(input: {
+  readonly documentId: string;
+  readonly blockId: string;
+  readonly baseRevisionId: string;
+  readonly at: number;
+}): Promise<GraphOutcome<SplitBlocks>> {
+  const loaded = await loadDocument(input.documentId);
   if (!loaded.ok) return loaded.outcome;
-
-  const block = loaded.document.blocks.find(
-    (candidate) => candidate.blockId === input.blockId,
-  );
-  if (block === undefined) {
-    return refuse("unknownBlock", `Block ${input.blockId} is not in this document.`);
-  }
+  const located = locate(loaded.document, input.blockId, input.baseRevisionId);
+  if ("failure" in located) return located.failure;
+  const block = located.block;
   if (block.kind !== "text") {
     return refuse("blockKind", `A ${block.kind} block does not split.`);
   }
@@ -640,54 +592,34 @@ export async function splitTextBlock(
   }
 
   const [head, tail] = splitRuns(block.runs, input.at);
-  const content = contentOf(loaded.graph, input.blockId);
   const order = orderFor(loaded.document.blocks, { after: input.blockId });
   if ("failure" in order) return order.failure;
 
-  const outcome = await mutateGraph(
-    db,
-    calliopaGraphSchema,
-    {
-      operations: [
-        {
-          op: "reviseNode",
-          nodeId: input.blockId,
-          baseRevisionId: input.baseRevisionId,
-          semanticType: "text",
-          content: asContent({ ...content, runs: head }),
-        },
-        {
-          op: "createNode",
-          ref: "tail",
-          semanticType: "text",
-          content: asContent({
-            ...content,
-            order: order.order,
-            runs: tail,
-          }),
-        },
-        {
-          op: "createRelation",
-          relationType: "contains",
-          from: { kind: "id", nodeId: input.documentId },
-          to: { kind: "node", node: { kind: "ref", ref: "tail" } },
-        },
-      ],
-    },
-    actor,
-  );
-  if (outcome.outcome !== "success") return outcome as GraphOutcome<SplitBlocks>;
-
-  const tailNode = outcome.result.nodes.find((node) => node.ref === "tail");
-  return {
-    outcome: "success",
-    result: {
-      blockId: input.blockId,
-      revisionId: revisionOf(outcome.result, input.blockId),
-      tailBlockId: tailNode?.nodeId as string,
-      dataRevision: outcome.result.dataRevision,
-    },
+  const tailBlockId = randomUUID();
+  const parameters: Record<string, unknown> = {
+    bNodeId: nodeRef(input.blockId),
+    head,
+    dref: nodeRef(input.documentId),
+    tref: nodeRef(tailBlockId),
   };
+  const tailContent: Record<string, unknown> = {
+    id: tailBlockId,
+    order: order.order,
+    runs: tail,
+    ...(block.role === "paragraph" ? {} : { role: block.role }),
+  };
+  const statement = [
+    "SET b.runs = $head",
+    `CREATE (t:text {${properties("t", tailContent, parameters, true)}})`,
+    `RELATE dref -[c:${CONTAINS}]-> tref`,
+  ].join("; ");
+
+  return commit(statement, parameters, `split block ${input.blockId}`, async (dataRevision, revisionOf) => ({
+    blockId: input.blockId,
+    revisionId: await revisionOf(input.blockId),
+    tailBlockId,
+    dataRevision,
+  }));
 }
 
 /**
@@ -695,16 +627,13 @@ export async function splitTextBlock(
  * away. A block leaves a document only by becoming retired, so what a merge
  * absorbed stays recoverable rather than becoming unreachable.
  */
-export async function mergeTextBlocks(
-  db: postgres.Sql,
-  input: {
-    readonly documentId: string;
-    readonly intoBlockId: string;
-    readonly intoBaseRevisionId: string;
-    readonly blockId: string;
-  },
-): Promise<GraphOutcome<WrittenBlock>> {
-  const loaded = await loadDocument(db, input.documentId);
+export async function mergeTextBlocks(input: {
+  readonly documentId: string;
+  readonly intoBlockId: string;
+  readonly intoBaseRevisionId: string;
+  readonly blockId: string;
+}): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
   if (!loaded.ok) return loaded.outcome;
 
   const into = loaded.document.blocks.find(
@@ -725,33 +654,24 @@ export async function mergeTextBlocks(
   if (into.blockId === from.blockId) {
     return refuse("incompatibleMerge", "A block does not merge into itself.");
   }
+  if (into.revisionId !== input.intoBaseRevisionId) {
+    return conflict(into.blockId, input.intoBaseRevisionId, into.revisionId);
+  }
 
-  const content = contentOf(loaded.graph, input.intoBlockId);
   return commit(
-    db,
-    [
-      {
-        op: "reviseNode",
-        nodeId: input.intoBlockId,
-        baseRevisionId: input.intoBaseRevisionId,
-        semanticType: "text",
-        content: asContent({
-          ...content,
-          runs: normalizeRuns([...into.runs, ...from.runs]),
-        }),
-      },
-      { op: "closeRelation", relationId: from.containmentId },
-      {
-        op: "createRelation",
-        relationType: "retired",
-        from: { kind: "id", nodeId: input.documentId },
-        to: { kind: "node", node: { kind: "id", nodeId: from.blockId } },
-      },
-    ],
-    (written) => ({
+    ["SET i.runs = $runs", "CLOSE c", `RELATE dref -[r:${RETIRED}]-> fref`].join("; "),
+    {
+      iNodeId: nodeRef(input.intoBlockId),
+      runs: normalizeRuns([...into.runs, ...from.runs]),
+      cRelationId: from.containmentId,
+      dref: nodeRef(input.documentId),
+      fref: nodeRef(from.blockId),
+    },
+    `merge block ${input.blockId} into ${input.intoBlockId}`,
+    async (dataRevision, revisionOf) => ({
       blockId: input.intoBlockId,
-      revisionId: revisionOf(written, input.intoBlockId),
-      dataRevision: written.dataRevision,
+      revisionId: await revisionOf(input.intoBlockId),
+      dataRevision,
     }),
   );
 }
@@ -761,24 +681,16 @@ export async function mergeTextBlocks(
  * block, so a reorder is one revision and the containment relation is
  * untouched.
  */
-export async function moveBlock(
-  db: postgres.Sql,
-  input: {
-    readonly documentId: string;
-    readonly blockId: string;
-    readonly baseRevisionId: string;
-    readonly placement: Placement;
-  },
-): Promise<GraphOutcome<WrittenBlock>> {
-  const loaded = await loadDocument(db, input.documentId);
+export async function moveBlock(input: {
+  readonly documentId: string;
+  readonly blockId: string;
+  readonly baseRevisionId: string;
+  readonly placement: Placement;
+}): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
   if (!loaded.ok) return loaded.outcome;
-
-  const block = loaded.document.blocks.find(
-    (candidate) => candidate.blockId === input.blockId,
-  );
-  if (block === undefined) {
-    return refuse("unknownBlock", `Block ${input.blockId} is not in this document.`);
-  }
+  const located = locate(loaded.document, input.blockId, input.baseRevisionId);
+  if ("failure" in located) return located.failure;
   if (
     ("before" in input.placement && input.placement.before === input.blockId) ||
     ("after" in input.placement && input.placement.after === input.blockId)
@@ -789,23 +701,14 @@ export async function moveBlock(
   const order = orderFor(loaded.document.blocks, input.placement);
   if ("failure" in order) return order.failure;
 
-  const node = nodeOf(loaded.graph, input.blockId);
-  const content = contentOf(loaded.graph, input.blockId);
   return commit(
-    db,
-    [
-      {
-        op: "reviseNode",
-        nodeId: input.blockId,
-        baseRevisionId: input.baseRevisionId,
-        semanticType: node?.semanticType as string,
-        content: asContent({ ...content, order: order.order }),
-      },
-    ],
-    (written) => ({
+    "SET b.order = $order",
+    { bNodeId: nodeRef(input.blockId), order: order.order },
+    `move block ${input.blockId}`,
+    async (dataRevision, revisionOf) => ({
       blockId: input.blockId,
-      revisionId: revisionOf(written, input.blockId),
-      dataRevision: written.dataRevision,
+      revisionId: await revisionOf(input.blockId),
+      dataRevision,
     }),
   );
 }
@@ -813,47 +716,40 @@ export async function moveBlock(
 /**
  * Retires a block: its containment closes and the document records it as
  * retired, so it leaves the reading order while staying reachable from the
- * document it belonged to.
+ * document it belonged to. The close and the relation travel in one script
+ * with the document as an endpoint, which is what lets the kernel's gate
+ * verify the close against content it can see.
  */
-export async function retireBlock(
-  db: postgres.Sql,
-  input: { readonly documentId: string; readonly blockId: string },
-): Promise<GraphOutcome<WrittenBlock>> {
-  const loaded = await loadDocument(db, input.documentId);
+export async function retireBlock(input: {
+  readonly documentId: string;
+  readonly blockId: string;
+}): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
   if (!loaded.ok) return loaded.outcome;
-
-  const block = loaded.document.blocks.find(
-    (candidate) => candidate.blockId === input.blockId,
-  );
-  if (block === undefined) {
-    return refuse("unknownBlock", `Block ${input.blockId} is not in this document.`);
-  }
+  const located = locate(loaded.document, input.blockId);
+  if ("failure" in located) return located.failure;
 
   return commit(
-    db,
-    [
-      { op: "closeRelation", relationId: block.containmentId },
-      {
-        op: "createRelation",
-        relationType: "retired",
-        from: { kind: "id", nodeId: input.documentId },
-        to: { kind: "node", node: { kind: "id", nodeId: input.blockId } },
-      },
-    ],
-    (written) => ({
+    ["CLOSE c", `RELATE dref -[r:${RETIRED}]-> bref`].join("; "),
+    {
+      cRelationId: located.block.containmentId,
+      dref: nodeRef(input.documentId),
+      bref: nodeRef(input.blockId),
+    },
+    `retire block ${input.blockId}`,
+    async (dataRevision) => ({
       blockId: input.blockId,
-      revisionId: revisionOf(written, input.blockId),
-      dataRevision: written.dataRevision,
+      revisionId: located.block.revisionId,
+      dataRevision,
     }),
   );
 }
 
 /** The blocks retired from a document, newest position order first read. */
 export async function readRetiredBlocks(
-  db: postgres.Sql,
   documentId: string,
 ): Promise<GraphOutcome<readonly BlockView[]>> {
-  const loaded = await loadDocument(db, documentId, "retired");
+  const loaded = await loadDocument(documentId, RETIRED);
   if (!loaded.ok) return loaded.outcome;
   return { outcome: "success", result: assembleRetired(loaded.graph, documentId) };
 }
@@ -863,30 +759,25 @@ export async function readRetiredBlocks(
  * than assuming the position it used to hold is still free.
  *
  * A block that is already contained is refused: containment is a tree, and a
- * second active parent is exactly what that rules out.
+ * second active parent is exactly what that rules out. Validation does not
+ * hold this line for graph-declared types, so the shell checks it before it
+ * writes (`block-document-model.md`).
  */
-export async function restoreBlock(
-  db: postgres.Sql,
-  input: {
-    readonly documentId: string;
-    readonly blockId: string;
-    readonly placement: Placement;
-  },
-): Promise<GraphOutcome<WrittenBlock>> {
-  const contained = await loadDocument(db, input.documentId);
+export async function restoreBlock(input: {
+  readonly documentId: string;
+  readonly blockId: string;
+  readonly placement: Placement;
+}): Promise<GraphOutcome<WrittenBlock>> {
+  const contained = await loadDocument(input.documentId);
   if (!contained.ok) return contained.outcome;
-  if (
-    contained.document.blocks.some(
-      (block) => block.blockId === input.blockId,
-    )
-  ) {
+  if (contained.document.blocks.some((block) => block.blockId === input.blockId)) {
     return refuse(
       "singleParent",
       `Block ${input.blockId} already has an active containment parent.`,
     );
   }
 
-  const loaded = await loadDocument(db, input.documentId, "retired");
+  const loaded = await loadDocument(input.documentId, RETIRED);
   if (!loaded.ok) return loaded.outcome;
   const retired = assembleRetired(loaded.graph, input.documentId).find(
     (block) => block.blockId === input.blockId,
@@ -901,70 +792,55 @@ export async function restoreBlock(
   const order = orderFor(contained.document.blocks, input.placement);
   if ("failure" in order) return order.failure;
 
-  const node = nodeOf(loaded.graph, input.blockId);
-  const content = contentOf(loaded.graph, input.blockId);
   return commit(
-    db,
-    [
-      {
-        op: "reviseNode",
-        nodeId: input.blockId,
-        baseRevisionId: retired.revisionId,
-        semanticType: node?.semanticType as string,
-        content: asContent({ ...content, order: order.order }),
-      },
-      { op: "closeRelation", relationId: retired.containmentId },
-      {
-        op: "createRelation",
-        relationType: "contains",
-        from: { kind: "id", nodeId: input.documentId },
-        to: { kind: "node", node: { kind: "id", nodeId: input.blockId } },
-      },
-    ],
-    (written) => ({
+    ["SET b.order = $order", "CLOSE r", `RELATE dref -[c:${CONTAINS}]-> bref`].join("; "),
+    {
+      bNodeId: nodeRef(input.blockId),
+      order: order.order,
+      rRelationId: retired.containmentId,
+      dref: nodeRef(input.documentId),
+      bref: nodeRef(input.blockId),
+    },
+    `restore block ${input.blockId}`,
+    async (dataRevision, revisionOf) => ({
       blockId: input.blockId,
-      revisionId: revisionOf(written, input.blockId),
-      dataRevision: written.dataRevision,
+      revisionId: await revisionOf(input.blockId),
+      dataRevision,
     }),
   );
 }
 
 /**
- * Deletes a document by archiving its established revision.
+ * Deletes a document by retiring its node: the established revision is
+ * archived and the node leaves current reads.
  *
  * The graph keeps every revision, every relation, and every closed validity:
- * dropping them would rewrite history rather than reclaim space. What changes
- * is that the document has no established truth, so the parentless listing
- * stops answering it and a read of it answers with nothing.
- *
- * Its blocks are left as they stand. A block is reachable only through its
- * document, so archiving each one would multiply the write for no readable
- * difference.
+ * dropping them would rewrite history rather than reclaim space. Its blocks
+ * are left as they stand. A block is reachable only through its document, so
+ * retiring each one would multiply the write for no readable difference.
  *
  * Deleting a document that is unknown or already deleted is refused rather
  * than answered as success, because the caller asked about something that is
  * not there.
  */
-export async function deleteDocument(
-  db: postgres.Sql,
-  input: { readonly documentId: string; readonly baseRevisionId: string },
-): Promise<GraphOutcome<WrittenDocument>> {
-  const loaded = await loadDocument(db, input.documentId);
+export async function deleteDocument(input: {
+  readonly documentId: string;
+  readonly baseRevisionId: string;
+}): Promise<GraphOutcome<WrittenDocument>> {
+  const loaded = await loadDocument(input.documentId);
   if (!loaded.ok) return loaded.outcome;
+  if (loaded.document.revisionId !== input.baseRevisionId) {
+    return conflict(input.documentId, input.baseRevisionId, loaded.document.revisionId);
+  }
 
   return commit(
-    db,
-    [
-      {
-        op: "archiveNode",
-        nodeId: input.documentId,
-        baseRevisionId: input.baseRevisionId,
-      },
-    ],
-    (written) => ({
+    "RETIRE d",
+    { dNodeId: nodeRef(input.documentId) },
+    `delete document ${input.documentId}`,
+    async (dataRevision) => ({
       documentId: input.documentId,
       revisionId: input.baseRevisionId,
-      dataRevision: written.dataRevision,
+      dataRevision,
     }),
   );
 }
@@ -972,44 +848,54 @@ export async function deleteDocument(
 /**
  * When a document last changed and how many times.
  *
- * A change is one graph data revision that touched the document: a revision of
- * its own node, of a block in its reading order, or of one of its retired
- * blocks, or the creation of a `contains` or `retired` relation between them.
- * The gateway counts one data revision once however many records it wrote, so
- * a split, which writes two blocks together, is the one change it was.
- *
- * Retired blocks count. They stay recoverable for the life of the document, so
- * they never stopped being the document's, and retiring one writes no node
- * revision at all — it closes a containment and creates a `retired` relation,
- * which is why that relation is named here.
- *
- * A closed relation is not reachable from a current read, and does not need to
- * be: every mutation that closes one also writes a record that is. Retiring
- * creates the `retired` relation, restoring revises the block it puts back,
- * and merging revises the block that survived.
+ * A change is one graph data revision that touched the document: a revision
+ * of its own node, of a block in its reading order or among its retired
+ * blocks, or the creation or closing of a containment or retirement between
+ * them. The stamps are read from CCGW's own history — metadata only, no
+ * content — and a data revision is counted once however many records it
+ * wrote, so a split, which writes two blocks together, is the one change it
+ * was.
  */
 export async function readDocumentChanges(
-  db: postgres.Sql,
   documentId: string,
 ): Promise<GraphOutcome<ChangeSummary>> {
-  const contained = await loadDocument(db, documentId);
-  if (!contained.ok) return contained.outcome;
+  const revisions = new Set<number>();
+  let lastWrittenAt = 0;
+  const stamp = (dataRevision: number | undefined, at: number | undefined): void => {
+    if (dataRevision !== undefined && dataRevision > 0) revisions.add(dataRevision);
+    if (at !== undefined && at > lastWrittenAt) lastWrittenAt = at;
+  };
 
-  const retired = await loadDocument(db, documentId, "retired");
-  if (!retired.ok) return retired.outcome;
-  const retiredBlocks = assembleRetired(retired.graph, documentId);
+  for (const relation of [CONTAINS, RETIRED] as const) {
+    const outcome = await query({
+      statement: CONTAINMENT_PATTERN(relation, " INCLUDE HISTORY"),
+      roots: [nodeRef(documentId)],
+      unbounded: true,
+      metadataOnly: true,
+      purpose: "document changes",
+    });
+    if (outcome.outcome === "noResult") continue;
+    if (outcome.outcome !== "success") return outcome as GraphOutcome<ChangeSummary>;
+    if (relation === CONTAINS && documentNodeOf(outcome.result, documentId) === undefined) {
+      return { outcome: "noResult", detail: `No document ${documentId} in this graph.` };
+    }
+    for (const node of outcome.result.nodes) {
+      stamp(node.revision.dataRevision, node.revision.createdAt);
+      for (const prior of node.history ?? []) stamp(prior.dataRevision, prior.createdAt);
+    }
+    for (const rel of outcome.result.relations) {
+      stamp(rel.dataRevision, rel.createdAt);
+      stamp(rel.validity.dataRevision, rel.validity.updatedAt);
+    }
+  }
 
-  const nodeIds = [
-    documentId,
-    ...contained.document.blocks.map((block) => block.blockId),
-    ...retiredBlocks.map((block) => block.blockId),
-  ];
-  const relationIds = [
-    ...contained.document.blocks.map((block) => block.containmentId),
-    ...retiredBlocks.map((block) => block.containmentId),
-  ];
-
-  return readChangeSummary(db, { nodeIds, relationIds });
+  return {
+    outcome: "success",
+    result: {
+      changeCount: revisions.size,
+      lastWrittenAt: lastWrittenAt === 0 ? null : new Date(lastWrittenAt).toISOString(),
+    },
+  };
 }
 
 /**
@@ -1037,178 +923,153 @@ export type DocumentProposalItem =
       readonly placement: Placement;
     };
 
+export interface StagedItem {
+  readonly itemId: string;
+  readonly kind: DocumentProposalItem["kind"];
+  /** The block it concerns: the one it names, or the one it would insert. */
+  readonly blockId: string;
+}
+
+export interface StagedProposal {
+  readonly groupId: string;
+  readonly items: readonly StagedItem[];
+  readonly dataRevision: string;
+}
+
+/**
+ * An item's identity, as the surface hands it back to be answered: the group,
+ * the kind, and the members the decision covers. A replace, move or insert is
+ * one member — the staged node, whose containment travels with it — while a
+ * remove is two, the retirement relation the proposal stages and the
+ * containment its close intent names, decided in that order.
+ */
+const itemId = (groupId: string, kind: string, members: readonly string[]): string =>
+  [groupId, kind, ...members].join("|");
+
+const parseItemId = (
+  id: string,
+): { readonly groupId: string; readonly kind: string; readonly members: readonly string[] } | null => {
+  const [groupId, kind, ...members] = id.split("|");
+  if (groupId === undefined || kind === undefined || members.length === 0) return null;
+  return { groupId, kind, members };
+};
+
 /**
  * Stages a group of proposed changes against one document. Nothing here
  * changes the document: content an item introduces is staged as a candidate
- * revision and the relations placing or retiring a block are written when the
- * item is accepted.
+ * revision, and the relations placing or retiring a block are staged beside
+ * it, written into truth when the item is accepted.
  *
  * Order keys are minted here, against the document as it stands, and each
  * insert accounts for the ones staged before it in the same group. A key
  * always sorts somewhere, so an accepted insert lands where its item said even
- * when the document has moved since.
+ * when the document has moved since. Staleness of a replace or a move is
+ * CCGW's per-member drift judgement at acceptance.
  */
-export async function proposeDocumentChanges(
-  db: postgres.Sql,
-  input: {
-    readonly documentId: string;
-    readonly items: NonEmpty<DocumentProposalItem>;
-    readonly request?: JSONValue;
-  },
-  by: GraphActor = actor,
-): Promise<GraphOutcome<StagedProposal>> {
-  const loaded = await loadDocument(db, input.documentId);
+export async function proposeDocumentChanges(input: {
+  readonly documentId: string;
+  readonly items: NonEmpty<DocumentProposalItem>;
+  readonly request?: unknown;
+}): Promise<GraphOutcome<StagedProposal>> {
+  const loaded = await loadDocument(input.documentId);
   if (!loaded.ok) return loaded.outcome;
 
-  // Inserts staged earlier in this group are siblings the later ones place
-  // themselves among, so two appends do not mint the same key.
+  const groupId = `node:chg-${randomBytes(8).toString("hex")}`;
   const siblings: BlockView[] = [...loaded.document.blocks];
-  const staged: ProposalItemRequest[] = [];
+  const statements: string[] = [];
+  const parameters: Record<string, unknown> = {};
+  const staged: StagedItem[] = [];
+  const documentNode = nodeRef(input.documentId);
 
-  for (const item of input.items) {
-    const compiled = compileProposalItem(loaded, siblings, item);
-    if ("failure" in compiled) return compiled.failure;
-    staged.push(compiled.item);
-  }
-
-  const [first, ...rest] = staged;
-  if (first === undefined) {
-    return refuse("emptyProposal", "A proposal names at least one change.");
-  }
-  return stageProposal(
-    db,
-    calliopaGraphSchema,
-    {
-      rootNodeId: input.documentId,
-      items: [first, ...rest],
-      ...(input.request === undefined ? {} : { request: input.request }),
-    },
-    by,
-  );
-}
-
-function compileProposalItem(
-  loaded: {
-    readonly graph: AssembledGraph;
-    readonly document: DocumentView;
-  },
-  siblings: BlockView[],
-  item: DocumentProposalItem,
-): { readonly item: ProposalItemRequest } | { readonly failure: GraphOutcome<never> } {
-  if (item.kind === "insert") {
-    const order = orderFor(siblings, item.placement);
-    if ("failure" in order) return { failure: order.failure };
-    siblings.push({
-      blockId: `staged:${order.order}`,
-      revisionId: "",
-      containmentId: "",
-      kind: "divider",
-      order: order.order,
-    });
-    return {
-      item: {
-        kind: "insert",
-        content: {
-          of: "newNode",
-          semanticType: blockType(item.block),
-          content: blockContent(item.block, order.order),
-        },
-        onAccept: [
-          {
-            op: "createRelation",
-            relationType: "contains",
-            from: { kind: "id", nodeId: loaded.document.documentId },
-            to: { kind: "stagedNode" },
-          },
-        ],
-      },
-    };
-  }
-
-  const block = loaded.document.blocks.find(
-    (candidate) => candidate.blockId === item.blockId,
-  );
-  if (block === undefined) {
-    return {
-      failure: refuse(
-        "unknownBlock",
-        `Block ${item.blockId} is not in this document.`,
-      ),
-    };
-  }
-
-  if (item.kind === "remove") {
-    return {
-      item: {
-        kind: "remove",
-        targetNodeId: item.blockId,
-        onAccept: [
-          { op: "closeRelation", relationId: block.containmentId },
-          {
-            op: "createRelation",
-            relationType: "retired",
-            from: { kind: "id", nodeId: loaded.document.documentId },
-            to: { kind: "id", nodeId: item.blockId },
-          },
-        ],
-      },
-    };
-  }
-
-  const node = nodeOf(loaded.graph, item.blockId);
-  const content = contentOf(loaded.graph, item.blockId);
-
-  if (item.kind === "move") {
-    if (
-      ("before" in item.placement && item.placement.before === item.blockId) ||
-      ("after" in item.placement && item.placement.after === item.blockId)
-    ) {
-      return {
-        failure: refuse(
-          "unknownAnchor",
-          "A block does not move relative to itself.",
-        ),
-      };
+  const isOutcome = (value: unknown): value is GraphOutcome<never> =>
+    typeof value === "object" && value !== null && "outcome" in value;
+  try {
+  input.items.forEach((item, index) => {
+    const alias = `i${index}`;
+    if (item.kind === "insert") {
+      const order = orderFor(siblings, item.placement);
+      if ("failure" in order) throw order.failure;
+      siblings.push({
+        blockId: `staged:${order.order}`,
+        revisionId: "",
+        containmentId: "",
+        kind: "divider",
+        order: order.order,
+      });
+      const blockId = randomUUID();
+      parameters[`${alias}d`] = documentNode;
+      parameters[`${alias}n`] = nodeRef(blockId);
+      statements.push(
+        `CREATE (${alias}:${blockType(item.block)} {${properties(alias, { id: blockId, ...blockContent(item.block, order.order) }, parameters, false)}})`,
+        `RELATE ${alias}d -[${alias}c:${CONTAINS}]-> ${alias}n`,
+      );
+      staged.push({ itemId: itemId(groupId, "insert", [nodeRef(blockId)]), kind: "insert", blockId });
+      return;
     }
-    const order = orderFor(siblings, item.placement);
-    if ("failure" in order) return { failure: order.failure };
-    return {
-      item: {
-        kind: "move",
-        targetNodeId: item.blockId,
-        content: {
-          of: "node",
-          nodeId: item.blockId,
-          baseRevisionId: item.baseRevisionId,
-          semanticType: node?.semanticType as string,
-          content: asContent({ ...content, order: order.order }),
-        },
-      },
-    };
+
+    const block = loaded.document.blocks.find((candidate) => candidate.blockId === item.blockId);
+    if (block === undefined) {
+      throw refuse("unknownBlock", `Block ${item.blockId} is not in this document.`);
+    }
+    const target = nodeRef(item.blockId);
+
+    if (item.kind === "remove") {
+      parameters[`${alias}cRelationId`] = block.containmentId;
+      parameters[`${alias}d`] = documentNode;
+      parameters[`${alias}b`] = target;
+      statements.push(`CLOSE ${alias}c`, `RELATE ${alias}d -[${alias}r:${RETIRED}]-> ${alias}b`);
+      // The retirement relation's id is only known once staged; the item is
+      // named by the block and resolved to its members when read back.
+      staged.push({ itemId: itemId(groupId, "remove", [target, block.containmentId]), kind: "remove", blockId: item.blockId });
+      return;
+    }
+
+    if (item.kind === "move") {
+      if (
+        ("before" in item.placement && item.placement.before === item.blockId) ||
+        ("after" in item.placement && item.placement.after === item.blockId)
+      ) {
+        throw refuse("unknownAnchor", "A block does not move relative to itself.");
+      }
+      const order = orderFor(siblings, item.placement);
+      if ("failure" in order) throw order.failure;
+      parameters[`${alias}NodeId`] = target;
+      parameters[`${alias}order`] = order.order;
+      statements.push(`SET ${alias}.order = $${alias}order`);
+      staged.push({ itemId: itemId(groupId, "move", [target]), kind: "move", blockId: item.blockId });
+      return;
+    }
+
+    const assignments: string[] = [];
+    parameters[`${alias}NodeId`] = target;
+    if (item.runs !== undefined) {
+      parameters[`${alias}runs`] = normalizeRuns([...item.runs]);
+      assignments.push(`${alias}.runs = $${alias}runs`);
+    }
+    if (item.role !== undefined) {
+      parameters[`${alias}role`] = item.role === "paragraph" ? null : item.role;
+      assignments.push(`${alias}.role = $${alias}role`);
+    }
+    if (assignments.length === 0) {
+      throw refuse("emptyReplace", `A replace of ${item.blockId} names runs or a role.`);
+    }
+    statements.push(`SET ${assignments.join(", ")}`);
+    staged.push({ itemId: itemId(groupId, "replace", [target]), kind: "replace", blockId: item.blockId });
+  });
+  } catch (failure) {
+    if (isOutcome(failure)) return failure;
+    throw failure;
   }
 
+  const rationale =
+    input.request === undefined
+      ? `proposal against document ${input.documentId}`
+      : `proposal against document ${input.documentId}: ${JSON.stringify(input.request)}`;
+  const outcome = await stage(groupId, statements.join("; "), parameters, rationale);
+  if (outcome.outcome !== "success") return outcome as GraphOutcome<StagedProposal>;
   return {
-    item: {
-      kind: "replace",
-      targetNodeId: item.blockId,
-      content: {
-        of: "node",
-        nodeId: item.blockId,
-        baseRevisionId: item.baseRevisionId,
-        semanticType: node?.semanticType as string,
-        content: asContent({
-          ...content,
-          ...(item.runs === undefined
-            ? {}
-            : { runs: normalizeRuns([...item.runs]) }),
-          ...(item.role === undefined
-            ? {}
-            : item.role === "paragraph"
-              ? { role: undefined }
-              : { role: item.role }),
-        }),
-      },
-    },
+    outcome: "success",
+    result: { groupId, items: staged, dataRevision: outcome.result.dataRevision },
   };
 }
 
@@ -1229,39 +1090,126 @@ export interface DocumentProposals {
   readonly groups: readonly {
     readonly groupId: string;
     readonly items: readonly ProposedChange[];
+    /** Who staged the group's candidates — the core's `createdBy` stamps, sorted. BO_0209_006 */
+    readonly stagedBy: readonly string[];
   }[];
+}
+
+/** The open proposal groups of the graph, by id. */
+async function openGroups(): Promise<GraphOutcome<readonly string[]>> {
+  const outcome = await query({
+    statement: "MATCH (g:ProposalGroup) RETURN GRAPH g",
+    unbounded: true,
+    purpose: "open proposals",
+  });
+  if (outcome.outcome === "noResult") return { outcome: "success", result: [] };
+  if (outcome.outcome !== "success") return outcome as GraphOutcome<readonly string[]>;
+  return {
+    outcome: "success",
+    result: outcome.result.nodes
+      .filter((node) => node.revision.content?.["status"] === "open")
+      .map((node) => node.id),
+  };
 }
 
 /**
  * The unanswered proposals standing against a document, grouped as they were
  * staged. This is the document's own reading of them: what each item would do
  * and to which block, which is what the editor shows against that block.
+ *
+ * A group names no document. Its members do: a staged relation from the
+ * document places or retires a block, and a candidate revision of a block in
+ * the document rewrites or moves it. A candidate whose content equals the
+ * block's established content is the carry-forward anchor a staged relation
+ * hangs on, not a change, and is not shown.
  */
 export async function readDocumentProposals(
-  db: postgres.Sql,
   documentId: string,
 ): Promise<GraphOutcome<DocumentProposals>> {
-  const loaded = await loadDocument(db, documentId);
+  const loaded = await loadDocument(documentId);
   if (!loaded.ok) return loaded.outcome;
+  const groupIds = await openGroups();
+  if (groupIds.outcome !== "success") return groupIds as GraphOutcome<never>;
 
-  const groupIds = await listOpenProposalGroups(db, documentId);
-  const groups: { groupId: string; items: ProposedChange[] }[] = [];
+  const documentNode = nodeRef(documentId);
+  const established = new Map(loaded.document.blocks.map((block) => [nodeRef(block.blockId), block]));
+  const groups: { groupId: string; items: ProposedChange[]; stagedBy: string[] }[] = [];
   let unanswered = 0;
 
-  for (const groupId of groupIds) {
-    const outcome = await readProposalGroup(db, groupId);
-    if (outcome.outcome !== "success") return outcome as GraphOutcome<never>;
-    const items = outcome.result.items
-      .filter((item) => item.answer === null)
-      .map((item) => ({
-        itemId: item.itemId,
+  for (const groupId of groupIds.result) {
+    const touched = await touchedSet(groupId);
+    if (touched.outcome !== "success") return touched as GraphOutcome<never>;
+    const candidates = await query({
+      statement: "MATCH (n) WHERE n._proposal = $g RETURN GRAPH n ROOT n INCLUDE CANDIDATES",
+      parameters: { g: groupId },
+      proposalOverlay: groupId,
+      unbounded: true,
+      purpose: "proposal members",
+    });
+    if (candidates.outcome === "storageError") return candidates as GraphOutcome<never>;
+    const staged = new Map(
+      candidates.outcome === "success"
+        ? candidates.result.nodes
+            .filter((node) => node.revision.content?.["_proposal"] === groupId)
+            .map((node) => [node.id, node])
+        : [],
+    );
+
+    const items: ProposedChange[] = [];
+    const named = new Set<string>();
+
+    for (const relation of touched.result.stagedRelations) {
+      if (relation.fromNodeId !== documentNode) continue;
+      const target = relation.toId;
+      if (relation.type === CONTAINS && !established.has(target)) {
+        const node = staged.get(target);
+        if (node === undefined) continue;
+        named.add(target);
+        items.push({
+          itemId: itemId(groupId, "insert", [target]),
+          groupId,
+          kind: "insert",
+          blockId: bareId(target),
+          block: toBlock(node, ""),
+        });
+      }
+      if (relation.type === RETIRED && established.has(target)) {
+        const block = established.get(target) as BlockView;
+        named.add(target);
+        items.push({
+          itemId: itemId(groupId, "remove", [relation.id, block.containmentId]),
+          groupId,
+          kind: "remove",
+          blockId: block.blockId,
+          block: null,
+        });
+      }
+    }
+
+    for (const [nodeId, node] of staged) {
+      if (named.has(nodeId)) continue;
+      const block = established.get(nodeId);
+      if (block === undefined) continue;
+      const proposed = toBlock(node, block.containmentId);
+      if (sameBlock(block, proposed)) continue;
+      const kind = onlyOrderDiffers(block, proposed) ? "move" : "replace";
+      items.push({
+        itemId: itemId(groupId, kind, [nodeId]),
         groupId,
-        kind: item.kind,
-        blockId: (item.targetNodeId ?? item.stagedNodeId) as string,
-        block: proposedBlock(item),
-      }));
+        kind,
+        blockId: block.blockId,
+        block: proposed,
+      });
+    }
+
+    if (items.length === 0) continue;
     unanswered += items.length;
-    groups.push({ groupId, items });
+    // Authorship is the graph's: the stager is whoever the core stamped on
+    // the candidates, never a name the shell asserts. BO_0209_006
+    const stagedBy = [...new Set([...staged.values()].map((node) => node.revision.createdBy))]
+      .filter((name) => name !== "")
+      .sort();
+    groups.push({ groupId, items, stagedBy });
   }
 
   return {
@@ -1270,41 +1218,69 @@ export async function readDocumentProposals(
   };
 }
 
-/**
- * The staged content as a block. It goes through the same reader the
- * document's own blocks do, so a proposed block and a stored one cannot come
- * to mean different things, and it carries no containment because the relation
- * placing it is written when the item is accepted.
- */
-function proposedBlock(item: ProposalItemView): BlockView | null {
-  if (item.stagedContent === null || item.stagedNodeId === null) return null;
-  return toBlock(
-    {
-      nodeId: item.stagedNodeId,
-      revisionId: item.stagedRevisionId ?? "",
-      semanticType: item.stagedSemanticType ?? "",
-      content: item.stagedContent,
-      provenance: null,
-      schemaVersion: 0,
-      dataRevision: "0",
-    },
-    "",
-  );
+const sameBlock = (left: BlockView, right: BlockView): boolean =>
+  left.kind === right.kind &&
+  left.order === right.order &&
+  (left.kind !== "text" ||
+    right.kind !== "text" ||
+    (left.role === right.role && sameRuns(left.runs, right.runs)));
+
+const onlyOrderDiffers = (left: BlockView, right: BlockView): boolean =>
+  left.kind === right.kind &&
+  left.order !== right.order &&
+  (left.kind !== "text" ||
+    right.kind !== "text" ||
+    (left.role === right.role && sameRuns(left.runs, right.runs)));
+
+export type ProposalAnswer = "accepted" | "rejected";
+
+export interface AnsweredItem {
+  readonly itemId: string;
+  readonly answer: ProposalAnswer;
+  readonly dataRevision: string;
+  /** The group after this answer, so a caller learns it closed without asking. */
+  readonly groupState: "open" | "closed";
 }
 
 /**
- * Answers one proposed change. Accepting performs it and the document holds it
- * from that moment; rejecting leaves the document exactly as it was.
+ * Answers one proposed change through the kernel. Accepting performs it and
+ * the document holds it from that moment; rejecting leaves the document
+ * exactly as it was. A remove is two member decisions in order — the
+ * retirement relation first, so the block is never detached without being
+ * recorded as retired — and a decision the kernel keeps behind its
+ * confirmation answers as refused rather than half-done.
  */
-export async function answerDocumentProposal(
-  db: postgres.Sql,
-  input: { readonly itemId: string; readonly answer: ProposalAnswer },
-): Promise<GraphOutcome<AnsweredItem>> {
-  return answerProposalItem(
-    db,
-    calliopaGraphSchema,
-    input.itemId,
-    input.answer,
-    actor,
-  );
+export async function answerDocumentProposal(input: {
+  readonly itemId: string;
+  readonly answer: ProposalAnswer;
+  readonly override?: boolean;
+}): Promise<GraphOutcome<AnsweredItem>> {
+  const parsed = parseItemId(input.itemId);
+  if (parsed === null) {
+    return refuse("itemShape", `${input.itemId} does not name a proposed change.`);
+  }
+  const decision = input.answer === "accepted" ? "accept" : "reject";
+  for (const member of parsed.members) {
+    const outcome = await decide(decision, parsed.groupId, member, `${parsed.kind} ${input.itemId}`, input.override ?? false);
+    if (outcome.outcome !== "success") return outcome as GraphOutcome<AnsweredItem>;
+  }
+
+  const state = await query({
+    statement: "MATCH (g:ProposalGroup {id: $gid}) RETURN GRAPH g",
+    parameters: { gid: bareId(parsed.groupId) },
+    purpose: "group state after answer",
+  });
+  const open =
+    state.outcome === "success" &&
+    state.result.nodes.some((node) => node.revision.content?.["status"] === "open");
+  return {
+    outcome: "success",
+    result: {
+      itemId: input.itemId,
+      answer: input.answer,
+      dataRevision: state.outcome === "success" ? String(state.result.resolvedDataRevision) : "",
+      groupState: open ? "open" : "closed",
+    },
+  };
 }
+

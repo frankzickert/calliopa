@@ -1,16 +1,7 @@
-import type postgres from "postgres";
-
 import type { DocumentSummary } from "../../lib/library";
 import { readRuns, TEXT_ROLES, type Run, type TextRole } from "../../lib/runs";
-import type {
-  AnsweredItem,
-  ChangeSummary,
-  GraphOutcome,
-  NonEmpty,
-  ProposalAnswer,
-  StagedProposal,
-} from "../graph/contract";
-import { refusal, respond, type OutcomeResponse } from "../graph/outcome";
+import type { GraphOutcome, NonEmpty } from "../outcome";
+import { refusal, respond, type OutcomeResponse } from "../outcome";
 import {
   answerDocumentProposal,
   createDocument,
@@ -29,12 +20,16 @@ import {
   retireBlock,
   reviseTextBlock,
   splitTextBlock,
+  type AnsweredItem,
+  type ChangeSummary,
   type CreatedDocument,
   type DocumentProposalItem,
   type DocumentProposals,
   type NewBlock,
   type Placement,
+  type ProposalAnswer,
   type SplitBlocks,
+  type StagedProposal,
   type WrittenBlock,
   type WrittenDocument,
 } from "./documents";
@@ -386,7 +381,6 @@ function readProposalItem(
 
 /** Runs one parsed command against a document. */
 export function runDocumentCommand(
-  db: postgres.Sql,
   documentId: string,
   command: DocumentCommand,
 ): Promise<
@@ -396,13 +390,13 @@ export function runDocumentCommand(
 > {
   switch (command.command) {
     case "insert":
-      return insertBlock(db, {
+      return insertBlock({
         documentId,
         block: command.block,
         placement: command.placement,
       });
     case "revise":
-      return reviseTextBlock(db, {
+      return reviseTextBlock({
         documentId,
         blockId: command.blockId,
         baseRevisionId: command.baseRevisionId,
@@ -410,51 +404,51 @@ export function runDocumentCommand(
         ...(command.role === undefined ? {} : { role: command.role }),
       });
     case "split":
-      return splitTextBlock(db, {
+      return splitTextBlock({
         documentId,
         blockId: command.blockId,
         baseRevisionId: command.baseRevisionId,
         at: command.at,
       });
     case "merge":
-      return mergeTextBlocks(db, {
+      return mergeTextBlocks({
         documentId,
         intoBlockId: command.intoBlockId,
         intoBaseRevisionId: command.intoBaseRevisionId,
         blockId: command.blockId,
       });
     case "move":
-      return moveBlock(db, {
+      return moveBlock({
         documentId,
         blockId: command.blockId,
         baseRevisionId: command.baseRevisionId,
         placement: command.placement,
       });
     case "rename":
-      return renameDocument(db, {
+      return renameDocument({
         documentId,
         baseRevisionId: command.baseRevisionId,
         title: command.title,
       });
     case "delete":
-      return deleteDocument(db, {
+      return deleteDocument({
         documentId,
         baseRevisionId: command.baseRevisionId,
       });
     case "retire":
-      return retireBlock(db, { documentId, blockId: command.blockId });
+      return retireBlock({ documentId, blockId: command.blockId });
     case "propose":
-      return proposeDocumentChanges(db, {
+      return proposeDocumentChanges({
         documentId,
         items: command.items,
       });
     case "answerProposal":
-      return answerDocumentProposal(db, {
+      return answerDocumentProposal({
         itemId: command.itemId,
         answer: command.answer,
       });
     case "restore":
-      return restoreBlock(db, {
+      return restoreBlock({
         documentId,
         blockId: command.blockId,
         placement: command.placement,
@@ -476,16 +470,14 @@ async function decode(request: Request): Promise<unknown | undefined> {
  * content it does not render.
  */
 export async function handleDocumentList(
-  db: postgres.Sql,
 ): Promise<OutcomeResponse<readonly DocumentSummary[]>> {
-  return respond(await listDocuments(db));
+  return respond(await listDocuments());
 }
 
 export async function handleDocumentRead(
-  db: postgres.Sql,
   documentId: string,
 ): Promise<OutcomeResponse<DocumentView>> {
-  return respond(await readDocument(db, documentId));
+  return respond(await readDocument(documentId));
 }
 
 /**
@@ -494,10 +486,9 @@ export async function handleDocumentRead(
  * save without paying to read every block again.
  */
 export async function handleDocumentChanges(
-  db: postgres.Sql,
   documentId: string,
 ): Promise<OutcomeResponse<ChangeSummary>> {
-  return respond(await readDocumentChanges(db, documentId));
+  return respond(await readDocumentChanges(documentId));
 }
 
 /**
@@ -506,17 +497,15 @@ export async function handleDocumentChanges(
  * document read paying for content nobody has asked to see.
  */
 export async function handleProposalsRead(
-  db: postgres.Sql,
   documentId: string,
 ): Promise<OutcomeResponse<DocumentProposals>> {
-  return respond(await readDocumentProposals(db, documentId));
+  return respond(await readDocumentProposals(documentId));
 }
 
 export async function handleRetiredRead(
-  db: postgres.Sql,
   documentId: string,
 ): Promise<OutcomeResponse<readonly BlockView[]>> {
-  return respond(await readRetiredBlocks(db, documentId));
+  return respond(await readRetiredBlocks(documentId));
 }
 
 /**
@@ -525,7 +514,6 @@ export async function handleRetiredRead(
  */
 export async function handleDocumentCommand(
   request: Request,
-  db: postgres.Sql,
   documentId: string,
 ): Promise<OutcomeResponse<unknown>> {
   const body = await decode(request);
@@ -536,7 +524,7 @@ export async function handleDocumentCommand(
   if ("failure" in parsed) {
     return respond(refusal("commandShape", parsed.failure));
   }
-  return respond(await runDocumentCommand(db, documentId, parsed.command));
+  return respond(await runDocumentCommand(documentId, parsed.command));
 }
 
 /**
@@ -546,7 +534,6 @@ export async function handleDocumentCommand(
  */
 export async function handleDocumentCreate(
   request: Request,
-  db: postgres.Sql,
 ): Promise<OutcomeResponse<CreatedDocument>> {
   const body = await decode(request);
   if (body === undefined) {
@@ -557,7 +544,7 @@ export async function handleDocumentCreate(
   if (typeof title !== "string") {
     return respond(refusal("documentShape", "A document carries a title."));
   }
-  return respond(await createDocument(db, { title }));
+  return respond(await createDocument({ title }));
 }
 
 /** A request naming something that is not a record identifier, answered as the

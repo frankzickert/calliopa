@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  bunnyLibraryUrl,
   agentNeeds,
   configurationRefusal,
   type AgentStatus,
@@ -15,8 +14,17 @@ import {
  * anything.
  */
 
+/** The presentational half of a descriptor, as the listing lays it on a record. BO_0202_008 */
+const described = (party: string) => ({
+  label: party.charAt(0).toUpperCase() + party.slice(1),
+  purpose: `What ${party} is for`,
+  channel: false,
+  fields: [],
+});
+
 const status = (party: string, authenticated: boolean): ConnectionRecord => ({
-  party: party as ConnectionRecord["party"],
+  party,
+  ...described(party),
   kind: "status",
   state: authenticated ? "verified" : "unconfigured",
   keySet: false,
@@ -35,6 +43,7 @@ const status = (party: string, authenticated: boolean): ConnectionRecord => ({
 
 const memory = (keySet: boolean): ConnectionRecord => ({
   party: "honcho",
+  ...described("honcho"),
   kind: "apiKey",
   state: keySet ? "configured" : "unconfigured",
   keySet,
@@ -88,7 +97,7 @@ describe("what the agent still needs", () => {
     expect(needs[0]?.text).toContain("own row");
   });
 
-  it("Given no credential was issued, Then the reader is told and given the command that issues one", () => {
+  it("Given the agent holds no credential for the kernel's toolset, Then the reader is told it is the install's to have made", () => {
     const needs = agentNeeds([
       hermes({ ...stamped, credential: false, toolset: false }),
       status("codex", true),
@@ -97,10 +106,10 @@ describe("what the agent still needs", () => {
 
     expect(needs.map((need) => need.key)).toEqual(["credential"]);
     expect(needs[0]?.blocking).toBe(true);
-    // The client name is what a run's owner is resolved by, so the command is
-    // the literal one and not a description of it.
-    expect(needs[0]?.command).toBe("pnpm run client issue hermes --proposer");
-    expect(needs[0]?.text).toContain("CALLIOPA_AGENT_TOOLS_TOKEN");
+    // The kernel toolset's bearer is generated at install; there is no command
+    // a reader types for it any more (BO_0207_015).
+    expect(needs[0]?.command).toBeUndefined();
+    expect(needs[0]?.text).toContain("bootstrap");
   });
 
   it("Given a need nothing can be typed for, Then it carries no command", () => {
@@ -161,21 +170,29 @@ describe("what the agent still needs", () => {
  * parsed rather than later inside a request, so a row never says it is ready
  * while pointing at something that is not an address at all. CA_0036_002
  */
+/** The descriptors `ui.shell` and `settings` contribute, as the registry holds them. */
+const homepage = {
+  id: "homepage",
+  kind: "channel" as const,
+  fields: [{ key: "address", label: "Address", hint: "", check: "address" as const }],
+};
+const honcho = { id: "honcho", kind: "service" as const, fields: [] };
+
 describe("A channel's configuration", () => {
   it("Given a complete configuration, When it is checked, Then it is accepted", () => {
     expect(
-      configurationRefusal("homepage", {
+      configurationRefusal(homepage, {
         address: "http://100.114.122.91:4460",
       }),
     ).toBeNull();
     expect(
-      configurationRefusal("homepage", { address: "https://example.com" }),
+      configurationRefusal(homepage, { address: "https://example.com" }),
     ).toBeNull();
   });
 
   it("Given a required field is missing or blank, When it is checked, Then it is refused by name", () => {
-    expect(configurationRefusal("homepage", {})).toBe("Address is required.");
-    expect(configurationRefusal("homepage", { address: "   " })).toBe(
+    expect(configurationRefusal(homepage, {})).toBe("Address is required.");
+    expect(configurationRefusal(homepage, { address: "   " })).toBe(
       "Address is required.",
     );
   });
@@ -189,7 +206,7 @@ describe("A channel's configuration", () => {
       "not an address",
     ]) {
       expect(
-        configurationRefusal("homepage", { address }),
+        configurationRefusal(homepage, { address }),
         `${address} was accepted`,
       ).toBe("Address must be an http or https address.");
     }
@@ -197,7 +214,7 @@ describe("A channel's configuration", () => {
 
   it("Given a field the channel does not have, When it is checked, Then it is refused", () => {
     expect(
-      configurationRefusal("homepage", {
+      configurationRefusal(homepage, {
         address: "https://example.com",
         token: "sneaky",
       }),
@@ -205,54 +222,9 @@ describe("A channel's configuration", () => {
   });
 
   it("Given a party that is not a channel, When configuration is offered, Then it is refused", () => {
-    expect(configurationRefusal("honcho", {})).toBeNull();
+    expect(configurationRefusal(honcho, {})).toBeNull();
     expect(
-      configurationRefusal("honcho", { address: "https://example.com" }),
+      configurationRefusal(honcho, { address: "https://example.com" }),
     ).toBe("honcho takes no configuration.");
-  });
-});
-
-describe("The bunny channel's library", () => {
-  it("Given a numeric library id, When it is checked, Then it is accepted", () => {
-    expect(configurationRefusal("bunny", { libraryId: "512345" })).toBeNull();
-  });
-
-  it("Given no library, When it is checked, Then it is refused by name", () => {
-    expect(configurationRefusal("bunny", {})).toBe("Library is required.");
-    expect(configurationRefusal("bunny", { libraryId: "  " })).toBe(
-      "Library is required.",
-    );
-  });
-
-  it("Given a library name rather than its id, When it is checked, Then it is refused", () => {
-    // Every call of the channel lives under the library's numeric id, so a
-    // name entered here would make each of them reach an address that cannot
-    // exist. It is refused where it is typed rather than at the first upload.
-    for (const value of ["calliopa", "vz-12345", "12.5", "-1", "5 12345"]) {
-      expect(
-        configurationRefusal("bunny", { libraryId: value }),
-      ).not.toBeNull();
-    }
-  });
-
-  it("Given surrounding whitespace, When it is checked, Then it is trimmed rather than refused", () => {
-    // The store trims what it saves, so refusing here would refuse a value
-    // that would have been stored correctly.
-    expect(configurationRefusal("bunny", { libraryId: " 512345 " })).toBeNull();
-  });
-
-  it("Given a field the channel does not take, When it is checked, Then it is refused", () => {
-    expect(
-      configurationRefusal("bunny", {
-        libraryId: "512345",
-        cdnHostname: "x.b-cdn.net",
-      }),
-    ).toBe("bunny takes no cdnHostname.");
-  });
-
-  it("Given a library id, Then every call of the channel lives under it", () => {
-    expect(bunnyLibraryUrl("512345")).toBe(
-      "https://video.bunnycdn.com/library/512345",
-    );
   });
 });

@@ -7,9 +7,9 @@ import qwikCityPlan from "@qwik-city-plan";
 import { manifest } from "@qwik-client-manifest";
 
 import render from "./entry.ssr";
-import { readAppEnv } from "./server/env";
+import { readGraphEnv } from "./server/ccgw/env";
 
-readAppEnv();
+readGraphEnv();
 
 const distDir = join(fileURLToPath(import.meta.url), "..", "..", "dist");
 const port = Number(process.env.PORT ?? 4300);

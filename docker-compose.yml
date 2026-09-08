@@ -1,20 +1,40 @@
 name: calliopa
 
-# The Calliopa stack. Image references are pinned via .env; until published
-# images exist, the defaults point at locally built tags.
+# The Calliopa stack. No image is published by Calliopa: the cell, the kernel,
+# the agent service and the database are built on your machine from the
+# recipes under build/ — base images you pull from their publishers, plus the
+# Calliopa binaries downloaded from the release named in .env and checked
+# against its pinned checksum — and the object store and the memory service
+# are images you pull from their publishers. See THIRD-PARTY.md.
+
+x-calliopa-build-args: &calliopa-build-args
+  CALLIOPA_RELEASE_VERSION: ${CALLIOPA_RELEASE_VERSION:-}
+  CALLIOPA_BINARY_SOURCE: ${CALLIOPA_BINARY_SOURCE:-https://github.com/frankzickert/calliopa/releases/download}
+  CALLIOPA_RELEASE_SHA256SUMS: ${CALLIOPA_RELEASE_SHA256SUMS:-}
 
 services:
   bootstrap:
-    image: ${CALLIOPA_CELL_IMAGE:-calliopa-bootstrap-app}
+    image: calliopa-cell:${CALLIOPA_RELEASE_VERSION:-local}
+    pull_policy: never
     command: ["/usr/local/bin/bootstrap"]
     environment:
       CALLIOPA_SECRET_DIR: /run/secrets/calliopa
+      # The core's principals (BO_0206): the owner — the one human whose
+      # credential the CLI and the kernel present — the kernel's serve
+      # principal, and the agent accounts. The bootstrap writes one token file
+      # per name under credentials/, the app registers them at every boot.
+      CALLIOPA_OWNER_PRINCIPAL: ${CALLIOPA_OWNER_PRINCIPAL:-owner}
+      CALLIOPA_KERNEL_PRINCIPAL: ${CALLIOPA_KERNEL_PRINCIPAL:-human:operator}
+      CALLIOPA_AGENT_PRINCIPALS: ${CALLIOPA_AGENT_PRINCIPALS:-claude,agent:hermes}
     volumes:
       - calliopa-secrets:/run/secrets/calliopa
     restart: "no"
 
   postgres:
-    image: ${CALLIOPA_POSTGRES_IMAGE:-calliopa-bootstrap-postgres}
+    image: calliopa-postgres:${CALLIOPA_RELEASE_VERSION:-local}
+    pull_policy: never
+    build:
+      context: build/postgres
     depends_on:
       bootstrap:
         condition: service_completed_successfully
@@ -34,7 +54,8 @@ services:
       retries: 20
 
   migrate:
-    image: ${CALLIOPA_CELL_IMAGE:-calliopa-bootstrap-app}
+    image: calliopa-cell:${CALLIOPA_RELEASE_VERSION:-local}
+    pull_policy: never
     command: ["/usr/local/bin/migrate"]
     depends_on:
       postgres:
@@ -46,16 +67,19 @@ services:
       POSTGRES_PORT: "5432"
       POSTGRES_SSLMODE: disable
       POSTGRES_PASSWORD_FILE: /run/secrets/calliopa/postgres_password
-      # The shell's own database and the memory service's, created beside
-      # the graph's by this one-shot.
-      CALLIOPA_APP_DB: ${CALLIOPA_APP_DB:-calliopa_app}
+      # The memory service's database, created beside the graph's by this
+      # one-shot. The shell keeps none since BO_0207_007.
       CALLIOPA_MEMORY_DB: ${CALLIOPA_MEMORY_DB:-honcho}
     volumes:
       - calliopa-secrets:/run/secrets/calliopa:ro
     restart: "no"
 
   app:
-    image: ${CALLIOPA_CELL_IMAGE:-calliopa-bootstrap-app}
+    image: calliopa-cell:${CALLIOPA_RELEASE_VERSION:-local}
+    pull_policy: never
+    build:
+      context: build/cell
+      args: *calliopa-build-args
     command: ["/usr/local/bin/app"]
     depends_on:
       migrate:
@@ -64,6 +88,14 @@ services:
         condition: service_completed_successfully
     environment:
       APP_BIND_ADDR: 0.0.0.0:8080
+      CALLIOPA_SECRET_DIR: /run/secrets/calliopa
+      # The core's principals (BO_0206): the owner — the one human whose
+      # credential the CLI and the kernel present — the kernel's serve
+      # principal, and the agent accounts. The bootstrap writes one token file
+      # per name under credentials/, the app registers them at every boot.
+      CALLIOPA_OWNER_PRINCIPAL: ${CALLIOPA_OWNER_PRINCIPAL:-owner}
+      CALLIOPA_KERNEL_PRINCIPAL: ${CALLIOPA_KERNEL_PRINCIPAL:-human:operator}
+      CALLIOPA_AGENT_PRINCIPALS: ${CALLIOPA_AGENT_PRINCIPALS:-claude,agent:hermes}
       POSTGRES_DB: ${POSTGRES_DB:-calliopa}
       POSTGRES_USER: ${POSTGRES_USER:-calliopa}
       POSTGRES_HOST: postgres
@@ -92,10 +124,16 @@ services:
       retries: 20
 
   garage:
-    image: ${CALLIOPA_GARAGE_IMAGE:-calliopa-bootstrap-garage}
+    image: ${CALLIOPA_GARAGE_IMAGE:-dxflrs/garage:v1.1.0@sha256:fdb8272fcbe643eef830ee17874d5d4ed623a86501f1acbac8012583113b1c26}
     depends_on:
       bootstrap:
         condition: service_completed_successfully
+    # The config is delivered by compose rather than baked into a derived
+    # image, so the stack still depends on no host path and Calliopa
+    # publishes no image. /etc/garage.toml is the binary's default path.
+    configs:
+      - source: garage_toml
+        target: /etc/garage.toml
     ports:
       - "${CALLIOPA_HOST_BIND:-127.0.0.1}:3900:3900"
     volumes:
@@ -108,7 +146,9 @@ services:
       retries: 20
 
   garage-init:
-    image: ${CALLIOPA_GARAGE_INIT_IMAGE:-calliopa-bootstrap-garage-init}
+    image: calliopa-cell:${CALLIOPA_RELEASE_VERSION:-local}
+    pull_policy: never
+    command: ["/usr/local/bin/init-garage"]
     depends_on:
       garage:
         condition: service_healthy
@@ -116,14 +156,15 @@ services:
       CALLIOPA_SECRET_DIR: /run/secrets/calliopa
       GARAGE_BACKUP_BUCKET: ${GARAGE_BACKUP_BUCKET:-calliopa-backups}
       GARAGE_CONTENT_BUCKET: ${GARAGE_CONTENT_BUCKET:-calliopa-content}
-      GARAGE_APP_BUCKET: ${GARAGE_APP_BUCKET:-calliopa-app}
       GARAGE_LAYOUT_CAPACITY: ${GARAGE_LAYOUT_CAPACITY:-10000000000}
     volumes:
       - calliopa-secrets:/run/secrets/calliopa
     restart: "no"
 
   backup:
-    image: ${CALLIOPA_BACKUP_IMAGE:-calliopa-bootstrap-backup}
+    image: calliopa-cell:${CALLIOPA_RELEASE_VERSION:-local}
+    pull_policy: never
+    command: ["/usr/local/bin/backup", "run"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -139,8 +180,6 @@ services:
       POSTGRES_PORT: "5432"
       GARAGE_BACKUP_BUCKET: ${GARAGE_BACKUP_BUCKET:-calliopa-backups}
       GARAGE_CONTENT_BUCKET: ${GARAGE_CONTENT_BUCKET:-calliopa-content}
-      GARAGE_APP_BUCKET: ${GARAGE_APP_BUCKET:-calliopa-app}
-      CALLIOPA_APP_DB: ${CALLIOPA_APP_DB:-calliopa_app}
       CALLIOPA_MEMORY_DB: ${CALLIOPA_MEMORY_DB:-honcho}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
@@ -152,20 +191,22 @@ services:
       RCLONE_CONFIG_OFFSITE_PROVIDER: ${RCLONE_CONFIG_OFFSITE_PROVIDER:-}
       OFFSITE_PATH: ${OFFSITE_PATH:-}
       OFFSITE_CONTENT_PATH: ${OFFSITE_CONTENT_PATH:-}
-      OFFSITE_APP_PATH: ${OFFSITE_APP_PATH:-}
     volumes:
       - calliopa-secrets:/run/secrets/calliopa:ro
 
   # Hermes: the agent. The pinned upstream Hermes Agent with the Codex and
-  # Claude sign-in broker, holding two Calliopa toolsets: the shell's own
-  # API (reached through the kernel's port with the credential
-  # scripts/agent-credential.sh issues) and the kernel's code toolset. It
-  # reaches the graph only through those, holds no database credentials,
+  # Claude sign-in broker, holding one Calliopa toolset: the kernel's, with
+  # its statement, document and workspace tools, under the bearer the
+  # bootstrap generates (BO_0207_006). It reaches the graph only through
+  # that toolset, holds no database credentials,
   # publishes no host port, and keeps its state on a named volume. The
   # unconfigured state (API up, no agent signed in yet) is a defined healthy
   # state the settings view renders with the sign-in action.
   hermes:
-    image: ${CALLIOPA_HERMES_IMAGE:-calliopa-bootstrap-hermes}
+    image: calliopa-hermes:${CALLIOPA_RELEASE_VERSION:-local}
+    pull_policy: never
+    build:
+      context: build/hermes
     depends_on:
       bootstrap:
         condition: service_completed_successfully
@@ -174,8 +215,6 @@ services:
       CALLIOPA_HERMES_API_SECRET_FILE: /run/secrets/calliopa/hermes_api_key
       CALLIOPA_AGENT_TOOLS_BEARER_FILE: /run/secrets/calliopa/agent_tools_bearer
       CALLIOPA_KERNEL_TOOLS_URL: http://kernel:8090/__kernel/agent-tools
-      CALLIOPA_AGENT_TOOLS_TOKEN_FILE: /run/secrets/calliopa/agent_tools_token
-      CALLIOPA_AGENT_TOOLS_URL: http://kernel:8090/api/v1/mcp
       CALLIOPA_AGENT_CONFIG_DIR: /var/lib/calliopa/agent-config
     volumes:
       - hermes-data:/var/lib/hermes
@@ -195,13 +234,21 @@ services:
   # and reports the no-pin state as healthy on /__kernel/healthz. The health
   # probe uses node because the slim kernel image carries no wget.
   kernel:
-    image: ${CALLIOPA_KERNEL_IMAGE:-calliopa-bootstrap-kernel}
+    image: calliopa-kernel:${CALLIOPA_RELEASE_VERSION:-local}
+    pull_policy: never
+    build:
+      context: build/kernel
+      args: *calliopa-build-args
     command: ["serve", "--mode", "prod", "--port", "8090", "--principal", "${CALLIOPA_KERNEL_PRINCIPAL:-human:operator}"]
     depends_on:
       app:
         condition: service_healthy
     environment:
       CALLIOPA_CCGW_URL: http://app:8080
+      # The credential files the kernel presents: the owner's for the CLI's
+      # human commands and the bridge, its own for its serve principal, the
+      # agent accounts' for the toolset per run. BO_0206_008
+      CALLIOPA_SECRET_DIR: /run/secrets/calliopa
       CALLIOPA_KERNEL_DATA: /var/lib/calliopa-kernel
       # The confirmation origin binds wide inside the container; the host
       # publish below stays loopback, and browsers reach it at the published
@@ -214,20 +261,19 @@ services:
       CALLIOPA_HERMES_BEARER_FILE: /run/secrets/calliopa/hermes_api_key
       CALLIOPA_AGENT_TOOLS_BEARER_FILE: /run/secrets/calliopa/agent_tools_bearer
       CALLIOPA_AGENT_CONFIG_DIR: /var/lib/calliopa/agent-config
-      # The shell's runtime environment: its database, its bucket, its
-      # at-rest key. Every secret stays a file; the tree assembles the plain
-      # variables before its server starts.
-      CALLIOPA_APP_DB_HOST: postgres
-      CALLIOPA_APP_DB_PORT: "5432"
-      CALLIOPA_APP_DB_NAME: ${CALLIOPA_APP_DB:-calliopa_app}
-      CALLIOPA_APP_DB_USER: ${POSTGRES_USER:-calliopa}
-      CALLIOPA_APP_DB_PASSWORD_FILE: /run/secrets/calliopa/postgres_password
-      CALLIOPA_GARAGE_ENDPOINT: http://garage:3900
-      CALLIOPA_GARAGE_REGION: garage
-      CALLIOPA_GARAGE_BUCKET: ${GARAGE_APP_BUCKET:-calliopa-app}
-      CALLIOPA_GARAGE_KEY_ID_FILE: /run/secrets/calliopa/garage_app_key_id
-      CALLIOPA_GARAGE_KEY_SECRET_FILE: /run/secrets/calliopa/garage_app_key_secret
-      CALLIOPA_SECRETS_KEY_PATH: /run/secrets/calliopa/secrets_key
+      # The kernel hands the served tree the two addresses it needs, CCGW's
+      # and its own, and nothing else: the shell keeps no database, bucket or
+      # at-rest key of its own (BO_0207_007). The old shell's stores stay on
+      # the volumes until the operator drops them after the transfer
+      # (BO_0207_005, BO_0207_008); `kernel import-app-content` names them
+      # through its flags.
+      # The kernel's own at-rest key for the secret store it keeps for the
+      # shell's party configuration. BO_0207_003
+      CALLIOPA_KERNEL_SECRETS_KEY_PATH: /run/secrets/calliopa/kernel_secrets_key
+      # The release the images were built from, the variable their tags use,
+      # so `kernel diagnose` states which release a support file describes.
+      # BO_0205_003
+      CALLIOPA_RELEASE_VERSION: ${CALLIOPA_RELEASE_VERSION:-}
     ports:
       - "${CALLIOPA_HOST_BIND:-127.0.0.1}:8090:8090"
       - "${CALLIOPA_HOST_BIND:-127.0.0.1}:8091:8091"
@@ -295,6 +341,29 @@ services:
       LLM_OPENAI_API_KEY: ${LLM_OPENAI_API_KEY:-}
     volumes:
       - calliopa-secrets:/run/secrets/calliopa:ro
+
+configs:
+  # Single-node Garage. Secrets come from the bootstrap one-shot via the
+  # shared secrets volume.
+  garage_toml:
+    content: |
+      metadata_dir = "/var/lib/garage/meta"
+      data_dir = "/var/lib/garage/data"
+      db_engine = "sqlite"
+      replication_factor = 1
+
+      rpc_bind_addr = "[::]:3901"
+      rpc_public_addr = "garage:3901"
+      rpc_secret_file = "/run/secrets/calliopa/garage_rpc_secret"
+
+      [s3_api]
+      s3_region = "garage"
+      api_bind_addr = "[::]:3900"
+      root_domain = ".s3.garage"
+
+      [admin]
+      api_bind_addr = "[::]:3903"
+      admin_token_file = "/run/secrets/calliopa/garage_admin_token"
 
 volumes:
   calliopa-secrets:

@@ -1,0 +1,20 @@
+# Confinement
+
+## Confinement
+
+* The Codex worker runs non-interactively under Codex's own permission profile: `approval_policy = "never"` and `sandbox_mode = "workspace-write"`, with Hermes's gateway-context approvals deferring to it (`approvals.mode: "off"`). Never the full-bypass combination.
+* Claude Code never launches with `--dangerously-skip-permissions`.
+* The container is the outer boundary. A gateway context has no UI for approval requests, so the choice is between failing closed on every tool call and deferring to a real sandbox profile; the sandbox is the deny-by-default gate.
+
+- A shell or network action outside the declared toolchain fails the tool call with a structured event rather than pausing for an approval nobody can answer.
+- Confinement is sufficient because an agent write is proposal-only. An agent that cannot write truth is bounded by review rather than by trust in a sandbox, which is the difference between a bad run being a cleanup and being an incident.
+
+- The entrypoint writes Codex's permission profile on every start with `approval_policy = "never"` and `sandbox_mode = "workspace-write"`, and generates `approvals.mode: "off"` for the codex runtime so Hermes defers to that profile rather than failing closed on every tool call (`CA_0022_010`).
+- The two profile values are fixed in the entrypoint and read from nowhere. The settings surface writes agent configuration onto a shared volume, so configuration a remote surface can write must not be able to widen the sandbox; rewriting the profile on every start is what makes that true whatever else the volume holds. The gate proves it by writing a `runtime.env` that asks for the full-bypass sandbox and finding the profile unmoved (`CA_0022_010`).
+- `tests/behavior/agent-confinement.test.mjs` asserts against the shipped files, with comment lines stripped, that nothing here asks for `danger-full-access` or launches Claude Code with `--dangerously-skip-permissions`. Stripping the prose is deliberate: a comment explaining why a dangerous value is refused would otherwise read as the script asking for it (`CA_0022_010`).
+- The refusal rule above is observed rather than asserted, in two real runs against a signed-in subscription: a shell command the image does not carry fails its tool call, and a write outside the workspace is refused by the sandbox. Each reaches a terminal event in seconds, names what was refused, and moves the registry off `running` — the bound is what tells a refusal apart from an approval nobody answered, because both otherwise look like a run still working (`CA_0022_017`).
+- `pnpm run verify:agent` is that proof and is deliberately its own command. It runs against the development stack rather than building its own, because a subscription lives on the agent's own data volume and nowhere else; it reads the same `adapters.json` the settings surface reads and refuses with a non-zero exit unless both runtimes report `ready`. A gate that skipped on an unqualified machine would report proof nobody produced (`CA_0022_017`).
+- It is absent from `CHECK_GATES` and `COMPLETION_LOCAL_GATES`, so `pnpm run verify` cannot reach it and stays subscription-free. `tests/behavior/agent-gate.test.mjs` asserts that absence by name, which is what keeps a later change from widening the ordinary gate into an account it must not have (`CA_0022_017`).
+- The scenarios are driven by `scripts/lib/agent-refusal-probe.mjs`, piped into the application container over stdin so what runs is the working tree's copy rather than whatever a sync last carried. It reads the run back through `GET /api/runs/:id/events`, which answers the normalized contract, so the assertion needs no second copy of the translation the console already reads through.
+- The gate spends the subscription's own quota and leaves one workspace and two runs in the development database; `pnpm run db:clear` is how that is cleaned up. It asserts a union rather than one event shape, because which way a live model reports a refusal is not a property of this system.
+

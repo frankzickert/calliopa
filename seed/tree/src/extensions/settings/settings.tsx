@@ -6,22 +6,16 @@ import {
   useVisibleTask$,
 } from "@builder.io/qwik";
 
-import {
-  agentNeeds,
-  CHANNEL_CONFIGURATION,
-  CONNECTION_PARTY_DETAIL,
-  isChannelParty,
-  type ChannelParty,
-  type ConnectionParty,
-  type ConnectionRecord,
-} from "~/lib/connections";
+import { agentNeeds, type ConnectionRecord } from "~/lib/connections";
 import type { ViewProps } from "~/components/shell/view-host";
-import type { LoginState } from "./server/adapters";
+import type { LoginState } from "~/server/agent/adapters";
+import type { AccountListing, AccountView, LicenceView } from "~/server/kernel/accounts";
+import type { Person } from "~/server/session";
 
 /**
  * The instance's settings, mounted like any other view. The tab is sectioned;
- * `Connections` is the first section and `Channels` the second, and further
- * sections arrive with the changes that need them.
+ * `Connections` is the first section, `Channels` the second and `People` the
+ * third, and further sections arrive with the changes that need them.
  *
  * The two are split because they read as different things to the person
  * entering credentials: a connection is a service Calliopa needs to run, a
@@ -90,8 +84,90 @@ export const SettingsView = component$<ViewProps>(() => {
     sent: boolean;
   }>({ runtime: null, state: null, code: "", sent: false });
 
+  /**
+   * The people who hold authority, as the kernel answers them for the
+   * signed-in person: nothing here is load-bearing. The list is read per
+   * request and cached nowhere; every control is a call the core refuses on
+   * its own terms, and a refusal is shown in the core's words with its code.
+   * BO_0209_004 BO_0209_005
+   */
+  const people = useStore<{
+    me: Person | null;
+    listing: AccountListing | null;
+    licence: LicenceView | null;
+    loaded: boolean;
+    /** The list is the owner's to read; a person who is not sees their own row's controls alone. */
+    forbidden: boolean;
+    busy: string | null;
+    error: string | null;
+    code: string | null;
+    create: { name: string; class: string; password: string };
+    own: { current: string; next: string; done: string | null };
+  }>({
+    me: null,
+    listing: null,
+    licence: null,
+    loaded: false,
+    forbidden: false,
+    busy: null,
+    error: null,
+    code: null,
+    create: { name: "", class: "agent", password: "" },
+    own: { current: "", next: "", done: null },
+  });
+
+  const readPeople$ = $(async () => {
+    const me = await fetch("/api/x/settings/people/me");
+    people.me = me.ok ? ((await me.json()) as Person | null) : null;
+    const listed = await fetch("/api/x/settings/people");
+    if (listed.ok) {
+      people.listing = (await listed.json()) as AccountListing;
+      people.forbidden = false;
+    } else {
+      people.listing = null;
+      people.forbidden = listed.status === 403;
+      if (listed.status !== 403) {
+        const refused = (await listed.json()) as { error?: string; code?: string };
+        people.error = refused.error ?? "The people could not be read.";
+        people.code = refused.code ?? null;
+      }
+    }
+    // The licence is the owner's to read; anyone else is told nothing, which
+    // is not an error worth showing.
+    const licence = await fetch("/api/x/settings/people/licence");
+    people.licence = licence.ok ? ((await licence.json()) as LicenceView) : null;
+    people.loaded = true;
+  });
+
+  /** One call to the kernel as the person, then a re-read: the rows are the server's answer. */
+  const act$ = $(async (busy: string, path: string, body: unknown): Promise<boolean> => {
+    people.busy = busy;
+    people.error = null;
+    people.code = null;
+    try {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const refused = (await response.json()) as { error?: string; code?: string };
+        people.error = refused.error ?? "The request failed.";
+        people.code = refused.code ?? null;
+        return false;
+      }
+      await readPeople$();
+      return true;
+    } catch {
+      people.error = "The request could not be made.";
+      return false;
+    } finally {
+      people.busy = null;
+    }
+  });
+
   const read$ = $(async () => {
-    const response = await fetch("/api/settings/connections");
+    const response = await fetch("/api/x/settings/connections");
     if (!response.ok) {
       state.error = "The connections could not be read.";
       state.loaded = true;
@@ -119,7 +195,7 @@ export const SettingsView = component$<ViewProps>(() => {
     login.code = "";
     login.sent = false;
     try {
-      const asked = await fetch("/api/settings/agent/login", {
+      const asked = await fetch("/api/x/settings/agent/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ runtime: party }),
@@ -138,7 +214,7 @@ export const SettingsView = component$<ViewProps>(() => {
       // needs to go and sign in.
       for (let attempt = 0; attempt < 900; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
-        const reported = await fetch("/api/settings/agent/login");
+        const reported = await fetch("/api/x/settings/agent/login");
         const answered = reported.ok
           ? ((await reported.json()) as LoginState | null)
           : null;
@@ -188,7 +264,7 @@ export const SettingsView = component$<ViewProps>(() => {
     if (code === "") return;
     login.code = "";
     login.sent = true;
-    await fetch("/api/settings/agent/code", {
+    await fetch("/api/x/settings/agent/code", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ code }),
@@ -224,6 +300,7 @@ export const SettingsView = component$<ViewProps>(() => {
   // tab would come back with no rows at all.
   useVisibleTask$(async ({ cleanup }) => {
     await read$();
+    await readPeople$();
 
     // The step the reader takes at a terminal ends in the agent restarting,
     // not the application, so nothing else would bring this row to the truth.
@@ -248,6 +325,11 @@ export const SettingsView = component$<ViewProps>(() => {
     cleanup(stop);
   });
 
+  // A refusal is shown in the section the reader was acting in; which one is
+  // read off the row's descriptor rather than a roster the browser holds.
+  const errorInChannel =
+    state.rows.find((row) => row.party === state.errorParty)?.channel ?? false;
+
   return (
     <div class="view view--settings" data-view-body="settings">
       <section class="settings-section" aria-labelledby="settings-connections">
@@ -259,7 +341,7 @@ export const SettingsView = component$<ViewProps>(() => {
           once and never shown again.
         </p>
 
-        {state.error !== null && !isChannelParty(state.errorParty ?? "") && (
+        {state.error !== null && !errorInChannel && (
           <p class="settings-error" role="alert">
             {state.error}
           </p>
@@ -271,10 +353,8 @@ export const SettingsView = component$<ViewProps>(() => {
 
         <ul class="connection-list">
           {state.rows
-            .filter((row) => !isChannelParty(row.party))
+            .filter((row) => !row.channel)
             .map((row) => {
-              const detail =
-                CONNECTION_PARTY_DETAIL[row.party as ConnectionParty];
               const busy = state.busy === row.party;
               const needs =
                 row.party === "hermes" ? agentNeeds(state.rows) : [];
@@ -287,9 +367,9 @@ export const SettingsView = component$<ViewProps>(() => {
                 >
                   <div class="connection__identity">
                     <h3 class="connection__name">
-                      {detail?.name ?? row.party}
+                      {row.label || row.party}
                     </h3>
-                    <p class="connection__purpose">{detail?.purpose ?? ""}</p>
+                    <p class="connection__purpose">{row.purpose}</p>
                   </div>
                   <p
                     class="connection__state"
@@ -317,9 +397,8 @@ export const SettingsView = component$<ViewProps>(() => {
                       {needs.length === 0 ? (
                         <p class="agent-report__ready" data-agent-ready>
                           {"Reasoning on "}
-                          {CONNECTION_PARTY_DETAIL[
-                            row.agent?.runtime as ConnectionParty
-                          ]?.name ??
+                          {state.rows.find((candidate) => candidate.party === row.agent?.runtime)
+                            ?.label ??
                             row.agent?.runtime ??
                             "its runtime"}
                           {", with the Calliopa toolset registered."}
@@ -439,7 +518,7 @@ export const SettingsView = component$<ViewProps>(() => {
                                   autoComplete="off"
                                   value={login.code}
                                   data-sign-in-paste
-                                  aria-label={`${detail?.name ?? row.party} code`}
+                                  aria-label={`${row.label || row.party} code`}
                                   onInput$={(_, element) =>
                                     (login.code = element.value)
                                   }
@@ -467,7 +546,7 @@ export const SettingsView = component$<ViewProps>(() => {
                                 role="status"
                               >
                                 {"Code sent. Waiting for "}
-                                {detail?.name ?? row.party}
+                                {row.label || row.party}
                                 {" to finish signing in…"}
                               </p>
                             )}
@@ -499,7 +578,7 @@ export const SettingsView = component$<ViewProps>(() => {
                           placeholder={
                             row.keySet ? "Enter a new key" : "Enter key"
                           }
-                          aria-label={`${detail?.name ?? row.party} key`}
+                          aria-label={`${row.label || row.party} key`}
                           onInput$={(_, element) =>
                             (entered.value = element.value)
                           }
@@ -512,7 +591,7 @@ export const SettingsView = component$<ViewProps>(() => {
                         onClick$={async () => {
                           await request$(
                             row.party,
-                            `/api/settings/connections/${row.party}`,
+                            `/api/x/settings/connections/${row.party}`,
                             {
                               method: "PUT",
                               headers: { "content-type": "application/json" },
@@ -531,7 +610,7 @@ export const SettingsView = component$<ViewProps>(() => {
                         onClick$={() =>
                           request$(
                             row.party,
-                            `/api/settings/connections/${row.party}/test`,
+                            `/api/x/settings/connections/${row.party}/test`,
                             { method: "POST" },
                           )
                         }
@@ -545,7 +624,7 @@ export const SettingsView = component$<ViewProps>(() => {
                         onClick$={() =>
                           request$(
                             row.party,
-                            `/api/settings/connections/${row.party}`,
+                            `/api/x/settings/connections/${row.party}`,
                             {
                               method: "DELETE",
                             },
@@ -576,7 +655,7 @@ export const SettingsView = component$<ViewProps>(() => {
           entered once and never shown again. Saving one publishes nothing.
         </p>
 
-        {state.error !== null && isChannelParty(state.errorParty ?? "") && (
+        {state.error !== null && errorInChannel && (
           <p class="settings-error" role="alert">
             {state.error}
           </p>
@@ -584,11 +663,9 @@ export const SettingsView = component$<ViewProps>(() => {
 
         <ul class="connection-list">
           {state.rows
-            .filter((row) => isChannelParty(row.party))
+            .filter((row) => row.channel)
             .map((row) => {
-              const party = row.party as ChannelParty;
-              const detail = CONNECTION_PARTY_DETAIL[row.party];
-              const fields = CHANNEL_CONFIGURATION[party];
+              const fields = row.fields;
               const busy = state.busy === row.party;
               const typedKey = channelKey[row.party] ?? "";
               const valueOf = (field: string) =>
@@ -605,9 +682,9 @@ export const SettingsView = component$<ViewProps>(() => {
                 >
                   <div class="connection__identity">
                     <h3 class="connection__name">
-                      {detail?.name ?? row.party}
+                      {row.label || row.party}
                     </h3>
-                    <p class="connection__purpose">{detail?.purpose ?? ""}</p>
+                    <p class="connection__purpose">{row.purpose}</p>
                   </div>
                   <p
                     class="connection__state"
@@ -637,7 +714,7 @@ export const SettingsView = component$<ViewProps>(() => {
                           value={valueOf(field.key)}
                           placeholder={field.hint}
                           data-channel-field={field.key}
-                          aria-label={`${detail?.name ?? row.party} ${field.label.toLowerCase()}`}
+                          aria-label={`${row.label || row.party} ${field.label.toLowerCase()}`}
                           onInput$={(_, element) =>
                             (channelField[`${row.party}.${field.key}`] =
                               element.value)
@@ -658,7 +735,7 @@ export const SettingsView = component$<ViewProps>(() => {
                           row.keySet ? "Enter a new key" : "Enter key"
                         }
                         data-channel-key
-                        aria-label={`${detail?.name ?? row.party} key`}
+                        aria-label={`${row.label || row.party} key`}
                         onInput$={(_, element) =>
                           (channelKey[row.party] = element.value)
                         }
@@ -689,7 +766,7 @@ export const SettingsView = component$<ViewProps>(() => {
                         if (typedKey.trim() !== "") body.secret = typedKey;
                         await request$(
                           row.party,
-                          `/api/settings/connections/${row.party}`,
+                          `/api/x/settings/connections/${row.party}`,
                           {
                             method: "PUT",
                             headers: { "content-type": "application/json" },
@@ -712,7 +789,7 @@ export const SettingsView = component$<ViewProps>(() => {
                       onClick$={() =>
                         request$(
                           row.party,
-                          `/api/settings/connections/${row.party}/test`,
+                          `/api/x/settings/connections/${row.party}/test`,
                           { method: "POST" },
                         )
                       }
@@ -727,7 +804,7 @@ export const SettingsView = component$<ViewProps>(() => {
                       onClick$={() =>
                         request$(
                           row.party,
-                          `/api/settings/connections/${row.party}`,
+                          `/api/x/settings/connections/${row.party}`,
                           { method: "DELETE" },
                         )
                       }
@@ -739,6 +816,265 @@ export const SettingsView = component$<ViewProps>(() => {
               );
             })}
         </ul>
+      </section>
+
+      {/* People: who holds authority in this instance. Read from the kernel as
+          the signed-in person and decided by the core; every control here is
+          one the core refuses independently, so a fork that redraws this
+          section changes nothing about who may write. BO_0209_004 */}
+      <section
+        class="settings-section"
+        aria-labelledby="settings-people"
+        data-people
+        data-people-loaded={people.loaded ? "true" : "false"}
+      >
+        <h2 class="settings-section__heading" id="settings-people">
+          People
+        </h2>
+        <p class="settings-section__lead">
+          Who holds authority in this instance. A person of class human may
+          establish truth; one of class agent may only propose. The core
+          decides every change here; this section only asks.
+        </p>
+
+        {people.listing !== null && (
+          <p class="licence-state" data-licence-state>
+            {people.listing.unlimited
+              ? `${people.listing.activeHumans} ${people.listing.activeHumans === 1 ? "person" : "people"} may establish`
+              : `${people.listing.activeHumans} of ${people.listing.seats} ${people.listing.seats === 1 ? "seat" : "seats"} may establish`}
+            {people.licence?.licence !== undefined
+              ? ` · licensed to ${people.licence.licence.licensee}, until ${people.licence.licence.expires}`
+              : people.listing.unlimited
+                ? ""
+                : " · no licence installed"}
+            {people.licence?.state.warning !== undefined &&
+              ` · ${people.licence.state.warning}`}
+          </p>
+        )}
+
+        {people.error !== null && (
+          <p class="settings-error" role="alert" data-people-error={people.code ?? "error"}>
+            {people.code !== null && (
+              <span class="settings-refusal__code">{people.code}</span>
+            )}
+            {people.error}
+          </p>
+        )}
+
+        {people.loaded && people.forbidden && (
+          <p class="settings-empty">The people list is the owner's to read.</p>
+        )}
+
+        {people.listing !== null && (
+          <ul class="connection-list" data-people-list>
+            {people.listing.principals.map((row: AccountView) => {
+              const me = people.me;
+              const isMe = me !== null && me.name === row.name;
+              const ownerActing = me !== null && people.listing?.principals.some((p) => p.name === me.name && p.owner) === true;
+              const busy = people.busy === row.name;
+              return (
+                <li
+                  class="connection person"
+                  key={row.name}
+                  data-person={row.name}
+                  data-person-kind={row.kind}
+                  data-person-class={row.class}
+                  data-person-state={row.state}
+                >
+                  <div class="connection__identity">
+                    <h3 class="connection__name">
+                      {row.name}
+                      {row.owner && <span class="person__owner">owner</span>}
+                      {isMe && <span class="person__owner">you</span>}
+                    </h3>
+                    <p class="person__facts">
+                      {row.kind}
+                      {" · "}
+                      {row.class === "human" ? "may establish" : "proposes"}
+                      {row.demotedByExpiry === true && " (demoted by the licence)"}
+                    </p>
+                  </div>
+                  <p class="connection__state">{row.state}</p>
+                  <p class="person__facts" data-person-stamps>
+                    {row.lastUsedAt === undefined
+                      ? "credential never used"
+                      : `credential used ${new Date(row.lastUsedAt).toLocaleString()}`}
+                    {" · "}
+                    {row.lastActiveAt === undefined
+                      ? "no live session"
+                      : `session active ${new Date(row.lastActiveAt).toLocaleString()}`}
+                  </p>
+                  {ownerActing && !row.owner && (
+                    <div class="connection__controls">
+                      {row.state === "active" && (
+                        <button
+                          type="button"
+                          class="connection__action"
+                          disabled={busy}
+                          data-person-suspend={row.name}
+                          onClick$={() =>
+                            act$(row.name, `/api/x/settings/people/${row.name}/state`, { state: "suspended" })
+                          }
+                        >
+                          Suspend
+                        </button>
+                      )}
+                      {row.state !== "active" && (
+                        <button
+                          type="button"
+                          class="connection__action"
+                          disabled={busy}
+                          data-person-resume={row.name}
+                          onClick$={() =>
+                            act$(row.name, `/api/x/settings/people/${row.name}/state`, { state: "active" })
+                          }
+                        >
+                          {row.state === "retired" ? "Reactivate" : "Resume"}
+                        </button>
+                      )}
+                      {row.state !== "retired" && (
+                        <button
+                          type="button"
+                          class="connection__action connection__action--clear"
+                          disabled={busy}
+                          data-person-retire={row.name}
+                          onClick$={() =>
+                            act$(row.name, `/api/x/settings/people/${row.name}/state`, { state: "retired" })
+                          }
+                        >
+                          Retire
+                        </button>
+                      )}
+                      {row.kind === "human" && (
+                        <button
+                          type="button"
+                          class="connection__action"
+                          disabled={busy}
+                          data-person-class={row.class === "human" ? "agent" : "human"}
+                          onClick$={() =>
+                            act$(row.name, `/api/x/settings/people/${row.name}/class`, {
+                              class: row.class === "human" ? "agent" : "human",
+                            })
+                          }
+                        >
+                          {row.class === "human" ? "Set to propose only" : "Let establish"}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {people.listing !== null &&
+          people.me !== null &&
+          people.listing.principals.some((p) => p.name === people.me?.name && p.owner) && (
+            <form
+              class="people-form"
+              data-people-create
+              preventdefault:submit
+              onSubmit$={async () => {
+                const done = await act$("create", "/api/x/settings/people", people.create);
+                if (done) people.create = { name: "", class: "agent", password: "" };
+              }}
+            >
+              <h3 class="people-form__title">Add a person</h3>
+              <label class="connection__field">
+                <span class="connection__label">Name</span>
+                <input
+                  class="connection__input"
+                  name="name"
+                  autocomplete="off"
+                  required
+                  value={people.create.name}
+                  onInput$={(_, element) => (people.create.name = element.value)}
+                />
+              </label>
+              <label class="connection__field">
+                <span class="connection__label">May establish truth</span>
+                <select
+                  class="connection__input"
+                  name="class"
+                  value={people.create.class}
+                  onChange$={(_, element) => (people.create.class = element.value)}
+                >
+                  <option value="agent" selected={people.create.class === "agent"}>No, proposes only</option>
+                  <option value="human" selected={people.create.class === "human"}>Yes</option>
+                </select>
+              </label>
+              <label class="connection__field">
+                <span class="connection__label">Initial password, handed over out of band</span>
+                <input
+                  class="connection__input"
+                  name="password"
+                  type="password"
+                  autocomplete="new-password"
+                  required
+                  value={people.create.password}
+                  onInput$={(_, element) => (people.create.password = element.value)}
+                />
+              </label>
+              <button type="submit" class="connection__action" disabled={people.busy !== null}>
+                Add
+              </button>
+            </form>
+          )}
+
+        {people.me !== null && (
+          // A person's own password, with the current one: the core accepts the
+          // owner or the principal itself and nobody else, and the kernel revokes
+          // the person's other sessions on the way. BO_0209_004
+          <form
+            class="people-form"
+            data-people-own-password
+            preventdefault:submit
+            onSubmit$={async () => {
+              const me = people.me;
+              if (me === null) return;
+              const done = await act$("password", `/api/x/settings/people/${me.name}/password`, {
+                password: people.own.next,
+                currentPassword: people.own.current,
+              });
+              people.own = done
+                ? { current: "", next: "", done: "Your password is changed; your other sessions are signed out." }
+                : { ...people.own, done: null };
+            }}
+          >
+            <h3 class="people-form__title">Your password</h3>
+            <label class="connection__field">
+              <span class="connection__label">Current password</span>
+              <input
+                class="connection__input"
+                name="currentPassword"
+                type="password"
+                autocomplete="current-password"
+                required
+                value={people.own.current}
+                onInput$={(_, element) => (people.own.current = element.value)}
+              />
+            </label>
+            <label class="connection__field">
+              <span class="connection__label">New password</span>
+              <input
+                class="connection__input"
+                name="password"
+                type="password"
+                autocomplete="new-password"
+                required
+                value={people.own.next}
+                onInput$={(_, element) => (people.own.next = element.value)}
+              />
+            </label>
+            <button type="submit" class="connection__action" disabled={people.busy !== null}>
+              Change
+            </button>
+            {people.own.done !== null && (
+              <p class="sign-in__sent" data-people-password-done>{people.own.done}</p>
+            )}
+          </form>
+        )}
       </section>
     </div>
   );

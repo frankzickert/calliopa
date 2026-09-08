@@ -1,0 +1,27 @@
+Calliopa
+Copyright 2026 Frank Zickert
+
+This repository contains two bodies of software under two licences.
+
+1. The extensions — the interface shell, the settings extension, calliopa-base
+   and calliopa-extension — are licensed under the Apache License, Version 2.0.
+   See LICENSE-APACHE.
+
+2. The Calliopa Core — the components published by the Licensor as the Calliopa
+   release binaries: the bootstrap runtime, the Calliopa-Cypher Gateway, the
+   kernel, and the migration and seed tooling — is proprietary software licensed
+   under the Calliopa Core Licence. It is NOT covered by the Apache License.
+   See LICENSE-CORE.md.
+
+LICENSE names both and says which covers what.
+
+Third-party software is not distributed here. The compose file and its build
+recipes reference images published by other people, which Docker pulls from their
+publishers to your machine under their own licences. Where a build recipe is provided instead of an
+image, running it installs software on your machine under whatever terms govern
+that software. None of it is part of Calliopa and none of it is the Licensor's
+responsibility. See LICENSE-CORE.md, Section 7, and THIRD-PARTY.md for what the
+compose file references and where each one comes from.
+
+"Calliopa" and the Calliopa laurel are trademarks of Frank Zickert. Neither
+licence grants any right in them. See LICENSE-CORE.md, Section 8.

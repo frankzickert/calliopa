@@ -31,6 +31,28 @@ docker compose version >/dev/null 2>&1 || {
   exit 1
 }
 
+# The minimum: Docker Engine 25 and Compose 2.24. The recipes rely on the
+# BuildKit default and the compose file on inline config content; an older
+# Docker fails here, naming what it found, rather than halfway into a build.
+version_at_least() {
+  # $1: found, $2: required — both "major.minor[.patch]".
+  [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" = "$2" ]
+}
+engine="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
+compose="$(docker compose version --short 2>/dev/null | sed 's/^v//' || true)"
+if [ -z "$engine" ]; then
+  echo "error: the Docker daemon is not reachable (docker version failed)" >&2
+  exit 1
+fi
+if ! version_at_least "$engine" "25.0"; then
+  echo "error: Docker Engine 25 or later is required; found $engine" >&2
+  exit 1
+fi
+if ! version_at_least "$compose" "2.24"; then
+  echo "error: Docker Compose 2.24 or later is required; found ${compose:-unknown}" >&2
+  exit 1
+fi
+
 # Configuration: create .env on first run; on re-run add missing keys only.
 if [ ! -f .env ]; then
   cp .env.example .env
@@ -55,9 +77,15 @@ if grep -q '^OPENROUTER_API_KEY=$' .env && [ -n "${OPENROUTER_API_KEY:-}" ]; the
   echo "wrote OPENROUTER_API_KEY from the environment into .env (embedding search)"
 fi
 
-# Images: fetch the pinned references. Pull failures are tolerated so locally
-# built tags keep working before published images exist.
-docker compose pull --ignore-pull-failures || true
+# Images. Calliopa publishes none: the object store is pulled from its
+# publisher, and the cell, the kernel, the agent service and the database are
+# built here from the recipes under build/ — base images pulled by you, the
+# Calliopa binaries downloaded from the release named in .env and checked
+# against its pinned checksum. A failed download or a checksum mismatch fails
+# the install on this line, naming the file, rather than a half-started
+# stack. A re-run rebuilds only what the pins changed.
+docker compose pull garage
+docker compose build
 
 # First-run secret generation and volume preparation. The bootstrap one-shot
 # generates the database password and object-store credentials into the

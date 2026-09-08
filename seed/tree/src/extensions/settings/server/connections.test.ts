@@ -15,7 +15,11 @@ import { withStatus } from "./connections";
  */
 
 const row = (party: string): ConnectionRecord => ({
-  party: party as ConnectionRecord["party"],
+  party,
+  label: party,
+  purpose: "",
+  channel: false,
+  fields: [],
   kind: "status",
   state: "unconfigured",
   keySet: false,

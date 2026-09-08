@@ -12,15 +12,42 @@ export interface Layout {
   left: DrawerState;
   right: DrawerState;
   dock: DockPosition;
-  /** The library's `Documents` category. */
-  library: SectionState;
-  /** The library's `Episodes` category. */
-  episodes: SectionState;
-  /** The library's `Standing Assets` category: the assets no episode holds. */
-  standing: SectionState;
-  /** The library's `Destinations` category: the destinations that have a front. */
-  destinations: SectionState;
+  /**
+   * The library sections' states, keyed `<ext>:<section>` as the registry
+   * names them. A key nothing contributes any more is preserved untouched, so
+   * an extension removed and restored remembers its state; a key absent
+   * reads expanded. BO_0202_003
+   */
+  sections: Record<string, SectionState>;
 }
+
+export function sectionState(layout: Layout, key: string): SectionState {
+  return layout.sections[key] ?? "expanded";
+}
+
+/**
+ * The named fields a layout carried before sections were keyed, and the key
+ * each became. A stored layout is rewritten on the way in (`workspaces.ts`),
+ * so a workspace saved before `BO_0202` opens with its sections as they were.
+ */
+export const LEGACY_SECTION_KEYS: Readonly<Record<string, string>> = {
+  library: "ui.shell:documents",
+  episodes: "calliopa-video:episodes",
+  standing: "calliopa-video:standing",
+  destinations: "calliopa-video:destinations",
+  extensions: "ui.shell:extensions",
+};
+
+/**
+ * Section keys that changed hands: the three sections `ui.shell` held for one
+ * pin before they became `calliopa-video`'s. A stored key on the left is read
+ * as the key on the right, once, and stored so on the next save (`BO_0203_006`).
+ */
+export const RENAMED_SECTION_KEYS: Readonly<Record<string, string>> = {
+  "ui.shell:episodes": "calliopa-video:episodes",
+  "ui.shell:standing": "calliopa-video:standing",
+  "ui.shell:destinations": "calliopa-video:destinations",
+};
 
 export function nextSectionState(state: SectionState): SectionState {
   return state === "expanded" ? "collapsed" : "expanded";

@@ -1,0 +1,33 @@
+# Licences
+
+Calliopa is two bodies of software under two licences. This file says which is which.
+Neither licence covers the other's half.
+
+## The extensions — Apache License 2.0
+
+The interface shell, the settings extension, `calliopa-base` and `calliopa-extension`:
+everything shipped as source in this repository and materialised into the graph.
+
+Use, modify, fork and redistribute on Apache-2.0 terms. Full text in **`LICENSE-APACHE`**.
+
+Rename before you redistribute: Apache-2.0 grants no trademark rights, and neither does
+anything else here.
+
+## The Calliopa Core — Calliopa Core Licence
+
+The software published as the Calliopa release binaries: the bootstrap runtime, the
+Calliopa-Cypher Gateway, the kernel, and the migration and seed tooling.
+
+Proprietary. Free to run, for any purpose including commercial work, for one instance with one
+distinguishable user. Not open source, not modifiable, not redistributable. Full text in
+**`LICENSE-CORE.md`**.
+
+## Third-party software — not distributed here
+
+The compose file and its build recipes reference images published by other people. Docker
+pulls them from their publishers to your machine, under their own licences. They are not part of Calliopa. See
+`THIRD-PARTY.md` and `LICENSE-CORE.md` Section 7.
+
+---
+
+Calliopa is not open source. Its interface and its extensions are.

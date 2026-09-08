@@ -44,7 +44,8 @@ import {
   type ViewDragState,
 } from "~/components/shell/view-bridge";
 import type { ViewProps } from "~/components/shell/view-host";
-import type { ChangeSummary, GraphOutcome } from "~/server/graph/contract";
+import type { ChangeSummary } from "~/server/documents/documents";
+import type { GraphOutcome } from "~/server/outcome";
 import type {
   BlockView,
   DocumentView,
@@ -206,13 +207,13 @@ async function readOutcome<T>(response: Response): Promise<GraphOutcome<T>> {
 }
 
 const fetchDocument = async (id: string): Promise<GraphOutcome<DocumentView>> =>
-  readOutcome<DocumentView>(await fetch(`/api/documents/${id}`));
+  readOutcome<DocumentView>(await fetch(`/api/x/ui.shell/documents/${id}`));
 
 const fetchRetired = async (
   id: string,
 ): Promise<GraphOutcome<readonly BlockView[]>> =>
   readOutcome<readonly BlockView[]>(
-    await fetch(`/api/documents/${id}/retired`),
+    await fetch(`/api/x/ui.shell/documents/${id}/retired`),
   );
 
 interface WriteResult {
@@ -227,7 +228,7 @@ const sendCommand = async (
   keepalive = false,
 ): Promise<GraphOutcome<WriteResult>> =>
   readOutcome<WriteResult>(
-    await fetch(`/api/documents/${id}/commands`, {
+    await fetch(`/api/x/ui.shell/documents/${id}/commands`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(command),
@@ -241,7 +242,7 @@ const sendRename = async (
   title: string,
 ): Promise<GraphOutcome<{ revisionId: string }>> =>
   readOutcome<{ revisionId: string }>(
-    await fetch(`/api/documents/${id}/commands`, {
+    await fetch(`/api/x/ui.shell/documents/${id}/commands`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ command: "rename", baseRevisionId, title }),
@@ -249,12 +250,12 @@ const sendRename = async (
   );
 
 const fetchChanges = async (id: string): Promise<GraphOutcome<ChangeSummary>> =>
-  readOutcome<ChangeSummary>(await fetch(`/api/documents/${id}/changes`));
+  readOutcome<ChangeSummary>(await fetch(`/api/x/ui.shell/documents/${id}/changes`));
 
 const fetchProposals = async (
   id: string,
 ): Promise<GraphOutcome<DocumentProposals>> =>
-  readOutcome<DocumentProposals>(await fetch(`/api/documents/${id}/proposals`));
+  readOutcome<DocumentProposals>(await fetch(`/api/x/ui.shell/documents/${id}/proposals`));
 
 const answerProposal = async (
   id: string,
@@ -262,7 +263,7 @@ const answerProposal = async (
   answer: "accepted" | "rejected",
 ): Promise<GraphOutcome<unknown>> =>
   readOutcome(
-    await fetch(`/api/documents/${id}/commands`, {
+    await fetch(`/api/x/ui.shell/documents/${id}/commands`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ command: "answerProposal", itemId, answer }),
@@ -1055,7 +1056,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     (blockId: string, preview: string, event: PointerEvent) => {
       const payload: DragPayload = {
         itemId: blockId,
-        kind: "document",
+        kind: "ui.shell:document",
         source: "workspace",
         operations: ["move"],
         preview,
@@ -1611,6 +1612,11 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                         state.proposals?.groups.find(
                           (group) => group.groupId === entry.item.groupId,
                         )?.items.length ?? 1
+                      }
+                      stagedBy={
+                        state.proposals?.groups
+                          .find((group) => group.groupId === entry.item.groupId)
+                          ?.stagedBy.join(", ") ?? ""
                       }
                     />
                   ) : entry.retired ? (
@@ -2438,7 +2444,9 @@ const ProposalRowView = component$<{
   answer$: QRL<(itemId: string, answer: "accepted" | "rejected") => void>;
   acceptGroup$: QRL<(groupId: string) => void>;
   groupSize: number;
-}>(({ item, answer$, acceptGroup$, groupSize }) => {
+  /** Who staged the group, as the core stamped it. BO_0209_006 */
+  stagedBy: string;
+}>(({ item, answer$, acceptGroup$, groupSize, stagedBy }) => {
   const block = item.block;
   const text =
     block !== null && isText(block)
@@ -2455,6 +2463,12 @@ const ProposalRowView = component$<{
     >
       <p class="proposal-row__mark" aria-hidden="true">
         {label}
+        {stagedBy !== "" && (
+          <span class="proposal-row__by" data-proposal-staged-by={stagedBy}>
+            {" · staged by "}
+            {stagedBy}
+          </span>
+        )}
       </p>
       {text === "" ? null : <div class="proposal-row__text">{text}</div>}
       <div class="proposal-row__answers">

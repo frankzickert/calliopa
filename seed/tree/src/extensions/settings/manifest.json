@@ -8,6 +8,7 @@
   "dependencies": {
     "ui.shell": "\u003e=0.1.0"
   },
+  "entrypoint": "contributions",
   "id": "settings",
   "version": "1.0.0"
 }

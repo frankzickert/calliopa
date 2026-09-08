@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   BLOCK_TYPES,
-  blockDocumentSchema,
+  BLOCK_VALIDATORS,
   MARKS,
   TEXT_ROLES,
   normalizeRuns,
@@ -11,29 +11,17 @@ import {
 } from "./vocabulary";
 
 const validateNode = (semanticType: string, content: unknown): string | null => {
-  const definition = blockDocumentSchema.nodes[semanticType];
-  if (definition === undefined) {
+  const validate = BLOCK_VALIDATORS[semanticType];
+  if (validate === undefined) {
     throw new Error(`No definition for ${semanticType}.`);
   }
-  return definition.validate(content as never);
+  return validate(content);
 };
 
 describe("the committed block vocabulary", () => {
-  it("Given the schema, Then it defines a document, a text block and a divider", () => {
-    expect(Object.keys(blockDocumentSchema.nodes).sort()).toEqual([
-      "divider",
-      "document",
-      "text",
-    ]);
-  });
-
-  it("Given the schema, Then containment and retirement run from a document to a block", () => {
-    const contains = blockDocumentSchema.relations["contains"];
-    const retired = blockDocumentSchema.relations["retired"];
-    expect(contains?.fromNodes).toEqual(["document"]);
-    expect(contains?.toNodes).toEqual([...BLOCK_TYPES]);
-    expect(retired?.fromNodes).toEqual(["document"]);
-    expect(retired?.toNodes).toEqual([...BLOCK_TYPES]);
+  it("Given the vocabulary, Then it reads a document, a text block and a divider", () => {
+    expect(Object.keys(BLOCK_VALIDATORS).sort()).toEqual(["divider", "document", "text"]);
+    expect([...BLOCK_TYPES].sort()).toEqual(["divider", "text"]);
   });
 });
 

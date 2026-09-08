@@ -13,38 +13,19 @@ export interface WorkspaceRecord extends WorkspaceState {
   readonly updatedAt: string;
 }
 
+/**
+ * A new workspace opens with no tabs (decided under `BO_0203`, 2026-09-07):
+ * the two placeholder tabs it opened with went with the story-development
+ * kinds, and the workspace's empty line names the library instead.
+ */
 export const DEFAULT_WORKSPACE_STATE: WorkspaceState = {
-  tabs: [
-    {
-      id: "workspace",
-      kind: "script",
-      title: "Workspace",
-      itemId: null,
-      viewType: "context",
-      selection: null,
-      drawerContext: "workspace",
-      unsaved: false,
-    },
-    {
-      id: "scene-board",
-      kind: "storyboard",
-      title: "Scene board",
-      itemId: "placeholder-scene",
-      viewType: "context",
-      selection: "opening",
-      drawerContext: "scene",
-      unsaved: false,
-    },
-  ],
-  activeTabId: "workspace",
+  tabs: [],
+  activeTabId: null,
   layout: {
     left: "expanded",
     right: "expanded",
     dock: "composer",
-    library: "expanded",
-    episodes: "expanded",
-    standing: "expanded",
-    destinations: "expanded",
+    sections: {},
   },
   preferredViews: {},
 };

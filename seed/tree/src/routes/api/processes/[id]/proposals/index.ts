@@ -1,6 +1,6 @@
 import type { RequestHandler } from "@builder.io/qwik-city";
 import { api } from "~/server/api";
-import { runForProcess } from "~/server/agent/runs";
+import { runForProcess } from "~/server/agent/conductor";
 import { runProposals } from "~/server/agent/proposed";
 import { isRecordId } from "~/server/uuid";
 
@@ -14,6 +14,6 @@ import { isRecordId } from "~/server/uuid";
 export const onGet: RequestHandler = (event) =>
   api(event, async () => {
     const id = event.params.id ?? "";
-    const run = isRecordId(id) ? await runForProcess(id) : null;
-    event.json(200, run === null ? [] : await runProposals(run.id));
+    const runId = isRecordId(id) ? await runForProcess(id) : null;
+    event.json(200, runId === null ? [] : await runProposals(runId));
   });
