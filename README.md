@@ -25,6 +25,14 @@ That one command downloads this repository into `~/calliopa`, generates every
 secret the stack needs, seeds the bundled core into your graph, and starts
 Calliopa at <http://127.0.0.1:8090>.
 
+Open that address. On your first visit Calliopa asks you to choose the
+owner's password — once; from then on you sign in with it. The owner's name
+is `CALLIOPA_OWNER_PRINCIPAL` in `.env` (`owner` unless you changed it before
+installing). Do that before you widen `CALLIOPA_HOST_BIND` beyond
+`127.0.0.1`: until the password is set, whoever reaches the address first
+sets it. A lost password is set again with `app account set-password` inside
+the stack.
+
 Requirements: Docker Engine 25 or later with the Compose plugin 2.24 or later,
 and `git`. You supply no keys — the agent is signed in later from the settings
 view, on your own ChatGPT or Claude subscription.

@@ -120,4 +120,6 @@ bind="$(sed -n 's/^CALLIOPA_HOST_BIND=//p' .env | tail -1)"
 echo
 echo "install complete. Calliopa is running at http://${bind:-127.0.0.1}:8090"
 echo
-echo "Sign the agent in from the settings view. More: https://www.calliopa.com"
+echo "Open that address: on your first visit Calliopa asks you to choose the"
+echo "owner's password, once. Then sign the agent in from the settings view."
+echo "More: https://www.calliopa.com"
