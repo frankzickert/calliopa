@@ -45,6 +45,18 @@ const stamp = (over: Partial<AgentStatus> = {}): AgentStatus => ({
   ...over,
 });
 
+describe("the agent's row when Hermes reasons", () => {
+  it("Given Hermes's own loop on the subscription, Then the row reads Codex's sign-in, and carries whether an API-key model is configured", () => {
+    const onHermes = stamp({ runtime: "hermes", hermesModel: "subscription", hermesModelName: "gpt-5.5" });
+    const record = withStatus(row("hermes"), { codex: signedIn }, onHermes, true);
+
+    expect(record.state).toBe("verified");
+    expect(record.agent).toEqual(onHermes);
+    expect(record.apiKeyModel).toBe(true);
+    expect(withStatus(row("hermes"), {}, onHermes).state).toBe("unconfigured");
+  });
+});
+
 describe("the agent's row", () => {
   it("Given the agent has stamped nothing, Then the row says it is not running", () => {
     const record = withStatus(row("hermes"), {}, null);

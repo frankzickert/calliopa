@@ -30,6 +30,9 @@ const TAG_MARK = new Map<string, Mark>(
  * is what the trailing `<br>` is for; `runsFrom` skips it, so it never becomes
  * content. */
 export function paintRuns(element: HTMLElement, runs: readonly Run[]): void {
+  // The element's own document: the page's in a browser, and the render
+  // harness's where it has no global one (`BO_0233_009`).
+  const document = element.ownerDocument;
   element.replaceChildren();
   for (const entry of runs) {
     let node: Node = document.createTextNode(entry.text);
@@ -51,6 +54,9 @@ export function paintRuns(element: HTMLElement, runs: readonly Run[]): void {
   if (runs.length === 0) element.appendChild(document.createElement("br"));
 }
 
+const TEXT_NODE = 3;
+const ELEMENT_NODE = 1;
+
 /** Reads an element's content back into runs. */
 export function runsFrom(element: HTMLElement): Run[] {
   const runs: Run[] = [];
@@ -60,7 +66,10 @@ export function runsFrom(element: HTMLElement): Run[] {
     marks: readonly Mark[],
     link: string | undefined,
   ): void => {
-    if (node.nodeType === Node.TEXT_NODE) {
+    // By node type rather than the globals `Node` and `HTMLElement`, which a
+    // render harness does not install; a proposal reads a composition back
+    // here too (`BO_0233_014`).
+    if (node.nodeType === TEXT_NODE) {
       const text = node.textContent ?? "";
       if (text !== "") {
         runs.push({
@@ -71,13 +80,14 @@ export function runsFrom(element: HTMLElement): Run[] {
       }
       return;
     }
-    if (!(node instanceof HTMLElement)) return;
-    if (node.tagName === "BR") return;
-    const mark = TAG_MARK.get(node.tagName);
-    const href = node.tagName === "A" ? node.getAttribute("href") : null;
+    if (node.nodeType !== ELEMENT_NODE || !("tagName" in node)) return;
+    const element = node as HTMLElement;
+    if (element.tagName === "BR") return;
+    const mark = TAG_MARK.get(element.tagName);
+    const href = element.tagName === "A" ? element.getAttribute("href") : null;
     const nextMarks = mark === undefined ? marks : [...marks, mark];
     const nextLink = href === null ? link : href;
-    for (const child of Array.from(node.childNodes)) {
+    for (const child of Array.from(element.childNodes)) {
       walk(child, nextMarks, nextLink);
     }
   };
@@ -109,7 +119,7 @@ function offsetOf(
 export function selectionIn(
   element: HTMLElement,
 ): { readonly start: number; readonly end: number } | null {
-  const selection = document.getSelection();
+  const selection = element.ownerDocument.getSelection?.() ?? null;
   if (selection === null || selection.rangeCount === 0) return null;
   const range = selection.getRangeAt(0);
   if (
@@ -122,6 +132,47 @@ export function selectionIn(
     start: offsetOf(element, range.startContainer, range.startOffset),
     end: offsetOf(element, range.endContainer, range.endOffset),
   };
+}
+
+/**
+ * A range as character offsets within this element, clamped to it: an end
+ * outside the element counts as the element's own start or end. A passage is
+ * one block's words, so a selection dragged past a block's edge is clamped to
+ * the block it began in rather than refused. BO_0227_009
+ */
+export function clampedOffsets(
+  element: HTMLElement,
+  range: Range,
+): { readonly start: number; readonly end: number } {
+  const length = textLength(element);
+  const before = element.compareDocumentPosition(range.startContainer);
+  const start = element.contains(range.startContainer)
+    ? offsetOf(element, range.startContainer, range.startOffset)
+    : before & Node.DOCUMENT_POSITION_PRECEDING
+      ? 0
+      : length;
+  const after = element.compareDocumentPosition(range.endContainer);
+  const end = element.contains(range.endContainer)
+    ? offsetOf(element, range.endContainer, range.endOffset)
+    : after & Node.DOCUMENT_POSITION_FOLLOWING
+      ? length
+      : 0;
+  return { start: Math.min(start, end), end: Math.max(start, end) };
+}
+
+/** A DOM range over a character range within this element — what a passage
+ * is painted over. BO_0227_009 */
+export function rangeAt(
+  element: HTMLElement,
+  start: number,
+  end: number,
+): Range {
+  const range = element.ownerDocument.createRange();
+  const from = positionOf(element, Math.max(0, start));
+  const to = positionOf(element, Math.max(0, end));
+  range.setStart(from.node, from.offset);
+  range.setEnd(to.node, to.offset);
+  return range;
 }
 
 /** The text node and code-unit offset a character offset names. */
@@ -156,7 +207,9 @@ export function selectRange(
   start: number,
   end: number,
 ): void {
-  const selection = document.getSelection();
+  // The element's own document, which is the page's in a browser and is
+  // what the render harness has where it has no global one.
+  const selection = element.ownerDocument.getSelection?.() ?? null;
   if (selection === null) return;
   const from = positionOf(element, Math.max(0, start));
   const to = positionOf(element, Math.max(0, end));

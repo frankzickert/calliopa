@@ -1,7 +1,13 @@
-import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 
-import type { AgentStatus, RuntimeStatus } from "~/lib/connections";
+import {
+  isAgentId,
+  type AgentId,
+  type AgentStatus,
+  type RuntimeStatus,
+  type SelectableRuntime,
+} from "~/lib/connections";
 
 /**
  * What the agent container reports about itself, and how a sign-in is asked
@@ -85,7 +91,112 @@ export async function agentStatus(): Promise<AgentStatus | null> {
     runtime: stamped.runtime,
     credential: stamp.kernelCredential === true || stamped.credential === true,
     toolset: stamp.kernelToolset === true || stamped.toolset === true,
+    // A stamp older than BO_0225 carries neither, and a stamp whose selection
+    // was configurable carries no reason: absence means the two agree.
+    ...(typeof stamped.selected === "string" ? { selected: stamped.selected } : {}),
+    ...(typeof stamped.reason === "string" ? { reason: stamped.reason } : {}),
+    ...(stamped.hermesModel === "subscription" || stamped.hermesModel === "provider"
+      ? { hermesModel: stamped.hermesModel }
+      : {}),
+    ...(typeof stamped.hermesModelName === "string" && stamped.hermesModelName !== ""
+      ? { hermesModelName: stamped.hermesModelName }
+      : {}),
   };
+}
+
+/**
+ * Whether an API-key model is configured: the controller the CLI's `provider`
+ * selection names, and what Hermes reasons with when it is set to the API-key
+ * model. BO_0228_012
+ */
+export async function apiKeyModelConfigured(): Promise<boolean> {
+  try {
+    await access(join(configDir(), "provider.env"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether the Claude runner answers, as the kernel's agent health reports it:
+ * `ok`, the words of why not, or null when the kernel said nothing about it —
+ * a kernel older than BO_0228, or one that could not be asked. BO_0228_009
+ */
+export type RunnerHealth = string | null;
+
+/**
+ * The agents the command area offers, and which of them can be chosen.
+ *
+ * Each is judged by what it needs to run, from the facts the agent container
+ * and the kernel report. Codex needs only to be signed in. Claude Code runs as
+ * itself behind the Claude runner, so it needs to be signed in and the runner
+ * to answer — never a controller model, since nothing reasons for it. Hermes
+ * needs what its model needs: the ChatGPT subscription needs Codex signed in,
+ * and the API-key model needs one configured; its label names the model, so
+ * the choice is never of an unnamed thing. BO_0225_004 BO_0228_009
+ */
+export async function selectableRuntimes(runner: RunnerHealth = null): Promise<readonly SelectableRuntime[]> {
+  const [reported, model, stamped] = await Promise.all([
+    runtimeStatuses(),
+    apiKeyModelConfigured(),
+    agentStatus(),
+  ]);
+  const signedIn = (id: string, label: string): string | null => {
+    const status = reported[id] ?? null;
+    if (status === null || !status.installed) return `${label} is not installed in the agent container.`;
+    if (!status.authenticated) return `${label} is not signed in.`;
+    return null;
+  };
+  const agent = (id: AgentId, label: string, reason: string | null): SelectableRuntime => ({
+    id,
+    label,
+    selectable: reason === null,
+    reason,
+  });
+
+  const claudeReason =
+    signedIn("claude-code", "Claude Code") ??
+    (runner === null || runner === "ok" ? null : "The Claude runner in the agent container is not answering.");
+
+  const hermesModel = stamped?.hermesModel ?? "subscription";
+  const hermesName = stamped?.hermesModelName;
+  const hermesReason =
+    hermesModel === "provider"
+      ? model
+        ? null
+        : "Hermes is set to the API-key model, and none is configured."
+      : signedIn("codex", "Codex") === null
+        ? null
+        : "Hermes reasons on the ChatGPT subscription, and Codex is not signed in.";
+
+  return [
+    agent("codex", "Codex", signedIn("codex", "Codex")),
+    agent("claude-code", "Claude Code", claudeReason),
+    agent("hermes", hermesName ? `Hermes · ${hermesName}` : "Hermes", hermesReason),
+  ];
+}
+
+/**
+ * The agent the composer last chose, for every device of the instance, or
+ * null when nothing was chosen or the file names no agent. BO_0228_009
+ */
+export async function chosenAgent(): Promise<AgentId | null> {
+  const choice = await readJson<{ agent?: unknown }>(join(configDir(), "agent-choice.json"));
+  return isAgentId(choice?.agent) ? choice.agent : null;
+}
+
+/**
+ * Remembers the composer's choice. Written whole and renamed into place, as
+ * the login request is, so a reader never sees half of it; it restarts
+ * nothing, since the gateway switches only when a command goes to an agent it
+ * is not running. BO_0228_009
+ */
+export async function chooseAgent(agent: AgentId): Promise<void> {
+  await mkdir(configDir(), { recursive: true });
+  const tmp = join(configDir(), "agent-choice.json.tmp");
+  await writeFile(tmp, JSON.stringify({ agent, chosenAt: Date.now() }), { mode: 0o644 });
+  await rename(tmp, join(configDir(), "agent-choice.json"));
 }
 
 /** Asks the agent's broker to run a runtime's own sign-in flow. */

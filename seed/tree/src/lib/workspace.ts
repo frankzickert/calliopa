@@ -26,6 +26,7 @@ export const DEFAULT_WORKSPACE_STATE: WorkspaceState = {
     right: "expanded",
     dock: "composer",
     sections: {},
+    filters: {},
   },
   preferredViews: {},
 };

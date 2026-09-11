@@ -1,12 +1,17 @@
+import { readStanding, type Standing } from "../../lib/disposition";
 import { byOrder, isOrderKey } from "../../lib/order";
 import type { ReadNode, ReadResult } from "../ccgw/client";
 import {
+  CHANGE_PROPERTY,
+  CHANGE_STATUS_PROPERTY,
   DOCUMENT_TYPE,
   normalizeRuns,
   TEXT_ROLES,
   type Run,
   type TextRole,
 } from "./vocabulary";
+import { statusOf } from "../../lib/changes";
+import type { ChangeStatus } from "../../lib/library";
 
 /**
  * Turning a CCGW read into an ordered document.
@@ -43,6 +48,8 @@ export interface TextBlockView extends BlockCommon {
   readonly kind: "text";
   readonly role: TextRole;
   readonly runs: readonly Run[];
+  /** The standing the reader gave the block; neutral when none is stored. BO_0227_010 */
+  readonly standing: Standing;
 }
 
 export interface DividerBlockView extends BlockCommon {
@@ -67,6 +74,10 @@ export interface DocumentView {
   readonly documentId: string;
   readonly revisionId: string;
   readonly title: string;
+  /** The extension this document is a change of, when it is one (`BO_0222_004`). */
+  readonly change?: string;
+  /** A change document's status. */
+  readonly changeStatus?: ChangeStatus;
   readonly blocks: readonly BlockView[];
 }
 
@@ -116,7 +127,8 @@ export function toBlock(node: ReadNode, containmentId: string): BlockView {
     const role = TEXT_ROLES.includes(stored as TextRole)
       ? (stored as TextRole)
       : "paragraph";
-    return { ...common, kind: "text", role, runs };
+    const standing = readStanding(content["disposition"]);
+    return { ...common, kind: "text", role, runs, standing };
   }
 
   if (semanticType === "divider") {
@@ -189,11 +201,16 @@ export function assembleDocument(
   const node = documentNodeOf(graph, documentId);
   if (node === undefined) return null;
 
-  const title = contentOf(node)["title"];
+  const content = contentOf(node);
+  const title = content["title"];
+  const change = content[CHANGE_PROPERTY];
   return {
     documentId: bareId(node.id),
     revisionId: node.revision.id,
     title: typeof title === "string" ? title : "",
+    ...(typeof change === "string" && change !== ""
+      ? { change, changeStatus: statusOf(content[CHANGE_STATUS_PROPERTY]) }
+      : {}),
     blocks: blocksOf(graph, documentId, CONTAINS),
   };
 }

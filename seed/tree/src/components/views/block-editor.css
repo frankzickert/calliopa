@@ -480,68 +480,502 @@ hr[data-block-divider] {
 }
 
 /*
- * A proposed change, against the block it concerns.
+ * A proposed change, drawn as the block it would become. BO_0233_004
  *
- * It has to be unmistakable against two neighbours: a retired block, which is
- * dashed and struck through, and a marked block, which command mode tints. So
- * this is solid rather than dashed, takes the accent edge rather than a muted
- * one, and carries a standing label — three signals, none of them colour
- * alone, for a reader who has both toggles on at once.
+ * It keeps the accepted blocks' geometry — the grip gutter on both sides and
+ * the role's own typography — so a proposal reads in the space it would take.
+ * What sets it apart from truth, from a retired block (dashed and struck) and
+ * from a marked one is its proposer's ground and edge, the proposer's face on
+ * its left border, and its answer icons on its top edge: never colour alone,
+ * since the face and the accessible name say who, and a label line no more.
  */
-.proposal-row {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-  margin: 0.35rem 0;
-  padding: 0.45rem 0.6rem;
-  border: 1px solid var(--accent);
-  border-left: 3px solid var(--accent);
+.proposal-block {
+  --proposal-ground: var(--proposal-person);
+  --proposal-edge: var(--proposal-person-edge);
+  position: relative;
+  margin: 0.9rem 0 0.6rem;
+  padding-block: 0.35rem;
+  padding-inline: var(--block-grip-gutter);
+  border: 1px solid var(--proposal-edge);
   border-radius: 0.35rem;
-  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  background: var(--proposal-ground);
 }
 
-.proposal-row__mark {
+/* A long press on touch is the drag's, never the page's callout; once it
+   has armed, the block lifts so the reader sees it is theirs to move.
+   BO_0233_012 */
+.proposal-block {
+  -webkit-touch-callout: none;
+}
+
+.proposal-block[data-lifted="true"] {
+  box-shadow: 0 0.4rem 1.2rem var(--selection);
+  outline: 2px solid var(--proposal-edge);
+}
+
+.proposal-block__portrait {
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
+}
+
+.proposal-block[data-proposal-tone="codex"] {
+  --proposal-ground: var(--proposal-codex);
+  --proposal-edge: var(--proposal-codex-edge);
+}
+
+.proposal-block[data-proposal-tone="claude"] {
+  --proposal-ground: var(--proposal-claude);
+  --proposal-edge: var(--proposal-claude-edge);
+}
+
+.proposal-block[data-proposal-tone="hermes"] {
+  --proposal-ground: var(--proposal-hermes);
+  --proposal-edge: var(--proposal-hermes-edge);
+}
+
+/* A removal or a move frames the block that stands, whose row brings its own
+   gutters. */
+.proposal-block[data-proposal-kind="remove"],
+.proposal-block[data-proposal-kind="move"] {
+  padding-inline: 0;
+}
+
+.proposal-block[data-proposal-kind="remove"] .block-text {
+  text-decoration: line-through;
+}
+
+/* The face, centred on the left border: half in the gutter, half over the
+   edge, taking none of the text's width. It is the handle too. It sits at the
+   border's middle, but never above the clearance: a removal or a move frames
+   a row whose ⠿ handle and standing glyph take the top of that same edge,
+   down to 2.13rem, so on a block of one line the face hangs below the border
+   rather than covering them. The rule is the same for every kind.
+   CA_0043_001 */
+.proposal-block__face {
+  position: absolute;
+  top: max(2.35rem, calc(50% - 14px));
+  left: 0;
+  transform: translateX(-50%);
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid var(--proposal-edge);
+  border-radius: 50%;
+  background: var(--panel-raised);
+  color: var(--text);
+  cursor: grab;
+  touch-action: none;
+}
+
+.proposal-block[data-proposal-kind="remove"] .proposal-block__face {
+  cursor: default;
+}
+
+.proposal-block__portrait {
+  display: block;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+/* The answers ride the top edge, right-aligned, half above it, so they take
+   no line of their own. */
+.proposal-block__answers {
+  position: absolute;
+  top: 0;
+  right: 0.6rem;
+  transform: translateY(-50%);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.proposal-block__answer,
+.proposal-block__moves {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--proposal-edge);
+  border-radius: 50%;
+  background: var(--panel-raised);
+  color: var(--text);
+}
+
+.proposal-block__answer {
+  cursor: pointer;
+}
+
+.proposal-block__answer:hover,
+.proposal-block__answer:focus-visible {
+  background: var(--proposal-ground);
+}
+
+.proposal-block__moves {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+/* A touch needs a larger target than the face and the icons draw. */
+@media (pointer: coarse) {
+  .proposal-block__answer {
+    width: 44px;
+    height: 44px;
+  }
+
+  .proposal-block__face::before {
+    content: "";
+    position: absolute;
+    inset: -8px;
+  }
+}
+
+.proposal-block__text {
+  color: var(--text);
+  cursor: text;
+  outline: none;
+  overflow-wrap: anywhere;
+}
+
+.proposal-block__text:focus-visible {
+  box-shadow: 0 0 0 2px var(--proposal-edge);
+}
+
+/* A block's standing, in the leading gutter beside any reference number: one
+ * glyph per standing, so the state rests on neither colour nor a bar's width,
+ * and its word in the margin where there is room for it. BO_0227_012 */
+.block-standing {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.45rem;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  width: 1.4rem;
+  justify-content: center;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.view--block-editor[data-editor-mode="command"]
+  .block-row[data-reference]
+  .block-standing {
+  top: 2rem;
+}
+
+.block-standing[data-standing-mark="pin"] {
+  color: var(--accent);
+}
+
+.block-standing__glyph {
+  font-size: 0.95rem;
+}
+
+.block-standing__word {
+  position: absolute;
+  inset-inline-end: calc(100% + 0.25rem);
+  display: none;
+  white-space: nowrap;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+@media (min-width: 44em) {
+  .block-standing__word {
+    display: inline;
+  }
+}
+
+/* Resolved stays where it is, quieted: preserved, out of active thought. */
+.block-row[data-standing="resolved"] .block-text[data-block-reading] {
+  color: var(--text-muted);
+}
+
+/* Reading text claims the horizontal axis alone, so vertical scrolling stays
+ * the browser's and a horizontal touch drag reaches the swipe rather than being
+ * taken for panning. BO_0227_011 */
+.block-text[data-block-reading] {
+  touch-action: pan-y;
+}
+
+.block-row[data-swiping="true"] {
+  z-index: 2;
+}
+
+/* The swipe's reveal: the strip the row has vacated, naming what release would
+ * commit. Drawn in the page's body, never inside a row Qwik renders. */
+.block-swipe-reveal {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  padding-inline: 0.5rem;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: pre;
+}
+
+.block-swipe-reveal[data-direction="left"] {
+  justify-content: flex-start;
+}
+
+.block-swipe-reveal[data-direction="right"] {
+  justify-content: flex-end;
+}
+
+.block-swipe-reveal[data-armed=""] {
+  color: var(--text-muted);
+}
+
+.block-swipe-reveal[data-armed="discarded"] {
+  background: color-mix(in srgb, var(--error) 18%, var(--panel));
+}
+
+/* A discarded block, drawn where it sits only while the panel asks. Dimmed and
+ * dotted, and named as discarded, so it is visibly neither the flow nor a
+ * retired block's dashed, struck-through row. BO_0227_014 */
+.discarded-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0.35rem 0;
+  padding: 0.35rem 0.6rem;
+  border: 1px dotted var(--border);
+  border-radius: 0.35rem;
+  opacity: 0.75;
+}
+
+.discarded-row__mark {
   margin: 0;
   flex: none;
   font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  /* The accent reads as 3.46:1 against this row's own tint at label size,
-     which is below AA. The border and the solid ground already carry the
-     accent; the label carries the words, so it takes the readable colour. */
-  color: var(--text);
-}
-
-.proposal-row__by {
-  font-weight: 400;
   color: var(--text-muted);
 }
 
-.proposal-row__text {
-  flex: 1 1 12rem;
+.discarded-row__text {
+  flex: 1 1 auto;
   min-width: 0;
-  color: var(--text);
+  color: var(--text-muted);
   overflow-wrap: anywhere;
 }
 
-.proposal-row__answers {
+.discarded-row button {
   flex: none;
-  display: flex;
-  gap: 0.35rem;
-}
-
-.proposal-row button {
   padding: 0.15rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: 0.3rem;
-  background: var(--panel-raised);
+  background: transparent;
   color: var(--text);
   font: inherit;
   cursor: pointer;
 }
 
-.proposal-row button:hover {
+/* The bar's control for the active block's standing. */
+.block-toolbar__standing {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+/* A passage, painted over its words without a node written into them: a tint
+ * and a dotted underline, so it is visibly not the active block, not a marked
+ * block's outline and not authored formatting, and rests on more than colour.
+ * BO_0227_009 */
+::highlight(calliopa-passage) {
+  background-color: color-mix(in srgb, var(--accent) 22%, transparent);
+  text-decoration: underline dotted var(--accent);
+}
+
+/* What a chip in the composer points at, shown for a moment
+   (`REVEAL_MS`, `reveal.ts`): a solid ring in the selection colour, wider
+   than the marked block's dashed accent outline and unlike the active block's
+   accent border, fading as the emphasis ends; a passage's words tinted and
+   underlined, so the words are found by more than colour. The attribute is
+   written onto the row and taken off again, so nothing stays. CA_0039_005 */
+.block-row[data-revealed] {
+  outline: 3px solid var(--selection);
+  outline-offset: 4px;
+  border-radius: 0.35rem;
+  animation: block-reveal 1.6s ease-out forwards;
+}
+
+@keyframes block-reveal {
+  0%,
+  70% {
+    outline-color: var(--selection);
+  }
+  100% {
+    outline-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .block-row[data-revealed] {
+    animation: none;
+  }
+}
+
+::highlight(calliopa-reveal) {
+  background-color: var(--selection);
+  text-decoration: underline solid var(--text);
+}
+
+/* A passage's number, beside its words and out of the flow. */
+.passage-number {
+  position: absolute;
+  z-index: 1;
+  transform: translateY(-85%);
+  padding: 0 0.15rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.2rem;
+  background: var(--panel-raised);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  line-height: 1.3;
+  /* Pressing a number takes its passage back. */
+  cursor: pointer;
+}
+
+/* A stale passage keeps its number, in the gutter, saying so; pressing it
+ * takes the passage back. */
+.passage-stale > span {
+  cursor: pointer;
+}
+
+/* A stale passage keeps its number, in the gutter, saying so. */
+.passage-stale {
+  position: absolute;
+  inset-inline-start: 0;
+  bottom: 0.2rem;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  width: var(--block-grip-gutter);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  line-height: 1.2;
+  color: var(--error);
+  overflow-wrap: anywhere;
+}
+
+/* Reference, and Re-point for a stale passage, beside the selection. Chrome
+ * that comes and goes with the selection, never a permanent bar. */
+.passage-affordance {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  max-width: calc(100vw - 2rem);
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--panel-raised);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--text) 18%, transparent);
+}
+
+.passage-affordance button {
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.passage-affordance__refusal {
+  padding: 0.2rem 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+/* A block's standing in command mode, on its top border like a tab: shown
+ * while the pointer is over the block and while focus is within it, and not
+ * drawn otherwise, so a hidden button takes no focus. Out of the flow, so
+ * showing it moves no text. The pressed standing carries its glyph and the
+ * accent, the dock toggle's pattern. BO_0231_004 */
+.standing-toolbar {
+  position: absolute;
+  top: 0;
+  inset-inline-start: calc(var(--block-grip-gutter) + 0.5rem);
+  z-index: 3;
+  display: none;
+  gap: 0.15rem;
+  padding: 0.1rem 0.2rem;
+  transform: translateY(-55%);
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--panel-raised);
+}
+
+@media (hover: hover) {
+  .view--block-editor[data-editor-mode="command"]
+    .block-row:hover
+    > .standing-toolbar {
+    display: flex;
+  }
+}
+
+.view--block-editor[data-editor-mode="command"]
+  .block-row:focus-within
+  > .standing-toolbar {
+  display: flex;
+}
+
+.standing-toolbar button {
+  min-width: 1.6rem;
+  min-height: 1.6rem;
+  padding: 0 0.25rem;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.standing-toolbar button:hover {
+  color: var(--text);
+}
+
+.standing-toolbar button[aria-pressed="true"] {
   border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel-raised));
+  color: var(--text);
+}
+
+.standing-toolbar
+  button[data-standing-option="discarded"][aria-pressed="false"]:hover {
+  color: var(--error);
+}
+
+/* The words' marking control in command mode, around the words so its state
+ * can be patched (BO_0231_001). It keeps the focus ring the words had. */
+.block-marking:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 0.3rem;
 }

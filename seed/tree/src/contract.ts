@@ -51,11 +51,20 @@ export interface LibraryItem {
 
 /** What a section contributed as a component receives from the shell. */
 export interface SectionProps {
-  /** The reader's answer from the page load; the component re-reads on its own. */
+  /** The reader's answer from the page load, re-read by the shell when a tab
+   * of the section's kind changes and by the component on its own. */
   readonly data: unknown;
   /** The active tab's item identity, so the section can mark its row. */
   readonly activeItemId: string | null;
   readonly sectionKey: string;
+  /**
+   * The section's stored filter — a set of values the section reads in its
+   * own vocabulary — from the workspace layout, or `null` when nothing was
+   * stored; `setFilter$` stores a new set beside the section's collapsed
+   * state, so it follows the workspace across reloads and devices. BO_0222_006
+   */
+  readonly filter: readonly string[] | null;
+  readonly setFilter$: QRL<(values: readonly string[]) => Promise<void>>;
 }
 
 /**

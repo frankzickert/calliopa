@@ -21,6 +21,7 @@ import {
 } from "~/server/extensions";
 import { HttpError } from "~/server/http-error";
 import { kernelExtensions } from "~/server/kernel/extensions";
+import { readSession } from "~/server/session";
 import { isRecordId } from "~/server/uuid";
 
 /**
@@ -92,6 +93,94 @@ const routes: readonly ApiRoute[] = [
     method: "GET",
     path: "extensions",
     handle: async (event) => event.json(200, await listExtensions()),
+  },
+  {
+    /**
+     * A new extension: the kernel writes its manifest and system.md as truth
+     * under the signed-in person, and answers its view. The refusal — an
+     * invalid id, a taken id, an agent-class session — passes through with
+     * its code so the form can say it. BO_0224_009
+     */
+    method: "POST",
+    path: "extensions",
+    handle: (event) =>
+      kernelAnswer(event, async () => {
+        const body = (await event.request.json()) as { id?: unknown; purpose?: unknown };
+        if (typeof body.id !== "string" || typeof body.purpose !== "string") {
+          throw new HttpError(400, 'the body must carry "id" and "purpose"', "bad_request");
+        }
+        return kernelExtensions.create(body.id.trim(), body.purpose.trim());
+      }, 201),
+  },
+  {
+    /**
+     * An import staged as a proposal: the body is the archive's bytes, sent
+     * raw to the kernel with the file's name, and the answer is the group and
+     * the summary — or the kernel's refusal with its code (`forbidden` for
+     * anyone but the owner, `extension_reserved`, `nothing_to_import`,
+     * `import_refused`, `archive_invalid`, `archive_too_large`). BO_0224_011
+     */
+    method: "POST",
+    path: "extensions/import",
+    handle: (event) =>
+      kernelAnswer(event, async () => {
+        const name = event.url.searchParams.get("name") ?? "extension.zip";
+        const bytes = new Uint8Array(await event.request.arrayBuffer());
+        return kernelExtensions.importArchive(bytes, name);
+      }, 202),
+  },
+  {
+    /** A staged import again, with its group's state. BO_0224_011 */
+    method: "GET",
+    path: "extensions/import/[group]",
+    handle: (event, params) =>
+      kernelAnswer(event, () => kernelExtensions.importRecord(params["group"] ?? "")),
+  },
+  {
+    /**
+     * The owner's decision on an import's group: accept parks behind the
+     * kernel's confirmation and answers its address; reject executes.
+     * BO_0224_011
+     */
+    method: "POST",
+    path: "extensions/import/[group]/[verb]",
+    handle: (event, params) =>
+      kernelAnswer(event, async () => {
+        const verb = params["verb"];
+        if (verb !== "accept" && verb !== "reject") {
+          throw new HttpError(404, "an import is accepted or rejected", "not_found");
+        }
+        const group = params["group"] ?? "";
+        const body = (await event.request.json().catch(() => ({}))) as { id?: unknown; version?: unknown };
+        const named = typeof body.id === "string" ? `${body.id}${typeof body.version === "string" ? ` ${body.version}` : ""}` : group;
+        return kernelExtensions.decide(verb, group, `extension import ${verb === "accept" ? "accepted" : "rejected"} in the browser: ${named}`);
+      }),
+  },
+  {
+    /** Head promoted through the gate: an update's Serve now. BO_0224_011 */
+    method: "POST",
+    path: "extensions/promote",
+    handle: (event) => kernelAnswer(event, () => kernelExtensions.promote(), 202),
+  },
+  {
+    /**
+     * One extension as an archive, streamed from the kernel with its file
+     * name, so the browser downloads it; `?revision=` names one of the
+     * extension's versions. BO_0224_010
+     */
+    method: "GET",
+    path: "extensions/[id]/export",
+    handle: async (event, params) => {
+      const raw = event.url.searchParams.get("revision");
+      const revision = raw === null ? undefined : Number(raw);
+      if (revision !== undefined && (!Number.isInteger(revision) || revision <= 0)) {
+        throw new HttpError(400, "revision must be a positive integer", "bad_request");
+      }
+      const archive = await kernelExtensions.exportArchive(params["id"] ?? "", revision);
+      event.headers.set("content-type", "application/zip");
+      event.headers.set("content-disposition", `attachment; filename="${archive.fileName}"`);
+      event.send(200, archive.bytes);
+    },
   },
   {
     /**
@@ -203,9 +292,10 @@ const routes: readonly ApiRoute[] = [
 async function kernelAnswer(
   event: Parameters<ApiRoute["handle"]>[0],
   run: () => Promise<unknown>,
+  status = 200,
 ): Promise<void> {
   try {
-    event.json(200, await run());
+    event.json(status, await run());
   } catch (error) {
     if (error instanceof HttpError) {
       event.json(error.status, {
@@ -237,8 +327,15 @@ export const contributions = declare({
       }));
     },
     // The knowledge graph's extensions, or why they could not be read; the
-    // section's component renders either. BO_0201_005
-    extensions: () => listExtensions(),
+    // section's component renders either. BO_0201_005 The reader adds whether
+    // the person is the owner, for the import control, outside the snapshot's
+    // cache. BO_0224_011
+    extensions: async () => {
+      const listing = await listExtensions();
+      if (!listing.reachable) return listing;
+      const person = await readSession();
+      return { ...listing, owner: person?.owner === true };
+    },
   },
   routes,
 });

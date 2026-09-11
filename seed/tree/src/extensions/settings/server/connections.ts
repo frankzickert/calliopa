@@ -1,5 +1,6 @@
 import {
   configurationRefusal,
+  reasoningParty,
   type AgentStatus,
   type ConnectionRecord,
   type ConnectionState,
@@ -9,7 +10,7 @@ import { HttpError } from "~/server/http-error";
 import { kernelSecrets, type PartyView } from "~/server/kernel/client";
 import type { RegisteredParty } from "~/registry";
 import { parties, partyOf } from "~/server/registry";
-import { agentStatus, runtimeStatuses } from "~/server/agent/adapters";
+import { agentStatus, apiKeyModelConfigured, runtimeStatuses } from "~/server/agent/adapters";
 
 /**
  * The store over the parties, kept by the kernel (`ui-kernel.md`,
@@ -90,9 +91,10 @@ export function withStatus(
   record: ConnectionRecord,
   reported: Record<string, RuntimeStatus>,
   stamped: AgentStatus | null,
+  apiKeyModel = false,
 ): ConnectionRecord {
   if (record.kind !== "status") return record;
-  if (record.party === "hermes") return asAgent(record, reported, stamped);
+  if (record.party === "hermes") return asAgent(record, reported, stamped, apiKeyModel);
 
   const status = reported[record.party] ?? null;
   if (status === null) {
@@ -133,6 +135,7 @@ function asAgent(
   record: ConnectionRecord,
   reported: Record<string, RuntimeStatus>,
   stamped: AgentStatus | null,
+  apiKeyModel = false,
 ): ConnectionRecord {
   if (stamped === null) {
     return {
@@ -143,7 +146,7 @@ function asAgent(
       agent: null,
     };
   }
-  const reasoning = reported[stamped.runtime]?.authenticated ?? false;
+  const reasoning = reported[reasoningParty(stamped)]?.authenticated ?? false;
   if (stamped.credential && !stamped.toolset) {
     return {
       ...record,
@@ -159,6 +162,7 @@ function asAgent(
     lastError: null,
     status: null,
     agent: stamped,
+    apiKeyModel,
   };
 }
 
@@ -192,7 +196,8 @@ export async function listConnections(): Promise<ConnectionRecord[]> {
   const status = records.some((record) => record.kind === "status");
   const reported = status ? await runtimeStatuses() : {};
   const stamped = status ? await agentStatus() : null;
-  return records.map((record) => withStatus(record, reported, stamped));
+  const apiKeyModel = status ? await apiKeyModelConfigured() : false;
+  return records.map((record) => withStatus(record, reported, stamped, apiKeyModel));
 }
 
 export async function readConnection(party: string): Promise<ConnectionRecord> {

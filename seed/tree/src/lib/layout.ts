@@ -19,6 +19,13 @@ export interface Layout {
    * reads expanded. BO_0202_003
    */
   sections: Record<string, SectionState>;
+  /**
+   * A section's stored filter, keyed like `sections`: the values it lists,
+   * in its own vocabulary — the Extensions section's change statuses. A key
+   * absent means the section's default; a stored empty set lists nothing.
+   * Preserved for a section nothing contributes, as `sections` is. BO_0222_006
+   */
+  filters: Record<string, readonly string[]>;
 }
 
 export function sectionState(layout: Layout, key: string): SectionState {
@@ -57,8 +64,16 @@ export function nextDrawerState(state: DrawerState): DrawerState {
   return DRAWER_STATES[(DRAWER_STATES.indexOf(state) + 1) % 3] ?? "expanded";
 }
 
+/**
+ * A tap on the dock's handle: an open dock — at the composer or the console —
+ * closes, and a closed one opens to the composer. Closing is what a reader
+ * reaching for the handle of an open dock means. The forward cycle this
+ * replaced took the composer to the console, so on a phone the first tap made
+ * the dock taller, which read as the dock refusing to close. The console is a
+ * swipe up from the composer, or the header's console control. BO_0230_002
+ */
 export function dockAfterTap(position: DockPosition): DockPosition {
-  return DOCK_POSITIONS[(DOCK_POSITIONS.indexOf(position) + 1) % 3] ?? position;
+  return position === "collapsed" ? "composer" : "collapsed";
 }
 
 /** How far a pointer must travel before a release reads as a swipe rather

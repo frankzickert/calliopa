@@ -1,3 +1,7 @@
 # Your instance's configuration and secrets. Created by install.sh from
 # .env.example; never committed.
 .env
+
+# The directory the kernel shares with the host-side updater: the owner's
+# update request and the updater's status. Created by install.sh.
+updater/

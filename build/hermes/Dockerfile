@@ -29,12 +29,17 @@ COPY --from=node:22-trixie-slim@sha256:7b8a0c89c54499bee567618f96578e1a12a800f06
 COPY --from=node:22-trixie-slim@sha256:7b8a0c89c54499bee567618f96578e1a12a800f062fbdbfd1fb6a443fa6f6284 /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -sf /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm
 
-# The subscription coding runtimes Hermes's bundled skills delegate to, and the
-# search tool they expect to find. Their credential homes live on the data
-# volume rather than in the image, so signing in survives a rebuild.
+# The subscription coding runtimes, and the search tool they expect to find.
+# Their credential homes live on the data volume rather than in the image, so
+# signing in survives a rebuild. Claude Code is pinned: the Claude runner
+# passes it flags verified against this version (`--tools`,
+# `--permission-mode dontAsk`, `--strict-mcp-config`,
+# `--append-system-prompt-file`, `${VAR}` expansion in `--mcp-config`
+# headers), so a bump is re-verified the way the patches below are.
+# BO_0228_001
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ripgrep \
-    && npm install -g @anthropic-ai/claude-code @openai/codex \
+    && npm install -g @anthropic-ai/claude-code@2.1.251 @openai/codex \
     && npm cache clean --force \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -63,6 +68,64 @@ assert '"calliopa-kernel"' in patched
 path.write_text(patched)
 EOF
 
+# Pinned-release patch. In codex app-server mode the release never forwards a
+# run's instructions: `/v1/runs` takes them as the agent's ephemeral system
+# prompt, which only Hermes's own loop applies, and that loop is bypassed for
+# this runtime — `thread/start` carries the working directory alone and
+# `turn/start` the reader's text alone. Every run the kernel bridge started on
+# codex therefore went out without its contract: the document it was aimed at,
+# where its work goes, the pin and group, the skills. Codex's `thread/start`
+# takes `developerInstructions`; the session now sends the run's instructions
+# there. One agent, one Codex session and one thread are built per run, so the
+# instructions a thread starts with are that run's. BO_0226_011
+#
+# The assertions are the point, as above: a pin bump that moves any of the
+# three places fails the build rather than quietly dropping the contract again.
+RUN python3 - <<'EOF'
+import pathlib
+
+root = pathlib.Path("/usr/local/lib/python3.13/site-packages/agent")
+
+
+def patch(relative, old, new):
+    path = root / relative
+    source = path.read_text()
+    assert source.count(old) == 1, (
+        f"hermes pin changed: the calliopa developer-instructions patch no longer "
+        f"applies to {relative}. Re-evaluate it against the new release before "
+        f"bumping the pin."
+    )
+    path.write_text(source.replace(old, new))
+
+
+patch(
+    "transports/codex_app_server_session.py",
+    "        client_factory: Optional[Callable[..., CodexAppServerClient]] = None,\n"
+    "    ) -> None:\n"
+    "        self._cwd = cwd or os.getcwd()\n",
+    "        client_factory: Optional[Callable[..., CodexAppServerClient]] = None,\n"
+    "        developer_instructions: Optional[str] = None,\n"
+    "    ) -> None:\n"
+    "        self._cwd = cwd or os.getcwd()\n"
+    "        self._developer_instructions = developer_instructions\n",
+)
+patch(
+    "transports/codex_app_server_session.py",
+    '        params: dict[str, Any] = {"cwd": self._cwd}\n',
+    '        params: dict[str, Any] = {"cwd": self._cwd}\n'
+    "        if self._developer_instructions:\n"
+    '            params["developerInstructions"] = self._developer_instructions\n',
+)
+patch(
+    "codex_runtime.py",
+    "        agent._codex_session = CodexAppServerSession(\n"
+    "            cwd=cwd,\n",
+    "        agent._codex_session = CodexAppServerSession(\n"
+    "            cwd=cwd,\n"
+    '            developer_instructions=getattr(agent, "ephemeral_system_prompt", None) or None,\n',
+)
+EOF
+
 # Both trap dependencies, asserted at build time so a broken image never
 # reaches a compose file. `aiohttp` is what the API server needs an adapter
 # from; `mcp.client.streamable_http` is the module the release's transport gate
@@ -89,8 +152,9 @@ ENV API_SERVER_ENABLED=true \
 # of one step. CA_0022_005 BO_0200_007
 COPY entrypoint.sh /usr/local/bin/hermes-entrypoint
 COPY login_broker.py /usr/local/bin/hermes-login-broker
-RUN chmod +x /usr/local/bin/hermes-entrypoint /usr/local/bin/hermes-login-broker
+COPY claude_runner.py /usr/local/bin/calliopa-claude-runner
+RUN chmod +x /usr/local/bin/hermes-entrypoint /usr/local/bin/hermes-login-broker /usr/local/bin/calliopa-claude-runner
 
-EXPOSE 8642
+EXPOSE 8642 8643
 
 ENTRYPOINT ["/usr/local/bin/hermes-entrypoint"]

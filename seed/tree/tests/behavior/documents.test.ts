@@ -5,9 +5,11 @@ import {
   createDocument,
   deleteDocument,
   insertBlock,
+  listChangeDocuments,
   listDocuments,
   mergeTextBlocks,
   moveBlock,
+  placeProposedItem,
   proposeDocumentChanges,
   readDocument,
   readDocumentChanges,
@@ -17,9 +19,12 @@ import {
   restoreBlock,
   retireBlock,
   reviseTextBlock,
+  setBlockDisposition,
+  setChangeStatus,
   splitTextBlock,
 } from "../../src/server/documents/documents";
 import { readGraphEnv } from "../../src/server/ccgw/env";
+import { stage } from "../../src/server/ccgw/client";
 
 /**
  * The document operations over the one graph, against a real CCGW and a real
@@ -128,6 +133,53 @@ describe.skipIf(!configured)("documents over CCGW", () => {
       runs: [{ text: "lost" }],
     });
     expect(stale.outcome).toBe("conflict");
+  });
+
+  it("Given a standing set with the base, Then it lands, survives a save and a split, counts as a change, and neutral clears it", async () => {
+    // Its own document, so the split it makes moves nothing the other
+    // scenarios count.
+    const { documentId: standingId, blockId: headId } = ok<{ documentId: string; blockId: string }>(
+      await createDocument({ title: "Standing" }),
+    );
+    type Read = { revisionId: string; blocks: readonly { blockId: string; revisionId: string; standing?: string }[] };
+    const block = async (blockId: string) =>
+      ok<Read>(await readDocument(standingId)).blocks.find((candidate) => candidate.blockId === blockId);
+    const counted = async () => ok<{ changeCount: number }>(await readDocumentChanges(standingId)).changeCount;
+
+    const before = await block(headId);
+    const changesBefore = await counted();
+    await settle();
+    const pinned = ok<{ revisionId: string }>(
+      await setBlockDisposition({ documentId: standingId, blockId: headId, baseRevisionId: before?.revisionId ?? "", standing: "pin" }),
+    );
+    expect((await block(headId))?.standing).toBe("pin");
+    expect(await counted()).toBe(changesBefore + 1);
+
+    // A stale base is a conflict that writes nothing.
+    await settle();
+    const stale = await setBlockDisposition({ documentId: standingId, blockId: headId, baseRevisionId: before?.revisionId ?? "", standing: "discarded" });
+    expect(stale.outcome).toBe("conflict");
+
+    // Typing writes runs and role by property, so the standing stands.
+    await settle();
+    const saved = ok<{ revisionId: string }>(
+      await reviseTextBlock({ documentId: standingId, blockId: headId, baseRevisionId: pinned.revisionId, runs: [{ text: "Pinned words, split here." }] }),
+    );
+    expect((await block(headId))?.standing).toBe("pin");
+
+    // A split carries the standing to the tail, as it carries the role.
+    await settle();
+    const split = ok<{ revisionId: string; tailBlockId: string }>(
+      await splitTextBlock({ documentId: standingId, blockId: headId, baseRevisionId: saved.revisionId, at: 13 }),
+    );
+    expect((await block(split.tailBlockId))?.standing).toBe("pin");
+
+    await settle();
+    ok(await setBlockDisposition({ documentId: standingId, blockId: headId, baseRevisionId: split.revisionId, standing: "neutral" }));
+    expect((await block(headId))?.standing).toBe("neutral");
+
+    await settle();
+    await deleteDocument({ documentId: standingId, baseRevisionId: ok<Read>(await readDocument(standingId)).revisionId });
   });
 
   it("Given a role the vocabulary does not permit, Then Validation refuses it and nothing is written", async () => {
@@ -290,6 +342,159 @@ describe.skipIf(!configured)("documents over CCGW", () => {
     expect(after.groups.some((candidate) => candidate.groupId === staged.groupId)).toBe(false);
   });
 
+  it("Given an agent's proposal, Then its proposer is the agent its run names, and a reader placing it keeps its text and proposer", async () => {
+    const before = ok<{ blocks: readonly { blockId: string; revisionId: string; order: string; kind: string }[] }>(await readDocument(documentId));
+    // A text block: a divider has no words for a rewrite to change.
+    const target = before.blocks.find((block) => block.kind === "text");
+    await settle();
+    const staged = ok<{ groupId: string; items: readonly { itemId: string; kind: string }[] }>(
+      await proposeDocumentChanges({
+        documentId,
+        items: [
+          { kind: "replace", blockId: target?.blockId ?? "", baseRevisionId: target?.revisionId ?? "", runs: [{ text: "Agent rewrite" }] },
+          { kind: "insert", block: { kind: "text", runs: [{ text: "Agent addition" }] }, placement: { at: "end" } },
+        ],
+      }),
+    );
+    // The run's provenance node, staged into the same group as the bridge
+    // stages it when a run closes (`stageRunSummary`). BO_0233_001
+    const provenance = await stage(
+      staged.groupId,
+      "CREATE (r:agent.run {id: $id, goal: $goal, pin: $pin, groupId: $group, agent: $agent, executedBy: $executedBy, runStatus: $status, verification: $verification, skillRevisions: $skills})",
+      {
+        id: `run:behaviour-${staged.groupId.slice(-8)}`,
+        goal: "rewrite the opening",
+        pin: 1,
+        group: staged.groupId,
+        agent: "claude-code",
+        executedBy: "claude-code (claude-sonnet-5)",
+        status: "completed",
+        verification: "unverified",
+        skills: [],
+      },
+      "run provenance",
+    );
+    expect(provenance.outcome).toBe("success");
+
+    type Read = { groups: readonly { groupId: string; proposer: Record<string, unknown>; items: readonly { itemId: string; kind: string; block: { order: string; runs?: readonly { text: string }[] } | null }[] }[] };
+    let read = ok<Read>(await readDocumentProposals(documentId));
+    let group = read.groups.find((candidate) => candidate.groupId === staged.groupId);
+    expect(group?.proposer).toEqual({ kind: "agent", agent: "claude-code", executedBy: "claude-code (claude-sonnet-5)" });
+    const replace = staged.items.find((item) => item.kind === "replace")?.itemId ?? "";
+    const insert = staged.items.find((item) => item.kind === "insert")?.itemId ?? "";
+
+    // The reader places the rewrite at the end and the new block first. It
+    // is a staging into the agent's group, and nothing is answered. BO_0233_007
+    await settle();
+    ok(await placeProposedItem({ documentId, itemId: replace, placement: { at: "end" } }));
+    await settle();
+    ok(await placeProposedItem({ documentId, itemId: insert, placement: { before: target?.blockId ?? "" } }));
+    read = ok<Read>(await readDocumentProposals(documentId));
+    group = read.groups.find((candidate) => candidate.groupId === staged.groupId);
+    const placedReplace = group?.items.find((item) => item.itemId === replace);
+    const placedInsert = group?.items.find((item) => item.itemId === insert);
+    // The rewrite keeps its words: the key was set on the group's own
+    // candidate, not on the established revision.
+    expect(placedReplace?.block?.runs).toEqual([{ text: "Agent rewrite" }]);
+    expect((placedReplace?.block?.order ?? "") > (before.blocks[before.blocks.length - 1]?.order ?? "")).toBe(true);
+    expect(placedInsert?.block?.runs).toEqual([{ text: "Agent addition" }]);
+    // Before the block it was dropped on.
+    const targetAt = before.blocks.findIndex((block) => block.blockId === target?.blockId);
+    expect((placedInsert?.block?.order ?? "~") < (target?.order ?? "")).toBe(true);
+    expect((placedInsert?.block?.order ?? "") > (before.blocks[targetAt - 1]?.order ?? "")).toBe(true);
+    expect(group?.items).toHaveLength(2);
+    expect(group?.proposer).toMatchObject({ kind: "agent", agent: "claude-code" });
+    // Truth is untouched: nothing was answered.
+    const unchanged = ok<{ blocks: readonly { blockId: string; revisionId: string }[] }>(await readDocument(documentId));
+    expect(unchanged.blocks.find((block) => block.blockId === target?.blockId)?.revisionId).toBe(target?.revisionId);
+    // A removal proposes no place.
+    const removal = await placeProposedItem({ documentId, itemId: `${staged.groupId}|remove|node:x|c-x`, placement: { at: "end" } });
+    expect(removal.outcome).not.toBe("success");
+
+    // A person's own proposal is the person's.
+    await settle();
+    const mine = ok<{ groupId: string; items: readonly { itemId: string }[] }>(
+      await proposeDocumentChanges({ documentId, items: [{ kind: "insert", block: { kind: "text", runs: [{ text: "Mine" }] }, placement: { at: "start" } }] }),
+    );
+    read = ok<Read>(await readDocumentProposals(documentId));
+    expect(read.groups.find((candidate) => candidate.groupId === mine.groupId)?.proposer).toMatchObject({ kind: "person" });
+
+    for (const itemId of [replace, insert, mine.items[0]?.itemId ?? ""]) {
+      ok(await answerDocumentProposal({ itemId, answer: "rejected" }));
+    }
+  });
+
+  it("Given a rewrite and a standing set after it, Then accepting lands the words and keeps the standing; a rewrite whose words moved says so, unless the reader typed into it", async () => {
+    type Read = { blocks: readonly { blockId: string; revisionId: string; kind: string; runs?: readonly { text: string }[]; standing?: string }[] };
+    let document = ok<Read>(await readDocument(documentId));
+    const target = document.blocks.find((block) => block.kind === "text");
+    await settle();
+    const staged = ok<{ items: readonly { itemId: string }[] }>(
+      await proposeDocumentChanges({
+        documentId,
+        items: [{ kind: "replace", blockId: target?.blockId ?? "", baseRevisionId: target?.revisionId ?? "", runs: [{ text: "Rewritten while pinned" }] }],
+      }),
+    );
+    // The reader pins the block after the proposal was staged: a revision
+    // CCGW reads as drift, though not a word moved. BO_0233_011
+    await settle();
+    ok(await setBlockDisposition({ documentId, blockId: target?.blockId ?? "", baseRevisionId: target?.revisionId ?? "", standing: "pin" }));
+    await settle();
+    ok(await answerDocumentProposal({ documentId, itemId: staged.items[0]?.itemId ?? "", answer: "accepted" }));
+    document = ok<Read>(await readDocument(documentId));
+    const accepted = document.blocks.find((block) => block.blockId === target?.blockId);
+    expect(accepted?.runs).toEqual([{ text: "Rewritten while pinned" }]);
+    expect(accepted?.standing).toBe("pin");
+
+    // A rewrite whose block's words changed since is refused in words, and
+    // nothing is written.
+    await settle();
+    const again = ok<{ items: readonly { itemId: string }[] }>(
+      await proposeDocumentChanges({
+        documentId,
+        items: [{ kind: "replace", blockId: accepted?.blockId ?? "", baseRevisionId: accepted?.revisionId ?? "", runs: [{ text: "A stale rewrite" }] }],
+      }),
+    );
+    await settle();
+    const written = ok<{ revisionId: string }>(
+      await reviseTextBlock({ documentId, blockId: accepted?.blockId ?? "", baseRevisionId: accepted?.revisionId ?? "", runs: [{ text: "Written by the reader" }] }),
+    );
+    // And the reader takes the pin back, after the rewrite that carries it.
+    await settle();
+    ok(await setBlockDisposition({ documentId, blockId: target?.blockId ?? "", baseRevisionId: written.revisionId, standing: "neutral" }));
+    await settle();
+    const stale = await answerDocumentProposal({ documentId, itemId: again.items[0]?.itemId ?? "", answer: "accepted" });
+    expect(stale.outcome).not.toBe("success");
+    expect(JSON.stringify(stale)).toContain("older version of the block");
+    document = ok<Read>(await readDocument(documentId));
+    expect(document.blocks.find((block) => block.blockId === target?.blockId)?.runs).toEqual([{ text: "Written by the reader" }]);
+
+    // Typed into, the same rewrite is accepted over the reader's words, and
+    // the standing stays the one the reader set since. CA_0042_002
+    await settle();
+    ok(await answerDocumentProposal({ documentId, itemId: again.items[0]?.itemId ?? "", answer: "accepted", edited: true }));
+    document = ok<Read>(await readDocument(documentId));
+    const edited = document.blocks.find((block) => block.blockId === target?.blockId);
+    expect(edited?.runs).toEqual([{ text: "A stale rewrite" }]);
+    expect(edited?.standing).toBe("neutral");
+
+    // A move takes no typing, so an edit's acceptance of a stale one is
+    // refused as the icons' is.
+    await settle();
+    const moving = ok<{ items: readonly { itemId: string }[] }>(
+      await proposeDocumentChanges({
+        documentId,
+        items: [{ kind: "move", blockId: target?.blockId ?? "", baseRevisionId: edited?.revisionId ?? "", placement: { at: "end" } }],
+      }),
+    );
+    await settle();
+    ok(await reviseTextBlock({ documentId, blockId: edited?.blockId ?? "", baseRevisionId: edited?.revisionId ?? "", runs: [{ text: "Written again" }] }));
+    await settle();
+    const staleMove = await answerDocumentProposal({ documentId, itemId: moving.items[0]?.itemId ?? "", answer: "accepted", edited: true });
+    expect(JSON.stringify(staleMove)).toContain("older version of the block");
+    ok(await answerDocumentProposal({ itemId: moving.items[0]?.itemId ?? "", answer: "rejected" }));
+  });
+
   it("Given a rename and a delete, Then the listing follows and history stays", async () => {
     const document = ok<{ revisionId: string }>(await readDocument(documentId));
     await settle();
@@ -308,5 +513,84 @@ describe.skipIf(!configured)("documents over CCGW", () => {
     expect(listedAfter.some((entry) => entry.documentId === documentId)).toBe(false);
     const twice = await deleteDocument({ documentId, baseRevisionId: renamed.revisionId });
     expect(twice.outcome).toBe("noResult");
+  });
+});
+
+/**
+ * A change of an extension is a document carrying `change` and
+ * `changeStatus` (BO_0222): created with both, it is absent from the
+ * documents listing and present in the change listing under its extension;
+ * its status is written through the bridge with the base compared first, a
+ * stale base answered as a conflict; a value outside the declaration's set is
+ * refused by Validation naming the six; and a status on an ordinary document
+ * is refused before the graph. BO_0222_011
+ */
+describe.skipIf(!configured)("change documents over CCGW", () => {
+  let changeId = "";
+  let plainId = "";
+
+  beforeAll(async () => {
+    changeId = ok<{ documentId: string }>(
+      await createDocument({ title: "Untitled change", change: "calliopa-video", status: "idea" }),
+    ).documentId;
+    plainId = ok<{ documentId: string }>(await createDocument({ title: "Plain" })).documentId;
+  });
+
+  afterAll(async () => {
+    for (const id of [changeId, plainId]) {
+      const document = await readDocument(id);
+      if (document.outcome === "success") {
+        await settle();
+        await deleteDocument({ documentId: id, baseRevisionId: document.result.revisionId });
+      }
+    }
+  });
+
+  it("Given a change document, Then it lists under its extension and never among the documents", async () => {
+    const documents = ok<readonly { documentId: string }[]>(await listDocuments());
+    expect(documents.some((entry) => entry.documentId === changeId)).toBe(false);
+    expect(documents.some((entry) => entry.documentId === plainId)).toBe(true);
+    const changes = ok<readonly { documentId: string; change: string; status: string; title: string }[]>(
+      await listChangeDocuments(),
+    );
+    const listed = changes.find((entry) => entry.documentId === changeId);
+    expect(listed).toMatchObject({ change: "calliopa-video", status: "idea", title: "Untitled change" });
+    expect(changes.some((entry) => entry.documentId === plainId)).toBe(false);
+    const read = ok<{ change?: string; changeStatus?: string }>(await readDocument(changeId));
+    expect(read.change).toBe("calliopa-video");
+    expect(read.changeStatus).toBe("idea");
+  });
+
+  it("Given a status written with the base, Then it lands; a stale base is a conflict; a value outside the set is refused by the graph", async () => {
+    await settle();
+    const before = ok<{ revisionId: string }>(await readDocument(changeId));
+    const written = ok<{ revisionId: string }>(
+      await setChangeStatus({ documentId: changeId, baseRevisionId: before.revisionId, status: "draft" }),
+    );
+    expect(written.revisionId).not.toBe(before.revisionId);
+    const after = ok<{ changeStatus?: string; revisionId: string }>(await readDocument(changeId));
+    expect(after.changeStatus).toBe("draft");
+
+    const stale = await setChangeStatus({ documentId: changeId, baseRevisionId: before.revisionId, status: "ready" });
+    expect(stale.outcome).toBe("conflict");
+
+    await settle();
+    const odd = await setChangeStatus({
+      documentId: changeId,
+      baseRevisionId: after.revisionId,
+      status: "done" as unknown as "ready",
+    });
+    expect(odd.outcome).toBe("validationFailure");
+    expect(JSON.stringify(odd)).toMatch(/property_value_not_permitted/u);
+    expect(JSON.stringify(odd)).toMatch(/rejected/u);
+    const unchanged = ok<{ changeStatus?: string }>(await readDocument(changeId));
+    expect(unchanged.changeStatus).toBe("draft");
+  });
+
+  it("Given an ordinary document, Then a status is refused before the graph", async () => {
+    const plain = ok<{ revisionId: string }>(await readDocument(plainId));
+    const refused = await setChangeStatus({ documentId: plainId, baseRevisionId: plain.revisionId, status: "wip" });
+    expect(refused.outcome).toBe("validationFailure");
+    expect(JSON.stringify(refused)).toMatch(/notAChange/u);
   });
 });

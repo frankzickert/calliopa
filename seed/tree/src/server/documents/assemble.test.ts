@@ -109,6 +109,18 @@ describe("assembling a document", () => {
     expect(document?.blocks[0]).toMatchObject({ role: "h2" });
   });
 
+  it("Given a text block with a disposition, Then its standing comes back, and none or an unknown value reads neutral", () => {
+    const document = assembleDocument(
+      graphOf([
+        text("a", "i", { disposition: "pin" }),
+        text("b", "u"),
+        text("c", "x", { disposition: "banana" }),
+      ]),
+      DOCUMENT,
+    );
+    expect(document?.blocks.map((block) => (block.kind === "text" ? block.standing : null))).toEqual(["pin", "neutral", "neutral"]);
+  });
+
   it("Given a divider, Then it comes back as a divider", () => {
     const document = assembleDocument(
       graphOf([{ id: "a", type: "divider", content: { order: "i" } }]),

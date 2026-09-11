@@ -1,7 +1,9 @@
 import { serverContributions as declare, type ApiRoute } from "~/contract";
 import { loginState, requestLogin, sendLoginCode } from "~/server/agent/adapters";
+import { configureHermesModel } from "~/server/agent/bridge";
 import { HttpError } from "~/server/http-error";
 import { kernelAccounts } from "~/server/kernel/accounts";
+import { kernelUpdate } from "~/server/kernel/update";
 import { readSession } from "~/server/session";
 import {
   clearConnectionSecret,
@@ -93,8 +95,45 @@ const people: readonly ApiRoute[] = [
   },
 ];
 
+/**
+ * The update routes: every one a call to the kernel's update surface as the
+ * signed-in person, refused with `forbidden` for anyone but the owner and
+ * passed through with its code. BO_0223_014
+ */
+const update: readonly ApiRoute[] = [
+  {
+    method: "GET",
+    path: "update",
+    handle: async (event) => event.json(200, await kernelUpdate.read()),
+  },
+  {
+    method: "GET",
+    path: "update/proposal",
+    handle: async (event) => event.json(200, await kernelUpdate.proposal()),
+  },
+  {
+    method: "POST",
+    path: "update",
+    handle: async (event) => event.json(202, await kernelUpdate.start(field(await bodyOf(event), "version"))),
+  },
+  {
+    method: "POST",
+    path: "update/accept",
+    handle: async (event) => {
+      const body = await bodyOf(event);
+      event.json(200, await kernelUpdate.accept(field(body, "proposal"), field(body, "version")));
+    },
+  },
+  {
+    method: "POST",
+    path: "update/promote",
+    handle: async (event) => event.json(202, await kernelUpdate.promote()),
+  },
+];
+
 const routes: readonly ApiRoute[] = [
   ...people,
+  ...update,
   {
     method: "GET",
     path: "connections",
@@ -115,6 +154,22 @@ const routes: readonly ApiRoute[] = [
     method: "POST",
     path: "connections/[party]/test",
     handle: async (event, params) => event.json(200, await proveConnection(params["party"] ?? "")),
+  },
+  {
+    // What Hermes's own loop reasons with, set explicitly from the agent's
+    // row; the kernel refuses the API-key model while none is configured,
+    // and its words come back as they are. BO_0228_012
+    method: "PUT",
+    path: "agent/hermes-model",
+    handle: async (event) => {
+      const model = field(await bodyOf(event), "model");
+      if (model !== "subscription" && model !== "provider") {
+        throw new HttpError(400, "model must be subscription or provider.");
+      }
+      const reply = await configureHermesModel(model);
+      if (!reply.ok) throw new HttpError(reply.status, reply.detail);
+      event.json(200, { model: reply.value });
+    },
   },
   {
     /** How the sign-in in flight is going, as the agent's broker reports it. */

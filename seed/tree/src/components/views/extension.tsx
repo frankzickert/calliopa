@@ -85,6 +85,16 @@ function when(millis: number | undefined): string {
   return new Date(millis).toISOString().slice(0, 10);
 }
 
+/**
+ * The download address of an extension's archive: the shell's own route,
+ * which streams the kernel's export with the file name it named; a
+ * revision names one of the extension's versions. BO_0224_010
+ */
+export function exportHref(id: string, revision?: number): string {
+  const query = revision === undefined ? "" : `?revision=${revision}`;
+  return `/api/x/ui.shell/extensions/${encodeURIComponent(id)}/export${query}`;
+}
+
 /** Splits `ext:<id>/<path>` into the extension and the optional node path. */
 export function nodeTarget(itemId: string): {
   extension: string;
@@ -338,13 +348,57 @@ export const ExtensionView = component$<ViewProps>(({ tab }) => {
       });
     }
     bridge.inspector.facts = facts;
-    bridge.inspector.actions = [];
+    // The one action: the extension as a file, the version the selector
+    // shows — pinned, that version; else its newest state. BO_0224_010
+    bridge.inspector.actions =
+      served === null
+        ? []
+        : [
+            {
+              kind: "button",
+              id: "export-extension",
+              label: "Export",
+              // A saved file, never a navigation: the route answers an
+              // attachment, and a refusal — the kernel unreachable, a
+              // revision it will not read — would otherwise replace the
+              // shell with the refusal's JSON. The control row's link
+              // carries `download` for the same reason. BO_0224_010
+              run$: $(() => {
+                const link = document.createElement("a");
+                link.href = exportHref(served.id, served.pinned ? served.pin : undefined);
+                link.download = "";
+                document.body.append(link);
+                link.click();
+                link.remove();
+              }),
+            },
+          ];
     bridge.inspector.text =
       state.status === "ready" ? null : state.detail || "Reading the graph…";
   });
 
   const follow$ = $(async (link: string) => {
     const nodeId = link.replace(/^calliopa:/u, "");
+    // A change document opens in the editor, as the library opens it: the
+    // link names the document, not a node of the owner network. BO_0222_009
+    if (nodeId.startsWith("doc:")) {
+      const documentId = nodeId.slice("doc:".length);
+      const named = state.document?.blocks.find(
+        (block) =>
+          block.kind === "text" &&
+          block.runs.some((run) => run.link === link),
+      );
+      const title =
+        named !== undefined && named.kind === "text"
+          ? (named.runs.find((run) => run.link === link)?.text ?? documentId)
+          : documentId;
+      await bridge.openTarget$({
+        kind: "ui.shell:document",
+        itemId: documentId,
+        title,
+      });
+      return;
+    }
     const { extension, path } = nodeTarget(nodeId);
     const title =
       path === undefined
@@ -448,6 +502,15 @@ export const ExtensionView = component$<ViewProps>(({ tab }) => {
                   </option>
                 ))}
               </select>
+              <a
+                class="extension-export"
+                data-extension-export={served.id}
+                href={exportHref(served.id, served.pinned ? served.pin : undefined)}
+                download
+                title={`${served.id} as one file: its sources, vocabulary, skills and change documents`}
+              >
+                Export
+              </a>
               {headAhead && (
                 <span class="extension-note" data-extension-note="ahead">
                   head is at {control.head}, the served pin at{" "}

@@ -1,3 +1,4 @@
+import type { CommandTarget } from "~/lib/command-target";
 import type { ProcessRecord } from "~/lib/process";
 import { agentStatus } from "./adapters";
 import { attachRun, createProcess, listAllProcesses, moveProcess, readProcess } from "../processes";
@@ -25,6 +26,10 @@ import type { RunEvent } from "./run-events";
 export type ConductedRun =
   | { readonly ok: true; readonly runId: string; readonly process: ProcessRecord }
   | { readonly ok: false; readonly reason: "busy"; readonly detail: string }
+  /** The kernel refused the request for what it said — a target it cannot
+   * mean, a goal it cannot take. The reader's to correct, not the agent's
+   * failure, so it is not reported as one. BO_0226_004 */
+  | { readonly ok: false; readonly reason: "refused"; readonly detail: string }
   /** The kernel refused or could not reach the agent. Answered before a
    * process is opened, because there is nothing to report. */
   | { readonly ok: false; readonly reason: "agent"; readonly detail: string };
@@ -54,6 +59,8 @@ export async function conductRun(input: {
   readonly workspaceId: string;
   readonly goal: string;
   readonly agent?: string;
+  /** What the command was aimed at, or null for a command aimed at nothing. */
+  readonly target?: CommandTarget | null;
 }): Promise<ConductedRun> {
   // The runtime is the reader's explicit choice or the one the agent
   // stamped as active; the bridge reads an empty selection as the API-key
@@ -64,11 +71,12 @@ export async function conductRun(input: {
     goal: input.goal,
     context: `raised from workspace ${input.workspaceId}`,
     agent,
+    target: input.target ?? null,
   });
   if (!started.ok) {
     return {
       ok: false,
-      reason: started.status === 409 ? "busy" : "agent",
+      reason: started.status === 409 ? "busy" : started.status === 400 ? "refused" : "agent",
       detail: started.detail,
     };
   }

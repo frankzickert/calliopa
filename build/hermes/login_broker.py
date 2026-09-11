@@ -11,6 +11,8 @@ The settings surface and this broker talk through files on the shared volume:
   login/state.json    {runtime, status, url?, userCode?, awaiting?, output}
   login/code          the paste-back code for Claude's flow, written by the app
   adapters.json       what each runtime is: installed, version, authenticated
+  runtime.env         the runtime a completed Codex sign-in selects, which is
+                      also the mtime the entrypoint watches to reconfigure
 
 Codex uses its device-auth flow — a URL and a one-time code, with the CLI
 polling. Claude uses `claude setup-token`, which prints a URL and takes a code
@@ -37,6 +39,7 @@ REQUEST = os.path.join(LOGIN_DIR, "request.json")
 STATE = os.path.join(LOGIN_DIR, "state.json")
 CODE = os.path.join(LOGIN_DIR, "code")
 ADAPTERS = os.path.join(CONFIG_DIR, "adapters.json")
+RUNTIME_ENV = os.path.join(CONFIG_DIR, "runtime.env")
 HOME = os.environ.get("HERMES_HOME", "/var/lib/hermes")
 
 LOGIN_TIMEOUT_SECONDS = 900
@@ -388,8 +391,74 @@ def run_login(runtime):
     if succeeded and runtime == "codex":
         adopt_codex_tokens()
     probe_adapters()
+    if succeeded:
+        select_runtime(runtime)
     state.update({"status": "succeeded" if succeeded else "failed", "awaiting": None})
     write_state(state)
+
+
+def selected_runtime():
+    """The runtime currently selected, as runtime.env holds it."""
+    try:
+        with open(RUNTIME_ENV) as handle:
+            for line in handle:
+                key, _, value = line.strip().partition("=")
+                if key == "CALLIOPA_AGENT_RUNTIME":
+                    return value
+    except OSError:
+        pass
+    return ""
+
+
+def select_runtime(runtime):
+    """Point the agent at the runtime a human just signed in to.
+
+    Signing in is the explicit choice; nothing else in the system makes it. The
+    selection is rewritten only when a run names a different controller, and the
+    browser names none — so before this, a credential could land while the
+    gateway went on reasoning as something else, and an instance selected onto a
+    runtime that accepts no run could never leave it.
+
+    The write is also the trigger: the entrypoint watches this file's mtime and
+    rebuilds the configuration when it moves. It is skipped when the selection
+    already stands, because the restart would interrupt a run to change nothing.
+    Whether the selection can actually be configured is not decided here — the
+    entrypoint resolves that on the restart this causes, and stamps it.
+    BO_0225_002
+
+    A Claude sign-in selects nothing: Claude Code runs as itself behind the
+    Claude runner, never through the gateway, and the composer names it per
+    command. The token it wrote to claude.env still moves that file's mtime,
+    so the gateway restarts with the credential in its environment regardless.
+    BO_0228_003
+    """
+    if runtime == "claude-code":
+        return
+    if selected_runtime() == runtime:
+        return
+    write_runtime_env({"CALLIOPA_AGENT_RUNTIME": runtime})
+
+
+def write_runtime_env(updates):
+    """Set keys in runtime.env and keep the others.
+
+    Two writers share the file — this broker and the kernel's agent surface —
+    and it carries more than the selection since BO_0228_002
+    (`CALLIOPA_HERMES_MODEL`), so a write that replaced the file would drop
+    what the other writer set.
+    """
+    lines = []
+    try:
+        with open(RUNTIME_ENV) as handle:
+            lines = [line.rstrip("\n") for line in handle if line.strip()]
+    except OSError:
+        pass
+    kept = [line for line in lines if line.partition("=")[0] not in updates]
+    kept += ["%s=%s" % (key, value) for key, value in updates.items()]
+    tmp = RUNTIME_ENV + ".tmp"
+    with open(tmp, "w") as handle:
+        handle.write("\n".join(kept) + "\n")
+    os.replace(tmp, RUNTIME_ENV)
 
 
 def main():

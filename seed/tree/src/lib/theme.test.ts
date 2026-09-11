@@ -48,3 +48,33 @@ describe("theme choice", () => {
     expect(THEME_SCRIPT).toContain("prefers-color-scheme: dark");
   });
 });
+
+/**
+ * A proposal's ground carries body text, and its edge carries the face's and
+ * the icons' rings, so each is held to WCAG's contrast: 4.5:1 for the text on
+ * the ground, 3:1 for the edge against the ground it bounds. Computed, so a
+ * value changed later is refused rather than eyeballed. BO_0233_002
+ */
+describe("the proposal colours", () => {
+  const luminance = (hex: string): number => {
+    const channels = [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16) / 255);
+    const [r, g, b] = channels.map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)) as [number, number, number];
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrast = (a: string, b: string): number => {
+    const [high, low] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+    return (high + 0.05) / (low + 0.05);
+  };
+
+  for (const name of ["dark", "light"] as const) {
+    for (const proposer of ["codex", "claude", "hermes", "person"] as const) {
+      it(`Given the ${name} theme, Then ${proposer}'s ground carries body text and its edge stands out`, () => {
+        const theme = themes[name];
+        const ground = theme[`proposal-${proposer}`];
+        const edge = theme[`proposal-${proposer}-edge`];
+        expect(contrast(theme.text, ground)).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(edge, ground)).toBeGreaterThanOrEqual(3);
+      });
+    }
+  }
+});

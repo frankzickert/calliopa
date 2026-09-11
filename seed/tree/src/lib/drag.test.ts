@@ -5,6 +5,7 @@ import {
   movedDistance,
   pointerIntent,
   resolveOperation,
+  SWIPE_LOCK_PX,
   type DragPayload,
   type DropTarget,
 } from "./drag";
@@ -73,5 +74,50 @@ describe("drag model", () => {
 
   it("Given two pointer positions, Then the distance is their separation", () => {
     expect(movedDistance({ x: 0, y: 0 }, { x: 3, y: 4 })).toBe(5);
+  });
+});
+
+describe("a target that offers a swipe", () => {
+  const touch = (dx: number, dy: number, heldMs = 60) =>
+    pointerIntent({
+      pointerType: "touch",
+      heldMs,
+      movedPx: Math.hypot(dx, dy),
+      swipe: { dx, dy },
+    });
+
+  it("Given a touch that has barely moved, Then the gesture waits rather than locking early", () => {
+    expect(touch(SWIPE_LOCK_PX - 2, 0)).toBe("wait");
+  });
+
+  it("Given clearly horizontal travel past the lock, Then it is a swipe, in either direction", () => {
+    expect(touch(30, 5)).toBe("swipe");
+    expect(touch(-30, 5)).toBe("swipe");
+  });
+
+  it("Given travel that is not clearly horizontal, Then vertical wins and the page scrolls", () => {
+    expect(touch(20, 18)).toBe("scroll");
+    expect(touch(3, 40)).toBe("scroll");
+  });
+
+  it("Given a held press, Then it is still the long press, swipe or no swipe", () => {
+    expect(touch(0, 0, LONG_PRESS_MS)).toBe("drag");
+  });
+
+  it("Given a mouse, Then it never swipes", () => {
+    expect(
+      pointerIntent({
+        pointerType: "mouse",
+        heldMs: 0,
+        movedPx: 40,
+        swipe: { dx: 40, dy: 0 },
+      }),
+    ).toBe("drag");
+  });
+
+  it("Given a target that offers none, Then early horizontal travel still scrolls, as the tab strip always read it", () => {
+    expect(
+      pointerIntent({ pointerType: "touch", heldMs: 60, movedPx: 30 }),
+    ).toBe("scroll");
   });
 });

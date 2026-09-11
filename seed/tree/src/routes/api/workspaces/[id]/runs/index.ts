@@ -1,5 +1,6 @@
 import type { RequestHandler } from "@builder.io/qwik-city";
 import { api } from "~/server/api";
+import { readCommandTarget } from "~/lib/command-target";
 import { conductRun, followRun } from "~/server/agent/conductor";
 
 /**
@@ -10,13 +11,29 @@ import { conductRun, followRun } from "~/server/agent/conductor";
  * going by polling the registry rather than by holding a request open. A
  * refusal is answered with the kernel's reason so the surface that asked can
  * say it in words. BO_0207_015
+ *
+ * A command from an open document carries what it was aimed at — the
+ * document, where its work goes, and what the reader marked — and a shape the
+ * composer never sends is refused here by name rather than forwarded.
+ * BO_0226_004
  */
 export const onPost: RequestHandler = (event) =>
   api(event, async () => {
-    const body = (await event.request.json()) as { goal?: unknown; agent?: unknown };
+    const body = (await event.request.json()) as {
+      goal?: unknown;
+      agent?: unknown;
+      artifact?: unknown;
+      delivery?: unknown;
+      references?: unknown;
+    };
     const goal = typeof body.goal === "string" ? body.goal.trim() : "";
     if (goal === "") {
       event.json(400, { error: "A run needs a goal." });
+      return;
+    }
+    const target = readCommandTarget(body);
+    if (!target.ok) {
+      event.json(400, { error: target.error });
       return;
     }
 
@@ -24,9 +41,10 @@ export const onPost: RequestHandler = (event) =>
       workspaceId: event.params.id ?? "",
       goal,
       ...(typeof body.agent === "string" && body.agent !== "" ? { agent: body.agent } : {}),
+      target: target.target,
     });
     if (!started.ok) {
-      event.json(started.reason === "busy" ? 409 : 502, {
+      event.json(started.reason === "busy" ? 409 : started.reason === "refused" ? 400 : 502, {
         error: started.detail,
       });
       return;

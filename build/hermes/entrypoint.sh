@@ -125,7 +125,28 @@ PYEOF
 # start stamped.
 kernel_toolset_registered="false"
 
+# export_codex_bearer TOKEN_FILE ENV_VAR puts the credential in the variable
+# Codex was told to read it from, in the shell that starts the gateway: Codex
+# reads it at call time from its own environment, which is the gateway's, and
+# the codex app-server the gateway spawns inherits it. It must run in that
+# shell and never inside a command substitution. It used to be exported by
+# register_codex_server, which runs as `registered="$(...)"` — a subshell —
+# so the export ended with it: every Codex process started with the variable
+# unset, the kernel toolset never listed a tool, and the stamp still said
+# `kernelToolset: true`. BO_0226_012
+export_codex_bearer() {
+  token_file="$1"; env_var="$2"
+  if [ -s "$token_file" ]; then
+    eval "$env_var=\"\$(cat \"$token_file\")\""
+    eval "export $env_var"
+  else
+    unset "$env_var"
+  fi
+}
+
 # register_codex_server NAME URL TOKEN_FILE ENV_VAR -> "true" | "false"
+# Registration only: the credential reaches the gateway's environment through
+# export_codex_bearer, because this runs in a subshell.
 register_codex_server() {
   name="$1"; url="$2"; token_file="$3"; env_var="$4"
   if [ ! -s "$token_file" ]; then
@@ -136,8 +157,6 @@ register_codex_server() {
     printf 'false'
     return 0
   fi
-  eval "$env_var=\"\$(cat \"$token_file\")\""
-  eval "export $env_var"
   codex mcp remove "$name" >/dev/null 2>&1 || true
   if ! codex mcp add "$name" --url "$url" --bearer-token-env-var "$env_var" >/dev/null 2>&1; then
     echo "warning: codex mcp add $name failed; the codex runtime will lack those tools"
@@ -147,11 +166,97 @@ register_codex_server() {
   printf 'true'
 }
 
+# approve_codex_server_tools NAME lets Codex call a registered server's tools
+# without asking. Codex 0.151 asks before an MCP tool call unless the server
+# says otherwise, and with approval_policy = "never" — the confinement above,
+# since nobody is there to answer — an ask is a failure: *MCP tool call
+# requires approval, but approval policy is never*. That failed every call a
+# run made to the kernel toolset, reads included. The toolset is bounded where
+# it is served: reads are pinned, every write stages into the run's own
+# proposal group, and nothing establishes truth without a human accepting it —
+# so a prompt nobody can answer added no protection, only the failure. Only the
+# named server is approved; Codex's own servers keep their defaults. It runs
+# after the registration, which rewrites the server's table. BO_0226_013
+approve_codex_server_tools() {
+  name="$1"
+  config="$HOME/.codex/config.toml"
+  [ -f "$config" ] || return 0
+  awk -v header="[mcp_servers.$name]" '
+    function place() { if (inside && !placed) { print "default_tools_approval_mode = \"approve\""; placed = 1 } }
+    /^\[/ { place(); inside = ($0 == header) }
+    inside && /^default_tools_approval_mode[ \t]*=/ { next }
+    { print }
+    END { place() }
+  ' "$config" > "$config.tmp" && mv "$config.tmp" "$config"
+}
+
+# runtime_configurable answers whether write_config below can name a model for
+# a runtime. It is the whole of the rule: a configuration with no `model:` line
+# is a gateway that refuses every run it is given — `model: String should have
+# at least 1 character` — so a selection this returns false for is a selection
+# that cannot work, whatever else is signed in. Codex names its own model from
+# the subscription. Hermes's own loop reasons on what `CALLIOPA_HERMES_MODEL`
+# names: the ChatGPT subscription, which needs Codex signed in, or the API-key
+# model. Every other selection is the API-key controller, which has a model
+# only when one was configured. BO_0225_001 BO_0228_002
+runtime_configurable() {
+  case "$1" in
+    codex) return 0 ;;
+    hermes)
+      if [ "$(hermes_model)" = "provider" ]; then
+        [ -n "${CALLIOPA_AGENT_MODEL:-}" ]
+      else
+        [ -s "$HOME/.codex/auth.json" ]
+      fi
+      ;;
+    *) [ -n "${CALLIOPA_AGENT_MODEL:-}" ] ;;
+  esac
+}
+
+# hermes_model is what Hermes's own loop reasons with: `subscription` (the
+# ChatGPT subscription, the default decided 2026-09-10) or `provider` (the
+# API-key model). It is set explicitly, from the settings surface, and never
+# falls back from one to the other. BO_0228_002
+hermes_model() {
+  case "${CALLIOPA_HERMES_MODEL:-}" in
+    provider) printf 'provider' ;;
+    *) printf 'subscription' ;;
+  esac
+}
+
+# unconfigurable_reason says, in the words a surface renders, why a selection
+# resolve_runtime fell back from cannot run. BO_0225_001 BO_0228_002
+unconfigurable_reason() {
+  if [ "$1" = "hermes" ] && [ "$(hermes_model)" = "subscription" ]; then
+    printf 'Hermes reasons on the ChatGPT subscription, and Codex is not signed in; sign in to Codex to use it'
+  elif [ "$1" = "hermes" ]; then
+    printf 'Hermes is set to the API-key model, and none is configured; set CALLIOPA_AGENT_MODEL to use it'
+  else
+    printf 'the %s runtime names no model, so it accepts no run; set CALLIOPA_AGENT_MODEL to use it' "$1"
+  fi
+}
+
+# resolve_runtime answers the selection when it can be configured, and the one
+# runtime that always can when it cannot. Without this an instance stamped with
+# an unconfigurable selection can never leave it: the selection is rewritten
+# only when a run names a different controller (`bridge.go`), the browser names
+# none, so the run's controller always matches the active one and no switch is
+# ever asked for. The fallback is never silent — the stamp below carries what
+# was chosen beside what is running, and why they differ. BO_0225_001
+resolve_runtime() {
+  if runtime_configurable "$1"; then
+    printf '%s' "$1"
+  else
+    printf 'codex'
+  fi
+}
+
 # write_config regenerates Hermes's configuration from the current agent
 # configuration. The runtime selection chooses the model *under* Hermes — the
 # conversation loop's own LLM — not a delegated worker.
 write_config() {
-  runtime="${CALLIOPA_AGENT_RUNTIME:-codex}"
+  selected="${CALLIOPA_AGENT_RUNTIME:-codex}"
+  runtime="$(resolve_runtime "$selected")"
   {
     # The toolset Hermes reaches Calliopa through. The release interpolates
     # nothing in this file, so the bearer is literal here; the file lives on
@@ -176,11 +281,28 @@ write_config() {
         # as a boolean.
         printf 'approvals:\n  mode: "off"\n'
         ;;
+      hermes)
+        # Hermes's own loop and tool dispatch, reasoning on what hermes_model
+        # names. On the subscription it is the same `openai-codex` provider
+        # the codex runtime uses, with `openai_runtime: auto` — Hermes's
+        # `codex_responses` loop — instead of handing the turn to a Codex
+        # app-server. Its tool dispatch runs under the gateway's default
+        # approvals, as the API-key path always has, and it applies a run's
+        # instructions itself, so BO_0226_011's patch is not involved.
+        # BO_0228_002
+        if [ "$(hermes_model)" = "provider" ]; then
+          printf 'model: "%s"\n' "$CALLIOPA_AGENT_MODEL"
+        else
+          printf 'model:\n  default: "%s"\n  provider: openai-codex\n  openai_runtime: auto\n' \
+            "${CALLIOPA_CODEX_MODEL:-gpt-5.5}"
+        fi
+        ;;
       *)
-        # An explicit API-key model as controller (the `provider` and
-        # `claude-code` selections of the kernel bridge). Kept as a
-        # configuration path and normally unconfigured; Calliopa ships with no
-        # model API key.
+        # An explicit API-key model as controller: the `provider` selection
+        # of the kernel bridge, which the CLI intake verb can still name. Kept
+        # as a configuration path and normally unconfigured; Calliopa ships
+        # with no model API key. Claude Code no longer reasons through it: it
+        # runs as itself behind the Claude runner (BO_0228_001).
         if [ -n "${CALLIOPA_AGENT_MODEL:-}" ]; then
           printf 'model: "%s"\n' "$CALLIOPA_AGENT_MODEL"
         fi
@@ -192,7 +314,11 @@ write_config() {
   # An entry an earlier start registered for the shell's retired surface is
   # removed the way a lost credential's would be.
   codex mcp remove calliopa >/dev/null 2>&1 || true
+  export_codex_bearer "$KERNEL_BEARER_FILE" CALLIOPA_AGENT_TOOLS_BEARER
   kernel_toolset_registered="$(register_codex_server calliopa-kernel "$KERNEL_TOOLS_URL" "$KERNEL_BEARER_FILE" CALLIOPA_AGENT_TOOLS_BEARER)"
+  if [ "$kernel_toolset_registered" = "true" ]; then
+    approve_codex_server_tools calliopa-kernel
+  fi
 
   # The active runtime and the toolset this start assembled are stamped as
   # fact for the surfaces that report them, never inferred from what happened
@@ -201,10 +327,32 @@ write_config() {
   # not generate is an install that did not run, while a registration that
   # failed with the credential in hand is the agent's own log to explain.
   if [ -s "$KERNEL_BEARER_FILE" ]; then kernel_credential="true"; else kernel_credential="false"; fi
-  printf '{"runtime": "%s", "kernelCredential": %s, "kernelToolset": %s}\n' \
-    "$runtime" "$kernel_credential" "$kernel_toolset_registered" \
-    > "$AGENT_CONFIG_DIR/active-runtime.json"
-  echo "agent configuration written for runtime $runtime (kernel toolset: $kernel_toolset_registered)"
+  # `runtime` is what the gateway is running, which is what the shell defaults
+  # a run to; `selected` is what a human chose. They differ only when the
+  # choice could not be configured, and then `reason` says so in the words a
+  # surface renders. BO_0225_001
+  #
+  # `hermesModel` and `hermesModelName` say what the hermes runtime reasons
+  # with whether or not it is the one running, so the composer can name it
+  # before anyone chooses it. BO_0228_002
+  if [ "$(hermes_model)" = "provider" ]; then
+    hermes_model_name="${CALLIOPA_AGENT_MODEL:-}"
+  else
+    hermes_model_name="${CALLIOPA_CODEX_MODEL:-gpt-5.5}"
+  fi
+  hermes_fields="$(printf '"hermesModel": "%s", "hermesModelName": "%s"' "$(hermes_model)" "$hermes_model_name")"
+  if [ "$runtime" = "$selected" ]; then
+    printf '{"runtime": "%s", "selected": "%s", %s, "kernelCredential": %s, "kernelToolset": %s}\n' \
+      "$runtime" "$selected" "$hermes_fields" "$kernel_credential" "$kernel_toolset_registered" \
+      > "$AGENT_CONFIG_DIR/active-runtime.json"
+    echo "agent configuration written for runtime $runtime (kernel toolset: $kernel_toolset_registered)"
+  else
+    reason="$(unconfigurable_reason "$selected")"
+    printf '{"runtime": "%s", "selected": "%s", "reason": "%s", %s, "kernelCredential": %s, "kernelToolset": %s}\n' \
+      "$runtime" "$selected" "$reason" "$hermes_fields" "$kernel_credential" "$kernel_toolset_registered" \
+      > "$AGENT_CONFIG_DIR/active-runtime.json"
+    echo "agent configuration written for runtime $runtime instead of $selected: $reason"
+  fi
 }
 
 # The mtimes of the files the settings surface and the kernel bridge write.
@@ -227,9 +375,30 @@ stamp() {
 python3 /usr/local/bin/hermes-login-broker &
 broker=$!
 
+# The Claude runner: Claude Code as an agent of its own, beside the gateway
+# rather than under it, on the port after the gateway's and under its bearer.
+# It reads the Claude token and the kernel bearer at each run's start, so a
+# sign-in needs no restart of it; it is restarted only if it dies. BO_0228_001
+# The image has no pkill, so the supervising subshell stops its own child.
+(
+  child=""
+  trap 'kill "$child" 2>/dev/null; exit 0' TERM INT
+  while true; do
+    HERMES_HOME="$HERMES_HOME" CALLIOPA_AGENT_CONFIG_DIR="$AGENT_CONFIG_DIR" \
+      CALLIOPA_KERNEL_TOOLS_URL="$KERNEL_TOOLS_URL" CALLIOPA_KERNEL_BEARER_FILE="$KERNEL_BEARER_FILE" \
+      python3 /usr/local/bin/calliopa-claude-runner &
+    child=$!
+    wait "$child" || true
+    echo "the Claude runner stopped; starting it again"
+    sleep 2
+  done
+) &
+runner=$!
+
 pid=""
 shutdown() {
   kill "$broker" 2>/dev/null || true
+  kill "$runner" 2>/dev/null || true
   if [ -n "$pid" ]; then
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true

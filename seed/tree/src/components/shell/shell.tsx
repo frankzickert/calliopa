@@ -8,6 +8,7 @@ import {
   useStore,
   useTask$,
   useVisibleTask$,
+  type QRL,
 } from "@builder.io/qwik";
 import {
   dockAfterRelease,
@@ -17,6 +18,12 @@ import {
   sectionState,
   type Layout,
 } from "~/lib/layout";
+import { danglingNumbers } from "~/lib/command-typeahead";
+import { Composer, type ComposerAim } from "./composer";
+import { fitField } from "./command-field";
+import { LicenceWarning, PersonMenu } from "./header-disclosure";
+import { Icon } from "./icons";
+import { SaveStatus } from "./save-status";
 import { ThemeToggle } from "./theme-toggle";
 import { Wordmark } from "./wordmark";
 import {
@@ -31,7 +38,6 @@ import {
 } from "~/lib/tabs";
 import {
   activeProcessCount,
-  describeProcess,
   tabProcessState,
   type ProcessRecord,
 } from "~/lib/process";
@@ -51,8 +57,18 @@ import { REGISTRY } from "~/registry.gen";
 import type { RunEvent } from "~/server/agent/run-events";
 import type { ProposedDocument } from "~/server/agent/proposed";
 import { describeRunEvent } from "~/lib/runs";
+import type { SelectableRuntime } from "~/lib/connections";
+import { CHOICE_NOT_REMEMBERED, openingAgent, rememberAgent } from "~/lib/agent-menu";
+import {
+  commandTarget,
+  NO_CHOICE,
+  NO_POINTING,
+  staleIn,
+  type Pointing,
+} from "~/lib/command-target";
 import type { WorkspaceRecord } from "~/lib/workspace";
 import type { Person } from "~/server/session";
+import { candidates, fetchReleases, parseReleases } from "~/lib/releases";
 import {
   preferredView,
   rememberView,
@@ -60,6 +76,13 @@ import {
   viewsFor,
 } from "~/lib/views";
 import { ViewHost } from "./view-host";
+import {
+  InspectorPanel,
+  ProcessList,
+  type ProcessRegistry,
+  type ProposedRead,
+} from "./inspector";
+import { keepOpenTabs, NO_SELECTION, selectedProcess } from "~/lib/process-selection";
 
 /**
  * Settings has no content to be the target of, so it carries one synthetic
@@ -70,12 +93,13 @@ import { ViewHost } from "./view-host";
  */
 const SETTINGS_KIND = "settings:settings";
 const SETTINGS_TARGET = "instance";
-
 /**
- * What a run proposes are documents, and the process inspector opens them
- * under the document kind `ui.shell` contributes. BO_0202_004
+ * The Update tab is the settings extension's second kind, on the same
+ * synthetic target; the header's hint appears only while the build holds it,
+ * the session is the owner's and a newer release exists. BO_0223_013
  */
-const DOCUMENT_KIND = "ui.shell:document";
+const UPDATE_KIND = "settings:update";
+
 
 /** The element id a section's header and body are paired by. */
 const sectionElementId = (key: string): string =>
@@ -84,18 +108,23 @@ import {
   ViewBridgeContext,
   type ViewBridge,
   type ViewDrop,
-  type InspectorFact,
   type ViewInspector,
   type ViewDock,
   type ViewSave,
   type SaveState,
   type Message,
   type ViewMessage,
+  type ViewProposed,
+  type ViewReveal,
+  type UndoOffer,
 } from "./view-bridge";
 import "./shell.css";
 
 /** The registry is re-attached by identity; polling is the first transport. */
 export const PROCESS_POLL_INTERVAL_MS = 2000;
+
+/** The events that end a run. BO_0226_007 */
+const RUN_ENDS: readonly RunEvent["kind"][] = ["runCompleted", "runFailed", "runCancelled"];
 
 interface DragState {
   candidate: DragPayload | null;
@@ -124,8 +153,7 @@ const idleDrag = () => ({
 });
 
 /** Targets the shell owns. Everything else belongs to the mounted view. */
-const shellTarget = (overId: string): boolean =>
-  overId.startsWith("tab:") || overId === "composer";
+const shellTarget = (overId: string): boolean => overId.startsWith("tab:");
 
 /**
  * The pointer is not captured, so the element under it decides the target.
@@ -156,10 +184,10 @@ export const Shell = component$<{
   licenceWarning: string | null;
 }>(({ workspace, processes, library: served, person, licenceWarning }) => {
   const layout = useStore<Layout>({ ...workspace.layout });
-  const registry = useStore<{
-    items: ProcessRecord[];
-    selectedId: string | null;
-  }>({ items: [...processes], selectedId: null });
+  const registry = useStore<ProcessRegistry>({
+    items: [...processes],
+    selection: NO_SELECTION,
+  });
   const mobile = useStore({
     sheet: null as "left" | "right" | null,
     // Where the dock handle was pressed, or `null` when it saw no press. The
@@ -194,26 +222,77 @@ export const Shell = component$<{
     events: RunEvent[];
     notice: string | null;
     sending: boolean;
+    /**
+     * The agent the next command goes to, and what there is to choose from.
+     * The dropdown opens on the instance's last choice (`openingAgent`), so
+     * `agent` is null only until the list has been read — and a command sent
+     * before then names none, which the server takes as what the gateway is
+     * running. BO_0225_004 BO_0228_011
+     */
+    agent: string | null;
+    runtimes: SelectableRuntime[];
+    /**
+     * The document the run was aimed at, and the run whose end has already
+     * been told to the view showing it — once per run, however many polls
+     * read the end. BO_0226_007
+     */
+    artifact: string | null;
+    announced: string | null;
   }>({
     id: null,
     processId: null,
     events: [],
     notice: null,
     sending: false,
+    agent: null,
+    runtimes: [],
+    artifact: null,
+    announced: null,
+  });
+  /**
+   * What the reader has marked in each document, as its view last reported,
+   * and where they asked the next command's work to go. Keyed by document
+   * rather than tab, as the marks themselves are (`markingKey`).
+   * BO_0226_005 BO_0226_006
+   */
+  const aim = useStore<ComposerAim>({ pointing: {}, choice: NO_CHOICE });
+  /** The last run aimed at a document that ended, for the view showing it. */
+  const runProposed = useStore<ViewProposed>({ itemId: null, seq: 0 });
+  /** The last chip the reader pressed, for the view showing its document. CA_0039_004 */
+  const reveal = useStore<ViewReveal>({ itemId: null, target: null, seq: 0 });
+  useVisibleTask$(async () => {
+    const response = await fetch("/api/agent/runtimes");
+    if (!response.ok) return;
+    const answered = (await response.json()) as {
+      runtimes: SelectableRuntime[];
+      chosen: string | null;
+      active: string | null;
+    };
+    run.runtimes = answered.runtimes;
+    // The instance's last choice when it can run; otherwise what the gateway
+    // runs, and a notice saying the choice was not honoured and why.
+    // BO_0228_011
+    const opening = openingAgent(answered.runtimes, answered.chosen, answered.active);
+    run.agent = opening.agent;
+    if (opening.notice !== null) run.notice = opening.notice;
   });
   /**
    * What the selected process's run proposed, read when the selection changes.
    * A process that is not a run answers an empty list, which is why this is
    * asked of whatever is selected rather than only of runs.
    */
-  const proposed = useStore<{
-    processId: string | null;
-    documents: ProposedDocument[];
-  }>({ processId: null, documents: [] });
-  const undo = useSignal<{ label: string; tabs: TabsState } | null>(null);
-  const attachment = useSignal<{ processId: string; text: string } | null>(
-    null,
-  );
+  const proposed = useStore<ProposedRead>({ processId: null, documents: [] });
+  /**
+   * The one thing the dock can take back: a tab move, which carries the tabs
+   * to restore, or what a view just did, which carries its own inverse
+   * (`offerUndo$`). One line for both, so a thing is taken back the same way
+   * wherever it was done. BO_0227_013
+   */
+  const undo = useSignal<
+    | { readonly kind: "tabs"; readonly label: string; readonly tabs: TabsState }
+    | { readonly kind: "view"; readonly label: string; readonly undo$: QRL<() => void> }
+    | null
+  >(null);
   const tabs = useStore<TabsState>({
     tabs: workspace.tabs,
     activeTabId: workspace.activeTabId,
@@ -295,6 +374,19 @@ export const Shell = component$<{
         const events = await fetch(`/api/runs/${run.id}/events`);
         if (!stopped && events.ok) {
           run.events = (await events.json()) as RunEvent[];
+          // A run aimed at a document has ended — completed, failed or
+          // cancelled, since a run that failed may already have staged — so
+          // the view showing that document reads what it proposed. Once per
+          // run: the poll keeps reading the same end. BO_0226_007
+          if (
+            run.artifact !== null &&
+            run.announced !== run.id &&
+            run.events.some((event) => RUN_ENDS.includes(event.kind))
+          ) {
+            run.announced = run.id;
+            runProposed.itemId = run.artifact;
+            runProposed.seq += 1;
+          }
         }
       }
     };
@@ -319,11 +411,41 @@ export const Shell = component$<{
 
     run.sending = true;
     run.notice = null;
+    // What the command is aimed at, read from the stores at the press: the
+    // active tab, the delivery chosen for its document, and its marks. Not the
+    // tab's selection, which leaving the editor for the composer has already
+    // cleared. BO_0226_005
+    const target = commandTarget(activeTab(tabs), aim.choice, aim.pointing);
+    // A passage whose words are gone stops the command where the reader can
+    // see why: its number may already be in the words, and sending it would
+    // name a reference with nothing behind it. BO_0227_015
+    const stale =
+      target === null ? [] : staleIn(aim.pointing[target.artifact] ?? NO_POINTING);
+    if (stale.length > 0) {
+      run.sending = false;
+      run.notice = `${stale.map((number) => `#${number}`).join(", ")} no longer ${stale.length === 1 ? "matches its" : "match their"} words. Re-point or take back before running.`;
+      return;
+    }
+    // A number written into the command whose mark has since been taken back
+    // names a reference with nothing behind it, for the same reason.
+    const dangling =
+      target === null
+        ? []
+        : danglingNumbers(goal, (aim.pointing[target.artifact] ?? NO_POINTING).references);
+    if (dangling.length > 0) {
+      run.sending = false;
+      run.notice = `${dangling.map((number) => `#${number}`).join(", ")} ${dangling.length === 1 ? "names" : "name"} nothing marked. Mark it again, or take it out of the command.`;
+      return;
+    }
     try {
       const response = await fetch(`/api/workspaces/${workspace.id}/runs`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ goal }),
+        body: JSON.stringify({
+          goal,
+          ...(run.agent === null ? {} : { agent: run.agent }),
+          ...(target === null ? {} : target),
+        }),
       });
       if (response.ok) {
         const started = (await response.json()) as {
@@ -333,7 +455,12 @@ export const Shell = component$<{
         run.id = started.runId;
         run.processId = started.processId;
         run.events = [];
-        if (field) field.value = "";
+        run.artifact = target?.artifact ?? null;
+        run.announced = null;
+        if (field) {
+          field.value = "";
+          fitField(field);
+        }
         // The run has already recorded its start; reading it now means the
         // console shows the run rather than nothing until the next poll.
         const events = await fetch(`/api/runs/${started.runId}/events`);
@@ -349,6 +476,13 @@ export const Shell = component$<{
     } finally {
       run.sending = false;
     }
+  });
+
+  const chooseAgent$ = $(async (agent: string) => {
+    run.agent = agent;
+    // Said when it could not be remembered, since the next reload would open
+    // elsewhere.
+    if (!(await rememberAgent(agent))) run.notice = CHOICE_NOT_REMEMBERED;
   });
 
   const cancelRun$ = $(async () => {
@@ -368,15 +502,24 @@ export const Shell = component$<{
    * seconds would buy nothing.
    */
   useVisibleTask$(async ({ track }) => {
-    const selected = track(() => registry.selectedId);
+    // The active tab's selection, so a tab switch reads what the process that
+    // tab selected proposed. CA_0040_001
+    const selected = track(() => selectedProcess(registry.selection, tabs.activeTabId));
     proposed.processId = selected;
     proposed.documents = [];
     if (selected === null) return;
 
     const response = await fetch(`/api/processes/${selected}/proposals`);
-    if (response.ok && registry.selectedId === selected) {
+    if (response.ok && selectedProcess(registry.selection, tabs.activeTabId) === selected) {
       proposed.documents = (await response.json()) as ProposedDocument[];
     }
+  });
+  // A closed tab takes its selection with it, so a tab opened again on the
+  // same target starts with nothing selected. CA_0040_001
+  useTask$(({ track }) => {
+    const open = track(() => tabs.tabs);
+    const kept = keepOpenTabs(registry.selection, open);
+    if (kept !== registry.selection) registry.selection = kept;
   });
 
   const acknowledge$ = $(async (id: string) => {
@@ -445,16 +588,8 @@ export const Shell = component$<{
       const next = moveTab(tabs, moving.id, before === "end" ? null : before);
       tabs.tabs = next.tabs;
       tabs.activeTabId = next.activeTabId;
-      undo.value = { label: `Moved ${moving.title}`, tabs: previous };
+      undo.value = { kind: "tabs", label: `Moved ${moving.title}`, tabs: previous };
       await save$(next, layout);
-      return;
-    }
-
-    if (operation === "attach-to-command") {
-      attachment.value = {
-        processId: payload.itemId,
-        text: payload.preview ?? payload.itemId,
-      };
       return;
     }
 
@@ -467,13 +602,17 @@ export const Shell = component$<{
     }
   });
   const cancelDrag$ = $(() => Object.assign(drag, idleDrag()));
-  const undoMove$ = $(async () => {
-    const previous = undo.value?.tabs;
+  const takeBack$ = $(async () => {
+    const entry = undo.value;
     undo.value = null;
-    if (!previous) return;
-    tabs.tabs = previous.tabs;
-    tabs.activeTabId = previous.activeTabId;
-    await save$(previous, layout);
+    if (entry === null) return;
+    if (entry.kind === "view") {
+      await entry.undo$();
+      return;
+    }
+    tabs.tabs = entry.tabs.tabs;
+    tabs.activeTabId = entry.tabs.activeTabId;
+    await save$(entry.tabs, layout);
   });
   /**
    * Opens a target in a tab, in the view remembered for it. `openTab` reveals
@@ -497,7 +636,9 @@ export const Shell = component$<{
   /** Re-reads one section through the host's library route. BO_0202_005 */
   const refreshSection$ = $(async (key: string) => {
     const section = REGISTRY.sections.find((candidate) => candidate.key === key);
-    if (section === undefined || section.component !== undefined) return;
+    if (section === undefined) return;
+    // A component section receives the fresh answer as its data and follows
+    // it; the item shape is rendered from it directly. BO_0222_005
     const response = await fetch(`/api/library/${section.extension}/${section.name}`);
     if (!response.ok) return;
     library.data[key] = (await response.json()) as unknown;
@@ -526,11 +667,41 @@ export const Shell = component$<{
     layout.sections = sections;
     await save$(tabs, { ...layout, sections });
   });
+  /** Stores a section's filter set beside its collapsed state. BO_0222_006 */
+  const setSectionFilter$ = $(async (key: string, values: readonly string[]) => {
+    const filters = { ...layout.filters, [key]: [...values] };
+    layout.filters = filters;
+    await save$(tabs, { ...layout, filters });
+  });
   /**
    * Settings is a tab like any other. Its target is synthetic and instance-wide,
    * so `openTab` reveals an open settings tab rather than opening a second one
    * and the reveal rule needs no case of its own for a tab that is not content.
    */
+  /**
+   * The release check, once per session and only for the owner: the browser
+   * asks GitHub which releases exist — nothing in the stack does — and the
+   * highest candidate above the installed release becomes the header's hint.
+   * Off, unreachable, or nothing newer all mean no hint and no error. BO_0223_013
+   */
+  const updateAvailable = useSignal<string | null>(null);
+  useVisibleTask$(async () => {
+    if (person === null || !person.owner || REGISTRY.kinds[UPDATE_KIND] === undefined) return;
+    try {
+      const response = await fetch("/api/x/settings/update");
+      if (!response.ok) return;
+      const info = (await response.json()) as { release?: unknown; updateCheck?: unknown };
+      if (info.updateCheck !== true || typeof info.release !== "string") return;
+      const raw = await fetchReleases();
+      if (raw === null) return;
+      updateAvailable.value = candidates(info.release, parseReleases(raw))[0]?.release.version ?? null;
+    } catch {
+      updateAvailable.value = null;
+    }
+  });
+  const openUpdate$ = $(async () => {
+    await openTarget$({ kind: UPDATE_KIND, itemId: SETTINGS_TARGET, title: "Update" });
+  });
   const openSettings$ = $(async () => {
     await openTarget$({ kind: SETTINGS_KIND, itemId: SETTINGS_TARGET, title: "Settings" });
   });
@@ -559,6 +730,9 @@ export const Shell = component$<{
     // content. Offering it over a different tab would put a control in the dock
     // for a surface the reader has left.
     dock.action = null;
+    // So is what it offered to take back, for the same reason. A tab move's
+    // undo is the shell's own and stays.
+    if (undo.value?.kind === "view") undo.value = null;
     // A message belongs to the view that raised it. Leaving it up over a
     // different tab would ask about a document the reader is no longer looking
     // at, and answering it would act on that one.
@@ -577,6 +751,14 @@ export const Shell = component$<{
       tabs.tabs = next.tabs;
       await save$(next, layout);
     }),
+    setPointing$: $((itemId: string, pointing: Pointing) => {
+      aim.pointing = { ...aim.pointing, [itemId]: pointing };
+    }),
+    proposed: runProposed,
+    reveal,
+    offerUndo$: $((offer: UndoOffer) => {
+      undo.value = { kind: "view", label: offer.label, undo$: offer.undo$ };
+    }),
     raiseMessage$: $((next: Message) => {
       message.current = next;
     }),
@@ -592,6 +774,13 @@ export const Shell = component$<{
       if (gone !== undefined) await refreshKind$(gone.kind);
     }),
     openTarget$,
+    targetChanged$: $(async () => {
+      const id = tabs.activeTabId;
+      if (id === null) return;
+      const current = tabs.tabs.find((tab) => tab.id === id);
+      if (current === undefined) return;
+      await refreshKind$(current.kind);
+    }),
     setTitle$: $(async (title: string) => {
       const id = tabs.activeTabId;
       if (id === null) return;
@@ -628,7 +817,6 @@ export const Shell = component$<{
     save$(tabs, next);
   });
 
-  const detail = registry.items.find(({ id }) => id === registry.selectedId);
   const active = activeTab(tabs);
   const activeView = active
     ? resolveView(REGISTRY, active.kind, active.viewType).view
@@ -756,42 +944,26 @@ export const Shell = component$<{
               aria-label={`${side} drawer: ${layout[side]}. Change`}
               onClick$={() => cycleDrawer$(side)}
             >
-              {side === "left" ? "◧" : "◨"}
+              <Icon name="sidebar-simple" />
             </button>
           ))}
-          {licenceWarning !== null && (
-            // The licensor's word, not a toast: it stays until the licence
-            // does. BO_0209_005
-            <p class="licence-warning" role="status" data-licence-warning>
-              {licenceWarning}
-            </p>
-          )}
-          {person !== null && (
-            // Whose authority the reader acts under, said before they act:
-            // acting as the wrong person is the mistake multi-party review
-            // exists to make visible. Sign-out is the kernel's; the reload
-            // that follows lands on its sign-in page. BO_0209_003
-            <span
-              class="identity"
-              data-identity={person.name}
-              data-identity-class={person.class}
+          {licenceWarning !== null && <LicenceWarning text={licenceWarning} />}
+          {updateAvailable.value !== null && (
+            // The owner's hint that a newer release exists, in the chrome
+            // idiom; it opens the Update tab. A phone shows the icon, the
+            // desktop the words. BO_0223_013 CA_0041_005
+            <button
+              type="button"
+              class="update-hint"
+              data-update-available={updateAvailable.value}
+              aria-label={`Update available: ${updateAvailable.value}. Open the Update tab`}
+              onClick$={() => openUpdate$()}
             >
-              <span class="identity__name">{person.name}</span>
-              <span class="identity__class">
-                {person.class === "human" ? "may establish" : "proposes"}
+              <Icon name="arrow-circle-up" />
+              <span class="update-hint__words">
+                Update available: {updateAvailable.value}
               </span>
-              <button
-                type="button"
-                class="sign-out"
-                aria-label={`Signed in as ${person.name}. Sign out`}
-                onClick$={async () => {
-                  await fetch("/__kernel/session/sign-out", { method: "POST" });
-                  window.location.assign("/__kernel/session/sign-in");
-                }}
-              >
-                Sign out
-              </button>
-            </span>
+            </button>
           )}
           {REGISTRY.kinds[SETTINGS_KIND] !== undefined && (
             <button
@@ -800,10 +972,11 @@ export const Shell = component$<{
               aria-label="Settings"
               onClick$={() => openSettings$()}
             >
-              ⚙
+              <Icon name="gear" />
             </button>
           )}
           <ThemeToggle />
+          {person !== null && <PersonMenu person={person} />}
         </header>
 
         <button
@@ -889,6 +1062,8 @@ export const Shell = component$<{
                       data={library.data[key] ?? null}
                       activeItemId={active?.itemId ?? null}
                       sectionKey={key}
+                      filter={layout.filters[key] ?? null}
+                      setFilter$={$((values: readonly string[]) => setSectionFilter$(key, values))}
                     />
                   ) : items.length === 0 ? (
                     <p class="library-empty" data-library-empty={name}>
@@ -1004,67 +1179,16 @@ export const Shell = component$<{
             ×
           </button>
           <h2>Inspector</h2>
-          {detail ? (
-            <div class="process-detail" data-process-id={detail.id}>
-              <p class="eyebrow">Process</p>
-              <h3>{detail.title}</h3>
-              <p data-process-state={detail.state}>{detail.state}</p>
-              <p data-process-step>{detail.step ?? "no step reported"}</p>
-              {detail.error !== null && (
-                <p class="process-error" data-process-error>
-                  {detail.error}
-                </p>
-              )}
-              {proposed.processId === detail.id && (
-                <div class="proposed" data-proposed>
-                  <p class="eyebrow">Proposed</p>
-                  {proposed.documents.length === 0 ? (
-                    <p data-proposed-none>This run proposed nothing.</p>
-                  ) : (
-                    <ul class="proposed__list">
-                      {proposed.documents.map((document) => (
-                        <li key={document.documentId}>
-                          <button
-                            type="button"
-                            data-proposed-document={document.documentId}
-                            onClick$={() =>
-                              openTarget$({
-                                kind: DOCUMENT_KIND,
-                                itemId: document.documentId,
-                                title: document.title,
-                              })
-                            }
-                          >
-                            {document.title}
-                          </button>
-                          <span data-proposed-unanswered>
-                            {document.unanswered} unanswered
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-              {detail.state === "failed" &&
-                (detail.acknowledged ? (
-                  <p data-process-acknowledged>Failure acknowledged</p>
-                ) : (
-                  <button
-                    type="button"
-                    onClick$={() => acknowledge$(detail.id)}
-                  >
-                    Acknowledge failure
-                  </button>
-                ))}
-            </div>
-          ) : (
-            <InspectorContribution
-              bridge={bridge}
-              declared={activeView?.inspector ?? "Workspace context"}
-              viewId={activeView?.id}
-            />
-          )}
+          <InspectorPanel
+            registry={registry}
+            tabs={tabs}
+            proposed={proposed}
+            inspector={inspector}
+            declared={activeView?.inspector ?? "Workspace context"}
+            viewId={activeView?.id}
+            openTarget$={openTarget$}
+            acknowledge$={acknowledge$}
+          />
         </aside>
 
         <section class="dock" aria-label="Command dock">
@@ -1095,43 +1219,19 @@ export const Shell = component$<{
           >
             <span />
           </button>
-          <DockActions dock={dock} />
-          <div
-            class="composer"
-            data-drop-target="composer"
-            data-accepts="attach-to-command process-input"
-            data-drop-active={drag.overId === "composer" ? "true" : undefined}
-          >
-            <label for="command">Command</label>
-            <textarea id="command" placeholder="Ask Calliopa or add context" />
-            <button type="button" onClick$={sendGoal$} disabled={run.sending}>
-              Run
-            </button>
-            {run.notice !== null && (
-              <p class="composer__notice" role="status" data-run-notice>
-                {run.notice}
-              </p>
-            )}
-            {attachment.value && (
-              <p
-                class="attachment"
-                data-attached-process={attachment.value.processId}
-              >
-                {attachment.value.text}
-                <button
-                  type="button"
-                  aria-label="Remove attachment"
-                  onClick$={() => (attachment.value = null)}
-                >
-                  ×
-                </button>
-              </p>
-            )}
-          </div>
+          <Composer
+            dock={dock}
+            tabs={tabs}
+            aim={aim}
+            run={run}
+            reveal={reveal}
+            onRun$={sendGoal$}
+            onChooseAgent$={chooseAgent$}
+          />
           {undo.value && (
             <p class="undo" data-undo>
               {undo.value.label}
-              <button type="button" onClick$={undoMove$}>
+              <button type="button" onClick$={takeBack$}>
                 Undo
               </button>
             </p>
@@ -1165,41 +1265,7 @@ export const Shell = component$<{
                 )}
               </div>
             )}
-            {registry.items.length === 0 ? (
-              <p>No running processes</p>
-            ) : (
-              <ul class="process-list" aria-label="Processes">
-                {registry.items.map((process) => (
-                  <li key={process.id}>
-                    <button
-                      type="button"
-                      class={{
-                        "process-entry": true,
-                        "process-entry--selected":
-                          process.id === registry.selectedId,
-                      }}
-                      data-process-id={process.id}
-                      data-state={process.state}
-                      onPointerDown$={(event) =>
-                        startDrag$(
-                          {
-                            itemId: process.id,
-                            kind: "process-result",
-                            source: "dock",
-                            operations: ["attach-to-command", "process-input"],
-                            preview: process.title,
-                          },
-                          event,
-                        )
-                      }
-                      onClick$={() => (registry.selectedId = process.id)}
-                    >
-                      {describeProcess(process)}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <ProcessList registry={registry} tabs={tabs} startDrag$={startDrag$} />
           </div>
         </section>
 
@@ -1355,160 +1421,3 @@ const MessageSurface = component$<{ message: ViewMessage }>(({ message }) => {
     </div>
   );
 });
-
-/**
- * What the inspector says for the active view: the view's own live
- * contribution when it has one, and its declared contribution otherwise.
- *
- * Its own component so that a view updating its contribution re-renders the
- * inspector alone. Re-rendering the shell for it would re-render the view too,
- * which for an editing surface means rebuilding the element under the caret.
- */
-const InspectorContribution = component$<{
-  bridge: ViewBridge;
-  declared: string;
-  viewId: string | undefined;
-}>(({ bridge, declared, viewId }) => {
-  const { facts, actions, text } = bridge.inspector;
-  if (facts.length === 0 && actions.length === 0) {
-    return <p data-view-inspector={viewId}>{text ?? declared}</p>;
-  }
-  return (
-    <div class="view-inspector" data-view-inspector={viewId}>
-      {facts.length > 0 && (
-        <dl class="inspector-facts">
-          {facts.map((fact) => (
-            <div key={fact.label} class="inspector-fact">
-              <dt>{fact.label}</dt>
-              <dd data-inspector-fact={fact.kind}>
-                <InspectorFactValue fact={fact} />
-              </dd>
-            </div>
-          ))}
-        </dl>
-      )}
-      {actions.length > 0 && (
-        <div class="inspector-actions">
-          {actions.map((action) =>
-            action.kind === "toggle" ? (
-              <button
-                key={action.id}
-                type="button"
-                data-inspector-action={action.id}
-                aria-pressed={action.on}
-                onClick$={() => action.run$(!action.on)}
-              >
-                {action.label}
-              </button>
-            ) : (
-              <button
-                key={action.id}
-                type="button"
-                data-inspector-action={action.id}
-                data-destructive={action.destructive === true ? "" : undefined}
-                onClick$={() => action.run$()}
-              >
-                {action.label}
-              </button>
-            ),
-          )}
-        </div>
-      )}
-    </div>
-  );
-});
-
-/**
- * The one action the active view contributes to the command dock.
- *
- * Its own component for the reason the inspector's contribution is one: a view
- * updating what it offers re-renders this alone, and re-rendering the shell
- * would rebuild the mounted view, which for an editing surface means rebuilding
- * the element under the caret.
- *
- * A view that contributes nothing renders nothing, so the dock keeps the shape
- * it has for every view that offers no action of its own.
- */
-const DockActions = component$<{ dock: ViewDock }>(({ dock }) => {
-  const action = dock.action;
-  if (action === null) return null;
-  return (
-    <div class="dock-actions" aria-label="View commands">
-      {action.kind === "toggle" ? (
-        <button
-          type="button"
-          data-dock-action={action.id}
-          aria-pressed={action.on}
-          onClick$={() => action.run$(!action.on)}
-        >
-          {action.label}
-        </button>
-      ) : (
-        <button
-          type="button"
-          data-dock-action={action.id}
-          data-destructive={action.destructive === true ? "" : undefined}
-          onClick$={() => action.run$()}
-        >
-          {action.label}
-        </button>
-      )}
-    </div>
-  );
-});
-
-/**
- * How the shell reads each fact a view contributes.
- *
- * A time renders as an absolute value in a `time` element carrying the
- * machine-readable stamp. A relative age in a drawer that sits open would have
- * to keep itself current, and one that stopped ticking would state something
- * false; a static absolute value cannot go stale.
- */
-const InspectorFactValue = component$<{ fact: InspectorFact }>(({ fact }) => {
-  if (fact.kind === "saveState") {
-    return <span data-save-state={fact.value}>{SAVE_WORD[fact.value]}</span>;
-  }
-  if (fact.kind === "time") {
-    return <time dateTime={fact.value}>{readableTime(fact.value)}</time>;
-  }
-  return <span>{String(fact.value)}</span>;
-});
-
-/** An absolute moment a reader can take in at a glance. An unparseable stamp
- * reads as itself rather than as `Invalid Date`. */
-function readableTime(value: string): string {
-  const at = new Date(value);
-  if (Number.isNaN(at.getTime())) return value;
-  return at.toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
-
-const SAVE_WORD: Readonly<Record<SaveState, string>> = {
-  saving: "Saving",
-  saved: "Saved",
-  unsaved: "Unsaved",
-};
-
-/**
- * The active tab's save state, in the header.
- *
- * Its own component for the reason the inspector contribution is one: a save
- * state changing must not re-render the shell, because re-rendering the shell
- * rebuilds the mounted view, and for an editing surface that means rebuilding
- * the element the caret is in. A view that reports nothing renders nothing.
- */
-const SaveStatus = component$<{ save: ViewSave }>(({ save }) =>
-  save.state === null ? null : (
-    <p
-      class="save-status"
-      role="status"
-      aria-label="Save state"
-      data-save-status={save.state}
-    >
-      {SAVE_WORD[save.state]}
-    </p>
-  ),
-);

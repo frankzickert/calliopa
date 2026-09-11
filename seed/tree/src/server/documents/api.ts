@@ -1,9 +1,16 @@
-import type { DocumentSummary } from "../../lib/library";
+import { SCALE, type Standing } from "../../lib/disposition";
+import {
+  CHANGE_STATUSES,
+  isChangeStatus,
+  type ChangeStatus,
+  type DocumentSummary,
+} from "../../lib/library";
 import { readRuns, TEXT_ROLES, type Run, type TextRole } from "../../lib/runs";
 import type { GraphOutcome, NonEmpty } from "../outcome";
 import { refusal, respond, type OutcomeResponse } from "../outcome";
 import {
   answerDocumentProposal,
+  placeProposedItem,
   createDocument,
   deleteDocument,
   insertBlock,
@@ -15,12 +22,15 @@ import {
   readDocumentChanges,
   readDocumentProposals,
   renameDocument,
+  setChangeStatus,
   readRetiredBlocks,
   restoreBlock,
   retireBlock,
   reviseTextBlock,
+  setBlockDisposition,
   splitTextBlock,
   type AnsweredItem,
+  type PlacedItem,
   type ChangeSummary,
   type CreatedDocument,
   type DocumentProposalItem,
@@ -125,6 +135,12 @@ export type DocumentCommand =
       readonly role: TextRole | undefined;
     }
   | {
+      readonly command: "setDisposition";
+      readonly blockId: string;
+      readonly baseRevisionId: string;
+      readonly standing: Standing;
+    }
+  | {
       readonly command: "split";
       readonly blockId: string;
       readonly baseRevisionId: string;
@@ -147,6 +163,12 @@ export type DocumentCommand =
       readonly baseRevisionId: string;
       readonly title: string;
     }
+  | {
+      /** A change document's status, from the vocabulary. BO_0222_007 */
+      readonly command: "setStatus";
+      readonly baseRevisionId: string;
+      readonly status: ChangeStatus;
+    }
   | { readonly command: "delete"; readonly baseRevisionId: string }
   | { readonly command: "retire"; readonly blockId: string }
   | {
@@ -157,6 +179,13 @@ export type DocumentCommand =
       readonly command: "answerProposal";
       readonly itemId: string;
       readonly answer: ProposalAnswer;
+      /** An edit's acceptance, over what the block did since. CA_0042_002 */
+      readonly edited?: boolean;
+    }
+  | {
+      readonly command: "placeProposal";
+      readonly itemId: string;
+      readonly placement: Placement;
     }
   | {
       readonly command: "restore";
@@ -202,6 +231,25 @@ export function parseDocumentCommand(
           baseRevisionId,
           runs: runs.runs,
           role: role.role,
+        },
+      };
+    }
+    case "setDisposition": {
+      if (blockId === null || baseRevisionId === null) {
+        return { failure: "A standing names a block and the revision it is based on." };
+      }
+      // Neutral is named rather than left out, so a body that forgot the
+      // field is refused rather than read as clearing the block's standing.
+      const standing = input["standing"];
+      if (typeof standing !== "string" || !(SCALE as readonly string[]).includes(standing)) {
+        return { failure: `A standing is one of ${SCALE.join(", ")}.` };
+      }
+      return {
+        command: {
+          command: "setDisposition",
+          blockId,
+          baseRevisionId,
+          standing: standing as Standing,
         },
       };
     }
@@ -255,6 +303,20 @@ export function parseDocumentCommand(
       }
       return { command: { command: "rename", baseRevisionId, title } };
     }
+    case "setStatus": {
+      if (baseRevisionId === null) {
+        return {
+          failure: "A status change names the document revision it is based on.",
+        };
+      }
+      const status = input["status"];
+      if (!isChangeStatus(status)) {
+        return {
+          failure: `A status is one of ${CHANGE_STATUSES.join(", ")}.`,
+        };
+      }
+      return { command: { command: "setStatus", baseRevisionId, status } };
+    }
     case "delete": {
       if (baseRevisionId === null) {
         return {
@@ -295,7 +357,20 @@ export function parseDocumentCommand(
       if (answer !== "accepted" && answer !== "rejected") {
         return { failure: "A proposed change is accepted or rejected." };
       }
-      return { command: { command: "answerProposal", itemId, answer } };
+      const edited = input["edited"];
+      if (edited !== undefined && typeof edited !== "boolean") {
+        return { failure: "Whether an answer is an edit's is true or false." };
+      }
+      return { command: { command: "answerProposal", itemId, answer, ...(edited === true ? { edited } : {}) } };
+    }
+    case "placeProposal": {
+      const itemId = input["itemId"];
+      if (typeof itemId !== "string") {
+        return { failure: "A placement names the proposed change it moves." };
+      }
+      const placement = readPlacement(input["placement"]);
+      if ("failure" in placement) return placement;
+      return { command: { command: "placeProposal", itemId, placement: placement.placement } };
     }
     case "restore": {
       if (blockId === null) return { failure: "A restore names a block." };
@@ -385,7 +460,7 @@ export function runDocumentCommand(
   command: DocumentCommand,
 ): Promise<
   GraphOutcome<
-    WrittenBlock | SplitBlocks | WrittenDocument | AnsweredItem | StagedProposal
+    WrittenBlock | SplitBlocks | WrittenDocument | AnsweredItem | StagedProposal | PlacedItem
   >
 > {
   switch (command.command) {
@@ -402,6 +477,13 @@ export function runDocumentCommand(
         baseRevisionId: command.baseRevisionId,
         runs: command.runs,
         ...(command.role === undefined ? {} : { role: command.role }),
+      });
+    case "setDisposition":
+      return setBlockDisposition({
+        documentId,
+        blockId: command.blockId,
+        baseRevisionId: command.baseRevisionId,
+        standing: command.standing,
       });
     case "split":
       return splitTextBlock({
@@ -430,6 +512,12 @@ export function runDocumentCommand(
         baseRevisionId: command.baseRevisionId,
         title: command.title,
       });
+    case "setStatus":
+      return setChangeStatus({
+        documentId,
+        baseRevisionId: command.baseRevisionId,
+        status: command.status,
+      });
     case "delete":
       return deleteDocument({
         documentId,
@@ -444,8 +532,16 @@ export function runDocumentCommand(
       });
     case "answerProposal":
       return answerDocumentProposal({
+        documentId,
         itemId: command.itemId,
         answer: command.answer,
+        edited: command.edited === true,
+      });
+    case "placeProposal":
+      return placeProposedItem({
+        documentId,
+        itemId: command.itemId,
+        placement: command.placement,
       });
     case "restore":
       return restoreBlock({
@@ -544,7 +640,26 @@ export async function handleDocumentCreate(
   if (typeof title !== "string") {
     return respond(refusal("documentShape", "A document carries a title."));
   }
-  return respond(await createDocument({ title }));
+  // A change document names its extension and may name a status; a status
+  // without an extension is not a shape a document has. BO_0222_005
+  const change = input === null ? undefined : input["change"];
+  const status = input === null ? undefined : input["status"];
+  if (change !== undefined && (typeof change !== "string" || change === "")) {
+    return respond(refusal("documentShape", "A change names the extension it is a change of."));
+  }
+  if (status !== undefined && !isChangeStatus(status)) {
+    return respond(refusal("documentShape", `A status is one of ${CHANGE_STATUSES.join(", ")}.`));
+  }
+  if (status !== undefined && change === undefined) {
+    return respond(refusal("documentShape", "A status belongs to a change document."));
+  }
+  return respond(
+    await createDocument({
+      title,
+      ...(typeof change === "string" ? { change } : {}),
+      ...(isChangeStatus(status) ? { status } : {}),
+    }),
+  );
 }
 
 /** A request naming something that is not a record identifier, answered as the

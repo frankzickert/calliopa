@@ -27,6 +27,9 @@ export interface ReadRevision {
   readonly dataRevision: number;
   readonly createdAt: number;
   readonly createdBy: string;
+  /** The data revision the revision was created at, which a proposal group's
+   * base is judged from (`proposalBase`). BO_0233_011 */
+  readonly createdDataRevision?: number;
   /** Present on a metadata-only read, where the content's `_type` is not. */
   readonly type?: string;
 }

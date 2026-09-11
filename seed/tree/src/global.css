@@ -49,6 +49,17 @@ body {
   object-fit: contain;
 }
 
+/**
+ * The `hidden` attribute must win. A component that lays itself out — the
+ * library's create form and its status filter are `display: flex` — would
+ * otherwise override the user agent's `[hidden] { display: none }`, because
+ * an author rule beats a user-agent one whatever its specificity, and a
+ * form that cannot be closed is what that looks like. BO_0224_009
+ */
+[hidden] {
+  display: none !important;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;

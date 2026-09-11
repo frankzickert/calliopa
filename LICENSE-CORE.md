@@ -1,6 +1,6 @@
 # Calliopa Core Licence
 
-Version 1.0
+Version 1.1
 
 ## 1. What this covers
 
@@ -72,6 +72,19 @@ This section is a term of this licence and not a statement of policy.
 - The Core contains no functionality that transmits information to the Licensor. It sends no
   telemetry, no usage data, no diagnostics, no crash reports, no update checks and no licence
   validation request.
+- The interface is not part of the Core (Section 1), and it makes one request of its own. When
+  the owner signs in, and when the owner asks it to check again, the interface in the owner's
+  browser asks GitHub for the public list of Calliopa releases, so it can say whether a newer
+  one exists. The request goes to GitHub, not to the Licensor. It carries what any request
+  from a browser carries — the browser's network address, its user agent and the address of
+  the page making it — and nothing else from Your instance: not Your installed version and not
+  Your content. The comparison with Your installed version happens in Your browser. What
+  GitHub records of the request is governed by GitHub's terms, not by this licence. The Core
+  does not make this request; it only passes Your setting to the interface. Setting
+  `CALLIOPA_UPDATE_CHECK=off` in Your `.env` stops it.
+- When You choose to update, the updater on Your machine fetches the release You chose from
+  the repository You installed from, and the build downloads its binaries from the source Your
+  `.env` names, as the install did. These are Your actions, taken at Your request.
 - The Core does open network connections to services **You** configure and control, such as
   the model providers Your agents use and the destinations You publish to. Those connections
   are Yours. None of them reach the Licensor.

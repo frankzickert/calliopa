@@ -84,6 +84,24 @@ describe("a workspace's section states", () => {
     layout: { ...DEFAULT_WORKSPACE_STATE.layout, ...layout },
   });
 
+  it("Given a layout stored before filters existed, Then it reads with no filter stored, and a stored set reads back as given", () => {
+    // BO_0222_006: the Extensions section's change filter lives beside the
+    // section's collapsed state; a layout without it is the default, and the
+    // values are the section's to read, so nothing here judges them.
+    const before = parseWorkspaceState(withLayout({ filters: undefined }));
+    expect(before.layout.filters).toEqual({});
+    const stored = parseWorkspaceState(
+      withLayout({ filters: { "ui.shell:extensions": ["idea", "completed"], "ui.shell:episodes": ["x"] } }),
+    );
+    expect(stored.layout.filters).toEqual({
+      "ui.shell:extensions": ["idea", "completed"],
+      "calliopa-video:episodes": ["x"],
+    });
+    expect(() => parseWorkspaceState(withLayout({ filters: { "ui.shell:extensions": "idea" } }))).toThrow(
+      /invalid workspace layout/u,
+    );
+  });
+
   it("Given a layout stored before sections were keyed, Then its named fields become keys", () => {
     // The one migration BO_0202_003 names, applied on read: the five fields a
     // layout carried become the keys the registry names for those sections.

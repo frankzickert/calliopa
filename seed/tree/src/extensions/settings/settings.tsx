@@ -1,16 +1,20 @@
 import {
   $,
   component$,
+  useContext,
   useSignal,
   useStore,
   useVisibleTask$,
 } from "@builder.io/qwik";
 
-import { agentNeeds, type ConnectionRecord } from "~/lib/connections";
+import { agentNeeds, type ConnectionRecord, type HermesModel } from "~/lib/connections";
 import type { ViewProps } from "~/components/shell/view-host";
 import type { LoginState } from "~/server/agent/adapters";
 import type { AccountListing, AccountView, LicenceView } from "~/server/kernel/accounts";
 import type { Person } from "~/server/session";
+import { ViewBridgeContext } from "~/components/shell/view-bridge";
+import { candidates, fetchReleases, parseReleases } from "~/lib/releases";
+import type { UpdateView } from "~/server/kernel/update";
 
 /**
  * The instance's settings, mounted like any other view. The tab is sectioned;
@@ -55,6 +59,44 @@ interface ConnectionsState {
 }
 
 export const SettingsView = component$<ViewProps>(() => {
+  const bridge = useContext(ViewBridgeContext);
+  /**
+   * The Update entry: the owner's alone — anyone else is refused by the
+   * kernel and sees no entry — saying the installed release and whether a
+   * newer one exists, and opening the Update tab. BO_0223_014
+   */
+  const update = useStore<{ info: UpdateView | null; shown: boolean; line: string }>({
+    info: null,
+    shown: false,
+    line: "",
+  });
+  const readUpdate$ = $(async () => {
+    try {
+      const response = await fetch("/api/x/settings/update");
+      if (!response.ok) {
+        update.shown = false;
+        return;
+      }
+      update.info = (await response.json()) as UpdateView;
+      update.shown = true;
+      if (!update.info.updateCheck) {
+        update.line = "The release check is off.";
+        return;
+      }
+      const raw = await fetchReleases();
+      if (raw === null) {
+        update.line = "GitHub could not be reached.";
+        return;
+      }
+      const found = candidates(update.info.release, parseReleases(raw));
+      update.line = found.length === 0 ? "This instance is on the newest release." : `Update available: ${found[0]?.release.version}.`;
+    } catch {
+      update.shown = false;
+    }
+  });
+  const openUpdate$ = $(async () => {
+    await bridge.openTarget$({ kind: "settings:update", itemId: "instance", title: "Update" });
+  });
   const state = useStore<ConnectionsState>({
     rows: [],
     loaded: false,
@@ -271,6 +313,38 @@ export const SettingsView = component$<ViewProps>(() => {
     });
   });
 
+  /**
+   * What Hermes's own loop reasons with, set from the agent's row. The kernel
+   * writes the choice and the agent applies it when its gateway restarts, so
+   * the row says it is switching until the agent's stamp agrees, and reads
+   * the stamp again while it restarts. BO_0228_012
+   */
+  const hermesAsked = useSignal<HermesModel | null>(null);
+  const setHermesModel$ = $(async (model: HermesModel) => {
+    state.busy = "hermes";
+    state.error = null;
+    state.errorParty = null;
+    try {
+      const response = await fetch("/api/x/settings/agent/hermes-model", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model }),
+      });
+      if (!response.ok) {
+        const refused = (await response.json().catch(() => ({}))) as { error?: string };
+        state.error = refused.error ?? "What Hermes reasons with could not be set.";
+        state.errorParty = "hermes";
+        return;
+      }
+      hermesAsked.value = model;
+      for (const delay of [4000, 10000, 20000]) setTimeout(() => void read$(), delay);
+    } catch {
+      state.error = "The request could not be made.";
+    } finally {
+      state.busy = null;
+    }
+  });
+
   const request$ = $(async (party: string, path: string, init: RequestInit) => {
     state.busy = party;
     state.error = null;
@@ -299,6 +373,7 @@ export const SettingsView = component$<ViewProps>(() => {
   // rendering is not run again when the page resumes, so a restored settings
   // tab would come back with no rows at all.
   useVisibleTask$(async ({ cleanup }) => {
+    await readUpdate$();
     await read$();
     await readPeople$();
 
@@ -397,10 +472,12 @@ export const SettingsView = component$<ViewProps>(() => {
                       {needs.length === 0 ? (
                         <p class="agent-report__ready" data-agent-ready>
                           {"Reasoning on "}
-                          {state.rows.find((candidate) => candidate.party === row.agent?.runtime)
-                            ?.label ??
-                            row.agent?.runtime ??
-                            "its runtime"}
+                          {row.agent?.runtime === "hermes"
+                            ? "Hermes's own loop"
+                            : (state.rows.find((candidate) => candidate.party === row.agent?.runtime)
+                                ?.label ??
+                              row.agent?.runtime ??
+                              "its runtime")}
                           {", with the Calliopa toolset registered."}
                         </p>
                       ) : (
@@ -447,6 +524,58 @@ export const SettingsView = component$<ViewProps>(() => {
                             );
                           })}
                         </ul>
+                      )}
+                      {row.agent !== null && (
+                        <p
+                          class="agent-report__model"
+                          data-hermes-model={row.agent.hermesModel ?? "subscription"}
+                        >
+                          {"Hermes reasons with "}
+                          {row.agent.hermesModel === "provider"
+                            ? "the API-key model"
+                            : "the ChatGPT subscription"}
+                          {row.agent.hermesModelName === undefined
+                            ? ""
+                            : ` (${row.agent.hermesModelName})`}
+                          {"."}
+                          {hermesAsked.value !== null &&
+                            hermesAsked.value !== (row.agent.hermesModel ?? "subscription") && (
+                              <span class="agent-report__switching" role="status" data-hermes-switching>
+                                {" Switching to "}
+                                {hermesAsked.value === "provider"
+                                  ? "the API-key model"
+                                  : "the ChatGPT subscription"}
+                                {"; the agent restarts to apply it."}
+                              </span>
+                            )}
+                          {row.agent.hermesModel === "provider" ? (
+                            <button
+                              type="button"
+                              class="connection__action"
+                              data-hermes-use="subscription"
+                              disabled={busy}
+                              onClick$={() => setHermesModel$("subscription")}
+                            >
+                              Use the ChatGPT subscription
+                            </button>
+                          ) : row.apiKeyModel === true ? (
+                            <button
+                              type="button"
+                              class="connection__action"
+                              data-hermes-use="provider"
+                              disabled={busy}
+                              onClick$={() => setHermesModel$("provider")}
+                            >
+                              Use the API-key model
+                            </button>
+                          ) : (
+                            <span class="agent-report__hint" data-hermes-hint>
+                              {" No API-key model is configured, so the subscription is the one choice. One is configured with "}
+                              <code>POST /__kernel/agent/config</code>
+                              {", naming an OpenRouter or OpenAI key and a model."}
+                            </span>
+                          )}
+                        </p>
                       )}
                     </div>
                   )}
@@ -1076,6 +1205,22 @@ export const SettingsView = component$<ViewProps>(() => {
           </form>
         )}
       </section>
+
+      {update.shown && (
+        <section class="settings-section" aria-labelledby="settings-update" data-settings-update>
+          <h2 class="settings-section__heading" id="settings-update">
+            Update
+          </h2>
+          <p class="settings-section__lead" data-settings-update-line>
+            Installed release {update.info?.release === "" ? "unknown" : update.info?.release}. {update.line}
+          </p>
+          <p class="connection__controls">
+            <button type="button" class="connection__action" onClick$={() => openUpdate$()}>
+              Open the Update tab
+            </button>
+          </p>
+        </section>
+      )}
     </div>
   );
 });

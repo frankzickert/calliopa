@@ -2,6 +2,7 @@ import {
   $,
   component$,
   useContext,
+  useContextProvider,
   useSignal,
   useStore,
   useTask$,
@@ -10,17 +11,10 @@ import {
 } from "@builder.io/qwik";
 
 import type { DragPayload } from "~/lib/drag";
-import {
-  keepPresent,
-  markingKey,
-  NO_MARKING,
-  parseMarking,
-  referenceFor,
-  serializeMarking,
-  toggleReference,
-  type EditorMode,
-  type Marking,
-} from "~/lib/references";
+import { step } from "~/lib/disposition";
+import { anchorAt } from "~/lib/passage";
+import { passagesIn, passageState, referenceFor } from "~/lib/references";
+import { proposedFor, revealFor } from "~/lib/command-target";
 import {
   applyLink,
   applyMark,
@@ -45,7 +39,8 @@ import {
 } from "~/components/shell/view-bridge";
 import type { ViewProps } from "~/components/shell/view-host";
 import type { ChangeSummary } from "~/server/documents/documents";
-import type { GraphOutcome } from "~/server/outcome";
+import { CHANGE_STATUSES, isChangeStatus } from "~/lib/library";
+import { STATUS_ICONS } from "~/components/shell/icons";
 import type {
   BlockView,
   DocumentView,
@@ -66,6 +61,51 @@ import {
   textLength,
   titleCaret,
 } from "./editor-dom";
+import {
+  answerProposal,
+  placeProposal,
+  describeOutcome,
+  fetchChanges,
+  fetchDocument,
+  fetchProposals,
+  fetchRetired,
+  sendCommand,
+  sendRename,
+  sendStatus,
+} from "./documents-client";
+import { installSwipe, swipeJustEnded } from "./block-swipe";
+import {
+  chordDirection,
+  clickMarks,
+  inStandingToolbar,
+  passageNumberAt,
+} from "./press";
+import { MarkingContext, useMarking } from "./marking/use-marking";
+import { PassageAffordance } from "./passages/passage-affordance";
+import { PassageNumbers } from "./passages/passage-numbers";
+import { revealedPassage, showArea } from "./reveal";
+import { selectedWords } from "./passages/selection";
+import { PassagesContext, usePassages } from "./passages/use-passages";
+import { Marked, ROLE_TAG, type BlockTag } from "./block-text";
+import { ProposalBlock } from "./proposals/proposal-block";
+import {
+  destinationOf,
+  stepPlacement,
+  withoutItems,
+  type Proposer,
+  type Placed,
+  type ProposalPlacement,
+  type TypedProposal,
+} from "~/lib/proposals";
+import { orderBetween } from "~/lib/order";
+import { placeProposals, readingOrder } from "./reading-order";
+import { markingName, readingName } from "./row-name";
+import { DiscardedRow } from "./standing/discarded-row";
+import { StandingAnnouncement } from "./standing/standing-announcement";
+import { StandingControl } from "./standing/standing-control";
+import { StandingMark } from "./standing/standing-mark";
+import { StandingToolbar } from "./standing/standing-toolbar";
+import { StandingContext, standingOf, useStanding } from "./standing/use-standing";
 import "./block-editor.css";
 
 /**
@@ -94,6 +134,12 @@ export const SAVE_PAUSE_MS = 1200;
  * gave back one character at a time would be a keystroke log, not a history. */
 const HISTORY_STEP_MS = 600;
 
+/** How long arrow presses on a proposal's face pause before the place they
+ * reached is staged. Longer than the kernel's restaging floor (250 ms), so
+ * a reader stepping a proposal along stages the place they stop at, once.
+ * BO_0233_007 */
+const PROPOSAL_STEP_PAUSE_MS = 600;
+
 /**
  * Scroll position per tab, for this page load only.
  *
@@ -115,23 +161,6 @@ const scrollByTab = new Map<string, number>();
  */
 const mountedTabs = new Set<string>();
 
-/**
- * Reading and editing use the same element, so the role decides the tag once.
- *
- * Levels start at `h3` because the page's `h1` is the application and this
- * view's own title is the `h2` beneath it: a document's headings are real
- * headings, sitting below the title that names them rather than competing with
- * it, and the outline skips no level on the way down.
- */
-type BlockTag = "p" | "h3" | "h4" | "h5" | "blockquote";
-
-const ROLE_TAG: Readonly<Record<TextRole, BlockTag>> = {
-  paragraph: "p",
-  h1: "h3",
-  h2: "h4",
-  h3: "h5",
-  quote: "blockquote",
-};
 
 /**
  * Whether the document says nothing yet.
@@ -178,105 +207,38 @@ const MARK_GLYPH: Readonly<Record<Mark, string>> = {
 const isText = (block: BlockView): block is TextBlockView =>
   block.kind === "text";
 
-/** What a failed outcome means to the person who was typing. */
-function describeOutcome(outcome: GraphOutcome<unknown>): string {
-  switch (outcome.outcome) {
-    case "success":
-      return "";
-    case "conflict":
-      return "This block changed somewhere else. Reload the document to see its current text before editing it again.";
-    case "validationFailure":
-      return outcome.failures[0].detail;
-    case "noResult":
-      return outcome.detail;
-    case "storageError":
-      return outcome.detail;
-    case "authenticationFailure":
-      return "This workspace is no longer signed in.";
-    case "refused":
-      return outcome.detail;
-  }
-}
+/** A group whose proposer the read did not carry: said as an agent, never guessed. */
+const UNKNOWN_PROPOSER: Proposer = { kind: "agent", agent: null, executedBy: "" };
 
-async function readOutcome<T>(response: Response): Promise<GraphOutcome<T>> {
-  try {
-    return (await response.json()) as GraphOutcome<T>;
-  } catch {
-    return { outcome: "storageError", detail: "The server sent no answer." };
-  }
-}
+/** The established blocks as a placement reads them, with their opening words. BO_0233_003 */
+const placedOf = (blocks: readonly BlockView[]): Placed[] =>
+  blocks
+    .filter((block) => block.order !== "")
+    .map((block) => ({
+      blockId: block.blockId,
+      order: block.order,
+      words: isText(block)
+        ? runsText(block.runs).split(/\s+/).filter(Boolean).slice(0, 6).join(" ") || "an empty block"
+        : "a divider",
+    }))
+    .sort((left, right) => (left.order < right.order ? -1 : left.order > right.order ? 1 : 0));
 
-const fetchDocument = async (id: string): Promise<GraphOutcome<DocumentView>> =>
-  readOutcome<DocumentView>(await fetch(`/api/x/ui.shell/documents/${id}`));
-
-const fetchRetired = async (
-  id: string,
-): Promise<GraphOutcome<readonly BlockView[]>> =>
-  readOutcome<readonly BlockView[]>(
-    await fetch(`/api/x/ui.shell/documents/${id}/retired`),
-  );
-
-interface WriteResult {
-  readonly blockId: string;
-  readonly revisionId: string;
-  readonly tailBlockId?: string;
-}
-
-const sendCommand = async (
-  id: string,
-  command: Record<string, unknown>,
-  keepalive = false,
-): Promise<GraphOutcome<WriteResult>> =>
-  readOutcome<WriteResult>(
-    await fetch(`/api/x/ui.shell/documents/${id}/commands`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(command),
-      keepalive,
-    }),
-  );
-
-const sendRename = async (
-  id: string,
-  baseRevisionId: string,
-  title: string,
-): Promise<GraphOutcome<{ revisionId: string }>> =>
-  readOutcome<{ revisionId: string }>(
-    await fetch(`/api/x/ui.shell/documents/${id}/commands`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ command: "rename", baseRevisionId, title }),
-    }),
-  );
-
-const fetchChanges = async (id: string): Promise<GraphOutcome<ChangeSummary>> =>
-  readOutcome<ChangeSummary>(await fetch(`/api/x/ui.shell/documents/${id}/changes`));
-
-const fetchProposals = async (
-  id: string,
-): Promise<GraphOutcome<DocumentProposals>> =>
-  readOutcome<DocumentProposals>(await fetch(`/api/x/ui.shell/documents/${id}/proposals`));
-
-const answerProposal = async (
-  id: string,
-  itemId: string,
-  answer: "accepted" | "rejected",
-): Promise<GraphOutcome<unknown>> =>
-  readOutcome(
-    await fetch(`/api/x/ui.shell/documents/${id}/commands`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ command: "answerProposal", itemId, answer }),
-    }),
-  );
+/** The order key a placement would take among the placed blocks, drawn at
+ * once while the staging that keeps it is on its way. */
+const localOrder = (placement: ProposalPlacement, placed: readonly Placed[], self: string): string => {
+  const others = placed.filter((block) => block.blockId !== self);
+  if ("at" in placement) return orderBetween(others[others.length - 1]?.order ?? "", "");
+  const at = others.findIndex((block) => block.blockId === placement.before);
+  return orderBetween(others[at - 1]?.order ?? "", others[at]?.order ?? "");
+};
 
 interface DocumentState {
   document: DocumentView | null;
-  /** The mode the surface is in and what is marked in it, as one fact: they
-   * are kept together and they come back together. */
-  marking: Marking;
   retired: BlockView[];
   retiredOpen: boolean;
+  /** Whether the blocks the reader set aside as discarded are drawn where
+   * they sit. They are otherwise not drawn at all. BO_0227_014 */
+  discardedOpen: boolean;
   /** The proposed changes standing unanswered against this document. They are
    * read whether or not the toggle is on, because the panel says how many are
    * waiting and a toggle that hid that would leave a reader no way to learn
@@ -300,6 +262,12 @@ interface DocumentState {
   /** Rises whenever the document is read again, so the painter knows the
    * element under it is new even when the active block has not changed. */
   loaded: number;
+  /** The shell's count of ended runs as this view last acted on it, so a run
+   * that ended before the view was opened is not acted on again when it is.
+   * BO_0226_007 */
+  proposedSeen: number;
+  /** The last reveal request this view has looked at. CA_0039_005 */
+  revealSeen: number;
 }
 
 /** The active block's transient editing state. */
@@ -364,9 +332,9 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   const bridge = useContext(ViewBridgeContext);
   const state = useStore<DocumentState>({
     document: null,
-    marking: NO_MARKING,
     retired: [],
     retiredOpen: false,
+    discardedOpen: false,
     proposals: null,
     proposalsOpen: false,
     status: "loading",
@@ -376,8 +344,30 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     saveState: null,
     activeBlockId: null,
     loaded: 0,
+    proposedSeen: bridge.proposed.seq,
+    revealSeen: bridge.reveal.seq,
+  });
+  /** The proposals an edit is accepting and handing over, and the pending
+   * staging of an arrow-moved proposal's place. BO_0233_007 BO_0233_014 */
+  const proposalEdit = useStore({
+    settling: [] as string[],
+    timer: 0,
+    /** Which proposals read is the newest, and how many local changes to
+     * the list this editor has made: a read that is overtaken by either is
+     * older than what the reader sees, and is dropped. BO_0233_013 */
+    reads: 0,
+    changes: 0,
+    /** What this editor has answered, and of that what it accepted: a read
+     * that began before an answer never draws it again, and an accepted
+     * proposal is never accepted twice. BO_0233_013 */
+    answered: [] as string[],
+    accepted: [] as string[],
   });
   const editor = useStore<EditorState>(idleEditor());
+  /** The view's own element. The load task reaches the page through it rather
+   * than through the global `document`, which a render harness does not
+   * install — so the editor can be pressed in one. BO_0227_006 */
+  const root = useSignal<HTMLElement>();
   const documentId = tab.itemId;
   const remembered = tab.selection;
 
@@ -430,13 +420,6 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     ) {
       state.activeBlockId = null;
     }
-    // A mark on nothing cannot be drawn, and the document is the only list
-    // there is, so a reference whose block has left the document is dropped
-    // rather than kept somewhere it could not appear.
-    state.marking = keepPresent(
-      state.marking,
-      outcome.result.blocks.map((block) => block.blockId),
-    );
   });
 
   const reloadRetired$ = $(async () => {
@@ -445,10 +428,33 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     if (outcome.outcome === "success") state.retired = [...outcome.result];
   });
 
+  /**
+   * Reads the proposals again. The read is slow — every open group — and
+   * several can be under way at once, so one that an answer, a move or a
+   * newer read has overtaken is dropped rather than drawn: a read begun
+   * before an answer lists the answered proposal, and drawing it again drew a
+   * copy that took the reader's next keystroke and asked for a second
+   * acceptance CCGW refused. BO_0233_013
+   *
+   * A read that lands while an edit hands a proposal over is dropped too: it
+   * no longer lists the accepted proposal, and taking it away then would take
+   * the text the reader is typing in before the block is there to take the
+   * caret. BO_0233_014
+   */
   const reloadProposals$ = $(async () => {
     if (documentId === null) return;
-    const outcome = await fetchProposals(documentId);
-    if (outcome.outcome === "success") state.proposals = outcome.result;
+    // A read a local change overtook is read again, a few times at most; a
+    // QRL cannot call itself, so the retry is a loop.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const read = ++proposalEdit.reads;
+      const changes = proposalEdit.changes;
+      const outcome = await fetchProposals(documentId);
+      if (outcome.outcome !== "success" || read !== proposalEdit.reads) return;
+      if (changes === proposalEdit.changes && proposalEdit.settling.length === 0) {
+        state.proposals = withoutItems(outcome.result, proposalEdit.answered);
+        return;
+      }
+    }
   });
 
   /**
@@ -502,7 +508,9 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
 
   const scheduleSave$ = $(async () => {
     if (editor.timer !== 0) clearTimeout(editor.timer);
-    editor.timer = window.setTimeout(() => void save$(), SAVE_PAUSE_MS);
+    // A number wherever it runs: a store holds it, and a timer object is not
+    // one a store can keep.
+    editor.timer = Number(setTimeout(() => void save$(), SAVE_PAUSE_MS));
     await report$("unsaved");
   });
 
@@ -590,9 +598,11 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       // only far enough to clear the bar, and not at all when the block is
       // already clear of it. Activation changes no geometry, so the row is
       // already where it will be.
-      document
-        .querySelector(`[data-block-id="${blockId}"]`)
-        ?.scrollIntoView({ block: "nearest" });
+      // Through the view's own element, as the load task reaches the page
+      // (`BO_0227_006`), so the render harness can activate a block too.
+      root.value
+        ?.querySelector(`[data-block-id="${blockId}"]`)
+        ?.scrollIntoView?.({ block: "nearest" });
       bridge.inspector.text = `${ROLE_LABEL[block.role]} block`;
       await bridge.setSelection$(blockId);
     },
@@ -637,39 +647,32 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     editor.leaving = false;
   });
 
-  /**
-   * Enters or leaves command mode.
-   *
-   * One place decides what the mode is, and the blocks read it. The surface
-   * that owns the mode decides what a gesture means; a block never arbitrates
-   * that for itself.
-   *
-   * Entering owns the commit rather than inheriting it from a click that
-   * happened to land elsewhere: the flush that already runs when a block is
-   * left is what keeps what was typed, and it leaves no block active, so the
-   * bar goes with it.
-   */
-  const setMode$ = $(async (on: boolean) => {
-    const next: EditorMode = on ? "command" : "reading";
-    if (state.marking.mode === next) return;
-    if (next === "command") await deactivate$();
-    // Leaving preserves what was marked, so closing the mode by accident costs
-    // nothing: only the mode changes here.
-    state.marking = { ...state.marking, mode: next };
+  // Command mode's marking session: the mode, the marks, their record and
+  // the dock's toggle. The rows read it from the context. BO_0227_006
+  const marking = useMarking({
+    documentId,
+    surface: state,
+    leaveEditing$: deactivate$,
   });
+  useContextProvider(MarkingContext, marking);
 
-  /**
-   * Marks a block as a reference, or takes the mark back.
-   *
-   * Marking is not activation: it opens no editor, writes no revision, and
-   * leaves the document exactly as it was. Numbers are assigned in the order
-   * the reader marked, which is what lets the document be read back as the
-   * list — `#2`, `#1`, `#3` down the page says both which blocks were marked
-   * and in what order.
-   */
-  const toggleReference$ = $((blockId: string) => {
-    state.marking = toggleReference(state.marking, blockId);
+  // A block's standing: every path that changes one — the swipe, the bar,
+  // the chord, Reopen — writes through here. BO_0227_011
+  const standing = useStanding({
+    documentId,
+    surface: state,
+    editor,
+    marking,
+    save$,
+    deactivate$,
+    reload$,
   });
+  useContextProvider(StandingContext, standing);
+
+  // Passages on the page: the selection in command mode and where each
+  // passage's number is drawn. BO_0227_009
+  const passages = usePassages({ root, surface: state, marking: marking.store });
+  useContextProvider(PassagesContext, passages);
 
   /**
    * Runs one structural command, then reads the document back. A refused
@@ -756,7 +759,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     // and command mode is not for writing. The surface is for pointing there,
     // so a click on either does nothing rather than appending a block the
     // reader cannot then mark.
-    if (state.marking.mode === "command") return;
+    if (marking.store.marking.mode === "command") return;
     // They are ways in from reading. With a block active the press means leave,
     // like every other press outside the block, and writing here takes a second
     // press. This surface owns that gesture rather than sharing it with the
@@ -987,9 +990,27 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     if (state.retiredOpen) await reloadRetired$();
   });
 
+  const toggleDiscarded$ = $((on: boolean) => {
+    state.discardedOpen = on;
+  });
+
   const toggleProposals$ = $(async (on: boolean) => {
     state.proposalsOpen = on;
     if (state.proposalsOpen) await reloadProposals$();
+  });
+
+  /** Takes an answered proposal out of the list at once, before the reread
+   * that confirms it. Defined before every QRL that calls it: the optimizer
+   * captures only what is declared above a `$`, and one declared below is a
+   * free name there, undefined when the answer runs. BO_0233_012 BO_0233_014 */
+  const dropProposal$ = $((itemId: string) => {
+    proposalEdit.changes += 1;
+    if (!proposalEdit.answered.includes(itemId)) {
+      proposalEdit.answered = [...proposalEdit.answered, itemId];
+    }
+    const proposals = state.proposals;
+    if (proposals === null) return;
+    state.proposals = withoutItems(proposals, [itemId]);
   });
 
   /**
@@ -1000,14 +1021,26 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   const answerProposal$ = $(
     async (itemId: string, answer: "accepted" | "rejected") => {
       if (documentId === null) return;
+      // An edit is accepting this one, or has: typing into a proposal and
+      // then pressing an answer is one decision, and the edit made it.
+      if (proposalEdit.settling.includes(itemId) || proposalEdit.accepted.includes(itemId)) {
+        if (answer === "rejected") state.notice = "Your edit to this proposal has already accepted it.";
+        return;
+      }
       const outcome = await answerProposal(documentId, itemId, answer);
       if (outcome.outcome !== "success") {
         state.notice = describeOutcome(outcome);
+      } else {
+        if (answer === "accepted") proposalEdit.accepted = [...proposalEdit.accepted, itemId];
+        await dropProposal$(itemId);
       }
       await reload$();
-      await reloadProposals$();
-      if (state.retiredOpen) await reloadRetired$();
-      await reloadChanges$();
+      // Every open group is read again to list the proposals, which is the
+      // slow read; the answered one has already left the list, so the reader
+      // is not kept waiting on the rest. BO_0233_012
+      void reloadProposals$();
+      if (state.retiredOpen) void reloadRetired$();
+      void reloadChanges$();
     },
   );
 
@@ -1020,6 +1053,153 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     for (const item of group?.items ?? []) {
       await answerProposal$(item.itemId, "accepted");
     }
+  });
+
+  /** Writes what was typed into an accepted proposal onto its block, read
+   * fresh, since the acceptance just established the revision this write is
+   * based on. BO_0233_014 */
+  const reviseAccepted$ = $(async (blockId: string, runs: Run[]) => {
+    if (documentId === null) return;
+    const block = await freshBlock$(blockId);
+    if (block === undefined || !isText(block) || sameRuns(block.runs, runs)) return;
+    const outcome = await sendCommand(documentId, {
+      command: "revise",
+      blockId,
+      baseRevisionId: block.revisionId,
+      runs,
+      role: block.role,
+    });
+    if (outcome.outcome !== "success") {
+      state.notice = `The proposal was accepted, but what you typed into it was not saved: ${describeOutcome(outcome)}`;
+      return;
+    }
+    await reload$();
+  });
+
+  /**
+   * Accepts a proposal the reader typed into and makes what they typed the
+   * block's own, once the typing has paused or the reader has left the text —
+   * never under a typing hand, since the proposal then turns into the block,
+   * with the block's look. Answers whether it was accepted; a refusal says why.
+   *
+   * What was typed is read at the hand-over (`typed$`), so keystrokes typed
+   * while the acceptance is under way are kept. A reader still in the text is
+   * given the block, activated where their caret is, before the proposal goes,
+   * so the caret passes from one to the other and every keystroke has a place
+   * to land; the edit is then made there and saved as any edit is. A reader
+   * who has left has what they typed written to the block, and keeps the caret
+   * where they took it. BO_0233_006 BO_0233_012 BO_0233_014
+   */
+  const settleProposal$ = $(
+    async (itemId: string, blockId: string, typed$: QRL<() => TypedProposal>): Promise<boolean> => {
+      if (documentId === null) return false;
+      // Rejected from its icons while the typing waited: the typing went with
+      // it, and there is nothing to accept.
+      if (proposalEdit.answered.includes(itemId) && !proposalEdit.accepted.includes(itemId)) return false;
+      proposalEdit.settling = [...proposalEdit.settling, itemId];
+      try {
+        // Accepted already, from its icons or by this edit: CCGW is not asked
+        // again for a decision it has made.
+        if (!proposalEdit.accepted.includes(itemId)) {
+          // An edit's acceptance, which takes a rewrite over what its block
+          // did since. CA_0042_003
+          const outcome = await answerProposal(documentId, itemId, "accepted", true);
+          if (outcome.outcome !== "success") {
+            state.notice = `The proposal was not accepted, so the edit was not made: ${describeOutcome(outcome)}`;
+            return false;
+          }
+          proposalEdit.accepted = [...proposalEdit.accepted, itemId];
+        }
+        const at = await typed$();
+        // A reader who went on into the block itself is there already.
+        if (at.focused || editor.blockId === blockId) {
+          await activate$(blockId, at.start, at.end);
+          const typed = await typed$();
+          await dropProposal$(itemId);
+          if (editor.blockId === blockId && !sameRuns(editor.runs, typed.runs)) {
+            await editRuns$(typed.runs, typed.start, typed.end);
+          }
+        } else {
+          await dropProposal$(itemId);
+          await reviseAccepted$(blockId, at.runs);
+        }
+      } finally {
+        proposalEdit.settling = proposalEdit.settling.filter((id) => id !== itemId);
+      }
+      void reloadProposals$();
+      void reloadChanges$();
+      return true;
+    },
+  );
+
+  /** Drags a proposal by its face, as a block is dragged by its grip. BO_0233_007 */
+  const startProposalDrag$ = $(
+    (itemId: string, preview: string, event: PointerEvent) =>
+      bridge.startDrag$(
+        {
+          itemId: `proposal:${itemId}`,
+          kind: "ui.shell:document",
+          source: "workspace",
+          operations: ["move"],
+          preview,
+        },
+        event,
+      ),
+  );
+
+  /** Draws a proposal at an order key at once, before the staging lands. */
+  const drawProposalAt$ = $((itemId: string, order: string) => {
+    proposalEdit.changes += 1;
+    const proposals = state.proposals;
+    if (proposals === null) return;
+    state.proposals = {
+      ...proposals,
+      groups: proposals.groups.map((group) => ({
+        ...group,
+        items: group.items.map((item) =>
+          item.itemId === itemId && item.block !== null
+            ? { ...item, block: { ...item.block, order } }
+            : item,
+        ),
+      })),
+    };
+  });
+
+  /**
+   * Moves a proposal to a place without answering it: drawn there at once,
+   * and staged into its own group, so the place survives a reload and every
+   * device. BO_0233_007
+   */
+  const placeProposal$ = $(async (itemId: string, placement: ProposalPlacement) => {
+    if (documentId === null) return;
+    const outcome = await placeProposal(documentId, itemId, placement);
+    if (outcome.outcome !== "success") state.notice = describeOutcome(outcome);
+    await reloadProposals$();
+  });
+
+  /**
+   * One arrow press on a proposal's face. It is drawn in its new place at
+   * once and staged once the presses pause: the kernel refuses a block
+   * restaged within its floor, and a reader stepping a proposal down a page
+   * means the place they stop at. BO_0233_007
+   */
+  const stepProposal$ = $((itemId: string, direction: -1 | 1) => {
+    const doc = state.document;
+    const item = state.proposals?.groups
+      .flatMap((group) => group.items)
+      .find((candidate) => candidate.itemId === itemId);
+    if (doc === null || item === undefined || item.block === null) return;
+    const placed = placedOf(doc.blocks);
+    const placement = stepPlacement(item.block.order, placed, item.blockId, direction);
+    if (placement === null) return;
+    void drawProposalAt$(itemId, localOrder(placement, placed, item.blockId));
+    if (proposalEdit.timer !== 0) clearTimeout(proposalEdit.timer);
+    proposalEdit.timer = Number(
+      setTimeout(() => {
+        proposalEdit.timer = 0;
+        void placeProposal$(itemId, placement);
+      }, PROPOSAL_STEP_PAUSE_MS),
+    );
   });
 
   /**
@@ -1121,12 +1301,39 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
    * Writing them from a task is what keeps the document's own render out of
    * it; the shell re-renders the drawer alone.
    */
+  /**
+   * A change document's status, chosen in the inspector: one write onto the
+   * document node with the base compared first, so a stale editor is
+   * answered as a conflict and reads the document again rather than
+   * overwriting; the section listing the change reads again. BO_0222_007
+   */
+  const setStatus$ = $(async (value: string) => {
+    const document = state.document;
+    if (documentId === null || document === null || document.change === undefined) return;
+    if (!isChangeStatus(value) || value === document.changeStatus) return;
+    const outcome = await sendStatus(documentId, document.revisionId, value);
+    if (outcome.outcome !== "success") {
+      state.notice = describeOutcome(outcome);
+      if (outcome.outcome === "conflict") await reload$();
+      return;
+    }
+    state.notice = null;
+    state.document = {
+      ...document,
+      changeStatus: value,
+      revisionId: outcome.result.revisionId,
+    };
+    await bridge.targetChanged$();
+  });
+
   useTask$(({ track }) => {
     track(() => state.document?.title);
+    track(() => state.document?.changeStatus);
     track(() => state.saveState);
     track(() => state.changes?.changeCount);
     track(() => state.changes?.lastWrittenAt);
     track(() => state.retiredOpen);
+    track(() => state.discardedOpen);
     track(() => state.proposalsOpen);
     track(() => state.proposals?.unanswered);
     track(() => state.status);
@@ -1138,6 +1345,15 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     }
 
     const facts: InspectorFact[] = [];
+    // A change document says which extension it is a change of, before its
+    // own facts, and carries its status as the first action. BO_0222_007
+    if (state.document.change !== undefined) {
+      facts.push({
+        kind: "text",
+        label: "Change of",
+        value: state.document.change,
+      });
+    }
     if (state.saveState !== null) {
       facts.push({
         kind: "saveState",
@@ -1170,12 +1386,35 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     }
 
     const actions: ViewAction[] = [
+      ...(state.document.change !== undefined
+        ? [
+            {
+              kind: "choice" as const,
+              id: "change-status",
+              label: "Status",
+              value: state.document.changeStatus ?? "idea",
+              options: CHANGE_STATUSES.map((status) => ({
+                value: status,
+                label: status,
+                icon: STATUS_ICONS[status],
+              })),
+              run$: setStatus$,
+            },
+          ]
+        : []),
       {
         kind: "toggle",
         id: "retired-blocks",
         label: "Show retired blocks",
         on: state.retiredOpen,
         run$: toggleRetired$,
+      },
+      {
+        kind: "toggle",
+        id: "discarded-blocks",
+        label: "Show discarded blocks",
+        on: state.discardedOpen,
+        run$: toggleDiscarded$,
       },
       {
         kind: "toggle",
@@ -1216,41 +1455,26 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     bridge.inspector.actions = actions;
   });
 
-  /**
-   * The way into command mode, contributed to the command dock.
-   *
-   * A toggle, so the control says which mode the surface is in rather than
-   * only offering a way in. The dock is chosen over the reading surface, which
-   * stays content-only, and over the inspector, which on a phone is a sheet
-   * that would have to be opened, toggled, and closed before a single block
-   * could be pointed at.
-   *
-   * Written from a task for the reason the panel's contribution is: the
-   * document's own render stays out of it, and the shell re-renders the dock
-   * action alone.
-   */
-  useTask$(({ track }) => {
-    track(() => state.status);
-    track(() => state.marking.mode);
-    if (state.status !== "ready") {
-      bridge.dock.action = null;
-      return;
-    }
-    bridge.dock.action = {
-      kind: "toggle",
-      id: "command-mode",
-      label: "Command mode",
-      on: state.marking.mode === "command",
-      run$: setMode$,
-    };
-  });
-
   useTask$(async ({ track }) => {
     track(() => bridge.drag.drop?.seq);
     const drop = bridge.drag.drop;
     if (drop == null) return;
     if (drop.operation !== "move" || !drop.overId.startsWith("block:")) return;
-    await dropOn$(drop.payload.itemId, drop.overId.slice("block:".length));
+    const target = drop.overId.slice("block:".length);
+    // A proposal dropped is placed, not accepted. BO_0233_007
+    if (drop.payload.itemId.startsWith("proposal:")) {
+      const itemId = drop.payload.itemId.slice("proposal:".length);
+      const doc = state.document;
+      const item = state.proposals?.groups
+        .flatMap((group) => group.items)
+        .find((candidate) => candidate.itemId === itemId);
+      if (doc === null || item === undefined) return;
+      const placement: ProposalPlacement = target === "end" ? { at: "end" } : { before: target };
+      await drawProposalAt$(itemId, localOrder(placement, placedOf(doc.blocks), item.blockId));
+      await placeProposal$(itemId, placement);
+      return;
+    }
+    await dropOn$(drop.payload.itemId, target);
   });
 
   // The first read, the block a returning tab was left on, and the scroll
@@ -1262,22 +1486,13 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     mountedTabs.add(tab.id);
     // The mode and its marks come back before the document does, so the read
     // that follows is what drops the references whose blocks have gone.
-    if (documentId !== null) {
-      try {
-        state.marking = parseMarking(
-          window.localStorage.getItem(markingKey(documentId)),
-        );
-      } catch {
-        // A browser that keeps nothing is a browser this document was never
-        // marked in: there is nothing to recover and nothing to report.
-      }
-    }
+    await marking.recover$();
     await reload$();
     // A document as read is a document the graph holds. Reporting it is what
     // gives the tab a save state before anything is typed.
     if (state.document !== null) await report$("saved");
     if (remembered !== null) {
-      if (returning && state.marking.mode === "reading") {
+      if (returning && marking.store.marking.mode === "reading") {
         // A returning tab comes back to the block it was left in — unless it
         // was left in command mode, where no block is active.
         await activate$(remembered, "end");
@@ -1290,7 +1505,10 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
         await bridge.setSelection$(null);
       }
     }
-    const surface = document.querySelector<HTMLElement>("[data-block-surface]");
+    const page = root.value?.ownerDocument;
+    const frame = page?.defaultView;
+    if (page === undefined || frame == null) return;
+    const surface = page.querySelector<HTMLElement>("[data-block-surface]");
     const previous = scrollByTab.get(tab.id);
     if (surface !== null && previous !== undefined)
       surface.scrollTop = previous;
@@ -1301,14 +1519,12 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     // Leaving the page is the one exit a cleanup cannot cover, so the save is
     // asked for with `keepalive` while the document is still here.
     const leaving = () => void save$(true);
-    window.addEventListener("beforeunload", leaving);
+    frame.addEventListener("beforeunload", leaving);
     // The surface owns the mode, so the surface hears the key: one listener
     // decides, and no block arbitrates the same event for itself. It listens on
     // the document because the shortcut opens the mode from wherever the reader
     // is on the page, including a dock collapsed to its handle.
-    const view = document.querySelector<HTMLElement>(
-      '[data-view-body="block-editor"]',
-    );
+    const view = root.value ?? null;
     const keys = (event: KeyboardEvent) => {
       // A surface holding the floor has made this frame inert, and nothing
       // inert may act on a key. That is what keeps `Escape` the message's
@@ -1316,18 +1532,18 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       if (view === null || view.closest("[inert]") !== null) return;
       if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
         event.preventDefault();
-        void setMode$(state.marking.mode !== "command");
+        void marking.setMode$(marking.store.marking.mode !== "command");
         return;
       }
       // Reading has more local surfaces that answer `Escape` first — an active
       // block leaves editing — and in command mode there is none, because no
       // block is active in it.
-      if (event.key === "Escape" && state.marking.mode === "command") {
+      if (event.key === "Escape" && marking.store.marking.mode === "command") {
         event.preventDefault();
-        void setMode$(false);
+        void marking.setMode$(false);
       }
     };
-    document.addEventListener("keydown", keys);
+    page.addEventListener("keydown", keys);
 
     /* A press that lands outside the active block ends the edit, and the same
      * surface hears it for the same reason it hears the key: one place decides,
@@ -1394,43 +1610,63 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
         requestAnimationFrame(() => placeTitleCaret(at));
       });
     };
-    document.addEventListener("pointerdown", pressed);
-    document.addEventListener("click", away);
+    page.addEventListener("pointerdown", pressed);
+    page.addEventListener("click", away);
+    // The disposition swipe, on touch. It commits through the one write the
+    // bar and the chord use. BO_0227_011
+    const uninstallSwipe = installSwipe(page, (blockId, to) => {
+      void standing.setStanding$(blockId, to);
+    });
     cleanup(() => {
+      uninstallSwipe();
       remember();
       surface?.removeEventListener("scroll", remember);
-      window.removeEventListener("beforeunload", leaving);
-      document.removeEventListener("keydown", keys);
-      document.removeEventListener("pointerdown", pressed);
-      document.removeEventListener("click", away);
+      frame.removeEventListener("beforeunload", leaving);
+      page.removeEventListener("keydown", keys);
+      page.removeEventListener("pointerdown", pressed);
+      page.removeEventListener("click", away);
       // A tab switch unmounts this view. Nothing typed may be lost to that.
       void save$(true);
     });
   });
 
   /**
-   * Keeps the mode and its marks, device-locally and per document.
+   * Shows what a run aimed at this document proposed, when the run ends.
    *
-   * Never graph truth: nothing here writes a revision, so a document that was
-   * only marked has the same change count it had before. Not the workspace
-   * record either, which follows the reader to another device; this is one
-   * browser's view of one document.
+   * The proposals are otherwise read after a load or a save, and a run staging
+   * into the document already open changes neither — so the reader who asked
+   * for a proposal was left looking at a document that did not show it. The
+   * panel is opened too when anything stands unanswered: the reader asked for
+   * the change, and a count moving in the inspector is not seeing it where it
+   * would land. BO_0226_007
    */
-  useVisibleTask$(({ track }) => {
-    track(() => state.marking);
-    if (documentId === null) return;
-    // Not before the document has been read. The mode and its marks are
-    // restored on the way in, and a write from the state this view starts in
-    // would clear what it was about to recover.
-    if (state.status !== "ready") return;
-    try {
-      const kept = serializeMarking(state.marking);
-      if (kept === null) window.localStorage.removeItem(markingKey(documentId));
-      else window.localStorage.setItem(markingKey(documentId), kept);
-    } catch {
-      // A browser that keeps nothing loses the marks at the page's end. The
-      // document is untouched either way, so there is nothing to recover.
-    }
+  useVisibleTask$(async ({ track }) => {
+    track(() => bridge.proposed.seq);
+    const looked = proposedFor(bridge.proposed, state.proposedSeen, documentId);
+    state.proposedSeen = looked.seen;
+    if (!looked.act || state.status !== "ready") return;
+    await reloadProposals$();
+    if ((state.proposals?.unanswered ?? 0) > 0) state.proposalsOpen = true;
+  });
+
+  /**
+   * Shows what a chip in the composer points at, when the reader presses it:
+   * the block scrolled into view and emphasized, or the passage's words, in
+   * either mode. Nothing here changes the document or the mode, and a second
+   * press ends the first emphasis before starting its own. CA_0039_005
+   */
+  useVisibleTask$(({ track, cleanup }) => {
+    track(() => bridge.reveal.seq);
+    const looked = revealFor(bridge.reveal, state.revealSeen, documentId);
+    state.revealSeen = looked.seen;
+    const element = root.value;
+    if (looked.target === null || element === undefined || state.document === null) return;
+    const passage = revealedPassage(
+      looked.target,
+      marking.store.marking,
+      state.document.blocks,
+    );
+    cleanup(showArea(element, looked.target, passage));
   });
 
   /**
@@ -1468,7 +1704,11 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
 
   if (state.status === "failed") {
     return (
-      <div class="view view--block-editor" data-view-body="block-editor">
+      <div
+        class="view view--block-editor"
+        data-view-body="block-editor"
+        ref={root}
+      >
         <p class="block-notice" role="alert" data-block-error>
           {state.notice ?? "This document could not be read."}
         </p>
@@ -1477,24 +1717,51 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   }
 
   const doc = state.document;
+  // What the panel shows of the proposals, and which of them frame the block
+  // they concern — a removal and a move, which are drawn with that block
+  // rather than beside it. BO_0233_004
+  const shownProposals = state.proposalsOpen
+    ? (state.proposals?.groups.flatMap((group) => group.items) ?? [])
+    : [];
+  const framed = new Map<string, ProposedChange[]>();
+  for (const item of shownProposals) {
+    if (item.kind !== "remove" && item.kind !== "move") continue;
+    if (!(doc?.blocks.some((block) => block.blockId === item.blockId) ?? false)) continue;
+    framed.set(item.blockId, [...(framed.get(item.blockId) ?? []), item]);
+  }
+  const groupOf = (groupId: string) =>
+    state.proposals?.groups.find((group) => group.groupId === groupId);
+  const placed = placedOf(doc?.blocks ?? []);
+  // A proposal that would move a block that stands is drawn where the block
+  // stands (decided 2026-09-10), so where it would go is said in words.
+  const destinationFor = (item: ProposedChange): string | null => {
+    if (item.kind === "insert" || item.kind === "remove" || item.block === null) return null;
+    const standing = doc?.blocks.find((block) => block.blockId === item.blockId);
+    if (standing === undefined || standing.order === item.block.order) return null;
+    return destinationOf(item.block.order, placed, item.blockId);
+  };
 
   return (
     <div
       class="view view--block-editor"
       data-view-body="block-editor"
-      data-editor-mode={state.marking.mode}
+      data-editor-mode={marking.store.marking.mode}
+      ref={root}
     >
       {/* Entering the mode is announced. The region is out of the flow, so
           what it says moves no document content, and it says nothing while
           reading rather than announcing a resting state nobody chose. */}
       <p class="visually-hidden" role="status">
-        {state.marking.mode === "command" ? "Command mode" : ""}
+        {marking.store.marking.mode === "command" ? "Command mode" : ""}
       </p>
+      <StandingAnnouncement />
+      <PassageAffordance surface={state} />
       {doc === null ? (
         <p data-block-loading>Reading the document…</p>
       ) : (
         <>
           <BlockToolbar
+            surface={state}
             editor={editor}
             toggleMark$={toggleMark$}
             setRole$={setRole$}
@@ -1595,37 +1862,47 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                   readingOrder(
                     doc.blocks,
                     state.retiredOpen ? state.retired : [],
+                    state.discardedOpen,
                   ),
-                  state.proposalsOpen
-                    ? (state.proposals?.groups.flatMap(
-                        (group) => group.items,
-                      ) ?? [])
-                    : [],
-                ).map((entry, index) =>
-                  entry.kind === "proposal" ? (
-                    <ProposalRowView
-                      key={`proposal:${entry.item.itemId}`}
-                      item={entry.item}
-                      answer$={answerProposal$}
-                      acceptGroup$={acceptGroup$}
-                      groupSize={
-                        state.proposals?.groups.find(
-                          (group) => group.groupId === entry.item.groupId,
-                        )?.items.length ?? 1
-                      }
-                      stagedBy={
-                        state.proposals?.groups
-                          .find((group) => group.groupId === entry.item.groupId)
-                          ?.stagedBy.join(", ") ?? ""
-                      }
-                    />
-                  ) : entry.retired ? (
-                    <RetiredRow
-                      key={`retired:${entry.block.blockId}`}
-                      block={entry.block}
-                      restore$={restore$}
-                    />
-                  ) : (
+                  shownProposals,
+                ).map((entry, index) => {
+                  if (entry.kind === "proposal") {
+                    // A removal and a move frame the block they concern,
+                    // which stays the editor's; they are drawn with it.
+                    if (framed.has(entry.item.blockId) && framed.get(entry.item.blockId)?.includes(entry.item)) return null;
+                    return (
+                      <ProposalBlock
+                        key={`proposal:${entry.item.itemId}`}
+                        item={entry.item}
+                        proposer={groupOf(entry.item.groupId)?.proposer ?? UNKNOWN_PROPOSER}
+                        groupSize={groupOf(entry.item.groupId)?.items.length ?? 1}
+                        destination={destinationFor(entry.item)}
+                        answer$={answerProposal$}
+                        acceptGroup$={acceptGroup$}
+                        settle$={settleProposal$}
+                        startDrag$={startProposalDrag$}
+                        step$={stepProposal$}
+                      />
+                    );
+                  }
+                  if (entry.discarded) {
+                    return (
+                      <DiscardedRow
+                        key={`discarded:${entry.block.blockId}:${entry.block.revisionId}`}
+                        block={entry.block}
+                      />
+                    );
+                  }
+                  if (entry.retired) {
+                    return (
+                      <RetiredRow
+                        key={`retired:${entry.block.blockId}`}
+                        block={entry.block}
+                        restore$={restore$}
+                      />
+                    );
+                  }
+                  const row = (
                     <BlockRow
                       // Keyed by revision, not just identity: a row renders one
                       // revision of a block, so a revised block is a new row. The
@@ -1640,12 +1917,6 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                         doc.blocks[doc.blocks.length - 1]?.blockId
                       }
                       active={entry.block.blockId === state.activeBlockId}
-                      mode={state.marking.mode}
-                      reference={referenceFor(
-                        state.marking,
-                        entry.block.blockId,
-                      )}
-                      toggleReference$={toggleReference$}
                       editor={editor}
                       drag={bridge.drag}
                       activate$={activate$}
@@ -1662,8 +1933,29 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                       redo$={redo$}
                       toggleMark$={toggleMark$}
                     />
-                  ),
-                )}
+                  );
+                  // Framed by each removal or move that concerns it, the
+                  // first outermost. BO_0233_004
+                  return (framed.get(entry.block.blockId) ?? []).reduceRight(
+                    (inner, item) => (
+                      <ProposalBlock
+                        key={`proposal:${item.itemId}`}
+                        item={item}
+                        proposer={groupOf(item.groupId)?.proposer ?? UNKNOWN_PROPOSER}
+                        groupSize={groupOf(item.groupId)?.items.length ?? 1}
+                        destination={destinationFor(item)}
+                        answer$={answerProposal$}
+                        acceptGroup$={acceptGroup$}
+                        settle$={settleProposal$}
+                        startDrag$={startProposalDrag$}
+                        step$={stepProposal$}
+                      >
+                        {inner}
+                      </ProposalBlock>
+                    ),
+                    row,
+                  );
+                })}
                 <DropMark id="end" drag={bridge.drag} />
                 {/* The area below the last block carries both gestures. It is
                     the way into writing below the document, and it is where a
@@ -1698,6 +1990,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
  * caret sits in.
  */
 const BlockToolbar = component$<{
+  surface: DocumentState;
   editor: EditorState;
   toggleMark$: QRL<(mark: Mark) => void>;
   setRole$: QRL<(role: TextRole) => void>;
@@ -1709,6 +2002,7 @@ const BlockToolbar = component$<{
   retire$: QRL<(blockId: string) => void>;
 }>(
   ({
+    surface,
     editor,
     toggleMark$,
     setRole$,
@@ -1819,6 +2113,10 @@ const BlockToolbar = component$<{
           </button>
         </div>
 
+        <div class="toolbar-group" role="group" aria-label="Standing">
+          <StandingControl surface={surface} editor={editor} />
+        </div>
+
         <div class="toolbar-group" role="group" aria-label="History">
           <button
             type="button"
@@ -1867,10 +2165,6 @@ const BlockRow = component$<{
   first: boolean;
   last: boolean;
   active: boolean;
-  mode: EditorMode;
-  /** This block's reference number, or `null` for a block nobody has marked. */
-  reference: number | null;
-  toggleReference$: QRL<(blockId: string) => void>;
   editor: EditorState;
   drag: ViewDragState;
   activate$: QRL<
@@ -1897,9 +2191,6 @@ const BlockRow = component$<{
     first,
     last,
     active,
-    mode,
-    reference,
-    toggleReference$,
     editor,
     drag,
     activate$,
@@ -1917,25 +2208,51 @@ const BlockRow = component$<{
     toggleMark$,
   }) => {
     const position = index + 1;
+    // What command mode says about this row: the mode, and this block's
+    // reference number or `null` for a block nobody has marked.
+    const {
+      store: markingStore,
+      toggleReference$,
+      addPassage$,
+      removeReference$,
+    } = useContext(MarkingContext);
+    const mode = markingStore.marking.mode;
+    const reference = referenceFor(markingStore.marking, block.blockId);
+    // And what the scale says: the block's standing, and the passages marked
+    // in it with whether each still matches its words.
+    const { store: standingStore, setStanding$ } = useContext(StandingContext);
+    const standing = standingOf(block, standingStore);
+    const text = isText(block) ? runsText(block.runs) : "";
+    const facts = {
+      position,
+      mode,
+      reference,
+      passages: passagesIn(markingStore.marking, block.blockId).map((passage) => ({
+        number: passage.number,
+        stale: passageState(passage, text).stale,
+      })),
+      standing,
+    };
     const Tag: BlockTag = isText(block) ? ROLE_TAG[block.role] : "p";
     const preview = isText(block) ? runsText(block.runs) : block.kind;
     // In command mode the whole block is what a click marks, whatever it holds:
     // a reference points at a block, and the reader pointing at one should not
     // have to hit its text.
     const marking = mode === "command";
+    // In command mode a text block's words are its marking control, so the
+    // standing toolbar can stand beside them rather than inside a button
+    // (`BO_0231_001`); a block with no words to carry it — a divider, an
+    // unsupported block — keeps the row as its control. The row keeps the
+    // handlers either way, so a press anywhere on the block still marks it.
     // Spread rather than a set of `undefined`s: an attribute that does not
     // apply is absent, so a reading row is a plain row again.
-    const markable = marking
-      ? {
-          role: "button",
-          tabIndex: 0,
-          "aria-pressed": reference !== null,
-          "aria-label":
-            reference === null
-              ? `Mark block ${position}`
-              : `Block ${position}, reference ${reference}`,
-        }
-      : {};
+    const markingControl = {
+      role: "button",
+      tabIndex: 0,
+      "aria-pressed": reference !== null,
+      "aria-label": markingName(facts),
+    };
+    const markable = marking && !isText(block) ? markingControl : {};
 
     return (
       <div
@@ -1943,17 +2260,45 @@ const BlockRow = component$<{
         data-block-id={block.blockId}
         data-block-kind={block.kind}
         data-reference={marking && reference !== null ? reference : undefined}
+        data-standing={standing}
         data-drop-target={`block:${block.blockId}`}
         data-accepts="move"
         {...markable}
-        onClick$={() => {
-          if (!marking) return;
+        // The mode is read from the store at the press, never from this
+        // render's copy of it: a row whose handlers outlived the mode they
+        // were drawn in would otherwise mark while reading, or open an editor
+        // while pointing — the rule `BO_0226_005` set for the composer.
+        onClick$={(event: MouseEvent, element: HTMLElement) => {
+          if (markingStore.marking.mode !== "command") return;
+          // The standing toolbar's buttons answer their own press.
+          if (inStandingToolbar(event.target)) return;
+          // A passage's number takes that passage back, and only that.
+          const passage = passageNumberAt(event.target);
+          if (passage !== null) {
+            void removeReference$(passage);
+            return;
+          }
+          if (!clickMarks(element)) return;
           void toggleReference$(block.blockId);
         }}
-        onKeyDown$={(event: KeyboardEvent) => {
-          if (!marking) return;
+        onKeyDown$={(event: KeyboardEvent, element: HTMLElement) => {
+          if (markingStore.marking.mode !== "command") return;
+          if (inStandingToolbar(event.target)) return;
+          const direction = chordDirection(event);
+          if (direction !== null) {
+            void setStanding$(block.blockId, step(standing, direction));
+            return;
+          }
           if (event.key !== "Enter" && event.key !== " ") return;
           event.preventDefault();
+          // Enter on a row holding selected words references the words rather
+          // than the block, decided here with the press so one handler answers
+          // the key.
+          const words = event.key === "Enter" ? selectedWords(element.ownerDocument) : null;
+          if (words !== null && words.blockId === block.blockId) {
+            void addPassage$(block.blockId, anchorAt(text, words.start, words.end));
+            return;
+          }
           void toggleReference$(block.blockId);
         }}
       >
@@ -1968,6 +2313,11 @@ const BlockRow = component$<{
             #{reference}
           </span>
         )}
+        {isText(block) && !active && <StandingMark block={block} />}
+        {marking && isText(block) && !active && (
+          <StandingToolbar block={block} />
+        )}
+        <PassageNumbers block={block} />
 
         {/* The grip the drag starts from, on the edge the gesture grabs.
          * Before the text in the DOM, so keyboard reach runs handle, text,
@@ -2006,7 +2356,14 @@ const BlockRow = component$<{
         {/* In command mode the block is read, not activated: marking is not
             activation, so the block carries no activation affordance and a
             click on it does not open an editor. */}
+        {/* The words' marking control is a literal element around them, not
+            the words' own tag: `Tag` is a tag held in a variable, and Qwik
+            treats every attribute of such an element as immutable — set when
+            it is created, never patched — so a block marked after it was
+            drawn went on saying it was not. A literal tag's attributes are
+            patched. BO_0231_001 */}
         {isText(block) && !active && mode === "command" && (
+          <div class="block-marking" data-block-marking {...markingControl}>
           <Tag class="block-text" data-block-reading>
             {block.runs.map((entry, at) => (
               <Marked
@@ -2017,6 +2374,7 @@ const BlockRow = component$<{
               />
             ))}
           </Tag>
+          </div>
         )}
 
         {isText(block) && !active && mode === "reading" && (
@@ -2028,8 +2386,14 @@ const BlockRow = component$<{
             // activated by Enter or Space like the button it replaced.
             tabIndex={0}
             role="button"
-            aria-label={`Edit block ${position}`}
+            aria-label={readingName(facts)}
             onClick$={(event: MouseEvent, element: HTMLElement) => {
+              // Command mode points and never opens an editor, read at the
+              // press rather than trusted to this render.
+              if (markingStore.marking.mode !== "reading") return;
+              // A swipe's release leaves a click behind; it is the swipe's,
+              // and opening an editor under it is what `BO_0153` fixed.
+              if (swipeJustEnded()) return;
               // A drag that left this block selected text this block does not
               // own. Activating would collapse it, and the reader was copying.
               if (selectionEscapes(element)) return;
@@ -2045,7 +2409,13 @@ const BlockRow = component$<{
               void activate$(block.blockId, at ?? "end");
             }}
             onKeyDown$={(event: KeyboardEvent) => {
+              const direction = chordDirection(event);
+              if (direction !== null) {
+                void setStanding$(block.blockId, step(standing, direction));
+                return;
+              }
               if (event.key !== "Enter" && event.key !== " ") return;
+              if (markingStore.marking.mode !== "reading") return;
               event.preventDefault();
               void activate$(block.blockId, "end");
             }}
@@ -2265,54 +2635,6 @@ const ActiveBlockText = component$<{
   );
 });
 
-/**
- * A run's marks as real elements, peeled one at a time.
- *
- * Nesting rather than one span with classes: `strong` and `em` mean something
- * to a screen reader that a styled span does not, and the reading presentation
- * is the one a reader actually reads.
- */
-const Marked = component$<{
-  text: string;
-  marks: readonly Mark[];
-  link?: string | undefined;
-}>(({ text, marks, link }) => {
-  if (link !== undefined) {
-    return (
-      <a href={link} class="run-link">
-        <Marked text={text} marks={marks} />
-      </a>
-    );
-  }
-  const [first, ...rest] = marks;
-  if (first === undefined) return <span class="run">{text}</span>;
-  if (first === "bold") {
-    return (
-      <strong>
-        <Marked text={text} marks={rest} />
-      </strong>
-    );
-  }
-  if (first === "italic") {
-    return (
-      <em>
-        <Marked text={text} marks={rest} />
-      </em>
-    );
-  }
-  if (first === "strikethrough") {
-    return (
-      <s>
-        <Marked text={text} marks={rest} />
-      </s>
-    );
-  }
-  return (
-    <code>
-      <Marked text={text} marks={rest} />
-    </code>
-  );
-});
 
 /**
  * The document's retired blocks, and the way one comes back.
@@ -2320,185 +2642,6 @@ const Marked = component$<{
  * Retirement is recoverable for the life of the document, so this list is the
  * recovery path rather than an undo that would have to survive a reload.
  */
-/**
- * The blocks to draw, in reading order, with retired blocks interleaved where
- * they sat when they were retired.
- *
- * Position comes from the order key the block held at that moment. The key
- * lives on the block and its last revision still carries it, so a retired
- * block sorts among current siblings by the same string comparison they sort
- * by. A key that no longer falls between two current siblings still sorts
- * somewhere, and that is where it appears: the position is where the block
- * was, not a promise about where restoring would put it.
- *
- * A block carrying no usable key sorts after the placed ones by identity, the
- * same rule the document read already applies.
- */
-export function readingOrder(
-  blocks: readonly BlockView[],
-  retired: readonly BlockView[],
-): readonly { block: BlockView; retired: boolean }[] {
-  const entries = [
-    ...blocks.map((block) => ({ block, retired: false })),
-    ...retired.map((block) => ({ block, retired: true })),
-  ];
-  const placed = entries.filter((entry) => entry.block.order !== "");
-  const unplaced = entries
-    .filter((entry) => entry.block.order === "")
-    .sort((left, right) => (left.block.blockId < right.block.blockId ? -1 : 1));
-  placed.sort((left, right) => {
-    if (left.block.order !== right.block.order) {
-      return left.block.order < right.block.order ? -1 : 1;
-    }
-    return left.block.blockId < right.block.blockId ? -1 : 1;
-  });
-  return [...placed, ...unplaced];
-}
-
-/**
- * The proposed changes to draw, placed where each concerns the document.
- *
- * An item that would insert a block carries an order key, so it sorts among
- * the blocks by the comparison siblings already sort by. An item that names a
- * block the reader can see is drawn immediately after that block, because
- * judging a rewrite means seeing it against what it would replace.
- *
- * An item whose block is not in the reading order — one naming a block that
- * has gone since — is drawn at the end rather than dropped, so a group the
- * reader has to answer never hides an item they cannot find.
- */
-export function placeProposals(
-  entries: readonly { block: BlockView; retired: boolean }[],
-  items: readonly ProposedChange[],
-): readonly ProposalRow[] {
-  const inserts = items.filter(
-    (item) => item.kind === "insert" && (item.block?.order ?? "") !== "",
-  );
-  const attached = new Map<string, ProposedChange[]>();
-  for (const item of items) {
-    if (inserts.includes(item)) continue;
-    attached.set(item.blockId, [...(attached.get(item.blockId) ?? []), item]);
-  }
-
-  const rows: ProposalRow[] = [];
-  const placed = [
-    ...entries.map((entry) => ({
-      order: entry.block.order,
-      id: entry.block.blockId,
-      row: { kind: "block" as const, ...entry },
-    })),
-    ...inserts.map((item) => ({
-      order: item.block?.order ?? "",
-      id: item.itemId,
-      row: { kind: "proposal" as const, item },
-    })),
-  ];
-  placed.sort((left, right) => {
-    if (left.order === "" || right.order === "") {
-      return left.order === right.order ? 0 : left.order === "" ? 1 : -1;
-    }
-    if (left.order !== right.order) return left.order < right.order ? -1 : 1;
-    return left.id < right.id ? -1 : 1;
-  });
-
-  const drawn = new Set<string>();
-  for (const entry of placed) {
-    rows.push(entry.row);
-    if (entry.row.kind !== "block") continue;
-    for (const item of attached.get(entry.row.block.blockId) ?? []) {
-      rows.push({ kind: "proposal", item });
-      drawn.add(item.itemId);
-    }
-  }
-  for (const item of items) {
-    if (inserts.includes(item) || drawn.has(item.itemId)) continue;
-    rows.push({ kind: "proposal", item });
-  }
-  return rows;
-}
-
-export type ProposalRow =
-  | { kind: "block"; block: BlockView; retired: boolean }
-  | { kind: "proposal"; item: ProposedChange };
-
-/** What each kind of item proposes, in the reader's words. */
-const PROPOSED: Record<string, string> = {
-  replace: "Proposed rewrite",
-  insert: "Proposed new block",
-  remove: "Proposed removal",
-  move: "Proposed move",
-};
-
-/**
- * A proposed change, shown against the block it concerns.
- *
- * It is visibly not truth, not the active block and not a retired block: a
- * reader with both toggles on must be able to tell at a glance which of the
- * three each row is, which is why the treatment carries a standing label and a
- * name of its own rather than a tint. It is answered here, where it is read,
- * because judging a rewrite away from the document it belongs to is the thing
- * this whole treatment exists to avoid.
- */
-const ProposalRowView = component$<{
-  item: ProposedChange;
-  answer$: QRL<(itemId: string, answer: "accepted" | "rejected") => void>;
-  acceptGroup$: QRL<(groupId: string) => void>;
-  groupSize: number;
-  /** Who staged the group, as the core stamped it. BO_0209_006 */
-  stagedBy: string;
-}>(({ item, answer$, acceptGroup$, groupSize, stagedBy }) => {
-  const block = item.block;
-  const text =
-    block !== null && isText(block)
-      ? runsText(block.runs) || "empty block"
-      : "";
-  const label = PROPOSED[item.kind] ?? "Proposed change";
-  return (
-    <div
-      class="proposal-row"
-      data-proposal-id={item.itemId}
-      data-proposal-kind={item.kind}
-      role="group"
-      aria-label={`${label} for block ${item.blockId}`}
-    >
-      <p class="proposal-row__mark" aria-hidden="true">
-        {label}
-        {stagedBy !== "" && (
-          <span class="proposal-row__by" data-proposal-staged-by={stagedBy}>
-            {" · staged by "}
-            {stagedBy}
-          </span>
-        )}
-      </p>
-      {text === "" ? null : <div class="proposal-row__text">{text}</div>}
-      <div class="proposal-row__answers">
-        <button
-          type="button"
-          data-proposal-accept={item.itemId}
-          onClick$={() => answer$(item.itemId, "accepted")}
-        >
-          Accept
-        </button>
-        <button
-          type="button"
-          data-proposal-reject={item.itemId}
-          onClick$={() => answer$(item.itemId, "rejected")}
-        >
-          Reject
-        </button>
-        {groupSize > 1 ? (
-          <button
-            type="button"
-            data-proposal-accept-all={item.groupId}
-            onClick$={() => acceptGroup$(item.groupId)}
-          >
-            Accept all
-          </button>
-        ) : null}
-      </div>
-    </div>
-  );
-});
 
 /**
  * A retired block shown where it used to sit.

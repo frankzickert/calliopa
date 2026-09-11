@@ -6,6 +6,14 @@ import {
   THEME_STORAGE_KEY,
   type ThemeChoice,
 } from "~/lib/theme";
+import { Icon, type IconName } from "./icons";
+
+/** The icon that shows each choice, where the word used to. CA_0041_001 */
+export const THEME_ICONS: Readonly<Record<ThemeChoice, IconName>> = {
+  light: "sun",
+  dark: "moon",
+  system: "circle-half",
+};
 
 export const ThemeToggle = component$(() => {
   const choice = useSignal<ThemeChoice>("system");
@@ -14,7 +22,7 @@ export const ThemeToggle = component$(() => {
   // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(() => {
     choice.value = parseThemeChoice(
-      document.documentElement.dataset.themeChoice,
+      document.documentElement.getAttribute("data-theme-choice"),
     );
   });
 
@@ -33,14 +41,17 @@ export const ThemeToggle = component$(() => {
           // The current page still changes when browser storage is unavailable.
         }
         const html = document.documentElement;
-        html.dataset.theme = resolveTheme(
-          next,
-          window.matchMedia("(prefers-color-scheme: dark)").matches,
+        html.setAttribute(
+          "data-theme",
+          resolveTheme(
+            next,
+            window.matchMedia("(prefers-color-scheme: dark)").matches,
+          ),
         );
-        html.dataset.themeChoice = next;
+        html.setAttribute("data-theme-choice", next);
       }}
     >
-      {choice.value}
+      <Icon name={THEME_ICONS[choice.value]} />
     </button>
   );
 });

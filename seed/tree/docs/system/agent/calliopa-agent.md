@@ -9,26 +9,28 @@
 
 ## Roles
 
-* Hermes is Calliopa's agent and the only agent the human talks to.
-* Codex is Hermes's controller runtime: `model.provider: openai-codex` with `model.openai_runtime: codex_app_server` hands each turn to a Codex app-server subprocess authenticated by the user's ChatGPT subscription.
-* Claude Code is a delegated coding worker on the user's Max subscription, invoked through Hermes's bundled skill, not as a controller.
+* A command goes to one of three agents, and the reader chooses which in the composer's agent dropdown (`BO_0228`): Codex, Claude Code or Hermes. All three receive the same instructions, hold the same kernel toolset and stage into the run's one group; what differs is who reasons.
+* Codex runs through the Hermes gateway: `model.provider: openai-codex` with `model.openai_runtime: codex_app_server` hands each turn to a Codex app-server subprocess authenticated by the user's ChatGPT subscription.
+* Hermes is the gateway's own loop and tool dispatch (`model.openai_runtime: auto`), reasoning on the ChatGPT subscription or, when the instance is set to it, the API-key model.
+* Claude Code runs as itself, beside the gateway rather than under it: the Claude runner in the agent container starts one `claude -p` per run on the user's Claude subscription (`CLAUDE_CODE_OAUTH_TOKEN`) and speaks the part of the gateway's runs API the kernel bridge uses. Until `BO_0228` it was a delegated coding worker under the API-key controller, invoked through Hermes's bundled skill, which on an instance with no API key meant it could not run at all.
 * Honcho is the agent's memory. It runs self-hosted, so agent memory never leaves the machine.
 * The agent reaches Calliopa's content only through the kernel toolset over CCGW, bound per run by the kernel (`BO_0207_015`). It never writes to Postgres or Garage directly.
 
 ## Runtimes And Billing
 
-The runtime selection chooses the model *under* Hermes — the conversation loop's own LLM — and it is not symmetric between the two subscriptions.
+For the two gateway agents the runtime selection chooses the model *under* Hermes — the conversation loop's own LLM. Claude Code is not a gateway selection, and switching to it restarts nothing.
 
 * The default runtime is `codex`, and it needs no model API key at all. The ChatGPT subscription is the reasoning credential.
-* `claude-code` is a delegated worker, never the controller. Hermes's own Anthropic OAuth provider bills extra-usage credits rather than the plan allowance, and is deliberately not used.
-* The active runtime is stamped as executed-by fact. An unavailable selection is a structured failure carrying a setup action, never a silent substitution of agent or billing mode.
+* `hermes` reasons on the ChatGPT subscription by default, and on the API-key model only when the instance is explicitly set to it from the agent's settings row — never as a fallback from one to the other (`BO_0228_002`).
+* Claude Code bills the Claude plan because the CLI is what calls Anthropic. Hermes's own Anthropic OAuth provider bills extra-usage credits rather than the plan allowance, and is deliberately not used. The runner reads the CLI's own rate-limit report, and the run records `billing: plan` or `extra-usage`.
+* The active runtime is stamped as executed-by fact, and a Claude run records the model its CLI named. An unavailable selection is a structured failure carrying a setup action, never a silent substitution of agent or billing mode.
 
-- A third runtime, `provider`, runs an explicit API-key model as controller. It is kept as a configuration path and left unconfigured: it is the fallback if a subscription runtime breaks, and Calliopa ships with no model API key.
+- The runtime `provider` runs an explicit API-key model as controller. It is kept as a configuration path the CLI intake verb can still name, and left unconfigured: Calliopa ships with no model API key.
 - Choosing `codex` as the default means Hermes's reasoning depends on the ChatGPT subscription being signed in. When it is not, the agent is `unconfigured`, which is a defined healthy state rather than a failure.
 
 ## Out Of Scope
 
-- The Agent Client Protocol. Hermes reaches Codex and Claude Code through its own runtimes, which is how it worked, and no ACP client exists in the pinned release.
+- The Agent Client Protocol. Codex is reached through Hermes's own runtime and Claude Code through the Claude runner's `claude -p`, which is how both work, and no ACP client exists in the pinned release.
 - Mock agents. If a CLI, a subscription, or a model is absent, the affected surface says so by name and offers nothing.
 - A second credential system. The inbound half is [API Authentication](../identity/api-authentication.md), the outbound half is the connection store, and the subscription logins live in the agent's own store.
 - Durable, resumable, or forkable sessions, and an interactive approval broker.

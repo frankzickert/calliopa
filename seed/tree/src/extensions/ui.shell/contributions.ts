@@ -2,6 +2,7 @@ import { $ } from "@builder.io/qwik";
 import { contributions as declare, type ViewContribution } from "~/contract";
 import { BlockEditorView } from "~/components/views/block-editor";
 import { ExtensionView } from "~/components/views/extension";
+import { ExtensionImportView } from "~/components/views/extension-import";
 import { ExtensionsSection } from "~/components/library/extensions-section";
 
 /**
@@ -49,6 +50,14 @@ const extension: ViewContribution = {
   component: ExtensionView,
 };
 
+const extensionImport: ViewContribution = {
+  id: "extension-import",
+  name: "Import",
+  inspector: "Reading the import",
+  drag: [],
+  component: ExtensionImportView,
+};
+
 export const contributions = declare({
   sections: [
     {
@@ -68,6 +77,14 @@ export const contributions = declare({
       name: "extensions",
       title: "Extensions",
       empty: "The graph holds no extensions",
+      // The rows under an extension are its change documents, so a rename, a
+      // status change or a delete in the editor re-reads this section the
+      // way it re-reads Documents. BO_0222_005
+      kind: "document",
+      // No `createLabel`: the header's control creates at once and answers
+      // what to open, and a new extension needs a name and a sentence first.
+      // The section carries its own `+` beside its other controls, where the
+      // form it opens is its own state. BO_0224_009
       component: ExtensionsSection,
     },
   ],
@@ -76,5 +93,8 @@ export const contributions = declare({
     // An extension of the knowledge graph, or one node of its owner network:
     // the item identity is `ext:<id>` or `ext:<id>/<path>`. BO_0201_007
     extension,
+    // A staged import of an extension, keyed by its proposal group, so a
+    // second press reveals the open tab. BO_0224_011
+    "extension-import": extensionImport,
   },
 });

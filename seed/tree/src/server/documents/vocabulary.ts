@@ -32,6 +32,16 @@ export {
 /** The document node type. One generic kind; story concepts arrive later. */
 export const DOCUMENT_TYPE = "document";
 
+/**
+ * A change document names the extension it is a change of in `change` and
+ * carries its status in `changeStatus`. The status is not `status`, because
+ * CCGW reads that key of a CREATE or a SET as the revision's lifecycle, never
+ * as content; the declaration permits the change protocol's six values.
+ * BO_0222_004
+ */
+export const CHANGE_PROPERTY = "change";
+export const CHANGE_STATUS_PROPERTY = "changeStatus";
+
 /** The block types this build understands. A stored type outside this set is
  * unsupported content: shown as such and never silently dropped. */
 export const BLOCK_TYPES = ["text", "divider"] as const;

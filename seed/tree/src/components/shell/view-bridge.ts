@@ -1,6 +1,8 @@
+import type { IconName } from "./icons";
 import { createContextId, type QRL } from "@builder.io/qwik";
 import type { TabKind } from "~/lib/tabs";
 import type { DragOperation, DragPayload } from "~/lib/drag";
+import type { Pointing, RevealTarget } from "~/lib/command-target";
 
 /**
  * What a view may reach in the shell, and nothing more.
@@ -77,6 +79,21 @@ export type ViewAction =
       readonly label: string;
       readonly on: boolean;
       readonly run$: QRL<(on: boolean) => void>;
+    }
+  | {
+      /**
+       * One value from a named set — a change document's status. The shell
+       * renders it as a labelled native select, in the inspector and the
+       * dock alike; the view supplies the options in its own words and what
+       * choosing one does. An option may name the icon that stands for it,
+       * shown beside the control for the current value. BO_0222_007
+       */
+      readonly kind: "choice";
+      readonly id: string;
+      readonly label: string;
+      readonly value: string;
+      readonly options: readonly { readonly value: string; readonly label: string; readonly icon?: IconName }[];
+      readonly run$: QRL<(value: string) => void>;
     };
 
 /**
@@ -160,6 +177,46 @@ export interface ViewSave {
   state: SaveState | null;
 }
 
+/**
+ * The last run aimed at a target that ended, as the shell saw it end.
+ *
+ * `seq` rises on every end, so a view tells a second run against the same
+ * target from the first — the shape `ViewDrop` has, for the same reason. A
+ * store, for the reason the inspector is one: the shell writes it and the view
+ * reads it, and a plain field would change with nothing re-reading. What the
+ * run staged is the view's to read; the shell only says that there is
+ * something to read. BO_0226_007
+ */
+export interface ViewProposed {
+  itemId: string | null;
+  seq: number;
+}
+
+/**
+ * The last chip pressed in the composer: which target, what to show in it, and
+ * a count that rises with every press, so a second press on the same chip is
+ * told from the first — `proposed`'s shape, for `proposed`'s reason. The shell
+ * only says what the reader asked to see; scrolling to it and drawing the eye
+ * is the view's. CA_0039_004
+ */
+export interface ViewReveal {
+  itemId: string | null;
+  target: RevealTarget | null;
+  seq: number;
+}
+
+/**
+ * Something a view has just done that can be taken back: the words the dock's
+ * undo line shows, and what taking it back does. The view supplies the inverse
+ * because only the view knows what it did; the shell renders the one undo
+ * line, so a tab move and a view's change are taken back in one place, the
+ * same way. BO_0227_013
+ */
+export interface UndoOffer {
+  readonly label: string;
+  readonly undo$: QRL<() => void>;
+}
+
 export interface ViewBridge {
   readonly drag: ViewDragState;
   readonly inspector: ViewInspector;
@@ -169,6 +226,24 @@ export interface ViewBridge {
   /** Records the view's selection on the active tab, which is what carries it
    * across a tab switch and a reload. */
   readonly setSelection$: QRL<(selection: string | null) => void>;
+  /**
+   * Records what the reader is pointing at in a target — the blocks and
+   * passages they marked, in mark order, and the blocks they pinned — so a
+   * command from the composer can carry it (`BO_0227_015`). The same direction as
+   * the selection and the same reason — a view asking the shell to record what
+   * the reader pointed at — but the marks outlive the press that reaches the
+   * composer, where the selection is gone by then (`BO_0226_006`).
+   *
+   * The view names its target for the reason it names its tab in
+   * `setSaveState$`: a report landing after a tab switch must not be filed
+   * under whichever target the reader moved to.
+   */
+  readonly setPointing$: QRL<(itemId: string, pointing: Pointing) => void>;
+  /** The last run aimed at a target that ended. BO_0226_007 */
+  readonly proposed: ViewProposed;
+  /** The last chip the reader pressed in the composer, asking the view to
+   * show its area. CA_0039_004 */
+  readonly reveal: ViewReveal;
   /** Renames the active tab's target. The shell carries the new name to the
    * tab and to the library entry for the same document. */
   readonly setTitle$: QRL<(title: string) => void>;
@@ -202,12 +277,25 @@ export interface ViewBridge {
    */
   readonly raiseMessage$: QRL<(message: Message) => void>;
   /**
+   * Offers the dock's undo line for what the view just did, replacing
+   * whatever it offered before. A tab switch clears it, as it clears the
+   * view's dock action: the inverse acts on a surface the reader may have
+   * left. BO_0227_013
+   */
+  readonly offerUndo$: QRL<(offer: UndoOffer) => void>;
+  /**
    * Asks the shell to open a target in a tab, or to reveal the tab already
    * showing it. A view that renders links between targets — the owner
    * document's links between an extension's topics and changes — says which
    * target; the shell owns the tabs and opens it. BO_0201_007
    */
   readonly openTarget$: QRL<(target: { kind: TabKind; itemId: string; title: string }) => void>;
+  /**
+   * Tells the shell that the active tab's target changed in a way a library
+   * listing shows without a rename — a change document's status. The
+   * sections whose rows open the tab's kind read again. BO_0222_007
+   */
+  readonly targetChanged$: QRL<() => void>;
 }
 
 export const ViewBridgeContext = createContextId<ViewBridge>(

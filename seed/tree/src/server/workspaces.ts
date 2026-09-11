@@ -119,11 +119,25 @@ function parseLayout(value: unknown): Layout {
       sections[RENAMED_SECTION_KEYS[key] ?? key] = asSectionState(stored);
     }
   }
+  // A section's filter is a set of strings in the section's own vocabulary;
+  // the layout stores it and the section reads it, so an unknown value is
+  // the section's to drop rather than a reason to refuse the workspace.
+  // Absent before BO_0222_006, so a stored layout without it reads empty.
+  const filters: Record<string, readonly string[]> = {};
+  if (layout.filters !== undefined) {
+    for (const [key, stored] of Object.entries(object(layout.filters))) {
+      if (!Array.isArray(stored) || stored.some((value) => typeof value !== "string")) {
+        throw new HttpError(400, "invalid workspace layout");
+      }
+      filters[RENAMED_SECTION_KEYS[key] ?? key] = stored as string[];
+    }
+  }
   return {
     left: layout.left as Layout["left"],
     right: layout.right as Layout["right"],
     dock: layout.dock as Layout["dock"],
     sections,
+    filters,
   };
 }
 

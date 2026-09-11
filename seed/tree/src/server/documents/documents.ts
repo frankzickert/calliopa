@@ -1,7 +1,10 @@
+import { storedValue, type Standing } from "../../lib/disposition";
 import { randomBytes, randomUUID } from "node:crypto";
 
-import type { DocumentSummary } from "../../lib/library";
+import type { ChangeDocumentSummary, ChangeStatus, DocumentSummary } from "../../lib/library";
+import { byChangeTitle, statusOf } from "../../lib/changes";
 import { orderBetween } from "../../lib/order";
+import { proposerOf, type Proposer } from "../../lib/proposals";
 import {
   decide,
   query,
@@ -28,6 +31,8 @@ import {
 } from "./assemble";
 import { sameRuns } from "../../lib/runs";
 import {
+  CHANGE_PROPERTY,
+  CHANGE_STATUS_PROPERTY,
   DOCUMENT_TYPE,
   normalizeRuns,
   splitRuns,
@@ -305,6 +310,10 @@ const properties = (
 export async function createDocument(input: {
   readonly title: string;
   readonly block?: NewBlock;
+  /** The extension this document is a change of; with it, the document is a
+   * change document carrying `status`, `idea` unless said. BO_0222_004 */
+  readonly change?: string;
+  readonly status?: ChangeStatus;
 }): Promise<GraphOutcome<CreatedDocument>> {
   const block = input.block ?? { kind: "text" as const };
   const documentId = randomUUID();
@@ -313,8 +322,13 @@ export async function createDocument(input: {
     dref: nodeRef(documentId),
     bref: nodeRef(blockId),
   };
+  const content: Record<string, unknown> = { id: documentId, title: input.title };
+  if (input.change !== undefined && input.change !== "") {
+    content[CHANGE_PROPERTY] = input.change;
+    content[CHANGE_STATUS_PROPERTY] = input.status ?? "idea";
+  }
   const statement = [
-    `CREATE (d:${DOCUMENT_TYPE} {${properties("d", { id: documentId, title: input.title }, parameters, true)}})`,
+    `CREATE (d:${DOCUMENT_TYPE} {${properties("d", content, parameters, true)}})`,
     `CREATE (b:${blockType(block)} {${properties("b", { id: blockId, ...blockContent(block, orderBetween("", "")) }, parameters, true)}})`,
     `RELATE dref -[c:${CONTAINS}]-> bref`,
   ].join("; ");
@@ -376,6 +390,9 @@ export async function listDocuments(): Promise<GraphOutcome<readonly DocumentSum
     if (typeOf(node) !== DOCUMENT_TYPE) continue;
     if (node.revision.status !== "established") continue;
     if (containedIds.has(node.id) || seen.has(node.id)) continue;
+    // A change document is listed under its extension, never here, so a
+    // change appears once. BO_0222_004
+    if (isChange(contentOf(node))) continue;
     seen.add(node.id);
     const title = contentOf(node)["title"];
     summaries.push({
@@ -385,6 +402,79 @@ export async function listDocuments(): Promise<GraphOutcome<readonly DocumentSum
   }
 
   return { outcome: "success", result: summaries.sort(byTitle) };
+}
+
+const isChange = (content: Record<string, unknown>): boolean => {
+  const change = content[CHANGE_PROPERTY];
+  return typeof change === "string" && change !== "";
+};
+
+/**
+ * Every change document — a document carrying `change` — with the extension
+ * it names and its status, by title. One unbounded read of the document
+ * nodes, the same the listing makes, and no block content: the Extensions
+ * category renders titles and statuses. BO_0222_005
+ */
+export async function listChangeDocuments(): Promise<GraphOutcome<readonly ChangeDocumentSummary[]>> {
+  const outcome = await query({
+    statement: `MATCH (d:${DOCUMENT_TYPE}) RETURN GRAPH d`,
+    unbounded: true,
+    purpose: "change document listing",
+  });
+  if (outcome.outcome === "noResult") return { outcome: "success", result: [] };
+  if (outcome.outcome !== "success") {
+    return outcome as GraphOutcome<readonly ChangeDocumentSummary[]>;
+  }
+  const summaries: ChangeDocumentSummary[] = [];
+  const seen = new Set<string>();
+  for (const node of outcome.result.nodes) {
+    if (typeOf(node) !== DOCUMENT_TYPE) continue;
+    if (node.revision.status !== "established") continue;
+    if (seen.has(node.id)) continue;
+    const content = contentOf(node);
+    if (!isChange(content)) continue;
+    seen.add(node.id);
+    const title = content["title"];
+    summaries.push({
+      documentId: bareId(node.id),
+      title: typeof title === "string" ? title : "",
+      change: String(content[CHANGE_PROPERTY]),
+      status: statusOf(content[CHANGE_STATUS_PROPERTY]),
+      revisedAt: node.revision.createdAt,
+    });
+  }
+  return { outcome: "success", result: summaries.sort(byChangeTitle) };
+}
+
+/**
+ * Sets a change document's status. Like a rename, this revises the document
+ * node alone with the base compared first; the graph's declaration refuses a
+ * value outside the vocabulary, and a document that is not a change is
+ * refused here, because a status belongs to a change. BO_0222_007
+ */
+export async function setChangeStatus(input: {
+  readonly documentId: string;
+  readonly baseRevisionId: string;
+  readonly status: ChangeStatus;
+}): Promise<GraphOutcome<WrittenDocument>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  if (loaded.document.change === undefined) {
+    return refuse("notAChange", `Document ${input.documentId} is not a change of an extension.`);
+  }
+  if (loaded.document.revisionId !== input.baseRevisionId) {
+    return conflict(input.documentId, input.baseRevisionId, loaded.document.revisionId);
+  }
+  return commit(
+    `SET d.${CHANGE_STATUS_PROPERTY} = $status`,
+    { dNodeId: nodeRef(input.documentId), status: input.status },
+    `set change status of document ${input.documentId} to ${input.status}`,
+    async (dataRevision, revisionOf) => ({
+      documentId: input.documentId,
+      revisionId: await revisionOf(input.documentId),
+      dataRevision,
+    }),
+  );
 }
 
 /**
@@ -568,6 +658,45 @@ export async function reviseTextBlock(input: {
 }
 
 /**
+ * Sets a text block's standing on the disposition scale, keeping its identity,
+ * text and position: one property on one node, so its inverse is the previous
+ * value, which the caller holds. Neutral clears the property rather than
+ * storing a value for it, as a paragraph stores no role; the graph's `text`
+ * declaration refuses any value not on the scale. BO_0227_010
+ */
+export async function setBlockDisposition(input: {
+  readonly documentId: string;
+  readonly blockId: string;
+  readonly baseRevisionId: string;
+  readonly standing: Standing;
+}): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  const located = locate(loaded.document, input.blockId, input.baseRevisionId);
+  if ("failure" in located) return located.failure;
+  if (located.block.kind !== "text") {
+    return refuse(
+      "blockKind",
+      `Block ${input.blockId} is a ${located.block.kind} block and carries no standing.`,
+    );
+  }
+  return commit(
+    "SET b.disposition = $disposition",
+    {
+      bNodeId: nodeRef(input.blockId),
+      // A null clears the property: a neutral block stores no disposition.
+      disposition: storedValue(input.standing),
+    },
+    `set the standing of block ${input.blockId}`,
+    async (dataRevision, revisionOf) => ({
+      blockId: input.blockId,
+      revisionId: await revisionOf(input.blockId),
+      dataRevision,
+    }),
+  );
+}
+
+/**
  * Splits a text block at a character position. The head keeps the block's
  * identity and the tail becomes a new block directly after it, carrying the
  * same role: a split is a structural gesture, and changing what the
@@ -602,11 +731,16 @@ export async function splitTextBlock(input: {
     dref: nodeRef(input.documentId),
     tref: nodeRef(tailBlockId),
   };
+  // The tail carries the block's standing as it carries its role: the reader
+  // gave that standing to the words, and a split does not change the words'
+  // standing. BO_0227_010
+  const standing = storedValue(block.standing);
   const tailContent: Record<string, unknown> = {
     id: tailBlockId,
     order: order.order,
     runs: tail,
     ...(block.role === "paragraph" ? {} : { role: block.role }),
+    ...(standing === null ? {} : { disposition: standing }),
   };
   const statement = [
     "SET b.runs = $head",
@@ -1092,6 +1226,12 @@ export interface DocumentProposals {
     readonly items: readonly ProposedChange[];
     /** Who staged the group's candidates — the core's `createdBy` stamps, sorted. BO_0209_006 */
     readonly stagedBy: readonly string[];
+    /**
+     * Who proposed it: the agent its run's provenance node names, or the
+     * person who staged it. Every agent stages as one account, so the stamps
+     * alone cannot say which agent it was. BO_0233_001
+     */
+    readonly proposer: Proposer;
   }[];
 }
 
@@ -1133,7 +1273,7 @@ export async function readDocumentProposals(
 
   const documentNode = nodeRef(documentId);
   const established = new Map(loaded.document.blocks.map((block) => [nodeRef(block.blockId), block]));
-  const groups: { groupId: string; items: ProposedChange[]; stagedBy: string[] }[] = [];
+  const groups: { groupId: string; items: ProposedChange[]; stagedBy: string[]; proposer: Proposer }[] = [];
   let unanswered = 0;
 
   for (const groupId of groupIds.result) {
@@ -1209,7 +1349,10 @@ export async function readDocumentProposals(
     const stagedBy = [...new Set([...staged.values()].map((node) => node.revision.createdBy))]
       .filter((name) => name !== "")
       .sort();
-    groups.push({ groupId, items, stagedBy });
+    // The agent is named by its run's provenance, staged into the same group
+    // before the run closed (`stageRunSummary`), never by the stamp. BO_0233_001
+    const run = [...staged.values()].find((node) => node.revision.content?.["_type"] === "agent.run");
+    groups.push({ groupId, items, stagedBy, proposer: proposerOf(run?.revision.content, stagedBy) });
   }
 
   return {
@@ -1232,7 +1375,138 @@ const onlyOrderDiffers = (left: BlockView, right: BlockView): boolean =>
     right.kind !== "text" ||
     (left.role === right.role && sameRuns(left.runs, right.runs)));
 
+/** A proposed change moved to another place, still unanswered. BO_0233_007 */
+export interface PlacedItem {
+  readonly itemId: string;
+  readonly order: string;
+}
+
+/**
+ * Moves a proposed change to another place without answering it. The new
+ * order key is staged into the item's own group, as a candidate revision of
+ * the block it places — the new block of an insert, the block a rewrite or a
+ * move concerns — carrying the key and nothing else, so the place is part of
+ * the proposal: it survives a reload and every device, and accepting lands the
+ * block there. The reader stages it, into a group an agent may have opened;
+ * CCGW admits a staging into any open group. A removal proposes no place and
+ * is refused. BO_0233_007
+ */
+export async function placeProposedItem(input: {
+  readonly documentId: string;
+  readonly itemId: string;
+  readonly placement: Placement;
+}): Promise<GraphOutcome<PlacedItem>> {
+  const parsed = parseItemId(input.itemId);
+  if (parsed === null) {
+    return refuse("itemShape", `${input.itemId} does not name a proposed change.`);
+  }
+  if (parsed.kind === "remove") {
+    return refuse("removalHasNoPlace", "A proposed removal proposes no place to move.");
+  }
+  const node = parsed.members[0] as string;
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  const self = bareId(node);
+  if (("before" in input.placement && input.placement.before === self) || ("after" in input.placement && input.placement.after === self)) {
+    return refuse("unknownAnchor", "A block does not move relative to itself.");
+  }
+  const order = orderFor(loaded.document.blocks, input.placement);
+  if ("failure" in order) return order.failure;
+  // The key alone: a staging into a group that already holds a candidate of
+  // this block builds on that candidate, so a rewrite keeps its words and a
+  // new block its content (proven over CCGW in `tests/behavior`). BO_0233_007
+  const outcome = await stage(
+    parsed.groupId,
+    "SET p.order = $porder",
+    { pNodeId: node, porder: order.order },
+    `place proposed ${parsed.kind} ${input.itemId}`,
+  );
+  if (outcome.outcome !== "success") return outcome as GraphOutcome<never>;
+  return { outcome: "success", result: { itemId: input.itemId, order: order.order } };
+}
+
 export type ProposalAnswer = "accepted" | "rejected";
+
+/** How a drifted member's block moved since the group's base. */
+interface BlockDrift {
+  /** Only its standing: its words, role and order as truth holds them now are
+   * what they were at the base. BO_0233_011 */
+  readonly standingOnly: boolean;
+  /** The standing truth holds now, and the one the proposal carries. */
+  readonly standing: Standing;
+  readonly proposed: Standing;
+}
+
+/**
+ * How a drifted member's block moved since the group's base, or null when the
+ * block cannot be read at the base or now. BO_0233_011 CA_0042_002
+ */
+async function blockDrift(groupId: string, member: string): Promise<GraphOutcome<BlockDrift | null>> {
+  // The base CCGW judges drift against (`proposalBase`): the group's first
+  // revision's declared `baseDataRevision`, else the data revision that
+  // revision was created at. A group the shell stages declares none.
+  const group = await query({
+    statement: "MATCH (g:ProposalGroup {id: $gid}) RETURN GRAPH g INCLUDE HISTORY",
+    parameters: { gid: bareId(groupId) },
+    purpose: "proposal base",
+  });
+  if (group.outcome !== "success") return group as GraphOutcome<never>;
+  const node = group.result.nodes[0];
+  const first = [...(node === undefined ? [] : [node.revision, ...(node.history ?? [])])]
+    .filter((revision) => (revision.createdDataRevision ?? 0) > 0)
+    .sort((left, right) => (left.createdDataRevision ?? 0) - (right.createdDataRevision ?? 0))[0];
+  if (first === undefined) return { outcome: "success", result: null };
+  const declared = Number(first.content?.["baseDataRevision"] ?? 0);
+  const base = declared > 0 ? declared : (first.createdDataRevision ?? 0);
+  const read = (extra: { dataRevision?: number; proposalOverlay?: string }) =>
+    query({
+      statement: "MATCH (n {id: $id}) RETURN GRAPH n",
+      parameters: { id: bareId(member) },
+      purpose: "proposal drift",
+      ...extra,
+    });
+  const [then, now, proposed] = await Promise.all([
+    read({ dataRevision: base }),
+    read({}),
+    read({ proposalOverlay: groupId }),
+  ]);
+  for (const outcome of [then, now, proposed]) {
+    if (outcome.outcome !== "success") return outcome as GraphOutcome<never>;
+  }
+  const content = (outcome: typeof then) =>
+    outcome.outcome === "success" ? outcome.result.nodes[0]?.revision.content : undefined;
+  const before = content(then);
+  const current = content(now);
+  if (before === undefined || current === undefined) return { outcome: "success", result: null };
+  const same =
+    before["_type"] === current["_type"] &&
+    (before["order"] ?? "") === (current["order"] ?? "") &&
+    (before["role"] ?? null) === (current["role"] ?? null) &&
+    sameRuns(normalizeRuns((before["runs"] ?? []) as Run[]), normalizeRuns((current["runs"] ?? []) as Run[]));
+  const standing = (value: unknown): Standing =>
+    typeof value === "string" && value !== "" ? (value as Standing) : "neutral";
+  return {
+    outcome: "success",
+    result: {
+      standingOnly: same,
+      standing: standing(current["disposition"]),
+      proposed: standing(content(proposed)?.["disposition"]),
+    },
+  };
+}
+
+/** Gives an accepted block back the standing the reader had set. BO_0233_011 */
+async function restoreStanding(
+  documentId: string,
+  blockId: string,
+  standing: Standing,
+): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(documentId);
+  if (!loaded.ok) return loaded.outcome;
+  const block = loaded.document.blocks.find((candidate) => candidate.blockId === blockId);
+  if (block === undefined) return refuse("unknownBlock", `Block ${blockId} is not in this document.`);
+  return setBlockDisposition({ documentId, blockId, baseRevisionId: block.revisionId, standing });
+}
 
 export interface AnsweredItem {
   readonly itemId: string;
@@ -1251,9 +1525,16 @@ export interface AnsweredItem {
  * confirmation answers as refused rather than half-done.
  */
 export async function answerDocumentProposal(input: {
+  /** The document the item stands against, for giving a block its standing
+   * back after an acceptance over a standing that moved. BO_0233_011 */
+  readonly documentId?: string;
   readonly itemId: string;
   readonly answer: ProposalAnswer;
   readonly override?: boolean;
+  /** The acceptance is an edit's: the reader typed into the proposal and
+   * chose its words, so a rewrite is accepted over whatever its block did
+   * since. CA_0042_002 */
+  readonly edited?: boolean;
 }): Promise<GraphOutcome<AnsweredItem>> {
   const parsed = parseItemId(input.itemId);
   if (parsed === null) {
@@ -1261,7 +1542,34 @@ export async function answerDocumentProposal(input: {
   }
   const decision = input.answer === "accepted" ? "accept" : "reject";
   for (const member of parsed.members) {
-    const outcome = await decide(decision, parsed.groupId, member, `${parsed.kind} ${input.itemId}`, input.override ?? false);
+    let outcome = await decide(decision, parsed.groupId, member, `${parsed.kind} ${input.itemId}`, input.override ?? false);
+    // CCGW judges drift by revision, so a block whose standing the reader
+    // set after the proposal was staged reads as moved past it though not a
+    // word of it changed. When the words, the role and the place are what the
+    // proposal was made against, it is accepted over that, and the reader's
+    // standing is given back; when they are not, it says so in words, since
+    // the reload the generic conflict asks for would change nothing.
+    // BO_0233_011
+    // A rewrite the reader typed into is accepted over any drift: editing it
+    // is choosing its words, and what the block said since is replaced by
+    // them. The standing is still the reader's. CA_0042_002
+    if (outcome.outcome === "conflict" && decision === "accept" && input.override !== true && (parsed.kind === "replace" || parsed.kind === "move")) {
+      const drift = await blockDrift(parsed.groupId, member);
+      if (drift.outcome !== "success") return drift as GraphOutcome<never>;
+      const edited = input.edited === true && parsed.kind === "replace";
+      if (drift.result === null || (!drift.result.standingOnly && !edited)) {
+        return refuse(
+          "proposalStale",
+          "This proposed change was made against an older version of the block, and its words, its kind or its place have changed since. Reject it, or ask for it again.",
+        );
+      }
+      const over = drift.result.standingOnly ? "over a standing set since" : "edited, over the block's changes since";
+      outcome = await decide(decision, parsed.groupId, member, `${parsed.kind} ${input.itemId}, ${over}`, true);
+      if (outcome.outcome === "success" && input.documentId !== undefined && drift.result.standing !== drift.result.proposed) {
+        const restored = await restoreStanding(input.documentId, bareId(member), drift.result.standing);
+        if (restored.outcome !== "success") return restored as GraphOutcome<never>;
+      }
+    }
     if (outcome.outcome !== "success") return outcome as GraphOutcome<AnsweredItem>;
   }
 

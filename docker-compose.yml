@@ -258,10 +258,11 @@ services:
       # publish below stays loopback, and browsers reach it at the published
       # address. BO_0103_003
       CALLIOPA_KERNEL_CONFIRM_BIND: 0.0.0.0
-      CALLIOPA_KERNEL_CONFIRM_URL: ${CALLIOPA_KERNEL_CONFIRM_URL:-http://127.0.0.1:8091}
+      CALLIOPA_KERNEL_CONFIRM_URL: ${CALLIOPA_KERNEL_CONFIRM_URL:-http://${CALLIOPA_HOST_BIND:-127.0.0.1}:${CALLIOPA_CONFIRM_PORT:-8091}}
       # The agent bridge: the kernel half of the Hermes agent service.
       # BO_0089_012
       CALLIOPA_HERMES_URL: http://hermes:8642
+      CALLIOPA_CLAUDE_RUNNER_URL: http://hermes:8643
       CALLIOPA_HERMES_BEARER_FILE: /run/secrets/calliopa/hermes_api_key
       CALLIOPA_AGENT_TOOLS_BEARER_FILE: /run/secrets/calliopa/agent_tools_bearer
       CALLIOPA_AGENT_CONFIG_DIR: /var/lib/calliopa/agent-config
@@ -278,13 +279,25 @@ services:
       # so `kernel diagnose` states which release a support file describes.
       # BO_0205_003
       CALLIOPA_RELEASE_VERSION: ${CALLIOPA_RELEASE_VERSION:-}
+      # The directory shared with the host-side updater (the bind mount
+      # below), and whether the owner's browser checks GitHub for releases at
+      # sign-in — the kernel only relays the setting. BO_0223_009
+      CALLIOPA_UPDATER_DIR: /var/lib/calliopa-updater
+      CALLIOPA_UPDATE_CHECK: ${CALLIOPA_UPDATE_CHECK:-on}
+    # The host side is .env's: CALLIOPA_PORT, and the confirmation origin on
+    # CALLIOPA_CONFIRM_PORT, which install.sh derives as the next port.
+    # Inside the container the kernel keeps 8090 and 8091. BO_0221_003
     ports:
-      - "${CALLIOPA_HOST_BIND:-127.0.0.1}:8090:8090"
-      - "${CALLIOPA_HOST_BIND:-127.0.0.1}:8091:8091"
+      - "${CALLIOPA_HOST_BIND:-127.0.0.1}:${CALLIOPA_PORT:-8090}:8090"
+      - "${CALLIOPA_HOST_BIND:-127.0.0.1}:${CALLIOPA_CONFIRM_PORT:-8091}:8091"
     volumes:
       - kernel-data:/var/lib/calliopa-kernel
       - agent-config:/var/lib/calliopa/agent-config
       - calliopa-secrets:/run/secrets/calliopa:ro
+      # The one host path the stack sees: the owner's update request goes
+      # out, the updater's status comes in, nothing else crosses. install.sh
+      # creates it. BO_0223_009
+      - ./updater:/var/lib/calliopa-updater
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/__kernel/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 5s

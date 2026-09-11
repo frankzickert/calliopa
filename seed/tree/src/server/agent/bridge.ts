@@ -1,3 +1,5 @@
+import type { CommandTarget } from "~/lib/command-target";
+import type { HermesModel } from "~/lib/connections";
 import { graphEnv } from "../ccgw/env";
 import { forwardedCookie } from "../request-context";
 import type { RunEvent } from "./run-events";
@@ -74,13 +76,18 @@ async function ask<T>(path: string, init: RequestInit, read: (body: unknown) => 
 
 /**
  * Starts a run. The runtime is the kernel's configured selection unless one
- * is named; the context tells the run where it was asked from.
+ * is named; the context tells the run where it was asked from, and a target
+ * what it was aimed at — the document, where its work goes, and what the
+ * reader marked, which the intake has taken as fields since `BO_0173` and
+ * `BO_0226_001`. A command aimed at nothing sends none of them.
  */
 export function startBridgeRun(input: {
   readonly goal: string;
   readonly context?: string;
   readonly agent?: string;
+  readonly target?: CommandTarget | null;
 }): Promise<BridgeReply<BridgeRun>> {
+  const target = input.target ?? null;
   return ask(
     "/runs",
     {
@@ -90,9 +97,45 @@ export function startBridgeRun(input: {
         goal: input.goal,
         context: input.context ?? "",
         agent: input.agent ?? "",
+        ...(target === null
+          ? {}
+          : {
+              artifact: target.artifact,
+              delivery: target.delivery,
+              // A passage travels with its words; a block with its identity
+              // alone. BO_0227_015
+              references: target.references,
+            }),
       }),
     },
     (body) => (body as { run: BridgeRun }).run,
+  );
+}
+
+/**
+ * Whether the Claude runner answers, from the kernel's agent health: `ok`,
+ * the kernel's words for why not, or null when it said nothing about the
+ * runner — which is what a kernel without one, or one that could not be
+ * reached, says. BO_0228_009
+ */
+export async function claudeRunnerHealth(): Promise<string | null> {
+  const reply = await ask("/health", { method: "GET" }, (body) => {
+    const claude = (body as { claude?: unknown } | null)?.claude;
+    return typeof claude === "string" ? claude : null;
+  });
+  return reply.ok ? reply.value : null;
+}
+
+/**
+ * Sets what Hermes's own loop reasons with. The kernel refuses the API-key
+ * model while none is configured, in its own words, rather than writing a
+ * choice that would fall back. BO_0228_012
+ */
+export function configureHermesModel(model: HermesModel): Promise<BridgeReply<HermesModel>> {
+  return ask(
+    "/config",
+    { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ hermesModel: model }) },
+    () => model,
   );
 }
 
@@ -173,10 +216,19 @@ export async function followBridgeEvents(
 ): Promise<BridgeReply<"ended" | "idle">> {
   const controller = new AbortController();
   options.signal?.addEventListener("abort", () => controller.abort());
+  // The stream is read as the person whose browser asked, exactly as `ask`
+  // reads every other bridge verb: the kernel's prod listener admits no
+  // session-less request, so a stream opened without the cookie is refused
+  // and the run's own events — the reason it failed among them — never reach
+  // the reader. This call cannot go through `ask` because it needs the body
+  // unread. BO_0209_002
+  const headers = new Headers({ accept: "text/event-stream" });
+  const cookie = forwardedCookie();
+  if (cookie !== undefined) headers.set("cookie", cookie);
   let response: Response;
   try {
     response = await fetch(`${base()}/runs/${encodeURIComponent(runId)}/events`, {
-      headers: { accept: "text/event-stream" },
+      headers,
       signal: controller.signal,
     });
   } catch (error) {

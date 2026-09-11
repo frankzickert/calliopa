@@ -10,7 +10,7 @@
           "humanWritesCostAConfirmation": "Every human-class write from the shell parks at the kernel bridge and waits for a confirmation on the kernel's own origin — no human mutation travels from the app origin to CCGW. Budget one cross-origin confirmation per write. That is proportionate for occasional truth like creating a channel and disproportionate for continuous editing, so a surface that writes on every keystroke needs a different shape than one that writes on a button.",
           "proofsAreNotProposals": "Never stage a proposal whose intended outcome is rejection. A proof-only group is indistinguishable from a real one at the review surface — the rationale is rendered as ordinary text — so after a run of proposals that all deserved acceptance, one that did not will be accepted by the same motion. Construct demonstrations so the refusal is the whole proof and stop there: a refused mutation stages nothing and opens no group. Acceptance is the one non-delegable human action in the architecture and its entire value is the attention behind it, so anything that produces frequent near-identical almost-always-correct proposals is spending that attention down.",
           "valuesTravelAsParameters": "How a statement says values, which the grammar will not let you guess:\n- Every value beyond a scalar travels beside the statement in the tool call's parameters field, which is one JSON object written as text — for example parameters: \"{\\\"bid\\\": \\\"art-x.b1\\\", \\\"runs\\\": [{\\\"text\\\": \\\"...\\\"}]}\". The statement writes $name where a value belongs; lists and objects have no literal form inside the statement itself, and runs: [{text: ...}] inline is a parse error every time.\n- Every $name in the statement must have a key in that JSON object. An empty parameters value beside a parameterized statement is always wrong, and resending a refused statement without filling it changes nothing.\n- A script is one or more statements separated by semicolons; CREATE ... RELATE ... in one breath is a parse error at RELATE. Aliases scope per statement but parameters are request-global, so one parameters object serves the whole script: the canonical block write is CREATE (n:Text {id: $bid, runs: $runs, order: $order}); RELATE childRef -[r:CONTAINS]-> parentRef, with bid, runs, order, childRef and parentRef all keys of the one JSON object.\n- RELATE endpoint refs resolve from parameters — <ref>NodeId first, then <ref> — and those values carry the node: prefix (childRef: \"node:art-x.b1\"), even though the id property inside CREATE content is bare. The ref names an existing node; the id property mints one.\n- When syntax is uncertain, calliopa_explain compiles a statement without executing it. Explain and correct rather than retrying a refusal unchanged — the diagnostics name what they want.",
-          "whereRequirementsLive": "An extension's requirements, open work and change history live in its own docs/ members (docs/system/**/*.md and docs/changes/*.md under the live-line protocol), read through calliopa_query like its code. A run that changes an extension's behaviour also updates those docs in the same proposal group. (BO_0201)",
+          "whereRequirementsLive": "An extension's requirements and open work live in its own docs/ members (docs/system/**/*.md under the live-line protocol), read through calliopa_query like its code. Its changes are documents in the graph, not files (BO_0222): a document carrying change (the extension's id) and changeStatus (idea, draft, ready, wip, completed, rejected), found with list_documents filtered by change, read with read_document, shaped with propose_document_changes, started with create_document. A run that changes an extension's behaviour also updates its docs in the same proposal group and keeps its change document's status honest — proposing wip when it claims ready work and completed when the work is done; only a person promotes a change to draft or ready, and acceptance is what moves any status. (BO_0201, BO_0222)",
           "writeShapeFollowsFrequency": "Choose the write path by how often the operation happens, not by what it touches. Continuous editing stages candidates with no confirmation and one deliberate act to establish them; an occasional deliberate act — creating a channel, filing something into one — takes the confirmation directly, where the ceremony is proportionate. Both are the same architecture; only the frequency differs, and reaching for one shape everywhere makes typing intolerable or truth too cheap."
         },
         "goal": "Stage work into Calliopa's graph as one reviewable proposal, whatever the reader's intention was.",
@@ -57,13 +57,13 @@
           "dependencyReferences": "A dependency on another extension is a dependsOn relation from the depending manifest to the dependency manifest, with the semver range recorded in the depending manifest dependencies map keyed by extension id — the range is content because a relation stores no properties, and the relation is what makes the dependency traversable. On the materializer route kernel commit derives the edge from the map; on the direct route you stage it. A dependencies entry naming an extension with no manifest, established or added by the same change, is refused. Two extensions added together may depend on each other. The range is checked twice: the registry scan fails a build whose tree holds a version outside a declared range (dependency_out_of_range), and the kernel refuses a version flip or an activation that would serve one before writing it (BO_0219). A version is the manifest version label at the subtree's last established state under it: bump version when you want a state of the subtree to be a version a person can serve from the extension view; two revisions under one label are one version, its last state.",
           "deploymentIsSeparate": "Acceptance and deployment are two acts. Accepting a proposal establishes truth at a new dataRevision; the kernel keeps serving the promoted release pin until kernel pin --to head moves it, building the candidate before it promotes. An accepted extension is therefore not yet a running one, and nothing warns that the two have diverged — verify the surface appears rather than inferring it from acceptance.",
           "derivedFiles": "Files matching *.gen.* are build output, never content, and the commit path skips them. The tree root's node_modules/, dist/ and server/ are the build's derived directories and are never committed either; a nested src/server/ is ordinary source.",
-          "docs": "An extension carries its owner's knowledge beside its code, as ext.source members under docs/: docs/system/<area>/<topic>.md under the live-line protocol — a list item's marker is its commitment (* fixed, - mutable), its checkbox its state ([ ] open, [x] claimed, none is truth), a line beginning 'Functional question' awaits the owner, and a task identifier (XX_0000_000) ties a line to the change that made it true — and docs/changes/<id>.md with a Status: line (idea, draft, ready, wip, completed), finished ones under docs/changes/completed/. docs/system/system.md's Purpose section is what the extension is for; README.md is the fallback; the skill's goal is the last resort. The shell's Extensions section renders these docs as a navigable network for the owner, so a change to an extension is not complete until its docs say so: convert the [x] lines you claimed into truth, add [ ] follow-ups for what remains, and keep the identifiers. Read the docs before changing the code; they are where the requirements live. (BO_0201)",
+          "docs": "An extension carries its owner's knowledge beside its code, as ext.source members under docs/: docs/system/<area>/<topic>.md under the live-line protocol — a list item's marker is its commitment (* fixed, - mutable), its checkbox its state ([ ] open, [x] claimed, none is truth), a line beginning 'Functional question' awaits the owner, and a task identifier (XX_0000_000) ties a line to the change that made it true. docs/system/system.md's Purpose section is what the extension is for; README.md is the fallback; the skill's goal is the last resort. An extension's changes are not files: since BO_0222 a change is a document in the graph carrying change (the extension's id) and changeStatus (idea, draft, ready, wip, completed, rejected), listed under the extension in the shell's Extensions section, started there by the row's + or by the kernel toolset's create_document, shaped through propose_document_changes, its status proposed by an agent and moved by acceptance — never write docs/changes/<id>.md members; kernel import-changes converted the ones that existed. The shell renders the system docs as a navigable network for the owner, so a change to an extension is not complete until its docs say so: convert the [x] lines you claimed into truth, add [ ] follow-ups for what remains, keep the identifiers, and propose the change document's status. Read the docs before changing the code; they are where the requirements live. (BO_0201, BO_0222) An extension may be started from the shell's Extensions section with a manifest and a docs/system/system.md alone — its purpose under Purpose, version 0.1.0, individual, no entrypoint, nothing to serve (BO_0224); the first topic names the extension's prefix, and the first code arrives through this skill as a proposal. An extension can leave an instance as one file — the kernel's export: its tree, its members and its change documents — and enter another as a proposal the owner accepts, arriving switched off; ext.settings, activation and pins never travel, and the archive's category lands as individual.",
           "domainVocabulary": "A domain vocabulary is ext.blocktype and ext.relationtype Blocks in an extension of its own, depending on ui.shell — never inside the shell, which stays domain-neutral. Neither Block materializes, so the definitions are staged through direct CCGW or a members sidecar while the extension's sources go through the materializer; that is one rung, two routes, and they must not be mixed inside a single change. Declare uniqueness with uniqueProperties and let the lifecycle carry the qualifier: declared uniqueness is scoped to established revisions, so retiring a node frees its unique values and a \"retired\" or \"archived\" flag kept in content does not, because a flagged node stays established and keeps claiming them.",
           "draftingSurfacesReadThroughTheirDraft": "A surface that stages before establishing has two halves, and the staged half is invisible by design. Staged content is a candidate and does not resolve at head, so every read in a drafting surface must carry the draft’s overlay — the list that finds unoffered drafts, and the read that shows what was just written. Getting this wrong does not produce an error: it produces a dead end, where the author is told to offer a draft they cannot see or reach. Verify that the author can see what they wrote, not only that the write succeeded.",
           "featureExtensions": "A feature extension carries code, not values. The first is settings: src/extensions/settings/ holds the view (settings.tsx), the server modules (server/connections.ts, server/connection-tests.ts, server/adapters.ts) and the feature's migrations (migrations/*.sql, one sequence with the shell's own migrations/ ordered by file name and applied by the tree's serve entry). The shell keeps the thin route files under src/routes/api/settings/ importing from ~/extensions/settings/server/…, and its manifest declares dependencies {\"ui.shell\": \">=0.1.0\"}. Values the feature stores stay where the feature keeps them — the shell's encrypted connection store — never in ext.settings Blocks, which are plain graph content.",
           "freshNamesAreForced": "A graph definition may never shadow a code-registered type, so the frozen vocabulary’s names are unavailable: Page, Paragraph, Note and Document are all taken. Reincarnating a model therefore means fresh names carrying proven mechanics — which is the intended posture anyway, but the refusal enforces it whether or not you meant it.",
           "migrations": "The tree owns its schema. scripts/lib/migrations.mjs reads migrations/ and every src/extensions/<id>/migrations/ as one sequence ordered by file name, records each in schema_migrations, and the serve entry applies pending ones before it listens — except under the promotion gate's probe (CALLIOPA_SERVE_PROBE=1), which never migrates. Number a new migration after the highest existing one across both places.",
-          "naming": "The manifest id is the extension id, lowercase, dot- or hyphen-separated, and must equal its directory name under src/extensions/ — the commit path refuses a mismatch. Source Blocks are <extId>.<path>. A contribution Block, if one is ever staged, carries a content id equal to its file name.",
+          "naming": "The manifest id is the extension id — lowercase letters and digits, starting with a letter, in parts joined by a dot or a hyphen, exactly ^[a-z][a-z0-9]*([.-][a-z0-9]+)*$, the rule the kernel's create enforces (BO_0224) — and must equal its directory name under src/extensions/ — the commit path refuses a mismatch. Source Blocks are <extId>.<path>. A contribution Block, if one is ever staged, carries a content id equal to its file name.",
           "orderingLivesOnTheChild": "Ordering is a content property on the child block, never on the containment relation, because a Relation stores no properties — a core-model fact, not a design choice. Use a base-36 fractional string compared as an ordinary string, so inserting between two siblings mints a key between theirs and writes one block instead of renumbering the set.",
           "rulesTheGraphCannotExpress": "Some settled rules have no home in the meta-schema and end up enforced in surfaces: which node types are ineligible as a relation’s endpoints, and permitted children wherever the enforcing layer is unreachable. Record each one where the rule is written rather than letting the surface be its only statement, because a rule living only in a surface is a rule the next surface will not know.",
           "shellShape": "The shell of this graph is calliopa-app, imported as ui.shell (BO_0200): a Qwik City application with file-convention routes under src/routes/ and compiled-in views (src/lib/views.ts), root-mapped as a whole. There is no runtime registry, no generated route map and no ext.uicontribution contract in this shell — the kernel still validates contribution Blocks on commit, but nothing reads them. An extension reaches the user through the shell's own source: the shell imports the extension's modules by path (~/extensions/<extId>/…) from a route file under src/routes/, a view entry in src/lib/views.ts, or a server module — so a new feature extension is one proposal that adds the subtree and the import lines in the shell, both root-mapped by the same kernel commit.",
@@ -187,7 +187,7 @@
           "The target extension id is decided and does not collide with an existing ext.manifest id.",
           "Every extension named in the manifest dependencies map has a manifest, established or added by this same change.",
           "The mutation context declares an agent identity scoped to one open proposal group; a skill execution never writes established truth.",
-          "The extension's docs/ members are read before its code is changed: docs/system/**/*.md carry the requirements and open work, docs/changes/*.md the changes and their status."
+          "The extension's docs/ members and its change documents are read before its code is changed: docs/system/**/*.md carry the requirements and open work; the changes and their status are documents carrying the extension's id in change, found with list_documents (BO_0222)."
         ]
       }
     },
@@ -225,13 +225,27 @@
         "name": "document",
         "optionalProperties": [
           "intention",
-          "record"
+          "record",
+          "change",
+          "changeStatus"
         ],
         "permittedChildTypes": [
           "text",
           "divider"
         ],
+        "permittedValues": {
+          "changeStatus": [
+            "idea",
+            "draft",
+            "ready",
+            "wip",
+            "completed",
+            "rejected"
+          ]
+        },
         "properties": {
+          "change": "the id of the extension this document is a change of; present, the document is a change document listed under that extension in the shell and never in the Documents section; absent, an ordinary document. A property rather than a relation because the bridge's write verb refuses an ext.* endpoint (BO_0222_004)",
+          "changeStatus": "a change document's status, from the change protocol's vocabulary; named changeStatus because CCGW reads a status key of a CREATE or a SET as the revision's lifecycle, never as content (BO_0222_004)",
           "id": "the document's identity, a UUID the shell mints; the node id is node:<id>",
           "intention": "the marking a reader gave the whole document: the marks value of an established ext.intention declaration; unconstrained here because intention extensions are declared per instance and a permitted set in this declaration would refuse a marking the instance legitimately declares — the agent bridge refuses an unknown intention at run start",
           "record": "the record slot carried over from the previous document type: names a record declaration; no permitted set, per the recorded non-enforcement of BO_0199_002",
@@ -241,7 +255,7 @@
           "id",
           "title"
         ],
-        "semantics": "The one product-level document kind: a node with a title whose content is its ordered child blocks, held as CONTAINS relations from the document to each block rather than nested in its revision. A document is not itself a block: it is not ordered among siblings and nothing contains it. At most one open candidate per document. Declared by ui.shell under BO_0207_011; the previous gateway's TypeScript definition of the same type is retired with the gateway.",
+        "semantics": "The one product-level document kind: a node with a title whose content is its ordered child blocks, held as CONTAINS relations from the document to each block rather than nested in its revision. A document is not itself a block: it is not ordered among siblings and nothing contains it. At most one open candidate per document. Declared by ui.shell under BO_0207_011; the previous gateway's TypeScript definition of the same type is retired with the gateway. Since BO_0222 a document carrying change is a change of that extension, with changeStatus from the permitted set.",
         "singleOpenCandidate": true
       }
     },
@@ -255,10 +269,17 @@
         "name": "text",
         "optionalProperties": [
           "role",
-          "intention"
+          "intention",
+          "disposition"
         ],
         "permittedChildTypes": [],
         "permittedValues": {
+          "disposition": [
+            "keep",
+            "pin",
+            "resolved",
+            "discarded"
+          ],
           "role": [
             "paragraph",
             "h1",
@@ -268,6 +289,7 @@
           ]
         },
         "properties": {
+          "disposition": "the standing the reader gave the block on the disposition scale: keep, pin, resolved or discarded; absent means neutral, as an absent role means paragraph (BO_0227_010)",
           "id": "the block's identity, a UUID the shell mints; the node id is node:<id>",
           "intention": "the marking a reader gave this block, resolved own marking first, else the nearest marked ancestor, else the document's; the marks value of an established ext.intention declaration, unconstrained for the reason the document type records",
           "order": "the block's place among its siblings: a fractional key compared as a string, so inserting between two siblings mints a key between theirs and writes one block",
@@ -302,18 +324,22 @@
       "type": "ext.skill",
       "content": {
         "conventions": {
+          "changeDocuments": "A change of an extension is a document whose change names the extension and whose status is the change protocol's: an agent shapes an idea's blocks freely, proposes wip when it claims ready work and completed when the work is done, and never promotes to draft or ready — a person does that in the shell's inspector. A status item stages like any other item; acceptance is what moves it. (BO_0222)",
           "marks": "A run carries text and, when it has any, marks among bold, italic, strikethrough and code, and may carry a link. Marks are not declared in the graph's vocabulary; the editor's set is the one that renders.",
           "readerAnswersPerItem": "Each item is decided on its own in the editor. Keep an item to one intent, so a reader can accept the heading and reject the rewrite."
         },
         "examples": {
           "addAHeadingAbove": "propose_document_changes {documentId, rationale, items: [{kind: insert, block: {kind: text, role: h2, runs: [{text: 'Heading'}]}, placement: {before: blockId}}]}",
+          "claimAChange": "propose_document_changes {documentId, rationale: 'claiming BO_0001', items: [{kind: status, status: wip}]}",
           "dropAStrayDivider": "propose_document_changes {documentId, rationale, items: [{kind: remove, blockId}]}",
-          "rewriteAParagraph": "read_document {documentId} → find the block whose runs carry the sentence → propose_document_changes {documentId, rationale, items: [{kind: replace, blockId, runs: [{text: '...'}]}]}"
+          "findAnExtensionsChanges": "list_documents → keep the rows whose change is the extension's id; their status says where each stands",
+          "rewriteAParagraph": "read_document {documentId} → find the block whose runs carry the sentence → propose_document_changes {documentId, rationale, items: [{kind: replace, blockId, runs: [{text: '...'}]}]}",
+          "startAChange": "create_document {title: 'CA_0040_FEAT_thing', change: 'calliopa-video', status: idea, block: {kind: text, role: h2, runs: [{text: 'Intent'}]}, rationale}"
         },
         "goal": "Read and propose changes to the documents a reader writes in, through the kernel toolset's document tools, so a run's proposal lands exactly what the editor would have written and is reviewed per item.",
         "id": "ui.shell.documents",
         "outputContract": "One propose_document_changes call per coherent change to one document, with a rationale saying why. Report the group the tool answered and what it stages; never claim the change is accepted. A refusal envelope is an answer: read its diagnostics and adjust the items rather than retrying the same call.",
-        "permittedOperations": "list_documents to find a document by title; read_document for its blocks in reading order with their identities, kinds, roles and runs; propose_document_changes with items of kind replace (runs and/or role for a block), insert (a new text or divider block at a placement), remove (a block leaves the reading order, retired rather than deleted) and move (a block to a placement). Everything stages into this run's proposal group; nothing writes truth. The statement tools remain available for anything beyond documents.",
+        "permittedOperations": "list_documents to find a document by title, and an extension's changes by change — each row carries change and status for a change document; read_document for its blocks in reading order with their identities, kinds, roles and runs, and for a change document its extension and status; propose_document_changes with items of kind replace (runs and/or role for a block), insert (a new text or divider block at a placement), remove (a block leaves the reading order, retired rather than deleted), move (a block to a placement) and status (a change document's status, one of idea, draft, ready, wip, completed, rejected); create_document for a new document with a title, its first block and — for a change of an extension — change naming the extension and a status, idea unless said. Everything stages into this run's proposal group; nothing writes truth. The statement tools remain available for anything beyond documents.",
         "preconditions": "The run holds the kernel toolset. The document to change exists at the run's pin; read it with read_document before proposing against it, because a replace or a move names a block by the identity that read answered."
       }
     }

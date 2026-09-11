@@ -20,6 +20,9 @@ import {
   type GraphNode,
   type GraphResult,
 } from "./graph-gateway";
+import { groupChanges } from "../lib/changes";
+import type { ChangeDocumentSummary } from "../lib/library";
+import { listChangeDocuments } from "./documents/documents";
 
 /**
  * The extensions the graph holds, for the library and for their owners.
@@ -35,11 +38,20 @@ export type ExtensionListing =
   | {
       readonly reachable: true;
       readonly extensions: readonly ExtensionSummary[];
+      /** Changes naming an extension the graph does not hold, by that id. BO_0222_005 */
+      readonly other: readonly ChangeDocumentSummary[];
+      /**
+       * Whether the person the listing was read for is the owner, so the
+       * section shows the import control to the one person the kernel lets
+       * import; set by the reader, never cached with the snapshot. BO_0224_011
+       */
+      readonly owner?: boolean;
     }
   | {
       readonly reachable: false;
       readonly detail: string;
       readonly extensions: readonly [];
+      readonly other: readonly [];
     };
 
 export type ExtensionDocumentOutcome =
@@ -296,7 +308,7 @@ function newestRevision(snapshot: Snapshot, manifest: GraphNode): number {
   );
 }
 
-function summaryOf(snapshot: Snapshot, manifest: GraphNode): ExtensionSummary {
+function summaryOf(snapshot: Snapshot, manifest: GraphNode): Omit<ExtensionSummary, "changes"> {
   const content = manifest.revision.content;
   const newest = newestRevision(snapshot, manifest);
   const id = stringOf(content, "id") || manifest.id.replace(/^node:/u, "");
@@ -332,10 +344,20 @@ export async function declaresVocabulary(id: string): Promise<boolean> {
 export async function listExtensions(): Promise<ExtensionListing> {
   const snapshot = await readSnapshot();
   if (!snapshot.ok)
-    return { reachable: false, detail: snapshot.detail, extensions: [] };
-  const extensions = snapshot.value.manifests.map((manifest) =>
-    summaryOf(snapshot.value, manifest),
+    return { reachable: false, detail: snapshot.detail, extensions: [], other: [] };
+  // The change documents are content, read as the documents listing reads
+  // and never from the pinned snapshot: a change written a moment ago lists
+  // at once. A failed read lists the extensions with no changes rather than
+  // nothing. BO_0222_005
+  const changes = await listChangeDocuments();
+  const grouped = groupChanges(
+    changes.outcome === "success" ? changes.result : [],
+    snapshot.value.manifests.map((manifest) => stringOf(manifest.revision.content, "id")),
   );
+  const extensions = snapshot.value.manifests.map((manifest) => {
+    const summary = summaryOf(snapshot.value, manifest);
+    return { ...summary, changes: grouped.byExtension.get(summary.id) ?? [] };
+  });
   extensions.sort((a, b) =>
     a.category !== b.category
       ? a.category === "bundled"
@@ -343,7 +365,7 @@ export async function listExtensions(): Promise<ExtensionListing> {
         : 1
       : a.id.localeCompare(b.id),
   );
-  return { reachable: true, extensions };
+  return { reachable: true, extensions, other: grouped.other };
 }
 
 function docsOf(members: readonly GraphNode[]): DocSource[] {
@@ -449,6 +471,8 @@ export async function readExtensionDocument(
     };
 
   const summary = summaryOf(snapshot.value, manifest);
+  const changes = await listChangeDocuments();
+  const own = groupChanges(changes.outcome === "success" ? changes.result : [], [id]).byExtension.get(id) ?? [];
   let entry = networks.get(id);
   if (entry === undefined || entry.head !== snapshot.value.head) {
     const network = buildNetwork(
@@ -464,7 +488,8 @@ export async function readExtensionDocument(
   const document = renderNode(
     path,
     entry.network,
-    factsOf(snapshot.value, manifest, summary),
+    factsOf(snapshot.value, manifest, { ...summary, changes: own }),
+    own,
   );
   return document === null
     ? { outcome: "missing", detail: `${id} has no node ${path ?? ""}.` }

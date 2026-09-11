@@ -1,3 +1,4 @@
+import type { ChangeDocumentSummary } from "../library";
 import type { Run, TextRole } from "../runs";
 import type { LiveLine, ParsedDocument } from "./parse";
 import type { Change, Network, Topic } from "./network";
@@ -150,7 +151,15 @@ function purposeBlocks(network: Network, facts: ExtensionFacts): OwnerBlock[] {
   ];
 }
 
-export function renderExtension(network: Network, facts: ExtensionFacts): OwnerDocument {
+/** The link that opens a change document in the editor, which the extension
+ * view tells apart from a node of the owner network by its prefix. BO_0222_009 */
+export const linkToDocument = (documentId: string): string => `calliopa:doc:${documentId}`;
+
+export function renderExtension(
+  network: Network,
+  facts: ExtensionFacts,
+  changes: readonly ChangeDocumentSummary[] = [],
+): OwnerDocument {
   const blocks: OwnerBlock[] = [text("h1", plain(facts.id))];
   blocks.push(text("h2", plain("Purpose")), ...purposeBlocks(network, facts));
 
@@ -175,9 +184,38 @@ export function renderExtension(network: Network, facts: ExtensionFacts): OwnerD
     );
   }
 
+  // An extension's changes are documents (BO_0222): open first, then title
+  // descending, each a link that opens the document in the editor. A
+  // docs/changes/ member the graph still holds — a file not yet imported —
+  // is listed after them under its own line, so nothing an extension carries
+  // goes unlisted. BO_0222_009
   blocks.push(text("h2", plain("Changes")));
-  if (network.changes.length === 0) {
-    blocks.push(text("paragraph", plain("No change documents yet.")));
+  if (changes.length === 0 && network.changes.length === 0) {
+    blocks.push(text("paragraph", plain("No changes yet.")));
+  }
+  const open = (status: string): boolean => status !== "completed" && status !== "rejected";
+  const ordered = [...changes].sort((a, b) => {
+    if (open(a.status) !== open(b.status)) return open(a.status) ? -1 : 1;
+    return b.title.toLowerCase().localeCompare(a.title.toLowerCase());
+  });
+  for (const change of ordered) {
+    blocks.push(
+      text(
+        "paragraph",
+        badge(change.status),
+        plain(" "),
+        { text: change.title, marks: ["bold"], link: linkToDocument(change.documentId) },
+      ),
+    );
+  }
+  if (network.changes.length > 0) {
+    blocks.push(text("h3", plain("Files not yet imported")));
+    blocks.push(
+      text(
+        "quote",
+        plain("Change documents still held as docs/changes/ members; kernel import-changes converts them into documents (BO_0222_001)."),
+      ),
+    );
   }
   for (const change of network.changes) {
     blocks.push(
@@ -345,8 +383,9 @@ export function renderNode(
   nodePath: string | undefined,
   network: Network,
   facts: ExtensionFacts,
+  changes: readonly ChangeDocumentSummary[] = [],
 ): OwnerDocument | null {
-  if (nodePath === undefined) return renderExtension(network, facts);
+  if (nodePath === undefined) return renderExtension(network, facts, changes);
   const topic = network.topics.find((candidate) => candidate.path === nodePath);
   if (topic !== undefined) return renderTopic(topic, facts.id, network, facts);
   const change = network.changes.find((candidate) => candidate.path === nodePath);

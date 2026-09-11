@@ -19,6 +19,10 @@
     16rem minmax(0, 1fr) 18rem;
   background: var(--canvas);
   color: var(--text);
+  /* The header's line is as tall as the wordmark's laurel (1.55em at the
+     header's 1.2rem), and no control in it is taller. CA_0041_007 */
+  --header-pad: 0.5rem;
+  --header-line: calc(1.2rem * 1.55);
 }
 
 .shell-header {
@@ -27,7 +31,7 @@
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  padding: 0.5rem 0.75rem;
+  padding: var(--header-pad) 0.75rem;
   background: var(--panel-raised);
   border-bottom: 1px solid var(--border);
 }
@@ -53,6 +57,8 @@
 .save-status {
   margin: 0;
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
   color: var(--text-muted);
   font-size: 0.85rem;
   white-space: nowrap;
@@ -64,6 +70,7 @@
 .theme-toggle,
 .settings-control,
 .process-indicator,
+.header-disclosure__button,
 .tab-action,
 .sheet-close {
   border: 1px solid transparent;
@@ -78,10 +85,41 @@
 .theme-toggle:hover,
 .settings-control:hover,
 .process-indicator:hover,
+.header-disclosure__button:hover,
+.header-disclosure__button[aria-expanded="true"],
 .tab-action:hover,
 .sheet-close:hover {
   background: var(--panel-raised);
   border-color: var(--border);
+}
+
+/* The header's buttons hold their icon or count centred, so none is taller
+   than the line: the content, the padding and the border. CA_0041_007 */
+.layout-control,
+.theme-toggle,
+.settings-control,
+.process-indicator,
+.header-disclosure__button,
+.update-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+/* One icon for both drawers: Phosphor draws the panel on the left, and the
+   right drawer's control mirrors it rather than altering the path.
+   CA_0041_002 */
+.layout-control[data-side="right"] .icon {
+  transform: scaleX(-1);
+}
+
+/* The desktop says the save state in words and the update in words; a phone
+   swaps both for their icons (the phone rules below). CA_0041_005
+   CA_0041_006 */
+.save-status .icon,
+.update-hint .icon {
+  display: none;
 }
 
 .library-action {
@@ -177,6 +215,9 @@
   color: var(--text-muted);
   font-family: var(--font-mono);
   font-size: 0.8rem;
+  /* Set, not the font's own, so the count stays inside the header's line
+     whichever monospace face answers. CA_0041_007 */
+  line-height: 1.2;
   text-align: center;
 }
 
@@ -192,45 +233,97 @@
   flex: 0 0 auto;
 }
 
-/* Whose authority the page acts under, beside the instance chrome: the name,
-   what the class lets the person do, and the way out. BO_0209_003 */
-.identity {
+/* The owner's hint that a newer release exists: the chrome idiom with the
+   accent, since it asks for a decision rather than offering a tool. BO_0223_013 */
+.update-hint {
+  flex: 0 0 auto;
+  border: 1px solid var(--accent);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--accent);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.update-hint:hover {
+  background: var(--panel-raised);
+}
+
+/* An icon button on the header's line whose panel opens under it, aligned
+   to its right edge: the signed-in person's menu and the licence warning.
+   Above the workspace, the dock and the phone's sheets; below messages and
+   the drag preview. CA_0041_003 CA_0041_004 */
+.header-disclosure {
+  position: relative;
   flex: 0 0 auto;
   display: inline-flex;
-  align-items: baseline;
-  gap: 0.4rem;
+}
+
+.header-disclosure__panel {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 30;
+  min-width: 12rem;
+  max-width: min(20rem, calc(100vw - 2rem));
+  box-sizing: border-box;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--panel-raised);
   font-size: 0.85rem;
 }
 
+/* Whose authority the page acts under: the name, what the class lets the
+   person do, and the way out, in the person's menu. BO_0209_003 CA_0041_003 */
+.identity {
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+
 .identity__name {
+  margin: 0;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .identity__class {
+  margin: 0.15rem 0 0.5rem;
   color: var(--text-muted);
 }
 
 .sign-out {
+  display: block;
+  width: 100%;
   border: 1px solid transparent;
   border-radius: 0.4rem;
   background: transparent;
   color: var(--text);
-  padding: 0.25rem 0.5rem;
+  padding: 0.35rem 0.5rem;
+  text-align: start;
   cursor: pointer;
 }
 
 .sign-out:hover {
-  background: var(--panel-raised);
+  background: var(--panel);
   border-color: var(--border);
 }
 
-/* The licence's word, shown for as long as it holds. BO_0209_005 */
+/* The licence's word, one press away for as long as it holds. BO_0209_005
+   CA_0041_004 */
 .licence-warning {
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+
+.header-disclosure--licence .header-disclosure__button {
+  color: var(--error);
+}
+
+.licence-warning__text {
   margin: 0;
   color: var(--error);
-  font-size: 0.85rem;
   overflow-wrap: anywhere;
 }
 
@@ -392,19 +485,283 @@
   letter-spacing: 0.08em;
 }
 
+/* The dock is a layer above the document. A dock taller than the room left
+ * to it takes the workspace's row down to nothing, while the workspace's
+ * padding still spills over the dock's top edge; the document's rows are
+ * positioned, and a positioned box paints — and takes the press — above an
+ * unpositioned one, so they lay over the handle and a finger reached the
+ * rows. Above every layer a view draws in the flow, and below the sheets, the
+ * messages and anything dragged (`dock-layer.test.ts`). BO_0230_003 */
 .dock {
   grid-area: dock;
+  position: relative;
+  z-index: 5;
   display: grid;
   padding: 0.75rem;
   background: var(--panel-raised);
   border-top: 1px solid var(--border);
 }
 
+/* The command bar (CA_0039_002): the strip naming where the work goes, then
+   one row — the agent's dropdown at the left, vertically centred on the field,
+   and the field, with the command's chips along its bottom edge and Run inside
+   it at its right end. Calm until engaged: a fine border on the raised panel,
+   no shadow, and the theme's tokens only. */
 .composer {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.composer__bar {
+  display: flex;
   align-items: center;
-  gap: 0.7rem;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.composer__field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.4rem 3.25rem 0.4rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 1.4rem;
+  background: var(--panel-raised);
+}
+
+.composer__field:focus-within {
+  border-color: var(--accent);
+}
+
+/* The field grows with its text up to a bound, then scrolls (`fitField` in
+   `command-field.tsx`); it has no border of its own inside the rounded one. */
+.dock .composer__field textarea {
+  min-height: 1.75rem;
+  max-height: 10rem;
+  padding: 0.25rem 0;
+  border: 0;
+  background: transparent;
+  resize: none;
+  overflow-y: auto;
+}
+
+/* Run: round, inside the field at its right end, the accent's ring and play
+   glyph. `.dock button` is more specific than a lone class, so the look is
+   qualified by the dock. */
+.dock .composer__run {
+  position: absolute;
+  inset-inline-end: 0.35rem;
+  top: 50%;
+  translate: 0 -50%;
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--accent);
+}
+
+.dock .composer__run:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+}
+
+.dock .composer__run:disabled {
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+/* What the command carries, one chip per reference in mark order and a pin
+   chip per pinned block, wrapping when they do not fit (CA_0039_003). */
+.composer__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dock .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 1.75rem;
+  padding: 0.1rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.dock .chip:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* A stale passage says so by its icon and its name as well as its colour. */
+.dock .chip[data-stale="true"] {
+  border-color: var(--warning);
+}
+
+.dock .chip[data-stale="true"] svg {
+  color: var(--warning);
+}
+
+/* The strip above the bar: the view's action, then the document the command
+   is aimed at, grayed, and the × that asks for words instead (CA_0039_001).
+   The title gives way first when the line is short. */
+.command-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.command-strip .dock-actions {
+  flex: none;
+  margin: 0;
+}
+
+.command-strip__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.command-strip__answer {
+  flex: none;
+  color: var(--text);
+}
+
+.dock button.command-strip__title {
+  padding: 0;
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
+}
+
+.dock .command-strip__dismiss {
+  flex: none;
+  margin-inline-start: auto;
+  padding: 0 0.4rem;
+  color: var(--text-muted);
+}
+
+/* On a coarse pointer every control in the bar is a fingertip wide. */
+@media (pointer: coarse) {
+  .dock .composer__run,
+  .dock .chip,
+  .dock .command-strip__dismiss {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .dock .composer__run {
+    width: 44px;
+    height: 44px;
+  }
+
+  .composer__field {
+    padding-inline-end: 3.5rem;
+  }
+}
+
+/* The agent dropdown: the chosen agent's face and a caret, opening upward
+   from the dock onto the three agents. The faces keep their own ground, so
+   they read the same in both themes; a ring marks the chosen one, and an
+   agent that cannot run is dimmed and desaturated with its reason beneath
+   its name. BO_0228_011 */
+.agent-menu {
+  position: relative;
+  flex: none;
+}
+
+.dock .agent-menu__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-raised);
+  color: var(--text-muted);
+}
+
+.agent-menu__face {
+  display: block;
+  flex: none;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.agent-menu__list {
+  position: absolute;
+  bottom: calc(100% + 0.35rem);
+  left: 0;
+  z-index: 20;
+  min-width: 16rem;
+  max-width: min(22rem, calc(100vw - 2rem));
+  margin: 0;
+  padding: 0.3rem;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--panel-raised);
+}
+
+.agent-menu__option {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 44px;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.45rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.agent-menu__option[data-active="true"] {
+  background: var(--selection);
+}
+
+.agent-menu__option[aria-selected="true"] .agent-menu__face {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.agent-menu__option[aria-disabled="true"] {
+  cursor: default;
+  color: var(--text-muted);
+}
+
+.agent-menu__option[aria-disabled="true"] .agent-menu__face {
+  filter: grayscale(1);
+  opacity: 0.55;
+}
+
+.agent-menu__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.agent-menu__reason {
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 
 .sheet-handle,
@@ -517,20 +874,12 @@
   color: var(--error);
 }
 
-.attachment,
 .undo {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   margin: 0.5rem 0 0;
   color: var(--text-muted);
-}
-
-.attachment {
-  grid-column: 1 / -1;
-  border: 1px solid var(--accent);
-  border-radius: 0.4rem;
-  padding: 0.25rem 0.5rem;
 }
 
 /* A message is off the shell's layout: raising or lowering one moves no content
@@ -654,9 +1003,50 @@
       "dock" auto / minmax(0, 1fr);
   }
 
+  /* One line and the tab strip under it. The wordmark takes what the
+     controls leave, so they sit at the right and the line never wraps: only
+     the tab strip goes below. The controls' gap and padding shrink so the
+     owner's full set fits at 360 CSS px inside the 2.25rem each side keeps
+     for a sheet handle. CA_0041_008 */
   .shell-header {
     flex-wrap: wrap;
+    column-gap: 0.2rem;
+    row-gap: 0.35rem;
     padding-inline: 2.25rem;
+  }
+
+  .shell-header .wordmark {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .shell-header .theme-toggle,
+  .shell-header .settings-control,
+  .shell-header .process-indicator,
+  .shell-header .header-disclosure__button,
+  .shell-header .update-hint {
+    padding-inline: 0.2rem;
+  }
+
+  .save-status .icon,
+  .update-hint .icon {
+    display: block;
+  }
+
+  .update-hint__words {
+    display: none;
+  }
+
+  /* Hidden to the eye only, so the status still says its word. */
+  .save-status__word {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
   }
 
   .shell-header .layout-control {
@@ -720,9 +1110,13 @@
     background: var(--panel-raised);
     color: var(--text);
     z-index: 10;
-    inset-block-start: 0.7rem;
+    /* Centred on the header's line, at the edge as before. CA_0041_008 */
+    inset-block-start: calc(
+      var(--header-pad) + var(--header-line) / 2 - 2.75rem / 2
+    );
     min-width: 2rem;
     min-height: 2.75rem;
+    box-sizing: border-box;
   }
 
   .sheet-handle--left {
@@ -739,12 +1133,23 @@
     min-height: 2.75rem;
   }
 
-  .composer {
-    grid-template-columns: 1fr auto;
+  /* What grows in the dock scrolls inside itself on a phone, so the dock
+   * cannot push the document's row to nothing — the state a reader met, with
+   * the handle under the document's rows and the dock opened for good. The
+   * agent menu opens upward out of the dock, so the dock itself never clips.
+   * BO_0230_003 */
+  .shell[data-dock="console"] .console,
+  .composer__chips,
+  .composer__references {
+    max-height: 40dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
-  .composer label {
-    grid-column: 1 / -1;
+  /* A fingertip's height across the dock's width, for a tap and a vertical
+   * swipe alike. */
+  .dock .dock__handle {
+    min-height: 44px;
   }
 }
 
@@ -845,6 +1250,19 @@
 }
 
 .settings-section__lead,
+/* The commands the Update tab shows where no updater runs, and the updater's
+   log while it does. BO_0223_014 */
+.settings-commands {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  padding: 0.6rem 0.8rem;
+  overflow-x: auto;
+  white-space: pre;
+}
+
 .settings-empty {
   margin: 0 0 1rem;
   color: var(--text-muted);
@@ -1229,4 +1647,257 @@
 .extension-version-select {
   font: inherit;
   max-width: 28rem;
+}
+.extension-export {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+.extension-import {
+  padding: 0.75rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+.extension-import__lines {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+.extension-import__lines li {
+  margin: 0.15rem 0;
+}
+.extension-import__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.extension-import__action {
+  font: inherit;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--text);
+  padding: 0.3rem 0.8rem;
+  cursor: pointer;
+}
+.extension-import__action[disabled] {
+  color: var(--text-muted);
+  cursor: default;
+}
+.library-create {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.25rem 0 0.5rem;
+}
+.library-create__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.library-create__field input {
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--panel, transparent);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  padding: 0.25rem 0.4rem;
+  min-width: 0;
+}
+.library-create__controls {
+  display: flex;
+  gap: 0.25rem;
+}
+.library-create__controls .library-action {
+  border-color: var(--border);
+}
+.library-refusal {
+  margin: 0.25rem 0;
+  font-size: 0.8rem;
+  color: var(--error);
+}
+
+/* The Extensions section as a tree: an extension row with the control that
+   starts a change beside it, its changes indented under it with the icon that
+   stands for each status, and the filter row the funnel reveals — one toggle
+   per status, pressed when that status lists. Icons are Phosphor regular at
+   16px, aria-hidden inside named controls (BO_0222_005, BO_0222_006, BO_0222_008). */
+.icon {
+  display: inline-block;
+  vertical-align: -0.15em;
+  flex: 0 0 auto;
+}
+.library-section-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.25rem;
+}
+.library-section-actions .library-action--body {
+  float: none;
+}
+.library-action--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.75rem;
+  min-height: 1.75rem;
+  padding: 0.2rem;
+}
+.library-action[aria-pressed="true"] {
+  background: var(--panel-raised);
+  border-color: var(--border);
+}
+/* The funnel reads as active whenever the set differs from the default: a
+   mark, not colour alone. */
+.library-action[data-filtered="true"]::after {
+  content: "";
+  position: absolute;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--accent);
+  transform: translate(0.55rem, -0.55rem);
+}
+.library-action[data-filtered="true"] {
+  position: relative;
+}
+.library-change-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0.25rem 0 0;
+}
+.library-change-filter .library-action[aria-pressed="false"] {
+  color: var(--text-muted);
+}
+.library-tree {
+  display: flex;
+  flex-direction: column;
+}
+.library-tree__row {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+.library-tree__row .library-entry {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.library-tree__named {
+  padding: 0.3rem 0.45rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+.library-list--children {
+  margin: 0.1rem 0 0.2rem 1.1rem;
+  gap: 0.05rem;
+}
+.library-entry--change {
+  padding: 0.2rem 0.45rem;
+  font-size: 0.9rem;
+}
+.library-entry__status {
+  display: inline-flex;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+.library-entry[data-current="true"] .library-entry__status {
+  color: var(--accent);
+}
+
+/* A choice action: a label, the current value's icon, a native select — the
+   shell's own idiom in the inspector and the dock (BO_0222_007). */
+.choice-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+.choice-control__label {
+  color: var(--text-muted);
+}
+.choice-control select {
+  font: inherit;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--panel);
+  color: var(--text);
+}
+
+/* The references a `#` being typed could mean, as buttons that open above
+   the field, since its bottom edge holds the chips (CA_0039_002); pointer,
+   touch and Tab all reach them. */
+.composer__references {
+  position: absolute;
+  inset-inline: 0;
+  bottom: calc(100% + 0.4rem);
+  z-index: 1;
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0.35rem;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--panel-raised);
+}
+
+.composer__references q {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  color: var(--text);
+}
+
+.composer__number {
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.composer__references button {
+  display: flex;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+  text-align: start;
+}
+
+/* A contributed toggle says which of the view's modes the surface is in, not
+ * only that there is a way in (`command-dock.md`). Every dock button shares a
+ * transparent, borderless rest, so the pressed state was in the markup alone
+ * and command mode could be on with nothing showing it. At rest the toggle
+ * reads as a control with an empty ring; pressed, it takes the accent, a
+ * tinted ground and a filled ring — shape as well as colour. BO_0227 */
+.dock-actions button[aria-pressed] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-color: var(--border);
+}
+
+.dock-actions button[aria-pressed]::before {
+  content: "";
+  box-sizing: border-box;
+  width: 0.65rem;
+  height: 0.65rem;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+}
+
+.dock-actions button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel-raised));
+  font-weight: 600;
+}
+
+.dock-actions button[aria-pressed="true"]::before {
+  border-color: var(--accent);
+  background: var(--accent);
 }

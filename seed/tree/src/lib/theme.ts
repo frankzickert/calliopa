@@ -15,6 +15,19 @@ export const THEME_TOKENS = [
   "timeline-track",
   "waveform",
   "playhead",
+  // A proposed change's ground and edge, one pair per proposer, so a reader
+  // sees who proposed it before reading a word. The face on the block's left
+  // border and its accessible name say the same: colour is never the only
+  // signal. Body text keeps AA on every ground, which `theme.test.ts`
+  // computes. BO_0233_002
+  "proposal-codex",
+  "proposal-codex-edge",
+  "proposal-claude",
+  "proposal-claude-edge",
+  "proposal-hermes",
+  "proposal-hermes-edge",
+  "proposal-person",
+  "proposal-person-edge",
 ] as const;
 
 type ThemeToken = (typeof THEME_TOKENS)[number];
@@ -40,6 +53,14 @@ const dark: Theme = {
   "timeline-track": "#1a2a33",
   waveform: "#3fa9c9",
   playhead: "#ff6b5e",
+  "proposal-codex": "#17302a",
+  "proposal-codex-edge": "#3fae8c",
+  "proposal-claude": "#35251c",
+  "proposal-claude-edge": "#d9895b",
+  "proposal-hermes": "#2b2339",
+  "proposal-hermes-edge": "#a585dc",
+  "proposal-person": "#262b33",
+  "proposal-person-edge": "#8a95a2",
 };
 
 const light: Theme = {
@@ -58,6 +79,14 @@ const light: Theme = {
   "timeline-track": "#dde4ea",
   waveform: "#1f86a8",
   playhead: "#d64545",
+  "proposal-codex": "#e2f3ed",
+  "proposal-codex-edge": "#2a8466",
+  "proposal-claude": "#fbebe1",
+  "proposal-claude-edge": "#b35c33",
+  "proposal-hermes": "#efe8fa",
+  "proposal-hermes-edge": "#7652bd",
+  "proposal-person": "#eceff3",
+  "proposal-person-edge": "#66717e",
 };
 
 export const themes: Readonly<Record<ResolvedTheme, Theme>> = { dark, light };

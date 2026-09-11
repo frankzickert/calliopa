@@ -70,6 +70,28 @@ const stamped: AgentStatus = {
 const keys = (rows: readonly ConnectionRecord[]) =>
   agentNeeds(rows).map((need) => need.key);
 
+describe("what the agent still needs when Hermes reasons", () => {
+  const onHermes = (over: Partial<AgentStatus> = {}): AgentStatus => ({ ...stamped, runtime: "hermes", ...over });
+
+  it("Given Hermes on the subscription and Codex signed in, Then nothing is needed: it reasons on Codex's sign-in", () => {
+    expect(keys([hermes(onHermes({ hermesModel: "subscription" })), status("codex", true), memory(true)])).toEqual([]);
+  });
+
+  it("Given Hermes on the subscription and Codex signed out, Then Codex's sign-in is what is needed", () => {
+    const needs = agentNeeds([hermes(onHermes()), status("codex", false), memory(true)]);
+    expect(needs.map((need) => need.key)).toEqual(["signIn"]);
+    expect(needs[0]?.text).toContain("Codex");
+  });
+
+  it("Given Hermes on the API-key model, Then it needs the model configured and no sign-in", () => {
+    const on = onHermes({ hermesModel: "provider" });
+    expect(agentNeeds([hermes(on), status("codex", false), memory(true)])).toEqual([
+      { key: "runtime", text: "Hermes is set to the API-key model, and none is configured.", blocking: true },
+    ]);
+    expect(keys([{ ...hermes(on), apiKeyModel: true }, status("codex", false), memory(true)])).toEqual([]);
+  });
+});
+
 describe("what the agent still needs", () => {
   it("Given a signed-in runtime, a credential, a toolset and a memory key, Then nothing is needed", () => {
     expect(

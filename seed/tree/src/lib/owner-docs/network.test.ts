@@ -85,6 +85,25 @@ describe("the owner network", () => {
     expect(links.some((run) => run.link === "calliopa:ext:ui.shell/docs/system/ui-kernel.md")).toBe(true);
   });
 
+  it("Given change documents, Then the Changes section lists them open first by title descending, each opening the document, with the files still held listed after (BO_0222_009)", () => {
+    const changes = [
+      { documentId: "d-done", title: "BO_0001_FEAT_done", change: "ui.shell", status: "completed" as const, revisedAt: 0 },
+      { documentId: "d-a", title: "BO_0002_FEAT_a", change: "ui.shell", status: "idea" as const, revisedAt: 0 },
+      { documentId: "d-b", title: "BO_0003_FEAT_b", change: "ui.shell", status: "wip" as const, revisedAt: 0 },
+    ];
+    const document = renderExtension(network, facts, changes);
+    const blocks = document.blocks.filter((block) => block.kind === "text");
+    const start = blocks.findIndex((block) => block.kind === "text" && block.runs[0]?.text === "Changes");
+    const rows = blocks
+      .slice(start + 1)
+      .filter((block) => block.kind === "text" && block.role === "paragraph" && block.runs.some((run) => run.link?.startsWith("calliopa:doc:")))
+      .map((block) => (block.kind === "text" ? block.runs.map((run) => run.text).join("") : ""));
+    expect(rows).toEqual(["wip BO_0003_FEAT_b", "idea BO_0002_FEAT_a", "completed BO_0001_FEAT_done"]);
+    const files = blocks.findIndex((block) => block.kind === "text" && block.runs[0]?.text === "Files not yet imported");
+    expect(files).toBeGreaterThan(start);
+    expect(renderExtension(network, facts).blocks.some((block) => block.kind === "text" && block.runs[0]?.text === "Files not yet imported")).toBe(true);
+  });
+
   it("Given a topic node, Then fixed lines and open work come before mutable truth within a section", () => {
     const document = renderNode("docs/system/distribution.md", network, facts);
     expect(document?.nodeId).toBe("ext:ui.shell/docs/system/distribution.md");

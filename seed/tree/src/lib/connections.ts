@@ -121,6 +121,12 @@ export interface ConnectionRecord {
    * row carries it, and only once the agent has started at all.
    */
   readonly agent: AgentStatus | null;
+  /**
+   * Whether an API-key model is configured, which Hermes may be set to reason
+   * with instead of the ChatGPT subscription. Only the `hermes` row carries
+   * it. BO_0228_012
+   */
+  readonly apiKeyModel?: boolean;
 }
 
 /**
@@ -133,6 +139,60 @@ export interface AgentStatus {
   readonly runtime: string;
   readonly credential: boolean;
   readonly toolset: boolean;
+  /**
+   * What a human chose, when it differs from what is running. The agent
+   * resolves a selection it cannot configure to one it can — a selection with
+   * no model accepts no run at all — and stamps the disagreement rather than
+   * hiding it. Absent when the two agree. BO_0225_001
+   */
+  readonly selected?: string;
+  /** Why they differ, in the words a surface renders. BO_0225_001 */
+  readonly reason?: string;
+  /**
+   * What the hermes runtime reasons with, whether or not it is the one
+   * running: the ChatGPT subscription or the API-key model, and the model's
+   * name. Absent from a stamp older than BO_0228. BO_0228_002
+   */
+  readonly hermesModel?: HermesModel;
+  readonly hermesModelName?: string;
+}
+
+/** What Hermes's own loop reasons with, chosen explicitly. BO_0228_002 */
+export type HermesModel = "subscription" | "provider";
+
+/**
+ * The three agents a command can be sent to. `provider` — Hermes on the
+ * API-key model under its old name — stays a selection the kernel's intake
+ * takes from the CLI, and is not one of these. BO_0228_009
+ */
+export const AGENTS = ["codex", "claude-code", "hermes"] as const;
+export type AgentId = (typeof AGENTS)[number];
+
+export const isAgentId = (value: unknown): value is AgentId =>
+  typeof value === "string" && (AGENTS as readonly string[]).includes(value);
+
+/**
+ * The party whose sign-in the running runtime reasons on. Hermes's own loop
+ * is not a runtime anything reports on: on the subscription it reasons on
+ * Codex's ChatGPT sign-in, and on the API-key model on no sign-in at all.
+ * BO_0228_012
+ */
+export const reasoningParty = (agent: AgentStatus): string =>
+  agent.runtime === "hermes" ? (agent.hermesModel === "provider" ? "provider" : "codex") : agent.runtime;
+
+/**
+ * One runtime the command area may offer, and whether it can be chosen.
+ *
+ * A runtime that cannot perform a command is named and disabled with its
+ * reason rather than omitted: a person who signed in to Claude and cannot find
+ * it in the list learns nothing, and one who finds it and picks it learns only
+ * that the run failed. BO_0225_004
+ */
+export interface SelectableRuntime {
+  readonly id: string;
+  readonly label: string;
+  readonly selectable: boolean;
+  readonly reason: string | null;
 }
 
 /** What the agent container reports about one of its runtimes. */
@@ -184,11 +244,22 @@ export function agentNeeds(
     ];
   }
 
-  const reasoning = rows.find((row) => row.party === agent.runtime) ?? null;
-  if (reasoning === null) {
+  const reasoning = rows.find((row) => row.party === reasoningParty(agent)) ?? null;
+  const hermesRow = rows.find((row) => row.party === "hermes");
+  if (reasoningParty(agent) === "provider" && agent.runtime === "hermes") {
+    // Hermes on the API-key model reasons on no sign-in; what it needs is
+    // the model configured. BO_0228_012
+    if (hermesRow?.apiKeyModel !== true) {
+      needs.push({
+        key: "runtime",
+        text: "Hermes is set to the API-key model, and none is configured.",
+        blocking: true,
+      });
+    }
+  } else if (reasoning === null) {
     needs.push({
       key: "runtime",
-      text: `The agent reasons on ${agent.runtime}, which nothing reports on.`,
+      text: `The agent reasons on ${reasoningParty(agent)}, which nothing reports on.`,
       blocking: true,
     });
   } else if (!(reasoning.status?.authenticated ?? false)) {
