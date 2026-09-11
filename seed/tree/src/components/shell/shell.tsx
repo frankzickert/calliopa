@@ -1037,18 +1037,21 @@ export const Shell = component$<{
                       aria-controls={`${elementId}-list`}
                       onClick$={() => toggleSection$(key)}
                     >
+                      <span class="library-category__caret">
+                        <Icon name="caret-right" />
+                      </span>
                       {section.title}
                     </button>
                   </h2>
                   {section.createLabel !== undefined && (
                     <button
                       type="button"
-                      class="library-action"
+                      class="library-action library-action--icon"
                       aria-label={section.createLabel}
                       data-new={name}
                       onClick$={() => createIn$(key)}
                     >
-                      +
+                      <Icon name="plus" />
                     </button>
                   )}
                 </div>

@@ -42,8 +42,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-calliopa}
       POSTGRES_USER: ${POSTGRES_USER:-calliopa}
       POSTGRES_PASSWORD_FILE: /run/secrets/calliopa/postgres_password
+    # Local to this machine whatever CALLIOPA_HOST_BIND says: nothing on
+    # another machine needs the database. BO_0240_002
     ports:
-      - "${CALLIOPA_HOST_BIND:-127.0.0.1}:5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - calliopa-secrets:/run/secrets/calliopa:ro
@@ -134,8 +136,10 @@ services:
     configs:
       - source: garage_toml
         target: /etc/garage.toml
+    # Local to this machine whatever CALLIOPA_HOST_BIND says: blob content
+    # reaches browsers only through CCGW's routes. BO_0240_002
     ports:
-      - "${CALLIOPA_HOST_BIND:-127.0.0.1}:3900:3900"
+      - "127.0.0.1:3900:3900"
     volumes:
       - garage-data:/var/lib/garage
       - calliopa-secrets:/run/secrets/calliopa:ro
@@ -254,11 +258,15 @@ services:
       # BO_0215_002
       CALLIOPA_OWNER_PRINCIPAL: ${CALLIOPA_OWNER_PRINCIPAL:-owner}
       CALLIOPA_KERNEL_DATA: /var/lib/calliopa-kernel
-      # The confirmation origin binds wide inside the container; the host
-      # publish below stays loopback, and browsers reach it at the published
-      # address. BO_0103_003
+      # The confirmation origin binds wide inside the container, and the
+      # host publish below decides where it is reachable. The confirmation
+      # URL names the host the browser used and the published port, so one
+      # install is confirmed from 127.0.0.1 and from a VPN address alike;
+      # CALLIOPA_KERNEL_CONFIRM_URL overrides it for a reverse proxy or TLS
+      # in front. BO_0103_003 BO_0240_001
       CALLIOPA_KERNEL_CONFIRM_BIND: 0.0.0.0
-      CALLIOPA_KERNEL_CONFIRM_URL: ${CALLIOPA_KERNEL_CONFIRM_URL:-http://${CALLIOPA_HOST_BIND:-127.0.0.1}:${CALLIOPA_CONFIRM_PORT:-8091}}
+      CALLIOPA_KERNEL_CONFIRM_URL: ${CALLIOPA_KERNEL_CONFIRM_URL:-}
+      CALLIOPA_KERNEL_CONFIRM_PUBLIC_PORT: ${CALLIOPA_CONFIRM_PORT:-8091}
       # The agent bridge: the kernel half of the Hermes agent service.
       # BO_0089_012
       CALLIOPA_HERMES_URL: http://hermes:8642
@@ -285,11 +293,13 @@ services:
       CALLIOPA_UPDATER_DIR: /var/lib/calliopa-updater
       CALLIOPA_UPDATE_CHECK: ${CALLIOPA_UPDATE_CHECK:-on}
     # The host side is .env's: CALLIOPA_PORT, and the confirmation origin on
-    # CALLIOPA_CONFIRM_PORT, which install.sh derives as the next port.
+    # CALLIOPA_CONFIRM_PORT, which install.sh derives as the next port, both
+    # on every adapter of the machine unless CALLIOPA_HOST_BIND names one.
     # Inside the container the kernel keeps 8090 and 8091. BO_0221_003
+    # BO_0240_002
     ports:
-      - "${CALLIOPA_HOST_BIND:-127.0.0.1}:${CALLIOPA_PORT:-8090}:8090"
-      - "${CALLIOPA_HOST_BIND:-127.0.0.1}:${CALLIOPA_CONFIRM_PORT:-8091}:8091"
+      - "${CALLIOPA_HOST_BIND:-0.0.0.0}:${CALLIOPA_PORT:-8090}:8090"
+      - "${CALLIOPA_HOST_BIND:-0.0.0.0}:${CALLIOPA_CONFIRM_PORT:-8091}:8091"
     volumes:
       - kernel-data:/var/lib/calliopa-kernel
       - agent-config:/var/lib/calliopa/agent-config

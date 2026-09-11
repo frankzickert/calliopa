@@ -262,12 +262,12 @@ export const ExtensionsSection = component$<SectionProps>(
         <div class="library-section-actions">
           <button
             type="button"
-            class="library-action library-action--body"
+            class="library-action library-action--body library-action--icon"
             aria-label="Re-read extensions"
             data-refresh-extensions
             onClick$={refresh$}
           >
-            ↻
+            <Icon name="arrow-clockwise" />
           </button>
           <button
             type="button"

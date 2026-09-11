@@ -357,9 +357,21 @@ install_updater
 bind="$(sed -n 's/^CALLIOPA_HOST_BIND=//p' .env | tail -1)"
 
 echo
-echo "install complete. Calliopa is running at http://${bind:-127.0.0.1}:${port}"
+# Every adapter is not an address a browser opens: name loopback for this
+# machine and say where the others find it. BO_0240_004
+case "${bind:-0.0.0.0}" in
+  0.0.0.0 | :: | '[::]')
+    echo "install complete. Calliopa is running at http://127.0.0.1:${port} on this machine."
+    echo "Other machines open it at this machine's address on their network or VPN"
+    echo "(its Tailscale name, for one), on the same port."
+    ;;
+  *)
+    echo "install complete. Calliopa is running at http://${bind}:${port}"
+    ;;
+esac
 echo "${updater_note}"
 echo
-echo "Open that address: on your first visit Calliopa asks you to choose the"
-echo "owner's password, once. Then sign the agent in from the settings view."
+echo "If you have not chosen the owner's password yet, open Calliopa now and"
+echo "choose it: until it is set, whoever reaches the address first chooses it."
+echo "Then sign the agent in from the settings view."
 echo "More: https://www.calliopa.com"

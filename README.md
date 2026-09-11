@@ -32,15 +32,35 @@ To change the port later, edit `CALLIOPA_PORT` in `.env` and run `./install.sh`
 again; the confirmation origin follows on the next port, which the installer
 derives, so never move the port with `docker compose up -d` alone.
 
+Other machines reach Calliopa too: it listens on every network adapter of
+the machine, so a laptop on the same LAN, Tailscale, WireGuard or any other
+VPN opens it at this machine's address there, on the same port. To limit
+that, set `CALLIOPA_HOST_BIND` in `.env` to one adapter's address (its
+Tailscale address, say) or to `127.0.0.1` for this machine only, and run
+`./install.sh` again. The database and the object store only ever listen on
+`127.0.0.1`. Two things to know before you rely on it:
+
+- On Linux, Docker's published ports bypass host firewalls such as `ufw`. On
+  a machine with a public IP address, bind to your VPN adapter's address or
+  to `127.0.0.1`, or the whole internet reaches the sign-in page.
+- Calliopa serves plain HTTP. Over a VPN the tunnel is the encryption; on an
+  open network, put a TLS proxy in front and set `CALLIOPA_KERNEL_CONFIRM_URL`
+  in `.env` to the address it gives the confirmation port.
+
+An existing install keeps the `CALLIOPA_HOST_BIND` its `.env` already holds,
+since the installer never rewrites your values, so one installed when the
+default was `127.0.0.1` stays local: change that line to `0.0.0.0` and run
+`./install.sh` to open it to your network.
+
 The installer asks you for your account name first (`owner` if you just
-press enter; it cannot be changed later). Then open that address: on your
-first visit Calliopa shows that name again and asks you to choose its
-password — once; from then on you sign in with the name and the password,
-and the sign-in page names the account while you are the only person on the
-instance. Set the password before you widen `CALLIOPA_HOST_BIND` beyond
-`127.0.0.1`: until it is set, whoever reaches the address first sets it. A
-lost password is set again with `app account set-password` inside the stack;
-the name is `CALLIOPA_OWNER_PRINCIPAL` in `.env`.
+press enter; it cannot be changed later). Then open that address right
+after the install: on your first visit Calliopa shows that name again and
+asks you to choose its password — once; from then on you sign in with the
+name and the password, and the sign-in page names the account while you are
+the only person on the instance. Until the password is set, whoever reaches
+the address first sets it. A lost password is set again with
+`app account set-password` inside the stack; the name is
+`CALLIOPA_OWNER_PRINCIPAL` in `.env`.
 
 Requirements: Docker Engine 25 or later with the Compose plugin 2.24 or later,
 and `git`. You supply no keys — the agent is signed in later from the settings

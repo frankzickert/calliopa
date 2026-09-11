@@ -1,5 +1,5 @@
 {
-  "dataRevision": 351,
+  "dataRevision": 369,
   "files": {
     "README.md": {
       "blockId": "node:ui.shell.README.md",
@@ -133,8 +133,8 @@
     },
     "docs/system/workspace/contribution-contract.md": {
       "blockId": "node:ui.shell.docs/system/workspace/contribution-contract.md",
-      "revision": "rev:cfa424d7c278bd6b",
-      "hash": "sha256:eeb93302b3ce0c0fde6e1bf47c1940d76665c99bc3ae69c8566eb02eda44d27c"
+      "revision": "rev:0e7e8255b0dadae0",
+      "hash": "sha256:e8b5247ebd32d93ac62db33d9f53d803e24167c6d516f7560142f465489df2c0"
     },
     "docs/system/workspace/drag-and-drop.md": {
       "blockId": "node:ui.shell.docs/system/workspace/drag-and-drop.md",
@@ -148,8 +148,8 @@
     },
     "docs/system/workspace/layout.md": {
       "blockId": "node:ui.shell.docs/system/workspace/layout.md",
-      "revision": "rev:a678e349e134e0e7",
-      "hash": "sha256:5aacda74179e1a76e3d08113d95326bbe38151624da5bb8664507c99bf85d5ac"
+      "revision": "rev:31f6cddca175f8cb",
+      "hash": "sha256:c19fd6e78691881dbf1373eb41917fe4cd1befb428498520b21cc479a51fff0b"
     },
     "docs/system/workspace/messages.md": {
       "blockId": "node:ui.shell.docs/system/workspace/messages.md",
@@ -270,8 +270,8 @@
     },
     "src/components/library/extensions-section.tsx": {
       "blockId": "node:ui.shell.src/components/library/extensions-section.tsx",
-      "revision": "rev:2b267dd8a681b279",
-      "hash": "sha256:650625ec79a7803be515ff0a2c54048e2a9acaa9020e29408606516a797619a4"
+      "revision": "rev:d64248b477ef8965",
+      "hash": "sha256:fbea6dd44a11f06a1a48c3b6ecdd4add67fdbb7e29ab049741d511b7dd5f7f55"
     },
     "src/components/router-head/router-head.tsx": {
       "blockId": "node:ui.shell.src/components/router-head/router-head.tsx",
@@ -335,8 +335,8 @@
     },
     "src/components/shell/icons.tsx": {
       "blockId": "node:ui.shell.src/components/shell/icons.tsx",
-      "revision": "rev:fcf5ae1c5ba6ceb8",
-      "hash": "sha256:30361a45b6276b9371a0357bcb43d0b0751cc0ddbb1f8b1f5d6ca8ee393ad81a"
+      "revision": "rev:f3fd21fa53e3884a",
+      "hash": "sha256:0caa4b2b0c1ea33ba6584b562e5fd7213b2d35a0b2f9d3caac4f51aa56d80c41"
     },
     "src/components/shell/inspector.tsx": {
       "blockId": "node:ui.shell.src/components/shell/inspector.tsx",
@@ -360,13 +360,13 @@
     },
     "src/components/shell/shell.css": {
       "blockId": "node:ui.shell.src/components/shell/shell.css",
-      "revision": "rev:f62631565252cace",
-      "hash": "sha256:33c895f3781fbdfb27c0408fa7322f3c31d822b8c3214367ff1d8a0411275e65"
+      "revision": "rev:d2138d46cc617efd",
+      "hash": "sha256:aaa3a7cf2aa86861cc1fe9f8a804401f2c53ef498785d946d051d88addddfac7"
     },
     "src/components/shell/shell.tsx": {
       "blockId": "node:ui.shell.src/components/shell/shell.tsx",
-      "revision": "rev:20c09acb26620dda",
-      "hash": "sha256:17da475ecdab7cd222707d0628e3300acfa9f075d24438287785980aeed1ab85"
+      "revision": "rev:32b77fc1bf4a575c",
+      "hash": "sha256:e8086b715599885c0ea800033b9f0305489fad7be9c2dc7afd2f4ddff5c659dd"
     },
     "src/components/shell/testing/agent-menu-host.tsx": {
       "blockId": "node:ui.shell.src/components/shell/testing/agent-menu-host.tsx",

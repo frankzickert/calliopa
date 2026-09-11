@@ -347,6 +347,20 @@
 .drawer--left {
   grid-area: left;
   border-right: 1px solid var(--border);
+  /* The library is a side bar: its bands, hovers and current row reach both
+     edges, so the drawer holds no padding of its own. One inset grid places
+     everything in it — the caret hangs in the gutter, a category's rows start
+     on its title's line, and each level below is one step further in.
+     CA_0044_001 CA_0044_002 */
+  padding: 0;
+  font-size: 0.8125rem;
+  --library-gutter: 0.25rem;
+  --library-caret: 1rem;
+  --library-inset: calc(var(--library-gutter) + var(--library-caret) + 0.25rem);
+  --library-step: 1rem;
+  --library-row: 1.375rem;
+  --library-header: 1.625rem;
+  --library-end: 0.375rem;
 }
 
 .drawer--right {
@@ -354,79 +368,124 @@
   border-left: 1px solid var(--border);
 }
 
-/* The library's categories. A category header is its name and the one control
-   that adds to it, so creating sits beside the things it creates. */
+/* A category is a band: a header bar ruled off from the category above, which
+   stays at the drawer's top while the category's list scrolls under it, until
+   the next category's header takes its place. CA_0044_001 */
+.library-category {
+  border-top: 1px solid var(--border);
+}
+
+.drawer--left > .library-category:first-of-type {
+  border-top: none;
+}
+
+.library-category:last-of-type {
+  border-bottom: 1px solid var(--border);
+}
+
+/* A category header is its name and the one control that adds to it, so
+   creating sits beside the things it creates. */
 .library-category__header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 0.25rem;
+  min-height: var(--library-header);
+  padding-inline: var(--library-gutter) var(--library-end);
+  background: color-mix(in srgb, var(--panel-raised) 55%, var(--panel));
 }
 
 .library-category__heading {
+  flex: 1 1 auto;
+  min-width: 0;
   margin: 0;
-  font-size: 0.85rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
 }
 
 .library-category__toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  width: 100%;
+  min-height: var(--library-header);
   border: none;
   background: transparent;
-  color: var(--text-muted);
+  color: var(--text);
   font: inherit;
   letter-spacing: inherit;
   text-transform: inherit;
-  padding: 0.25rem 0;
+  text-align: left;
+  padding: 0;
   cursor: pointer;
 }
 
-.library-category__toggle::before {
-  content: "▾";
-  display: inline-block;
-  width: 1rem;
+.library-category__caret {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: var(--library-caret);
+  justify-content: center;
   color: var(--text-muted);
+  transition: transform 120ms ease;
 }
 
-.library-category[data-state="collapsed"] .library-category__toggle::before {
-  content: "▸";
+.library-category[data-state="expanded"] .library-category__caret {
+  transform: rotate(90deg);
+}
+
+.library-category__body {
+  padding-block: 0.125rem 0.375rem;
 }
 
 .library-list {
   list-style: none;
-  margin: 0.4rem 0 0;
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
 }
 
+/* A row is a line of the side bar: no border, no radius, no gap to the next,
+   its hover and its selection painted across the full width. CA_0044_002 */
 .library-entry {
   display: flex;
   align-items: center;
   gap: 0.4rem;
   width: 100%;
-  border: 1px solid transparent;
-  border-radius: 0.4rem;
+  min-height: var(--library-row);
+  box-sizing: border-box;
+  border: none;
+  border-radius: 0;
   background: transparent;
   color: var(--text);
   font: inherit;
+  line-height: 1.2;
   text-align: left;
-  padding: 0.3rem 0.45rem;
+  padding: 0 0.5rem 0 var(--library-inset);
   cursor: pointer;
 }
 
 .library-entry:hover {
   background: var(--panel-raised);
-  border-color: var(--border);
+}
+
+/* Keyboard focus is drawn inside the row, as the side bar draws it, rather
+   than as a ring standing out past a row that has no edges of its own. */
+.library-entry:focus-visible,
+.library-category__toggle:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
 }
 
 /* The open document is marked, not merely tinted: the state has to survive a
    reader who cannot tell the two backgrounds apart. */
 .library-entry[data-current="true"] {
-  background: var(--panel-raised);
-  border-color: var(--border);
-  font-weight: 600;
+  background: var(--selection);
 }
 
 .library-entry__label {
@@ -446,9 +505,9 @@
 }
 
 .library-empty {
-  margin: 0.4rem 0 0;
+  margin: 0;
+  padding: 0.125rem 0.5rem 0 var(--library-inset);
   color: var(--text-muted);
-  font-size: 0.9rem;
 }
 
 .workspace {
@@ -1133,6 +1192,24 @@
     min-height: 2.75rem;
   }
 
+  /* The library's close control keeps a line of its own above the first
+     band, so no sticky header slides beside or under it. CA_0044_004 */
+  .drawer--left > .sheet-close {
+    float: none;
+    margin-inline-start: auto;
+  }
+
+  /* Its × is drawn large inside the same 44px box: the glyph grows, the
+     control does not. CA_0044_009 */
+  .drawer--left > .sheet-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 1.75rem;
+    line-height: 1;
+  }
+
   /* What grows in the dock scrolls inside itself on a phone, so the dock
    * cannot push the document's row to nothing — the state a reader met, with
    * the handle under the document's rows and the dock opened for good. The
@@ -1525,13 +1602,24 @@
 }
 
 /* The Extensions category: two groups, Core and Yours, and the dot that says
-   newer truth waits for promotion. BO_0201_005 */
+   newer truth waits for promotion. BO_0201_005 A group's label sits on the
+   inset and a rule runs from it to the right edge. CA_0044_003 */
 .library-group {
-  margin: 0.5rem 0 0;
-  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.25rem 0 0.125rem;
+  padding: 0 0.5rem 0 var(--library-inset);
+  font-size: 0.625rem;
+  font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+.library-group::after {
+  content: "";
+  flex: 1 1 auto;
+  border-top: 1px solid var(--border);
 }
 .library-entry__version {
   color: var(--text-muted);
@@ -1686,11 +1774,15 @@
   color: var(--text-muted);
   cursor: default;
 }
+/* The create form and the filter row open under the header, on the inset,
+   ruled off from the tree below. CA_0044_003 */
 .library-create {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  margin: 0.25rem 0 0.5rem;
+  margin: 0 0 0.25rem;
+  padding: 0.25rem 0.5rem 0.375rem var(--library-inset);
+  border-bottom: 1px solid var(--border);
 }
 .library-create__field {
   display: flex;
@@ -1740,13 +1832,35 @@
 .library-section-actions .library-action--body {
   float: none;
 }
+/* A component section's leading controls ride its header's line, as a VS
+   Code view's title actions do: sticky in the body and pulled up by the
+   header's height, so they take no row, follow the sticky header, and go with
+   the body when the section collapses. CA_0044_006 */
+.library-category__body > .library-section-actions:first-child {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  width: max-content;
+  height: var(--library-header);
+  align-items: center;
+  gap: 0;
+  margin-inline: auto var(--library-end);
+  margin-block: calc(-1 * var(--library-header) - 0.125rem) 0.125rem;
+}
 .library-action--icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
   min-width: 1.75rem;
   min-height: 1.75rem;
   padding: 0.2rem;
+}
+.drawer--left .library-action--icon {
+  min-width: var(--library-row);
+  min-height: var(--library-row);
+  padding: 0.1875rem;
+  line-height: 1;
 }
 .library-action[aria-pressed="true"] {
   background: var(--panel-raised);
@@ -1770,7 +1884,9 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.25rem;
-  margin: 0.25rem 0 0;
+  margin: 0 0 0.25rem;
+  padding: 0.25rem 0.5rem 0.375rem var(--library-inset);
+  border-bottom: 1px solid var(--border);
 }
 .library-change-filter .library-action[aria-pressed="false"] {
   color: var(--text-muted);
@@ -1779,27 +1895,49 @@
   display: flex;
   flex-direction: column;
 }
+/* An extension row paints across the whole row, its + included; its change
+   rows start one step in, and Other's change two, under the id it names.
+   CA_0044_003 */
 .library-tree__row {
   display: flex;
   align-items: center;
-  gap: 0.15rem;
+  padding-inline-end: var(--library-end);
+}
+.library-tree__row:hover {
+  background: var(--panel-raised);
+}
+.library-tree__row:has(> .library-entry[data-current="true"]) {
+  background: var(--selection);
 }
 .library-tree__row .library-entry {
   flex: 1 1 auto;
   min-width: 0;
 }
+.library-tree__row .library-entry:hover,
+.library-tree__row .library-entry[data-current="true"] {
+  background: transparent;
+}
+/* A row's own action shows on the row the pointer or the focus is on, and
+   always where there is no hover. CA_0044_003 CA_0044_004 */
+@media (hover: hover) {
+  .library-tree__row > .library-action {
+    visibility: hidden;
+  }
+  .library-tree__row:hover > .library-action,
+  .library-tree__row:focus-within > .library-action {
+    visibility: visible;
+  }
+}
 .library-tree__named {
-  padding: 0.3rem 0.45rem;
+  display: block;
+  padding: 0.125rem 0.5rem 0 calc(var(--library-inset) + var(--library-step));
   color: var(--text-muted);
-  font-size: 0.85rem;
 }
-.library-list--children {
-  margin: 0.1rem 0 0.2rem 1.1rem;
-  gap: 0.05rem;
+.library-list--children .library-entry {
+  padding-inline-start: calc(var(--library-inset) + var(--library-step));
 }
-.library-entry--change {
-  padding: 0.2rem 0.45rem;
-  font-size: 0.9rem;
+.library-list--children .library-list--children .library-entry {
+  padding-inline-start: calc(var(--library-inset) + 2 * var(--library-step));
 }
 .library-entry__status {
   display: inline-flex;
