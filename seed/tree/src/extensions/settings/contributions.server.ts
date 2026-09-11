@@ -119,10 +119,9 @@ const update: readonly ApiRoute[] = [
   {
     method: "POST",
     path: "update/accept",
-    handle: async (event) => {
-      const body = await bodyOf(event);
-      event.json(200, await kernelUpdate.accept(field(body, "proposal"), field(body, "version")));
-    },
+    // The kernel accepts the update it recorded; nothing in the request
+    // names a proposal. BO_0241_005
+    handle: async (event) => event.json(200, await kernelUpdate.accept()),
   },
   {
     method: "POST",

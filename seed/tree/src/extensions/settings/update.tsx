@@ -12,8 +12,10 @@ import { updateCommands } from "./update-commands";
  * and the update itself, started here with one press and followed through
  * to the instance serving the new release. Nothing here decides anything the
  * review path would not: the updater on the host runs the install, the
- * proposal it stages is accepted through the kernel's confirmation, and the
- * release pin moves through the kernel's promotion gate. BO_0223_014
+ * proposal it stages is accepted by the owner's press here — the kernel takes
+ * only the update it recorded, staged wholly by her, with no confirmation
+ * page (BO_0241) — and the release pin moves through the kernel's promotion
+ * gate. BO_0223_014
  */
 
 type Phase =
@@ -21,7 +23,6 @@ type Phase =
   | "running"
   | "waiting"
   | "returned"
-  | "confirm"
   | "accepted"
   | "promoting"
   | "served"
@@ -40,7 +41,8 @@ interface State {
   phase: Phase;
   detail: string;
   proposal: UpdateProposal | null;
-  confirmUrl: string | null;
+  /** The session ended while the stack restarted: the page must be reloaded and the owner sign in. BO_0241_005 */
+  sessionEnded: boolean;
   busy: boolean;
 }
 
@@ -68,7 +70,7 @@ export const UpdateTabView = component$<ViewProps>(() => {
     phase: "idle",
     detail: "",
     proposal: null,
-    confirmUrl: null,
+    sessionEnded: false,
     busy: false,
   });
 
@@ -80,7 +82,16 @@ export const UpdateTabView = component$<ViewProps>(() => {
     } catch {
       return false;
     }
+    // A 503 is the kernel waiting for the gateway during the restart; any
+    // other 5xx, or no answer at all, is the restart itself. BO_0241_005
     if (response.status >= 500) return false;
+    if (response.status === 401) {
+      state.sessionEnded = true;
+      state.refusal = null;
+      state.info = null;
+      return true;
+    }
+    state.sessionEnded = false;
     if (!response.ok) {
       state.refusal = await refusalOf(response);
       state.info = null;
@@ -137,11 +148,6 @@ export const UpdateTabView = component$<ViewProps>(() => {
         state.phase = "returned";
         await readProposal$();
       }
-      return;
-    }
-    if (state.phase === "confirm" && info.pending === null) {
-      state.phase = "accepted";
-      state.confirmUrl = null;
       return;
     }
     if (state.phase === "promoting") {
@@ -209,19 +215,12 @@ export const UpdateTabView = component$<ViewProps>(() => {
     state.busy = true;
     state.detail = "";
     try {
-      const response = await fetch("/api/x/settings/update/accept", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ proposal: pending.proposal, version: pending.version }),
-      });
+      // The press is the acceptance: the kernel accepts the update it
+      // recorded, never a proposal named here, with no confirmation page.
+      // BO_0241_005
+      const response = await fetch("/api/x/settings/update/accept", { method: "POST" });
       if (!response.ok) {
         state.detail = await refusalOf(response);
-        return;
-      }
-      const answer = (await response.json()) as { status: string; confirmUrl?: string };
-      if (answer.status === "pending" && answer.confirmUrl !== undefined) {
-        state.confirmUrl = answer.confirmUrl;
-        state.phase = "confirm";
         return;
       }
       state.phase = "accepted";
@@ -269,6 +268,16 @@ export const UpdateTabView = component$<ViewProps>(() => {
         <h2 class="settings-section__heading" id="update-installed">
           Update
         </h2>
+        {state.sessionEnded && (
+          <p class="connection__controls" role="alert" data-update-session-ended>
+            <span class="settings-empty">
+              Your session ended while the stack restarted. Reload the page and sign in again.
+            </span>
+            <button type="button" class="connection__action" onClick$={() => location.reload()}>
+              Reload
+            </button>
+          </p>
+        )}
         {state.refusal !== null && (
           <p class="settings-empty" role="status" data-update-refusal>
             {state.refusal}
@@ -452,15 +461,6 @@ export const UpdateTabView = component$<ViewProps>(() => {
               </p>
             </div>
           )}
-          {state.phase === "confirm" && state.confirmUrl !== null && (
-            <p class="settings-section__lead" role="status" data-update-confirm={state.confirmUrl}>
-              Establishing truth needs the kernel's own confirmation:{" "}
-              <a href={state.confirmUrl} target="_blank" rel="noreferrer">
-                confirm the acceptance
-              </a>
-              . This tab moves on when the proposal is accepted.
-            </p>
-          )}
           {state.phase === "accepted" && (
             <p class="connection__controls">
               <span class="settings-section__lead" role="status">
@@ -477,9 +477,15 @@ export const UpdateTabView = component$<ViewProps>(() => {
             </p>
           )}
           {state.phase === "served" && (
-            <p class="settings-section__lead" role="status" data-update-served={state.chosen}>
-              Serving release {state.chosen}
-              {info?.servedPin !== undefined && ` at pin ${info.servedPin}`}. Reload to run the new shell.
+            <p class="connection__controls" role="status" data-update-served={state.chosen}>
+              <span class="settings-section__lead">
+                Calliopa now serves release {state.chosen}
+                {info?.servedPin !== undefined && ` at pin ${info.servedPin}`}. This page still runs the previous release:
+                reload it to use the new one.
+              </span>
+              <button type="button" class="connection__action" onClick$={() => location.reload()}>
+                Reload
+              </button>
             </p>
           )}
           {state.phase === "failed" && (

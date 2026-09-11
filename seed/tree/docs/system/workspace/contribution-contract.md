@@ -33,5 +33,5 @@
 ## Not Here
 
 - Runtime loading of extension code, in any form: the contract resolves at build time, the pin promotes a build, and `BO_0200`'s fixed constraint stands. Switching an extension off or serving it at an older version (`BO_0218`, `BO_0219`) is the kernel materializing a different tree and promoting it, not the application loading or unloading anything.
-- A review of code in the shell. An import's diff is the kernel's summary and its acceptance is the kernel's confirmation page, the way every group holding an extension member is established; the shell never shows a staged diff of code and never accepts one itself (`BO_0224_008`).
+- A review of code in the shell. An import's diff is the kernel's summary and its acceptance is the kernel's confirmation page, the way every group holding an extension member is established but the release's update, which the owner's press in the Update tab accepts (`BO_0241`); the shell never shows a staged diff of code and never accepts one itself (`BO_0224_008`).
 - The carve-out of episodes, standing assets, destinations and their channels into `calliopa-video` (`BO_0203`), which is the contract's first consumer beyond the shell itself.

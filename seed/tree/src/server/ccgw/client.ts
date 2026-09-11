@@ -1,6 +1,6 @@
 import type { GraphOutcome } from "../outcome";
 import { graphEnv } from "./env";
-import { forwardedCookie } from "../request-context";
+import { forwardedHeaders } from "../request-context";
 
 /**
  * The shell's side of the one graph.
@@ -94,11 +94,11 @@ interface Envelope {
 
 async function post(url: string, body: unknown): Promise<{ readonly status: number; readonly envelope: Envelope }> {
   // The bridge resolves the person from the session the browser holds, so
-  // the request's cookie travels with the call. BO_0208_007
-  const cookie = forwardedCookie();
+  // the request's cookie travels with the call, and the browser's host with
+  // it, which a parked action's confirmation link names. BO_0208_007 BO_0241_006
   const response = await fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json", ...(cookie === undefined ? {} : { cookie }) },
+    headers: { "content-type": "application/json", ...forwardedHeaders() },
     body: JSON.stringify(body),
   });
   const text = await response.text();

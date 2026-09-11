@@ -87,9 +87,13 @@ patch, minor and major release above yours and every release on request. One
 press installs the one you choose: an updater the installer left running on
 your machine checks out that release and runs `./install.sh` for you — the
 images are rebuilt from the release's binaries, the stack restarts, and the
-release's extensions arrive in your graph as a proposal. The tab then offers to
-review it and to accept and promote it, and your instance serves the new
-release. Until you accept, it keeps serving what it served before.
+release's extensions arrive in your graph as a proposal. The tab shows what
+they change; your *Accept* in the tab is the acceptance, with no second page,
+and *Promote* makes your instance serve the new release. Until you accept, it
+keeps serving what it served before. Once it serves the new release, the tab
+asks you to reload the page, which still runs the previous release's code. If
+the tab says your session ended while the stack restarted, reload and sign in
+again.
 
 Where no updater could be installed (the installer says so at its end), the
 tab shows the three commands to run instead:

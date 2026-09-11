@@ -59,13 +59,7 @@
   - The section's controls, with the re-read now `arrow-clockwise` under its unchanged name, ride the header's line ([Contribution Contract](./contribution-contract.md)).
   - The filter row and the create form open under the header, on the inset, ruled off below (`CA_0044_003`).
 - The side bar was measured in Chromium (`CA_0044_005`). The page was built from the drawer's markup: the shell's section markup as `shell.tsx` renders it, and the Extensions body as Qwik's render harness renders it (core, individual, pinned, inactive, *Other*, a current change). It was styled with the built stylesheet and the theme, in both themes, at 1280 CSS px on a fine pointer and at 360 CSS px as the phone sheet on a coarse one, where it was measured again after `CA_0044_008`. Every line of every category starts at or right of its title (24px), change rows at 40px under rows at 24px, and *Other*'s change at 56px under its id at 40px. Rows are 22px and headers 26px on both pointers, with no gap between rows. A rule sits above every category but the first. The row `+` is hidden until hovered or focused on the fine pointer, and always shown on the coarse one. With the Extensions list scrolled, its header and its controls both sit at the drawer's top. Collapsed, its controls are gone. An open filter row sits under the header with its rule. `extensions-section.test.ts` presses the section's controls by name unchanged, and the unit project passes.
-- [ ] CA_0044_007 The walk-through on the served build, on a desktop and a phone:
-  - the bands and rules between the categories;
-  - a header staying at the top while its list scrolls, and handing over to the next;
-  - the rows close, and nothing left of its parent;
-  - a row's `+` appearing on hover and on keyboard focus;
-  - the Extensions controls on the header's line, working from there (re-read, new extension, filter, import);
-  - on the phone, the sheet's close control, rows as close as the desktop's, and the row `+` always shown.
+- The side bar was walked on the served build on a desktop and a phone, and the user set the change completed on 2026-09-11 (`CA_0044_007`). On the desktop at pin 363 the walk-through covered the bands and their rules, a header staying at the top and handing over to the next, the close rows with nothing left of its parent, the row `+` on hover and on keyboard focus, and the Extensions controls working from the header's line. The phone brought two changes: its rows became the desktop's 22px (`CA_0044_008`, pin 366), and the close control's × became 28px in its unchanged box (`CA_0044_009`, pin 369). The user accepted the phone at pin 369.
 
 ## Mobile Layout
 

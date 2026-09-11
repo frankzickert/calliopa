@@ -40,6 +40,8 @@ describe.skipIf(!configured)("the update, through the kernel as the signed-in pe
     await expect(kernelUpdate.start("0.4.0")).rejects.toMatchObject({ status: 409, code: "updater_absent" });
     await expect(kernelUpdate.start("v0.4.0")).rejects.toMatchObject({ status: 400, code: "version_invalid" });
     await expect(kernelUpdate.proposal()).rejects.toMatchObject({ status: 404, code: "no_pending_update" });
+    // The owner's OK with nothing staged: the kernel names nothing to accept. BO_0241_006
+    await expect(kernelUpdate.accept()).rejects.toMatchObject({ status: 404, code: "no_pending_update" });
   });
 
   it("Given a person who is not the owner, Then their session says so and every update call is forbidden", async () => {
@@ -58,5 +60,6 @@ describe.skipIf(!configured)("the update, through the kernel as the signed-in pe
     await expect(asUpd(() => kernelUpdate.read())).rejects.toMatchObject({ status: 403, code: "forbidden" });
     await expect(asUpd(() => kernelUpdate.start("0.4.0"))).rejects.toMatchObject({ status: 403, code: "forbidden" });
     await expect(asUpd(() => kernelUpdate.promote())).rejects.toMatchObject({ status: 403, code: "forbidden" });
+    await expect(asUpd(() => kernelUpdate.accept())).rejects.toMatchObject({ status: 403, code: "forbidden" });
   });
 });

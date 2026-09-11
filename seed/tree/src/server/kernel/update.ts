@@ -1,5 +1,3 @@
-import { graphEnv } from "../ccgw/env";
-import { forwardedCookie } from "../request-context";
 import { call, jsonInit, refusalWithCode } from "./client";
 
 /**
@@ -68,14 +66,12 @@ export interface UpdateProposal {
 }
 
 /**
- * The answer to accepting the update proposal: the bridge keeps a
- * truth-establishing acceptance behind its confirmation origin, so the
- * shell presents the address and never confirms (`BO_0103_003`).
+ * The answer to accepting the update proposal. The owner's press is the
+ * acceptance: the kernel accepts the update it recorded, staged wholly by
+ * the owner, with no confirmation page (`ui-kernel.md`, `BO_0241_002`).
  */
 export interface Acceptance {
-  readonly status: "accepted" | "pending";
-  readonly confirmUrl?: string;
-  readonly pending?: string;
+  readonly status: "accepted";
 }
 
 async function answered<T>(response: Response): Promise<T> {
@@ -97,26 +93,12 @@ export const kernelUpdate = {
     return answered(await call("/__kernel/update/promote", { method: "POST" }));
   },
   /**
-   * Accepts the whole update proposal through the bridge's `accept` verb as
-   * the signed-in owner. The kernel parks it behind its confirmation and
-   * answers where; a content-only group would execute at once.
+   * Accepts the pending update as the signed-in owner. No proposal is named:
+   * the kernel takes the one it recorded, and refuses one another principal
+   * staged into (`409 update_not_the_owners`). BO_0241_006
    */
-  async accept(proposal: string, version: string): Promise<Acceptance> {
-    const cookie = forwardedCookie();
-    const response = await fetch(`${graphEnv().kernelUrl}/__kernel/review/accept`, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...(cookie === undefined ? {} : { cookie }) },
-      body: JSON.stringify({ proposal, rationale: `update from the browser: release ${version} accepted` }),
-    });
-    if (!response.ok) throw await refusalWithCode(response);
-    const envelope = (await response.json()) as { status?: string; confirmUrl?: string; pending?: string };
-    if (envelope.status === "pending") {
-      return {
-        status: "pending",
-        ...(envelope.confirmUrl === undefined ? {} : { confirmUrl: envelope.confirmUrl }),
-        ...(envelope.pending === undefined ? {} : { pending: envelope.pending }),
-      };
-    }
+  async accept(): Promise<Acceptance> {
+    await answered<unknown>(await call("/__kernel/update/accept", { method: "POST" }));
     return { status: "accepted" };
   },
 };
