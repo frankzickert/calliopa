@@ -1,5 +1,5 @@
 {
-  "dataRevision": 338,
+  "dataRevision": 351,
   "files": {
     "README.md": {
       "blockId": "node:ui.shell.README.md",
@@ -88,8 +88,8 @@
     },
     "docs/system/documents/proposed-changes.md": {
       "blockId": "node:ui.shell.docs/system/documents/proposed-changes.md",
-      "revision": "rev:1d6e46e6a50ae971",
-      "hash": "sha256:5cb152e876f860b36b2b605156b79dad9fb39f5c54312af9eb18d224ffd1e8f9"
+      "revision": "rev:669b768dd84b90bb",
+      "hash": "sha256:0427eb8325e11bd148f8deb3a7d126618c45d867881d0060388212ca2c07ccd1"
     },
     "docs/system/documents/schema-evolution.md": {
       "blockId": "node:ui.shell.docs/system/documents/schema-evolution.md",
@@ -640,8 +640,8 @@
     },
     "src/extensions/settings/docs/system/settings-surface.md": {
       "blockId": "node:settings.docs/system/settings-surface.md",
-      "revision": "rev:50f9b8c254f055c5",
-      "hash": "sha256:989e33873f9bcf48dbfddb4b87ac4e05f7130cf79630f1c217a26c21c5bde012"
+      "revision": "rev:c4b3c9b448c742ea",
+      "hash": "sha256:9ecb2c119c59f8eba150866e871e4a3f37bf861485171be523bc328645ed025f"
     },
     "src/extensions/settings/docs/system/system.md": {
       "blockId": "node:settings.docs/system/system.md",
@@ -698,10 +698,20 @@
       "revision": "rev:45719332c54adc12",
       "hash": "sha256:722b8ff2d10a276100f979a9de84460f4da6c8d799da7af47f512965afa649d2"
     },
+    "src/extensions/settings/update-commands.test.ts": {
+      "blockId": "node:settings.update-commands.test.ts",
+      "revision": "rev:98067bcf0fcb915a",
+      "hash": "sha256:06adba69a5e37a554c0d582a4a967e9816b143f01435739a2df16280a851046a"
+    },
+    "src/extensions/settings/update-commands.ts": {
+      "blockId": "node:settings.update-commands.ts",
+      "revision": "rev:590130bfb0fda1a4",
+      "hash": "sha256:e7c34561667480e62229de4a5735b29bad9466dc94a6e52527dd9d81532c01db"
+    },
     "src/extensions/settings/update.tsx": {
       "blockId": "node:settings.update.tsx",
-      "revision": "rev:84587b2f779fc250",
-      "hash": "sha256:f134b48f178da2d2373d1c3e9b851110a286860c385b507c840768803acbe5e7"
+      "revision": "rev:3d34d02dba31f945",
+      "hash": "sha256:b736047043d0fa1bad1fa9684a100fb294be2c9315a9abc4fd3102b9eb965a0d"
     },
     "src/extensions/ui.shell/contributions.server.ts": {
       "blockId": "node:ui.shell.contributions.server.ts",

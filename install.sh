@@ -22,6 +22,26 @@ if [ ! -f docker-compose.yml ] || [ ! -f .env.example ]; then
   if [ ! -d "$target/.git" ]; then
     echo "downloading Calliopa into $target"
     git clone "$repo_url" "$target"
+  else
+    # An existing checkout keeps its release: this command installs, and
+    # updating is the Update tab's (BO_0238_004). It says which release the
+    # checkout is on and which is the latest, read from the repository it
+    # was cloned from — no connection the clone did not already make.
+    current="$(sed -n 's/^CALLIOPA_RELEASE_VERSION=//p' "$target/.env.example" 2>/dev/null | tail -n 1 || true)"
+    current="${current:-unknown}"
+    if latest="$(git -C "$target" ls-remote --tags --refs origin 2>/dev/null \
+        | sed -n 's#^[0-9a-f]*[[:space:]]*refs/tags/v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$#\1#p' \
+        | sort -V | tail -n 1)" && [ -n "$latest" ]; then
+      if [ "$latest" = "$current" ]; then
+        echo "$target is on the latest release, $current"
+      else
+        echo "$target is on release $current; the latest is $latest. Installing keeps the checkout's release."
+        echo "to update: the Update tab in Calliopa, or in $target:"
+        echo "  git fetch --tags --force && git checkout --detach v$latest && ./install.sh"
+      fi
+    else
+      echo "$target is on release $current; the latest release could not be read from its repository"
+    fi
   fi
   cd "$target"
   exec ./install.sh

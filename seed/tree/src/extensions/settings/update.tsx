@@ -4,6 +4,7 @@ import type { ViewProps } from "~/components/shell/view-host";
 import { ViewBridgeContext } from "~/components/shell/view-bridge";
 import { candidates, fetchReleases, parseReleases, type Candidate, type Release } from "~/lib/releases";
 import type { UpdateProposal, UpdateView } from "~/server/kernel/update";
+import { updateCommands } from "./update-commands";
 
 /**
  * The Update tab: the installed release, the releases above it worth
@@ -252,8 +253,6 @@ export const UpdateTabView = component$<ViewProps>(() => {
   const info = state.info;
   const installed = versionOf(info);
   const inFlight = state.phase !== "idle" && state.phase !== "served" && state.phase !== "failed";
-  const commands = (version: string) =>
-    `cd ~/calliopa\ngit fetch --tags && git checkout --detach v${version}\n./install.sh`;
   const describe = (release: Release, type?: Candidate["type"]): string => {
     const date = release.publishedAt === "" ? "" : ` · ${new Date(release.publishedAt).toLocaleDateString()}`;
     const label = type === undefined ? "" : ` · newest ${type}`;
@@ -401,7 +400,7 @@ export const UpdateTabView = component$<ViewProps>(() => {
               <p class="settings-section__lead">
                 No updater is running on this machine. Run these on it, then come back here:
               </p>
-              <pre class="settings-commands">{commands(state.chosen)}</pre>
+              <pre class="settings-commands">{updateCommands(state.chosen)}</pre>
             </div>
           )}
           {(state.phase === "running" || state.phase === "waiting") && info?.updater.state !== "absent" && (

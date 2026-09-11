@@ -55,7 +55,9 @@ ever contacts Calliopa.
 
 Re-running the installer is always safe: it repairs what is missing and never
 overwrites your configuration, secrets, or data. From an existing checkout,
-run `./install.sh` directly.
+run `./install.sh` directly. Running the one command above again keeps the
+release your existing `~/calliopa` is on: it says which release that is and
+which is the latest, and leaves the update to you (Updating, below).
 
 ## Updating
 
@@ -74,12 +76,14 @@ tab shows the three commands to run instead:
 
 ```sh
 cd ~/calliopa
-git fetch --tags && git checkout --detach v<version>
+git fetch --tags --force && git checkout --detach v<version>
 ./install.sh
 ```
 
-The installer rewrites the release's pins in `.env` from the checkout on
-every run; everything else in `.env` is yours and is never touched.
+`--force` lets the fetch take a release tag that was corrected after your
+checkout last saw it; without it, git keeps the tag it already has. The
+installer rewrites the release's pins in `.env` from the checkout on every
+run; everything else in `.env` is yours and is never touched.
 
 An older release can be chosen the same way, labelled as a downgrade. That
 rolls the images back; your graph content versions on its own — every accepted

@@ -113,7 +113,7 @@ take_request() {
   local before_install
   before_install="$(mtime "$self")"
   local rc
-  run_step fetch git fetch --tags; rc=$?
+  run_step fetch git fetch --tags --force; rc=$?
   if [ "$rc" -ne 0 ]; then
     fail "fetch exited with $rc: $(tail -n 1 "$log_file")"
     return 0
