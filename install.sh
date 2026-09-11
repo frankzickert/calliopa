@@ -261,20 +261,24 @@ docker compose build
 # generates the database password and object-store credentials into the
 # stack's secrets volume; re-running repairs missing pieces and never
 # overwrites existing ones.
-docker compose run --rm bootstrap
+# -T and /dev/null because this script may have no terminal: under
+# `curl … | bash` stdin is the pipe, and Compose v2 asks for a TTY whenever
+# stdout is one, which Docker then refuses. A run also keeps stdin attached
+# with -T, so it would be handed the rest of the piped script. BO_0239_001
+docker compose run --rm -T bootstrap < /dev/null
 
 # Pre-seeding: a release ships its seed bundle under seed/ with a run.sh
 # entrypoint that applies it through the Calliopa gateway under your
 # identity. The gateway publishes no host port — browser scripts must never
 # reach it directly (BO_0103) — so the bundle runs inside the stack, where
 # the gateway is reachable on the compose network. Nothing to do when no
-# bundle is present.
+# bundle is present. No terminal, as for the bootstrap above. BO_0239_001
 if [ -x seed/run.sh ]; then
   echo "seed bundle found; starting the cell to apply it"
   docker compose up -d --wait app
-  docker compose run --rm --no-deps --entrypoint /bin/sh \
+  docker compose run --rm -T --no-deps --entrypoint /bin/sh \
     -v "$(pwd)/seed:/calliopa-seed:ro" kernel \
-    /calliopa-seed/run.sh "http://app:8080"
+    /calliopa-seed/run.sh "http://app:8080" < /dev/null
 fi
 
 # Start: the install is one command, so it ends with a running stack rather
