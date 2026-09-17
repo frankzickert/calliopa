@@ -1,6 +1,6 @@
 {
-  "version": "0.3.9",
-  "pin": 1403,
+  "version": "0.3.10",
+  "pin": 25,
   "mapRoot": "ui.shell",
   "marker": "ui.shell",
   "members": 40,

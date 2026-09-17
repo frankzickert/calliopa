@@ -100,10 +100,14 @@ for dir in "$tmp"/src/extensions/*/; do
   fi
 done
 # Root-mapped files belong to exactly one bundled extension — the release guard
-# refuses anything else — so they are cleared on the same terms. They are read
-# from the lockfile rather than from the directory listing, because the tree
-# root also holds files no Block owns.
-node -e 'const l=require(process.argv[1]);for(const k of Object.keys(l.files||{})) if(!k.includes("/")) console.log(k)' \
+# refuses anything else — so they are cleared on the same terms, at any depth:
+# every lockfile file outside src/extensions/ is root-mapped, since a file that
+# is not materializes under its extension's directory, and only an elevated
+# extension may stage one. A shell file a release moved elsewhere is then a
+# deletion rather than a leftover that no longer builds (BO_0259_001). They are
+# read from the lockfile rather than from the directory listing, because the
+# tree also holds files no Block owns.
+node -e 'const l=require(process.argv[1]);for(const k of Object.keys(l.files||{})) if(!k.startsWith("src/extensions/")) console.log(k)' \
   "$tmp/graph.lock.json" | while IFS= read -r rootfile; do
   [ -n "$rootfile" ] && rm -f "$tmp/$rootfile"
 done
