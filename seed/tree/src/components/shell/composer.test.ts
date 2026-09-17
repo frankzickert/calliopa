@@ -35,7 +35,7 @@ const mount = async () => {
   const sent = () =>
     JSON.parse(find("[data-target]")?.textContent ?? "null") as {
       delivery: string;
-      references: unknown[];
+      references?: unknown[];
     } | null;
   const revealed = () =>
     JSON.parse(find("[data-reveal]")?.textContent ?? "null") as {
@@ -57,12 +57,44 @@ describe("the strip above the bar", () => {
     expect(find("[data-aim-title]")?.textContent).toBe("Draft of the storm chapter");
   });
 
-  it("Given a tab that is not a document and contributes nothing, Then there is no strip", async () => {
-    const { find, userEvent } = await mount();
+  it("Given a tab that is not a document and contributes nothing, Then the strip offers to start a document, with no title", async () => {
+    const { find, sent, userEvent } = await mount();
     await userEvent('[data-switch="tab-settings"]', "click");
-    expect(find("[data-command-strip]")).toBeNull();
+    const strip = find("[data-command-strip]");
+    expect(strip?.getAttribute("aria-label")).toBe("Command starts a document");
+    expect(find("[data-aim-start]")?.textContent).toBe("Start a document");
     expect(find("[data-aim-title]")).toBeNull();
-    expect(find("[data-aim-dismiss]")).toBeNull();
+    expect(find('[data-dock-action="command-mode"]')).toBeNull();
+    expect(sent()).toEqual({ delivery: "start" });
+  });
+
+  it("Given nothing open, When × is pressed, Then the command answers in the console and sends nothing, and the words bring the start back", async () => {
+    const { find, sent, userEvent } = await mount();
+    await userEvent("[data-nothing-open]", "click");
+    expect(sent()).toEqual({ delivery: "start" });
+    const dismiss = find("[data-aim-dismiss]");
+    expect(dismiss?.getAttribute("aria-label")).toBe("Answer in the console instead of starting a document");
+    await userEvent("[data-aim-dismiss]", "click");
+    expect(sent()).toBeNull();
+    expect(find("[data-aim-answer]")?.textContent).toBe("Answer in the console");
+    expect(find("[data-command-strip]")?.getAttribute("aria-label")).toBe("Command answers in the console");
+    expect(find("[data-aim-start]")).toBeNull();
+    const restore = find("[data-aim-restore]");
+    expect(restore?.textContent).toBe("Start a document");
+    expect(restore?.getAttribute("aria-label")).toBe("Start a document");
+    await userEvent("[data-aim-restore]", "click");
+    expect(sent()).toEqual({ delivery: "start" });
+    expect(find("[data-aim-start]") != null).toBe(true);
+  });
+
+  it("Given answer chosen with nothing open, Then a document still proposes, and the choice stands on return", async () => {
+    const { sent, userEvent } = await mount();
+    await userEvent("[data-nothing-open]", "click");
+    await userEvent("[data-aim-dismiss]", "click");
+    await userEvent('[data-switch="tab-doc-1"]', "click");
+    expect(sent()?.delivery).toBe("propose");
+    await userEvent("[data-nothing-open]", "click");
+    expect(sent()).toBeNull();
   });
 
   it("When × is pressed, Then the command answers in the console and still carries the references, and the title brings propose back", async () => {

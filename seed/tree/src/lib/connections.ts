@@ -40,6 +40,7 @@ export function configurationRefusal(
     readonly id: string;
     readonly kind: "service" | "channel";
     readonly fields: readonly ConfigurationField[];
+    readonly fixed?: Readonly<Record<string, string>>;
   },
   configuration: Readonly<Record<string, string>>,
 ): string | null {
@@ -48,8 +49,9 @@ export function configurationRefusal(
       ? null
       : `${party.id} takes no configuration.`;
   }
+  // A key the kind fixes — a platform's API address — is written with the record, never typed. BO_0252_006
   const unknown = Object.keys(configuration).find(
-    (key) => !party.fields.some((field) => field.key === key),
+    (key) => !party.fields.some((field) => field.key === key) && party.fixed?.[key] === undefined,
   );
   if (unknown !== undefined) {
     return `${party.id} takes no ${unknown}.`;
@@ -85,7 +87,7 @@ function isAddress(value: string): boolean {
  * reports about it — which is what the agent's runtimes are, because their
  * credentials live in their own homes and never enter this store.
  */
-export const CONNECTION_KINDS = ["apiKey", "status"] as const;
+export const CONNECTION_KINDS = ["apiKey", "status", "oauth"] as const;
 export type ConnectionKind = (typeof CONNECTION_KINDS)[number];
 
 /**
@@ -114,6 +116,8 @@ export interface ConnectionRecord {
   readonly configuration: Readonly<Record<string, string>>;
   readonly lastTestedAt: string | null;
   readonly lastError: string | null;
+  /** An oauth party's device flow as the kernel reports it: the code to type while awaiting, verified, or failing with the provider's words. BO_0252_007 */
+  readonly flow?: { readonly state: "awaiting" | "verified" | "failing"; readonly userCode: string | null; readonly verificationUrl: string | null; readonly expiresAt: string | null; readonly lastError: string | null } | null;
   /** What a status party reports about itself. Absent for an `apiKey` party. */
   readonly status: RuntimeStatus | null;
   /**

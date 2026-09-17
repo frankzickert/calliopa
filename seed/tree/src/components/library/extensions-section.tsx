@@ -52,7 +52,6 @@ const EMPTY: ExtensionListing = {
   reachable: false,
   detail: "not read",
   extensions: [],
-  other: [],
 };
 
 const ChangeRow = component$<{
@@ -64,7 +63,7 @@ const ChangeRow = component$<{
     <button
       type="button"
       class="library-entry library-entry--change"
-      data-change-id={change.documentId}
+      data-change-id={change.path}
       data-change-status={change.status}
       data-current={current ? "true" : undefined}
       aria-current={current ? "true" : undefined}
@@ -86,7 +85,6 @@ export const ExtensionsSection = component$<SectionProps>(
       listing: ExtensionListing;
       reads: number;
       filterOpen: boolean;
-      creating: string | null;
       formOpen: boolean;
       formId: string;
       formPurpose: string;
@@ -100,7 +98,6 @@ export const ExtensionsSection = component$<SectionProps>(
       // Whether the filter row shows is a gesture of the moment, not stored:
       // reopening the shell shows the header alone. BO_0222_006
       filterOpen: false,
-      creating: null,
       // The create form: open by the header's control, nothing stored.
       formOpen: false,
       formId: "",
@@ -137,46 +134,18 @@ export const ExtensionsSection = component$<SectionProps>(
         title: id,
       }),
     );
-    // A change opens in the editor by its document identity, as the Documents
-    // section opens a document, so one already open is revealed. BO_0222_005
+    /**
+     * A change opens where its extension's topics open: the extension view,
+     * by the member's path, read-only. One already open is revealed, because
+     * the item identity is the network's node id. BO_0254_009
+     */
     const openChange$ = $((change: ChangeDocumentSummary) =>
       bridge.openTarget$({
-        kind: "ui.shell:document",
-        itemId: change.documentId,
-        title: change.title,
+        kind: "ui.shell:extension",
+        itemId: `ext:${change.change}/${change.path}`,
+        title: (change.path.split("/").pop() ?? change.path).replace(/\.md$/u, ""),
       }),
     );
-    /**
-     * A new change of the extension: created as *Untitled change* with
-     * `change` naming the extension and `status` idea, opened in the editor,
-     * and the section read again so the row shows it. An inactive extension
-     * keeps the control: a change to something switched off is a normal thing
-     * to write. BO_0222_005
-     */
-    const create$ = $(async (extension: string) => {
-      if (state.creating !== null) return;
-      state.creating = extension;
-      try {
-        const response = await fetch("/api/x/ui.shell/documents", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ title: "Untitled change", change: extension, status: "idea" }),
-        });
-        const outcome = (await response.json()) as
-          | { outcome: "success"; result: { documentId: string } }
-          | { outcome: string };
-        if (outcome.outcome !== "success") return;
-        const documentId = (outcome as { result: { documentId: string } }).result.documentId;
-        await bridge.openTarget$({
-          kind: "ui.shell:document",
-          itemId: documentId,
-          title: "Untitled change",
-        });
-        await refresh$();
-      } finally {
-        state.creating = null;
-      }
-    });
     const toggleStatus$ = $(async (status: ChangeStatus) => {
       await setFilter$(toggleChangeStatus(changeFilterOf(filter), status));
     });
@@ -482,24 +451,14 @@ export const ExtensionsSection = component$<SectionProps>(
                               />
                             )}
                           </button>
-                          <button
-                            type="button"
-                            class="library-action library-action--icon"
-                            aria-label={`New change for ${id}`}
-                            data-new-change={id}
-                            disabled={state.creating !== null}
-                            onClick$={() => create$(id)}
-                          >
-                            <Icon name="plus" />
-                          </button>
                         </div>
                         {changes.length > 0 && (
                           <ul class="library-list library-list--children" data-changes-of={id}>
                             {changes.map((change) => (
                               <ChangeRow
-                                key={change.documentId}
+                                key={change.path}
                                 change={change}
-                                current={activeItemId === change.documentId}
+                                current={activeItemId === `ext:${change.change}/${change.path}`}
                                 open$={openChange$}
                               />
                             ))}
@@ -513,32 +472,6 @@ export const ExtensionsSection = component$<SectionProps>(
             );
           })
         )}
-        {listing.reachable &&
-          filterChanges(listing.other, active).length > 0 &&
-          (() => {
-            const other = filterChanges(listing.other, active);
-            return (
-              <div data-library-group="other">
-                <h3 class="library-group">Other</h3>
-                <ul class="library-list library-list--children" data-changes-of="">
-                  {other.map((change) => (
-                    <li key={change.documentId} class="library-tree">
-                      <span class="library-tree__named" data-extension-missing={change.change}>
-                        {change.change}
-                      </span>
-                      <ul class="library-list library-list--children">
-                        <ChangeRow
-                          change={change}
-                          current={activeItemId === change.documentId}
-                          open$={openChange$}
-                        />
-                      </ul>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            );
-          })()}
       </>
     );
   },

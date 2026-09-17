@@ -9,7 +9,8 @@ import { readSession } from "~/server/session";
 /**
  * The update surface's server side against a real kernel: the session names
  * the owner; the kernel answers the installed release, the check, the
- * updater — absent in the harness, which mounts none — and nothing pending;
+ * updater — absent in the harness, which mounts none — nothing pending and
+ * the newest accepted extension truth;
  * a request is refused while the updater is absent and for a malformed
  * version, each with the kernel's code; a person who is not the owner is
  * refused `forbidden` and is not the owner on their session. Skips without
@@ -34,6 +35,9 @@ describe.skipIf(!configured)("the update, through the kernel as the signed-in pe
     expect(view.updateCheck).toBe(true);
     expect(view.updater.state).toBe("absent");
     expect(view.pending).toBeNull();
+    // The newest accepted extension truth rides beside the served pin, so the
+    // tab offers Promote whenever it is past it. BO_0242_004
+    expect(view.extensionTruth).toBeGreaterThan(0);
   });
 
   it("Given no updater on the host, Then a request is refused as absent, and a malformed version before that", async () => {

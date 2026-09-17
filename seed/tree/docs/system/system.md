@@ -11,10 +11,10 @@
 
 ## What Calliopa Is
 
-* `calliopa` is `Calliopa`: a browser workspace for story development, used by people directly.
+* `calliopa` is `Calliopa`: a graph-backed, versioned, extensible browser workspace — a frame, and extensions over it, where nothing changes without a proposal someone accepted. The recursive decision and refinement system `BO_0243` built is an extension over it, `calliopa-refine`, and is not part of what a release ships. User decision, 2026-09-16 (`BO_0253`, Decided; `BO_0256_005`), replacing the line `BO_0243` set on 2026-09-13, which named the decision system as what Calliopa is.
 * Calliopa may serve other repos in the Calliopa family; which repos consume which capabilities is decided by the change introducing the first shared capability.
 
-- The workspace shell is the frame for later story-development tools. It does not define a content model.
+- The workspace shell is the frame the extensions mount in. The one type it declares is `attachment`, the record of a file sent with a command ([Command Dock](./workspace/command-dock.md), `BO_0229_007`); documents and every other content model are extensions'.
 
 ## Fixed Stack
 
@@ -47,14 +47,13 @@
 
 ### documents
 
-- [Block Editor View](./documents/block-editor.md) describes the first real view type: reading presentation, in-place block editing, saving, structural gestures, and its action surfaces.
-- [Block Document Model](./documents/block-document-model.md) describes the first domain model over the graph: documents, blocks, the block vocabulary, ordering, containment, retirement, and structural operations.
-- [Block Document Model](./documents/block-document-model.md)
-- [Proposed Changes](./documents/proposed-changes.md)
-- [Schema Evolution](./documents/schema-evolution.md)
-- [Block Editor View](./documents/block-editor.md)
-- [Document Panel](./documents/document-panel.md)
-- [Command Mode](./documents/command-mode.md)
+- The documents area is `documents`' own `docs/` since `BO_0255_009`; its topics live under the extension's [docs](../../src/extensions/documents/docs/system/system.md) and are linked here for the reader who knew them as the shell's, as the production and publishing areas link `calliopa-video`'s.
+- [Block Document Model](../../src/extensions/documents/docs/system/documents/block-document-model.md)
+- [Block Editor View](../../src/extensions/documents/docs/system/documents/block-editor.md)
+- [Proposed Changes](../../src/extensions/documents/docs/system/documents/proposed-changes.md)
+- [Document Panel](../../src/extensions/documents/docs/system/documents/document-panel.md)
+- [Command Mode](../../src/extensions/documents/docs/system/documents/command-mode.md)
+- [Schema Evolution](../../src/extensions/documents/docs/system/documents/schema-evolution.md)
 
 ### content-store
 

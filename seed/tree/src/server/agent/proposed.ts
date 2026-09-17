@@ -1,81 +1,38 @@
-import { query, touchedSet } from "../ccgw/client";
-import { bareId, CONTAINS, contentOf, nodeRef, typeOf } from "../documents/assemble";
-import { readDocumentProposals } from "../documents/documents";
-import { DOCUMENT_TYPE } from "../documents/vocabulary";
+import type { ProposedTarget } from "~/contract";
+import { SERVER_REGISTRY } from "~/registry.server.gen";
+import { qualify } from "~/registry";
 import { readBridgeRun } from "./bridge";
 
 /**
- * One document a run staged a group against, as the run's detail lists it.
+ * What a run proposed, as the run detail lists it.
  *
- * The count is of items still unanswered, because that is the only number a
- * reader can act on: an answered item is already truth or already rejected, and
- * either way there is nothing left to open the document for.
+ * The frame knows a run has a proposal group and nothing about what a group
+ * means: each extension reads its own content and answers what the run staged
+ * into it (`proposedTargets`), and this merges those answers in extension
+ * order with each kind qualified. An extension that throws contributes
+ * nothing, the way a section reader that throws renders its section empty.
+ * BO_0207_015 BO_0255_007
  */
-export interface ProposedDocument {
-  readonly documentId: string;
-  readonly title: string;
-  readonly unanswered: number;
+export interface ProposedItem extends ProposedTarget {
+  /** The qualified kind, so the detail can open what it names. */
+  readonly openKind: string;
 }
 
-/**
- * What a run proposed, indexed by the documents it touched. `BO_0207_015`
- *
- * A run is found on its group through the bridge's own record of the run,
- * and the group's touched set says which nodes it staged. A staged relation
- * from a document places or retires a block in it; a candidate of a block is
- * placed by the containment the block already has, read from the block
- * upward. The unanswered count is the document's own reading of the group
- * (`readDocumentProposals`), so the detail and the editor cannot disagree.
- */
-export async function runProposals(runId: string): Promise<readonly ProposedDocument[]> {
+export async function runProposals(runId: string): Promise<readonly ProposedItem[]> {
   const run = await readBridgeRun(runId);
   if (!run.ok || !run.value.group) return [];
   const group = run.value.group;
-
-  const touched = await touchedSet(group);
-  if (touched.outcome !== "success") return [];
-
-  const documents = new Set<string>();
-  for (const relation of touched.result.stagedRelations) {
-    if (relation.type === CONTAINS || relation.type === "retired") {
-      documents.add(relation.fromNodeId);
+  const listed: ProposedItem[] = [];
+  for (const { extension, read } of SERVER_REGISTRY.proposedTargets) {
+    let answered: readonly ProposedTarget[];
+    try {
+      answered = await read(group);
+    } catch {
+      continue;
     }
-  }
-  for (const nodeId of touched.result.touchedNodes) {
-    const parent = await query({
-      statement: `MATCH (d:${DOCUMENT_TYPE})-[c:${CONTAINS}]->(b) RETURN GRAPH d, c, b ROOT b`,
-      roots: [nodeId],
-      purpose: "run proposals",
-    });
-    if (parent.outcome !== "success") continue;
-    for (const relation of parent.result.relations) {
-      if (relation.type === CONTAINS && relation.to.nodeId === nodeId && relation.validity.status === "active") {
-        documents.add(relation.fromNodeId);
-      }
+    for (const target of answered) {
+      listed.push({ ...target, openKind: qualify(extension, target.kind) });
     }
-  }
-
-  const listed: ProposedDocument[] = [];
-  for (const documentNode of documents) {
-    const documentId = bareId(documentNode);
-    const proposals = await readDocumentProposals(documentId);
-    if (proposals.outcome !== "success") continue;
-    const own = proposals.result.groups.find((candidate) => candidate.groupId === group);
-    const title = await titleOf(documentNode);
-    listed.push({ documentId, title, unanswered: own?.items.length ?? 0 });
   }
   return listed.sort((left, right) => left.title.localeCompare(right.title));
-}
-
-async function titleOf(documentNode: string): Promise<string> {
-  const outcome = await query({
-    statement: "MATCH (n {id: $id}) RETURN GRAPH n",
-    parameters: { id: bareId(documentNode) },
-    purpose: "run proposals",
-  });
-  if (outcome.outcome !== "success") return "";
-  const node = outcome.result.nodes.find((candidate) => candidate.id === nodeRef(documentNode));
-  if (node === undefined || typeOf(node) !== DOCUMENT_TYPE) return "";
-  const title = contentOf(node)["title"];
-  return typeof title === "string" ? title : "";
 }

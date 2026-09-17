@@ -26,7 +26,22 @@ export interface ProcessRecord {
   readonly updatedAt: string;
   /** The kernel run this process reports, when it is one. BO_0207_015 */
   readonly runId?: string;
+  /** Whose run: the kernel's own refinement, or a person's command. A
+   * person's run that carried a refinement with it stays a person's and
+   * names what it refined. BO_0245_010 */
+  readonly trigger?: "person" | "system";
+  /** What triggered a refinement: the document and the data revision. */
+  readonly refined?: { readonly documentId: string; readonly dataRevision: number };
+  /** What the run concluded, in the judgement's words. */
+  readonly concluded?: string;
+  /** The signed-in person whose command started the run; the kernel lists
+   * and serves the record to them and the owner alone. A system process
+   * names none. BO_0232_006 */
+  readonly account?: string;
 }
+
+/** The workspace a system process lists under: every workspace's list carries it. */
+export const SYSTEM_WORKSPACE = "system";
 
 const ALLOWED: Readonly<Record<ProcessState, readonly ProcessState[]>> = {
   queued: ["running", "failed", "cancelled"],

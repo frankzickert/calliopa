@@ -20,9 +20,9 @@ import {
   type GraphNode,
   type GraphResult,
 } from "./graph-gateway";
-import { groupChanges } from "../lib/changes";
+import { statusOf } from "../lib/changes";
 import type { ChangeDocumentSummary } from "../lib/library";
-import { listChangeDocuments } from "./documents/documents";
+import { parseDocument } from "~/lib/owner-docs/parse";
 
 /**
  * The extensions the graph holds, for the library and for their owners.
@@ -38,8 +38,6 @@ export type ExtensionListing =
   | {
       readonly reachable: true;
       readonly extensions: readonly ExtensionSummary[];
-      /** Changes naming an extension the graph does not hold, by that id. BO_0222_005 */
-      readonly other: readonly ChangeDocumentSummary[];
       /**
        * Whether the person the listing was read for is the owner, so the
        * section shows the import control to the one person the kernel lets
@@ -51,7 +49,6 @@ export type ExtensionListing =
       readonly reachable: false;
       readonly detail: string;
       readonly extensions: readonly [];
-      readonly other: readonly [];
     };
 
 export type ExtensionDocumentOutcome =
@@ -344,19 +341,19 @@ export async function declaresVocabulary(id: string): Promise<boolean> {
 export async function listExtensions(): Promise<ExtensionListing> {
   const snapshot = await readSnapshot();
   if (!snapshot.ok)
-    return { reachable: false, detail: snapshot.detail, extensions: [], other: [] };
-  // The change documents are content, read as the documents listing reads
-  // and never from the pinned snapshot: a change written a moment ago lists
-  // at once. A failed read lists the extensions with no changes rather than
-  // nothing. BO_0222_005
-  const changes = await listChangeDocuments();
-  const grouped = groupChanges(
-    changes.outcome === "success" ? changes.result : [],
-    snapshot.value.manifests.map((manifest) => stringOf(manifest.revision.content, "id")),
-  );
+    return { reachable: false, detail: snapshot.detail, extensions: [] };
+  // An extension's changes are its own `docs/changes/` members, read from the
+  // same snapshot its topics are read from: one read, and a change is always
+  // under the extension whose subtree holds it. BO_0254_009
   const extensions = snapshot.value.manifests.map((manifest) => {
     const summary = summaryOf(snapshot.value, manifest);
-    return { ...summary, changes: grouped.byExtension.get(summary.id) ?? [] };
+    return {
+      ...summary,
+      changes: changesOf(
+        summary.id,
+        snapshot.value.membersByManifest.get(manifest.id) ?? [],
+      ),
+    };
   });
   extensions.sort((a, b) =>
     a.category !== b.category
@@ -365,8 +362,36 @@ export async function listExtensions(): Promise<ExtensionListing> {
         : 1
       : a.id.localeCompare(b.id),
   );
-  return { reachable: true, extensions, other: grouped.other };
+  return { reachable: true, extensions };
 }
+
+/** The `docs/changes/` members of one extension, as the category lists them:
+ * the file's title and the status its `Status:` line carries, ordered by file
+ * name, which is identifier order for every change the protocol names.
+ * BO_0254_009 */
+function changesOf(
+  extension: string,
+  members: readonly GraphNode[],
+): readonly ChangeDocumentSummary[] {
+  const changes: ChangeDocumentSummary[] = [];
+  for (const source of docsOf(members)) {
+    const name = CHANGE_MEMBER.exec(source.path)?.[1];
+    if (name === undefined) continue;
+    const document = parseDocument(source.path, source.content);
+    changes.push({
+      path: source.path,
+      id: CHANGE_IDENTIFIER.exec(name)?.[1] ?? "",
+      title: document.title,
+      change: extension,
+      status: statusOf(document.status),
+    });
+  }
+  changes.sort((a, b) => a.path.localeCompare(b.path));
+  return changes;
+}
+
+const CHANGE_MEMBER = /^docs\/changes\/(?:completed\/)?([^/]+)\.md$/u;
+const CHANGE_IDENTIFIER = /^([A-Z]{2}_\d{4})_/u;
 
 function docsOf(members: readonly GraphNode[]): DocSource[] {
   const docs: DocSource[] = [];
@@ -471,12 +496,11 @@ export async function readExtensionDocument(
     };
 
   const summary = summaryOf(snapshot.value, manifest);
-  const changes = await listChangeDocuments();
-  const own = groupChanges(changes.outcome === "success" ? changes.result : [], [id]).byExtension.get(id) ?? [];
+  const members = snapshot.value.membersByManifest.get(manifest.id) ?? [];
   let entry = networks.get(id);
   if (entry === undefined || entry.head !== snapshot.value.head) {
     const network = buildNetwork(
-      docsOf(snapshot.value.membersByManifest.get(manifest.id) ?? []),
+      docsOf(members),
       historyOf(
         snapshot.value.eventsByManifest.get(manifest.id) ?? [],
         snapshot.value.proposals,
@@ -488,8 +512,10 @@ export async function readExtensionDocument(
   const document = renderNode(
     path,
     entry.network,
-    factsOf(snapshot.value, manifest, { ...summary, changes: own }),
-    own,
+    factsOf(snapshot.value, manifest, {
+      ...summary,
+      changes: changesOf(id, members),
+    }),
   );
   return document === null
     ? { outcome: "missing", detail: `${id} has no node ${path ?? ""}.` }
@@ -497,5 +523,5 @@ export async function readExtensionDocument(
 }
 
 /** For tests: the grouping and summary logic over a recorded result set. */
-export const forTesting = { membersByManifest, summaryOf, docsOf };
+export const forTesting = { membersByManifest, summaryOf, docsOf, changesOf };
 export type { GraphResult };

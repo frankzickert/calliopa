@@ -20,14 +20,33 @@ import { quotable } from "./passage";
 /** The one tab kind a command can be aimed at. Another kind has no propose
  * path of this shape — an extension's is staging its source, which a run does
  * by default — so it names no artifact at all. */
-export const DOCUMENT_KIND = "ui.shell:document";
+export const DOCUMENT_KIND = "documents:document";
 
-export const DELIVERIES = ["propose", "answer"] as const;
-export type Delivery = (typeof DELIVERIES)[number];
+/** Where the work of a command aimed at a document goes. */
+export const DOCUMENT_DELIVERIES = ["propose", "answer"] as const;
+export type Delivery = (typeof DOCUMENT_DELIVERIES)[number];
+
+/** A command given with nothing open starts a document, and the one delivery
+ * that names no artifact is that start. BO_0251_006 */
+export const START = "start";
+
+/** Every delivery the kernel's intake takes. */
+export const DELIVERIES = [...DOCUMENT_DELIVERIES, START] as const;
 
 export const isDelivery = (value: unknown): value is Delivery =>
   typeof value === "string" &&
-  (DELIVERIES as readonly string[]).includes(value);
+  (DOCUMENT_DELIVERIES as readonly string[]).includes(value);
+
+/**
+ * Where a command aimed at nothing goes: into a document the run starts, or
+ * answered in the console, which sends no delivery at all. The reader's
+ * choice, kept beside the document's (`DeliveryChoice`) as the one choice for
+ * commands aimed at nothing. BO_0251_006
+ */
+export type UnaimedDelivery = typeof START | "answer";
+
+/** Start is what a command with nothing open asks for until the reader says otherwise. */
+export const NO_UNAIMED: UnaimedDelivery = START;
 
 /**
  * A reference as it travels to the run: a block, or a passage carrying its
@@ -81,13 +100,25 @@ export const staleIn = (pointing: Pointing): readonly number[] =>
     .filter((reference) => reference.kind === "passage" && reference.stale)
     .map((reference) => reference.number);
 
-export interface CommandTarget {
+export interface DocumentTarget {
   /** The document's identity — the one the document tools take. */
   readonly artifact: string;
   readonly delivery: Delivery;
   /** What the reader marked, in mark order. */
   readonly references: readonly SentReference[];
 }
+
+/** A command with nothing open that starts a document: no artifact and no
+ * references, since the document does not exist yet. BO_0251_006 */
+export interface StartTarget {
+  readonly delivery: typeof START;
+}
+
+export type CommandTarget = DocumentTarget | StartTarget;
+
+/** The document a target is aimed at, or null for a start. */
+export const artifactOf = (target: CommandTarget | null): string | null =>
+  target !== null && "artifact" in target ? target.artifact : null;
 
 /** A reported reference with what is only shown taken off. */
 export const sent = (reference: PointedReference): SentReference =>
@@ -132,8 +163,9 @@ export const documentOf = (
     : null;
 
 /**
- * What a command sent from this tab is aimed at, or null when it is aimed at
- * nothing. The references are copied out in mark order, so what is sent is
+ * What a command sent from this tab is aimed at: its document, a start when no
+ * document is active and the reader has not dismissed it, or null when it is
+ * answered in the console with nothing aimed at. The references are copied out in mark order, so what is sent is
  * the reader's marks as they stood at the press and not a view onto them —
  * and the composer's disclosure lists them from this same value, so what it
  * shows and what is sent cannot differ.
@@ -142,9 +174,10 @@ export function commandTarget(
   tab: { readonly kind: string; readonly itemId: string | null } | undefined,
   choice: DeliveryChoice,
   pointing: Readonly<Record<string, Pointing>>,
+  unaimed: UnaimedDelivery,
 ): CommandTarget | null {
   const artifact = documentOf(tab);
-  if (artifact === null) return null;
+  if (artifact === null) return unaimed === START ? { delivery: START } : null;
   return {
     artifact,
     delivery: deliveryFor(artifact, choice),
@@ -176,6 +209,17 @@ export function readCommandTarget(body: {
   if (body.artifact !== undefined && typeof body.artifact !== "string") {
     return { ok: false, error: "The artifact must be a document's identity." };
   }
+  if (artifact !== "" && body.delivery === START) {
+    return { ok: false, error: "A started document is not delivered into an open one." };
+  }
+  if (artifact === "" && body.delivery === START) {
+    return body.references === undefined
+      ? { ok: true, target: { delivery: START } }
+      : {
+          ok: false,
+          error: "A started document carries no references: they need the document they point into.",
+        };
+  }
   if (artifact === "") {
     if (body.delivery !== undefined || body.references !== undefined) {
       return {
@@ -192,7 +236,7 @@ export function readCommandTarget(body: {
   if (!isDelivery(delivery)) {
     return {
       ok: false,
-      error: `A command aimed at a document says where its work goes: ${DELIVERIES.join(" or ")}.`,
+      error: `A command aimed at a document says where its work goes: ${DOCUMENT_DELIVERIES.join(" or ")}.`,
     };
   }
   const listed = body.references ?? [];
@@ -241,6 +285,27 @@ function readReference(entry: unknown): SentReference | string {
     default:
       return `Reference #${number} is neither a block nor a passage.`;
   }
+}
+
+/**
+ * The document a run started from a command created, once the run has ended
+ * naming it — completed, failed or cancelled, since a run that failed may
+ * already have staged it — or null while it runs or when it created none.
+ * BO_0251_007
+ */
+export function startedDocument<E extends { readonly kind: string; readonly document?: string }>(
+  events: readonly E[],
+): string | null {
+  for (const event of events) {
+    if (
+      (event.kind === "runCompleted" || event.kind === "runFailed" || event.kind === "runCancelled") &&
+      event.document !== undefined &&
+      event.document !== ""
+    ) {
+      return event.document;
+    }
+  }
+  return null;
 }
 
 /** The shell's report of the last run aimed at a document that ended. */
@@ -313,4 +378,112 @@ export function revealFor(
 ): { readonly seen: number; readonly target: RevealTarget | null } {
   const looked = proposedFor(request, seen, documentId);
   return { seen: looked.seen, target: looked.act ? request.target : null };
+}
+
+/**
+ * A reference chip's accessible name: its number and the words it stands for,
+ * and that it is stale when its words have gone, since the chip itself shows
+ * only the number. CA_0039_003
+ */
+export function chipName(reference: PointedReference): string {
+  return `Reference ${reference.number}${reference.stale ? ", stale" : ""}: “${reference.words}”`;
+}
+
+/** A pinned block's chip, which carries no number: a pinned block is a
+ * standing, not a reference. CA_0039_003 */
+export function pinnedChipName(pinned: PinnedBlock): string {
+  return `Pinned: “${pinned.words}”`;
+}
+
+/** The most files one command carries, and the most one file may weigh:
+ * decided by the user on 2026-09-10, and refused by the kernel too.
+ * BO_0229_010 */
+export const MAX_ATTACHMENTS = 10;
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+/** What a run can read of an attachment, as the kernel classified it. */
+export const TEXT_STATUSES = ["text", "extracted", "empty", "image", "none"] as const;
+export type TextStatus = (typeof TEXT_STATUSES)[number];
+
+/** A stored file as the kernel's upload answers it: the original's blob, its
+ * extracted text's blob when it has one, and what a run can read of it.
+ * BO_0229_008 */
+export interface AttachmentDescriptor {
+  readonly hash: string;
+  readonly size: number;
+  readonly mediaType: string;
+  readonly filename: string;
+  readonly text: { readonly hash: string; readonly size: number } | null;
+  readonly textStatus: TextStatus;
+}
+
+export type ReadAttachments =
+  | { readonly ok: true; readonly attachments: readonly AttachmentDescriptor[] }
+  | { readonly ok: false; readonly error: string };
+
+const HASH = /^sha256:[0-9a-f]{64}$/u;
+
+/**
+ * The attachments a run request carries, read back from its body: absent is
+ * none, and a list that is not one, holds more than ten, or holds a
+ * descriptor the upload never answers is refused by name rather than
+ * forwarded. BO_0229_009
+ */
+export function readAttachments(value: unknown): ReadAttachments {
+  if (value === undefined) return { ok: true, attachments: [] };
+  if (!Array.isArray(value)) {
+    return { ok: false, error: "Attachments must be a list of the files the upload answered." };
+  }
+  if (value.length > MAX_ATTACHMENTS) {
+    return { ok: false, error: `A command carries at most ${MAX_ATTACHMENTS} files; this one carries ${value.length}.` };
+  }
+  const attachments: AttachmentDescriptor[] = [];
+  for (const [index, entry] of (value as unknown[]).entries()) {
+    const descriptor = readDescriptor(entry);
+    if (typeof descriptor === "string") {
+      return { ok: false, error: `Attachment ${index + 1} ${descriptor}` };
+    }
+    attachments.push(descriptor);
+  }
+  return { ok: true, attachments };
+}
+
+function readDescriptor(entry: unknown): AttachmentDescriptor | string {
+  if (entry === null || typeof entry !== "object") return "is not a file the upload answered.";
+  const { hash, size, mediaType, filename, text, textStatus } = entry as Record<string, unknown>;
+  if (typeof hash !== "string" || !HASH.test(hash)) return "is missing its hash.";
+  if (typeof size !== "number" || !Number.isInteger(size) || size < 0) return "is missing its size.";
+  if (typeof mediaType !== "string" || mediaType === "") return "is missing its media type.";
+  if (typeof filename !== "string" || filename.trim() === "") return "is missing its name.";
+  if (typeof textStatus !== "string" || !(TEXT_STATUSES as readonly string[]).includes(textStatus)) {
+    return "is missing what a run can read of it.";
+  }
+  let readText: AttachmentDescriptor["text"] = null;
+  if (text !== undefined && text !== null) {
+    const { hash: textHash, size: textSize } = text as Record<string, unknown>;
+    if (typeof textHash !== "string" || !HASH.test(textHash) || typeof textSize !== "number") {
+      return "names its text without a hash and size.";
+    }
+    readText = { hash: textHash, size: textSize };
+  }
+  return { hash, size, mediaType, filename, text: readText, textStatus: textStatus as TextStatus };
+}
+
+/** A size in the words a chip shows it: bytes, KB or MB. */
+export function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** What a run was given of an attachment, in the process detail's words. BO_0229_011 */
+export function deliveredWords(delivered: string): string {
+  switch (delivered) {
+    case "text":
+      return "read as text";
+    case "image":
+      return "seen as an image";
+    default:
+      return "name, type and size only";
+  }
 }

@@ -19,6 +19,7 @@ import {
   type Layout,
 } from "~/lib/layout";
 import { danglingNumbers } from "~/lib/command-typeahead";
+import { LibraryRow } from "./library-row";
 import { Composer, type ComposerAim } from "./composer";
 import { fitField } from "./command-field";
 import { LicenceWarning, PersonMenu } from "./header-disclosure";
@@ -32,12 +33,15 @@ import {
   moveTab,
   openTab,
   selectTab,
+  retargetTab,
   updateTab,
+  type RouteEntry,
   type Tab,
   type TabsState,
 } from "~/lib/tabs";
 import {
   activeProcessCount,
+  isTerminal,
   tabProcessState,
   type ProcessRecord,
 } from "~/lib/process";
@@ -55,17 +59,23 @@ import type { LibraryItem, OpenTarget } from "~/contract";
 import { qualify } from "~/registry";
 import { REGISTRY } from "~/registry.gen";
 import type { RunEvent } from "~/server/agent/run-events";
-import type { ProposedDocument } from "~/server/agent/proposed";
+import type { ProposedItem } from "~/server/agent/proposed";
 import { describeRunEvent } from "~/lib/runs";
 import type { SelectableRuntime } from "~/lib/connections";
 import { CHOICE_NOT_REMEMBERED, openingAgent, rememberAgent } from "~/lib/agent-menu";
 import {
   commandTarget,
+  artifactOf,
+  DOCUMENT_KIND,
   NO_CHOICE,
+  NO_UNAIMED,
+  startedDocument,
   NO_POINTING,
   staleIn,
   type Pointing,
 } from "~/lib/command-target";
+import { readyDescriptors, stillUploading, uploadingNames, type AttachmentChip } from "~/lib/attachments";
+import type { BridgeAttachment } from "~/server/agent/bridge";
 import type { WorkspaceRecord } from "~/lib/workspace";
 import type { Person } from "~/server/session";
 import { candidates, fetchReleases, parseReleases } from "~/lib/releases";
@@ -115,6 +125,8 @@ import {
   type Message,
   type ViewMessage,
   type ViewProposed,
+  type ViewCompose,
+  type ViewFocus,
   type ViewReveal,
   type UndoOffer,
 } from "./view-bridge";
@@ -125,6 +137,8 @@ export const PROCESS_POLL_INTERVAL_MS = 2000;
 
 /** The events that end a run. BO_0226_007 */
 const RUN_ENDS: readonly RunEvent["kind"][] = ["runCompleted", "runFailed", "runCancelled"];
+/** A started document's tab until its view has read the title. BO_0251_007 */
+const STARTED_TITLE = "New document";
 
 interface DragState {
   candidate: DragPayload | null;
@@ -238,6 +252,16 @@ export const Shell = component$<{
      */
     artifact: string | null;
     announced: string | null;
+    /** The system processes whose end this shell has told the open views
+     * about, so each raises the proposed signal once. BO_0245_009 */
+    announcedSystem: string[];
+    /** The run whose started document this shell has opened, once per run.
+     * BO_0251_007 */
+    opened: string | null;
+    /** The files the next command carries, and a file refused before its
+     * upload. BO_0229_010 */
+    attachments: AttachmentChip[];
+    attachNotice: string | null;
   }>({
     id: null,
     processId: null,
@@ -248,6 +272,10 @@ export const Shell = component$<{
     runtimes: [],
     artifact: null,
     announced: null,
+    announcedSystem: [] as string[],
+    opened: null,
+    attachments: [],
+    attachNotice: null,
   });
   /**
    * What the reader has marked in each document, as its view last reported,
@@ -255,11 +283,13 @@ export const Shell = component$<{
    * rather than tab, as the marks themselves are (`markingKey`).
    * BO_0226_005 BO_0226_006
    */
-  const aim = useStore<ComposerAim>({ pointing: {}, choice: NO_CHOICE });
+  const aim = useStore<ComposerAim>({ pointing: {}, choice: NO_CHOICE, unaimed: NO_UNAIMED });
   /** The last run aimed at a document that ended, for the view showing it. */
   const runProposed = useStore<ViewProposed>({ itemId: null, seq: 0 });
   /** The last chip the reader pressed, for the view showing its document. CA_0039_004 */
   const reveal = useStore<ViewReveal>({ itemId: null, target: null, seq: 0 });
+  const compose = useStore<ViewCompose>({ text: "", seq: 0 });
+  const focus = useStore<ViewFocus>({ itemId: null, blockId: null, seq: 0 });
   useVisibleTask$(async () => {
     const response = await fetch("/api/agent/runtimes");
     if (!response.ok) return;
@@ -281,7 +311,7 @@ export const Shell = component$<{
    * A process that is not a run answers an empty list, which is why this is
    * asked of whatever is selected rather than only of runs.
    */
-  const proposed = useStore<ProposedRead>({ processId: null, documents: [] });
+  const proposed = useStore<ProposedRead>({ processId: null, documents: [], attachments: [] });
   /**
    * The one thing the dock can take back: a tab move, which carries the tabs
    * to restore, or what a view just did, which carries its own inverse
@@ -361,10 +391,24 @@ export const Shell = component$<{
   });
   useVisibleTask$(({ cleanup }) => {
     let stopped = false;
+    let primed = false;
     const poll = async () => {
       const response = await fetch(`/api/workspaces/${workspace.id}/processes`);
       if (!stopped && response.ok) {
         registry.items = (await response.json()) as ProcessRecord[];
+        // A system run nobody followed has ended for a document: the view
+        // showing it reads what the run proposed, as it does for a person's
+        // run. The first poll only remembers what had already ended, so a
+        // reload does not re-announce every past refinement. BO_0245_009
+        for (const item of registry.items) {
+          if (item.trigger !== "system" || !isTerminal(item.state) || item.refined === undefined) continue;
+          if (run.announcedSystem.includes(item.id)) continue;
+          run.announcedSystem = [...run.announcedSystem, item.id];
+          if (!primed) continue;
+          runProposed.itemId = item.refined.documentId;
+          runProposed.seq += 1;
+        }
+        primed = true;
       }
       // The run's events ride the registry's clock rather than opening a
       // second transport. A run the reader started in an earlier session is
@@ -385,6 +429,30 @@ export const Shell = component$<{
           ) {
             run.announced = run.id;
             runProposed.itemId = run.artifact;
+            runProposed.seq += 1;
+          }
+          // A run started from a command has ended naming the document it
+          // created: it opens in a tab — the one already showing it, if any —
+          // and the view and the library read what the run proposed. Once per
+          // run. BO_0251_007
+          const started = run.opened === run.id ? null : startedDocument(run.events);
+          if (started !== null) {
+            run.opened = run.id;
+            await applyTabs$(
+              openTab(tabs, {
+                id: `${DOCUMENT_KIND}-${started}`,
+                kind: DOCUMENT_KIND,
+                // The view names the tab by the document's title once it has
+                // read it, as it does for every tab it shows.
+                title: STARTED_TITLE,
+                itemId: started,
+                viewType: preferredView(REGISTRY, preferred.value, started, DOCUMENT_KIND).id,
+                selection: null,
+                drawerContext: DOCUMENT_KIND,
+                unsaved: false,
+              }),
+            );
+            runProposed.itemId = started;
             runProposed.seq += 1;
           }
         }
@@ -409,18 +477,27 @@ export const Shell = component$<{
     const goal = field?.value.trim() ?? "";
     if (goal === "" || run.sending) return;
 
+    // A file still uploading holds the command: sent now, it would go without
+    // the file the reader sees in the bar. BO_0229_010
+    const uploading = uploadingNames(run.attachments);
+    if (uploading.length > 0) {
+      run.notice = stillUploading(uploading);
+      return;
+    }
+
     run.sending = true;
     run.notice = null;
     // What the command is aimed at, read from the stores at the press: the
     // active tab, the delivery chosen for its document, and its marks. Not the
     // tab's selection, which leaving the editor for the composer has already
     // cleared. BO_0226_005
-    const target = commandTarget(activeTab(tabs), aim.choice, aim.pointing);
+    const target = commandTarget(activeTab(tabs), aim.choice, aim.pointing, aim.unaimed);
+    const artifact = artifactOf(target);
     // A passage whose words are gone stops the command where the reader can
     // see why: its number may already be in the words, and sending it would
     // name a reference with nothing behind it. BO_0227_015
     const stale =
-      target === null ? [] : staleIn(aim.pointing[target.artifact] ?? NO_POINTING);
+      artifact === null ? [] : staleIn(aim.pointing[artifact] ?? NO_POINTING);
     if (stale.length > 0) {
       run.sending = false;
       run.notice = `${stale.map((number) => `#${number}`).join(", ")} no longer ${stale.length === 1 ? "matches its" : "match their"} words. Re-point or take back before running.`;
@@ -429,14 +506,15 @@ export const Shell = component$<{
     // A number written into the command whose mark has since been taken back
     // names a reference with nothing behind it, for the same reason.
     const dangling =
-      target === null
+      artifact === null
         ? []
-        : danglingNumbers(goal, (aim.pointing[target.artifact] ?? NO_POINTING).references);
+        : danglingNumbers(goal, (aim.pointing[artifact] ?? NO_POINTING).references);
     if (dangling.length > 0) {
       run.sending = false;
       run.notice = `${dangling.map((number) => `#${number}`).join(", ")} ${dangling.length === 1 ? "names" : "name"} nothing marked. Mark it again, or take it out of the command.`;
       return;
     }
+    const sentAttachments = readyDescriptors(run.attachments);
     try {
       const response = await fetch(`/api/workspaces/${workspace.id}/runs`, {
         method: "POST",
@@ -445,6 +523,11 @@ export const Shell = component$<{
           goal,
           ...(run.agent === null ? {} : { agent: run.agent }),
           ...(target === null ? {} : target),
+          // A command issued in a branch proposes into it: the run's group
+          // is the person's branch, not one of its own. BO_0250_010
+          ...(artifact === null || aim.branch?.[artifact] === undefined ? {} : { branch: aim.branch[artifact] }),
+          // The files the bar shows as ready, read at the press. BO_0229_010
+          ...(sentAttachments.length === 0 ? {} : { attachments: sentAttachments }),
         }),
       });
       if (response.ok) {
@@ -455,8 +538,12 @@ export const Shell = component$<{
         run.id = started.runId;
         run.processId = started.processId;
         run.events = [];
-        run.artifact = target?.artifact ?? null;
+        run.artifact = artifact;
         run.announced = null;
+        run.opened = null;
+        // Sent with the run; a refused run keeps them for the next press.
+        run.attachments = [];
+        run.attachNotice = null;
         if (field) {
           field.value = "";
           fitField(field);
@@ -507,11 +594,19 @@ export const Shell = component$<{
     const selected = track(() => selectedProcess(registry.selection, tabs.activeTabId));
     proposed.processId = selected;
     proposed.documents = [];
+    proposed.attachments = [];
     if (selected === null) return;
 
-    const response = await fetch(`/api/processes/${selected}/proposals`);
+    const [response, attached] = await Promise.all([
+      fetch(`/api/processes/${selected}/proposals`),
+      // What the run was sent with, from its own record. BO_0229_011
+      fetch(`/api/processes/${selected}/attachments`),
+    ]);
     if (response.ok && selectedProcess(registry.selection, tabs.activeTabId) === selected) {
-      proposed.documents = (await response.json()) as ProposedDocument[];
+      proposed.documents = (await response.json()) as ProposedItem[];
+    }
+    if (attached.ok && selectedProcess(registry.selection, tabs.activeTabId) === selected) {
+      proposed.attachments = (await attached.json()) as BridgeAttachment[];
     }
   });
   // A closed tab takes its selection with it, so a tab opened again on the
@@ -650,6 +745,13 @@ export const Shell = component$<{
       if (section.opens === kind) await refreshSection$(section.key);
     }
   });
+  /** A system run that ended may have changed a document's derived state:
+   * the library's rows read their glyphs again. BO_0248_012 */
+  useTask$(({ track }) => {
+    const seq = track(() => runProposed.seq);
+    if (seq === 0) return;
+    void refreshKind$("document");
+  });
   /**
    * A section's create control: the contribution makes the item and says what
    * to open; the shell opens it and re-reads the section. BO_0202_003
@@ -739,6 +841,7 @@ export const Shell = component$<{
     message.current = null;
   });
   const bridge: ViewBridge = {
+    workspaceId: workspace.id,
     drag,
     inspector,
     dock,
@@ -754,8 +857,29 @@ export const Shell = component$<{
     setPointing$: $((itemId: string, pointing: Pointing) => {
       aim.pointing = { ...aim.pointing, [itemId]: pointing };
     }),
+    setBranch$: $((itemId: string, branch: string | null) => {
+      const next = { ...(aim.branch ?? {}) };
+      if (branch === null) delete next[itemId];
+      else next[itemId] = branch;
+      aim.branch = next;
+    }),
     proposed: runProposed,
     reveal,
+    composeCommand$: $((text: string) => {
+      compose.text = text;
+      compose.seq += 1;
+    }),
+    retarget$: $(async (target: { itemId: string; title: string; route: readonly RouteEntry[]; focus?: string }) => {
+      const id = tabs.activeTabId;
+      if (id === null) return;
+      const next = retargetTab(tabs, id, target);
+      tabs.tabs = next.tabs;
+      focus.itemId = target.itemId;
+      focus.blockId = target.focus ?? null;
+      focus.seq += 1;
+      await save$(next, layout);
+    }),
+    focus,
     offerUndo$: $((offer: UndoOffer) => {
       undo.value = { kind: "view", label: offer.label, undo$: offer.undo$ };
     }),
@@ -1075,47 +1199,10 @@ export const Shell = component$<{
                   ) : (
                     <ul class="library-list" key={library.reads}>
                       {items.map((item) => {
-                        const open = item.open;
-                        const current = open !== undefined && active?.itemId === open.itemId;
+                        const current = item.open !== undefined && active?.itemId === item.open.itemId;
                         return (
                           <li key={item.id}>
-                            {open === undefined ? (
-                              // Named and not opened: no view presents it on
-                              // its own, and a control that opened nothing
-                              // would say there is somewhere to go.
-                              <span
-                                class="library-entry library-entry--inert"
-                                data-item-id={item.id}
-                              >
-                                <span class="library-entry__label">{item.label}</span>
-                                {item.badge !== undefined && (
-                                  <span class="library-entry__badge">{item.badge}</span>
-                                )}
-                              </span>
-                            ) : (
-                              <button
-                                type="button"
-                                class="library-entry"
-                                data-item-id={item.id}
-                                data-item-kind={open.kind}
-                                data-badge={item.badge}
-                                data-current={current ? "true" : undefined}
-                                aria-current={current ? "true" : undefined}
-                                onClick$={() => openTarget$(open)}
-                              >
-                                <span class="library-entry__label">{item.label}</span>
-                                {item.badge !== undefined && (
-                                  <span class="library-entry__badge">{item.badge}</span>
-                                )}
-                                {/* The marker is the sighted reader's non-colour
-                                  signal. `aria-current` above already says the
-                                  same thing, so naming the marker too would
-                                  append it to the entry's name. */}
-                                {current && (
-                                  <span class="library-entry__marker" aria-hidden="true" />
-                                )}
-                              </button>
-                            )}
+                            <LibraryRow item={item} current={current} onOpen$={openTarget$} />
                           </li>
                         );
                       })}
@@ -1144,7 +1231,10 @@ export const Shell = component$<{
             // Keyed by tab: switching tabs must unmount the view, not hand it a
             // different target. A surface holding unsaved input has to be told it
             // is leaving, and per-tab view-local state must not leak sideways.
-            <ViewHost key={active.id} tab={active} />
+            // Keyed by the target too: a retargeted tab remounts its view on
+            // the new document rather than handing the old one a target it
+            // did not read. CA_0047_004
+            <ViewHost key={`${active.id}:${active.itemId ?? ""}`} tab={active} />
           ) : (
             // With no tab open the workspace names the library: a document is
             // opened or created there, and nothing opens on its own. BO_0203_005
@@ -1228,6 +1318,7 @@ export const Shell = component$<{
             aim={aim}
             run={run}
             reveal={reveal}
+            compose={compose}
             onRun$={sendGoal$}
             onChooseAgent$={chooseAgent$}
           />

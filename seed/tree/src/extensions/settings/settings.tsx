@@ -8,6 +8,7 @@ import {
 } from "@builder.io/qwik";
 
 import { agentNeeds, type ConnectionRecord, type HermesModel } from "~/lib/connections";
+import { parseRefinement, refinementWords, type RefinementSettings } from "~/lib/refinement";
 import type { ViewProps } from "~/components/shell/view-host";
 import type { LoginState } from "~/server/agent/adapters";
 import type { AccountListing, AccountView, LicenceView } from "~/server/kernel/accounts";
@@ -103,6 +104,44 @@ export const SettingsView = component$<ViewProps>(() => {
     busy: null,
     error: null,
     errorParty: null,
+  });
+  /** Whether the kernel refines on its own and after how long a quiet, as
+   * its route answers; the owner's switch and field write it back and the
+   * row re-reads. BO_0245_011 */
+  const refinement = useStore<{
+    settings: RefinementSettings | null;
+    settle: string;
+    busy: boolean;
+    error: string | null;
+  }>({ settings: null, settle: "30", busy: false, error: null });
+  const readRefinement$ = $(async () => {
+    const response = await fetch("/api/agent/refinement");
+    if (!response.ok) {
+      refinement.settings = null;
+      return;
+    }
+    const settings = parseRefinement((await response.json()) as unknown);
+    refinement.settings = settings;
+    if (settings !== null) refinement.settle = String(settings.settleSeconds);
+  });
+  const setRefinement$ = $(async (next: RefinementSettings) => {
+    refinement.busy = true;
+    refinement.error = null;
+    try {
+      const response = await fetch("/api/agent/refinement", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(next),
+      });
+      if (!response.ok) {
+        const refused = (await response.json().catch(() => ({}))) as { error?: string };
+        refinement.error = refused.error ?? "The kernel refused the change.";
+        return;
+      }
+      await readRefinement$();
+    } finally {
+      refinement.busy = false;
+    }
   });
   const entered = useSignal("");
   /**
@@ -217,6 +256,7 @@ export const SettingsView = component$<ViewProps>(() => {
     }
     state.rows = (await response.json()) as ConnectionRecord[];
     state.loaded = true;
+    await readRefinement$();
   });
 
   // The rows are the server's answer, so every request re-reads rather than
@@ -398,6 +438,12 @@ export const SettingsView = component$<ViewProps>(() => {
       if (state.busy === null) void read$();
     }, AGENT_POLL_MS);
     cleanup(stop);
+    // A device flow the kernel is polling: the row follows it every few
+    // seconds until the provider answers. BO_0252_007
+    const flow = setInterval(() => {
+      if (state.busy === null && state.rows.some((row) => row.flow?.state === "awaiting")) void read$();
+    }, 3000);
+    cleanup(() => clearInterval(flow));
   });
 
   // A refusal is shown in the section the reader was acting in; which one is
@@ -575,6 +621,68 @@ export const SettingsView = component$<ViewProps>(() => {
                               {", naming an OpenRouter or OpenAI key and a model."}
                             </span>
                           )}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                  {/* Refinement: whether the kernel refines on its own after
+                      a change settles, and after how long. The owner switches
+                      it and sets the settle time; anyone else reads it. With
+                      no runtime signed in it waits, and the row says so.
+                      BO_0245_011 */}
+                  {row.party === "hermes" && refinement.settings !== null && (
+                    <div class="agent-report__refinement" data-refinement={refinement.settings.enabled ? "on" : "off"}>
+                      <p data-refinement-words>
+                        {refinementWords(refinement.settings, !agentNeeds(state.rows).some((need) => need.blocking))}
+                      </p>
+                      <p class="connection__controls">
+                        <button
+                          type="button"
+                          class="connection__action"
+                          data-refinement-switch
+                          aria-pressed={refinement.settings.enabled ? "true" : "false"}
+                          disabled={refinement.busy}
+                          onClick$={() =>
+                            setRefinement$({
+                              enabled: !(refinement.settings?.enabled ?? true),
+                              settleSeconds: refinement.settings?.settleSeconds ?? 30,
+                            })
+                          }
+                        >
+                          {refinement.settings.enabled ? "Turn refinement off" : "Turn refinement on"}
+                        </button>
+                        <label class="connection__field">
+                          {"Settle time, seconds "}
+                          <input
+                            type="number"
+                            min={0}
+                            step={1}
+                            data-refinement-settle
+                            value={refinement.settle}
+                            disabled={refinement.busy}
+                            onInput$={(_event, element) => {
+                              refinement.settle = element.value;
+                            }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          class="connection__action"
+                          data-refinement-save
+                          disabled={refinement.busy || !/^\d+$/u.test(refinement.settle) || Number(refinement.settle) === refinement.settings.settleSeconds}
+                          onClick$={() =>
+                            setRefinement$({
+                              enabled: refinement.settings?.enabled ?? true,
+                              settleSeconds: Number(refinement.settle),
+                            })
+                          }
+                        >
+                          Save settle time
+                        </button>
+                      </p>
+                      {refinement.error !== null && (
+                        <p class="connection__error" role="status" data-refinement-error>
+                          {refinement.error}
                         </p>
                       )}
                     </div>
@@ -820,13 +928,28 @@ export const SettingsView = component$<ViewProps>(() => {
                     data-connection-state={row.state}
                   >
                     {STATE_WORDS[row.state]}
-                    {row.keySet && (
+                    {row.keySet && row.kind !== "oauth" && (
                       <span class="connection__suffix">
                         {" · key ending "}
                         {row.secretSuffix}
                       </span>
                     )}
+                    {row.kind === "oauth" && row.flow !== null && row.flow !== undefined && (
+                      <span class="connection__suffix" data-channel-flow={row.flow.state}>
+                        {row.flow.state === "awaiting"
+                          ? " · signing in"
+                          : row.flow.state === "verified"
+                            ? " · signed in"
+                            : ` · sign-in failed${row.flow.lastError === null ? "" : `: ${row.flow.lastError}`}`}
+                      </span>
+                    )}
                   </p>
+                  {row.kind === "oauth" && row.flow?.state === "awaiting" && (
+                    // The device flow: the code to type and where, until the provider answers. BO_0252_007
+                    <p class="connection__error" role="status" data-channel-sign-in-code>
+                      Open <a href={row.flow.verificationUrl ?? "#"} target="_blank" rel="noreferrer">{row.flow.verificationUrl}</a> and enter the code <strong>{row.flow.userCode}</strong>.
+                    </p>
+                  )}
                   {row.lastError !== null && (
                     <p class="connection__error" role="status">
                       {row.lastError}
@@ -853,7 +976,7 @@ export const SettingsView = component$<ViewProps>(() => {
                     ))}
                     <label class="connection__field">
                       <span class="connection__label">
-                        {row.keySet ? "Replace key" : "Key"}
+                        {row.kind === "oauth" ? (row.keySet ? "Replace client secret" : "Client secret") : row.keySet ? "Replace key" : "Key"}
                       </span>
                       <input
                         type="password"
@@ -861,7 +984,7 @@ export const SettingsView = component$<ViewProps>(() => {
                         autoComplete="off"
                         value={typedKey}
                         placeholder={
-                          row.keySet ? "Enter a new key" : "Enter key"
+                          row.kind === "oauth" ? "Enter the client secret" : row.keySet ? "Enter a new key" : "Enter key"
                         }
                         data-channel-key
                         aria-label={`${row.label || row.party} key`}
@@ -910,10 +1033,27 @@ export const SettingsView = component$<ViewProps>(() => {
                     >
                       Save
                     </button>
+                    {row.kind === "oauth" && (
+                      <button
+                        type="button"
+                        class="connection__action"
+                        disabled={busy || !row.keySet || row.flow?.state === "awaiting"}
+                        data-channel-sign-in={row.party}
+                        onClick$={() =>
+                          request$(
+                            row.party,
+                            `/api/x/settings/connections/${row.party}/sign-in`,
+                            { method: "POST" },
+                          )
+                        }
+                      >
+                        {row.flow?.state === "verified" ? "Sign in again" : "Sign in"}
+                      </button>
+                    )}
                     <button
                       type="button"
                       class="connection__action"
-                      disabled={busy || !row.keySet}
+                      disabled={busy || !row.keySet || (row.kind === "oauth" && row.flow?.state !== "verified")}
                       data-channel-test={row.party}
                       onClick$={() =>
                         request$(

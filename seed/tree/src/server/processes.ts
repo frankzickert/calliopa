@@ -4,13 +4,16 @@ import {
   canTransition,
   INITIAL_PROCESS_STATE,
   PROCESS_STATES,
+  SYSTEM_WORKSPACE,
   type ProcessRecord,
   type ProcessState,
 } from "~/lib/process";
+import { DOCUMENT_KIND } from "~/lib/command-target";
+import { judgementWords, listBridgeRuns, triggerOf, type BridgeRun } from "./agent/bridge";
 import { migrateTabKind, type TabKind } from "~/lib/tabs";
 import { HttpError } from "./http-error";
 import { kernelState } from "./kernel/client";
-import { isRegisteredKind } from "./registry";
+import { isRegisteredKind, labelOf } from "./registry";
 import { assertRecordId } from "./uuid";
 import { readWorkspace } from "./workspaces";
 
@@ -112,22 +115,102 @@ async function store(record: ProcessRecord): Promise<ProcessRecord> {
 
 export async function listProcesses(workspaceId: string): Promise<ProcessRecord[]> {
   await readWorkspace(workspaceId);
+  await syncSystemRuns();
   const ids = await kernelState.list("processes");
   const records = await Promise.all(ids.map(readStored));
   // A process naming an item kind no extension contributes any more is
   // dropped from the listing, not from the record: absence tolerates what it
   // finds, and nothing is purged. BO_0203_006
+  // A system process belongs to no workspace and is listed in every one:
+  // the kernel's refinement is not a fact about where a reader sat. BO_0245_009
   return records
     .filter(
       (record): record is ProcessRecord =>
         record !== null &&
-        record.workspaceId === workspaceId &&
+        (record.workspaceId === workspaceId || record.workspaceId === SYSTEM_WORKSPACE) &&
         (record.itemKind === null || isRegisteredKind(migrateTabKind(record.itemKind))),
     )
     .map((record) =>
       record.itemKind === null ? record : { ...record, itemKind: migrateTabKind(record.itemKind) },
     )
     .sort(byCreation);
+}
+
+/** The process state a bridge run's status reads as. */
+const stateOfRun = (status: string): ProcessState => {
+  switch (status) {
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "cancelled";
+    default:
+      return "running";
+  }
+};
+
+/**
+ * The kernel's own runs, as processes: a system run is started by nobody
+ * here, so the registry learns of it from the bridge's list and keeps one
+ * record per run under the system workspace, its state following the run's.
+ * A bridge that cannot be reached leaves the records as they are. BO_0245_009
+ */
+async function syncSystemRuns(): Promise<void> {
+  const listed = await listBridgeRuns();
+  if (!listed.ok) return;
+  const system = listed.value.filter((run) => triggerOf(run) === "system");
+  if (system.length === 0) return;
+  const ids = await kernelState.list("processes");
+  const records = (await Promise.all(ids.map(readStored))).filter((record): record is ProcessRecord => record !== null);
+  for (const run of system) {
+    const existing = records.find((record) => record.runId === run.id);
+    const state = stateOfRun(run.status);
+    if (existing !== undefined) {
+      const concluded = judgementWords(run.judgement);
+      if (existing.state !== state || (concluded !== "" && existing.concluded !== concluded)) {
+        await store({
+          ...existing,
+          state,
+          step: state === "running" ? "Refining" : state === "completed" ? "Done" : existing.step,
+          ...(concluded === "" ? {} : { concluded }),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+    await store(await systemProcess(run, state));
+  }
+}
+
+async function systemProcess(run: BridgeRun, state: ProcessState): Promise<ProcessRecord> {
+  const documentId = run.refined ?? null;
+  let title = "Refine";
+  if (documentId !== null) {
+    // What the refined document is called is the extension listing it to say;
+    // with no extension listing documents, the identity names it. BO_0255_007
+    const named = await labelOf(DOCUMENT_KIND, documentId);
+    title = `Refine: ${named ?? documentId}`;
+  }
+  const now = new Date().toISOString();
+  const concluded = judgementWords(run.judgement);
+  return {
+    id: randomUUID(),
+    workspaceId: SYSTEM_WORKSPACE,
+    title,
+    state,
+    step: state === "running" ? "Refining" : state === "completed" ? "Done" : null,
+    error: null,
+    itemId: documentId,
+    itemKind: documentId === null ? null : DOCUMENT_KIND,
+    acknowledged: false,
+    createdAt: now,
+    updatedAt: now,
+    runId: run.id,
+    trigger: "system",
+    ...(documentId === null ? {} : { refined: { documentId, dataRevision: run.refinedAt ?? run.pin } }),
+    ...(concluded === "" ? {} : { concluded }),
+  };
 }
 
 /**
@@ -138,6 +221,8 @@ export async function createProcess(
   workspaceId: string,
   input: unknown,
   id: string = randomUUID(),
+  /** Whose process: the person whose command started the run. BO_0232_006 */
+  account?: string,
 ): Promise<ProcessRecord> {
   const { title, step, itemId, itemKind } = parseProcessInput(input);
   await readWorkspace(workspaceId);
@@ -154,6 +239,7 @@ export async function createProcess(
     acknowledged: false,
     createdAt: now,
     updatedAt: now,
+    ...(account === undefined ? {} : { account }),
   });
 }
 
@@ -192,7 +278,11 @@ export async function transitionProcess(
  */
 export async function moveProcess(
   id: string,
-  change: { readonly state: ProcessState; readonly step: string | null; readonly error: string | null },
+  change: Partial<Pick<ProcessRecord, "trigger" | "refined" | "concluded">> & {
+    readonly state: ProcessState;
+    readonly step: string | null;
+    readonly error: string | null;
+  },
 ): Promise<ProcessRecord | null> {
   const current = await readStored(id);
   if (current === null) return null;

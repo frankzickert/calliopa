@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   changeFilterOf,
   filterChanges,
-  groupChanges,
   isDefaultChangeFilter,
   statusOf,
   toggleChangeStatus,
@@ -15,11 +14,11 @@ const change = (
   extension: string,
   status: ChangeDocumentSummary["status"],
 ): ChangeDocumentSummary => ({
-  documentId: title.toLowerCase(),
+  path: `docs/changes/${title}.md`,
+  id: "",
   title,
   change: extension,
   status,
-  revisedAt: 0,
 });
 
 describe("the change filter", () => {
@@ -48,23 +47,7 @@ describe("the change filter", () => {
   });
 });
 
-describe("grouping changes under extensions", () => {
-  it("Given changes naming known and unknown extensions, Then each goes under its extension by title and the rest under other", () => {
-    const grouped = groupChanges(
-      [
-        change("b-second", "ui.shell", "wip"),
-        change("A-first", "ui.shell", "idea"),
-        change("Gone", "retired-ext", "completed"),
-        change("Video", "calliopa-video", "draft"),
-      ],
-      ["ui.shell", "calliopa-video", "settings"],
-    );
-    expect(grouped.byExtension.get("ui.shell")?.map((c) => c.title)).toEqual(["A-first", "b-second"]);
-    expect(grouped.byExtension.get("calliopa-video")?.map((c) => c.title)).toEqual(["Video"]);
-    expect(grouped.byExtension.get("settings")).toEqual([]);
-    expect(grouped.other.map((c) => `${c.change}/${c.title}`)).toEqual(["retired-ext/Gone"]);
-  });
-
+describe("reading a status line", () => {
   it("Given a stored status, Then it reads as itself and anything else as idea", () => {
     expect(statusOf("ready")).toBe("ready");
     expect(statusOf(undefined)).toBe("idea");

@@ -1,5 +1,6 @@
-# The Calliopa kernel — pinned Node, pinned pnpm, and the kernel binary,
-# nothing else — built on your machine. The base image is pulled by you from
+# The Calliopa kernel — pinned Node, pinned pnpm, the kernel binary, and
+# poppler-utils for the text of an attached PDF, nothing else — built on your
+# machine. The base image is pulled by you from
 # Docker Hub; the kernel binary is downloaded from the release named in .env
 # and checked before it is installed. Vite and the Qwik optimizer are absent
 # on purpose: they arrive from a working tree's own lockfile at install time.
@@ -15,7 +16,7 @@ ARG CALLIOPA_RELEASE_SHA256SUMS
 ARG TARGETARCH
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates wget && \
+    apt-get install -y --no-install-recommends ca-certificates wget poppler-utils && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /calliopa-release

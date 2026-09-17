@@ -5,10 +5,12 @@ import { attachRun, createProcess, listAllProcesses, moveProcess, readProcess } 
 import {
   cancelBridgeRun,
   followBridgeEvents,
+  judgementWords,
   readBridgeRun,
   startBridgeRun,
 } from "./bridge";
 import type { RunEvent } from "./run-events";
+import { readSession } from "../session";
 
 /**
  * Conducting a run through the kernel's agent bridge. `BO_0207_015`
@@ -30,6 +32,8 @@ export type ConductedRun =
    * mean, a goal it cannot take. The reader's to correct, not the agent's
    * failure, so it is not reported as one. BO_0226_004 */
   | { readonly ok: false; readonly reason: "refused"; readonly detail: string }
+  /** The kernel refused it as someone else's to do. BO_0232_007 */
+  | { readonly ok: false; readonly reason: "forbidden"; readonly detail: string }
   /** The kernel refused or could not reach the agent. Answered before a
    * process is opened, because there is nothing to report. */
   | { readonly ok: false; readonly reason: "agent"; readonly detail: string };
@@ -61,6 +65,10 @@ export async function conductRun(input: {
   readonly agent?: string;
   /** What the command was aimed at, or null for a command aimed at nothing. */
   readonly target?: CommandTarget | null;
+  /** The person's branch the run proposes into. BO_0250_005 */
+  readonly group?: string;
+  /** The attachment nodes written for the files the command carries. BO_0229_009 */
+  readonly attachments?: readonly string[];
 }): Promise<ConductedRun> {
   // The runtime is the reader's explicit choice or the one the agent
   // stamped as active; the bridge reads an empty selection as the API-key
@@ -72,18 +80,24 @@ export async function conductRun(input: {
     context: `raised from workspace ${input.workspaceId}`,
     agent,
     target: input.target ?? null,
+    ...(input.group === undefined ? {} : { group: input.group }),
+    ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
   });
   if (!started.ok) {
     return {
       ok: false,
-      reason: started.status === 409 ? "busy" : started.status === 400 ? "refused" : "agent",
+      reason: started.status === 409 ? "busy" : started.status === 400 ? "refused" : started.status === 403 ? "forbidden" : "agent",
       detail: started.detail,
     };
   }
-  const process = await createProcess(input.workspaceId, {
-    title: input.goal,
-    step: "Started",
-  });
+  // The process is the person's, as the run is. BO_0232_006
+  const person = await readSession();
+  const process = await createProcess(
+    input.workspaceId,
+    { title: input.goal, step: "Started" },
+    undefined,
+    person?.name,
+  );
   const attached = await attachRun(process.id, started.value.id);
   return { ok: true, runId: started.value.id, process: attached ?? process };
 }
@@ -114,6 +128,23 @@ export async function followRun(processId: string, runId: string): Promise<void>
   if (!followed.ok) {
     await moveProcess(processId, { state: "failed", step: null, error: followed.detail });
     return;
+  }
+  // A command's run that carried a queued refinement with it says so in its
+  // detail: what it refined and what it concluded. BO_0245_009
+  const carried = await readBridgeRun(runId);
+  if (carried.ok && carried.value.refined !== undefined) {
+    const current = await readProcess(processId).catch(() => null);
+    if (current !== null) {
+      const concluded = judgementWords(carried.value.judgement);
+      await moveProcess(processId, {
+        state: current.state,
+        step: current.step,
+        error: current.error,
+        trigger: "person",
+        refined: { documentId: carried.value.refined, dataRevision: carried.value.refinedAt ?? carried.value.pin },
+        ...(concluded === "" ? {} : { concluded }),
+      });
+    }
   }
   if (!ended) {
     // The stream closed without a terminal event: the bridge's own record
@@ -155,11 +186,15 @@ export async function cancelRun(runId: string): Promise<{ readonly runId: string
  * bridge answers its buffered history first, which is what a poll wants; it
  * leaves as soon as the stream goes quiet.
  */
-export async function runEvents(runId: string): Promise<readonly RunEvent[]> {
+export async function runEvents(runId: string): Promise<readonly RunEvent[] | null> {
   const events: RunEvent[] = [];
-  await followBridgeEvents(runId, (event) => {
+  const followed = await followBridgeEvents(runId, (event) => {
     events.push(event);
   }, { idleMs: 400 });
+  // A run the kernel does not serve this person — unknown, or someone
+  // else's — is answered as unknown rather than as a run with no events.
+  // BO_0232_007
+  if (!followed.ok && followed.status === 404) return null;
   return events;
 }
 

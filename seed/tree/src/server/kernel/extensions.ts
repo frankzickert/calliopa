@@ -66,6 +66,11 @@ export interface KernelExtensionListing {
   readonly canChange: boolean;
 }
 
+/** One extension as `GET /__kernel/extensions/{id}` answers it. BO_0257_009 */
+export interface KernelExtensionOne extends Omit<KernelExtensionListing, "extensions"> {
+  readonly extension: KernelExtensionView;
+}
+
 /** The answer to a create: the new extension's view and the revision it was established at. */
 export interface ExtensionCreated {
   readonly extension: KernelExtensionView;
@@ -119,6 +124,12 @@ export const kernelExtensions = {
   async list(): Promise<KernelExtensionListing> {
     return answered<KernelExtensionListing>(
       await call("/__kernel/extensions", { method: "GET" }),
+    );
+  },
+  /** One extension as the listing answers it, read from that extension alone. BO_0257_009 */
+  async one(id: string): Promise<KernelExtensionOne> {
+    return answered<KernelExtensionOne>(
+      await call(`/__kernel/extensions/${encodeURIComponent(id)}`, { method: "GET" }),
     );
   },
   async setActive(id: string, active: boolean): Promise<ExtensionChange> {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Component } from "@builder.io/qwik";
 import type { ApiRoute, ViewContribution } from "~/contract";
-import { buildRegistry, buildServerRegistry, matchRoute, RegistryError } from "./registry";
+import { buildRegistry, buildServerRegistry, matchRoute, mergeRoster, RegistryError } from "./registry";
 
 /**
  * The merge behind the generated registries, over fixture contributions: what
@@ -32,17 +32,17 @@ describe("building the client registry", () => {
   it("qualifies sections and kinds by extension and keeps the host's bare", () => {
     const registry = buildRegistry(host, [
       {
-        id: "ui.shell",
+        id: "documents",
         contributions: {
           sections: [{ name: "documents", title: "Documents", empty: "", kind: "document" }],
           kinds: { document: view("block-editor") },
         },
       },
     ]);
-    expect(registry.sections.map((section) => section.key)).toEqual(["ui.shell:documents"]);
-    expect(registry.sections[0]?.opens).toBe("ui.shell:document");
-    expect(registry.kinds).toEqual({ "process-result": "context", "ui.shell:document": "block-editor" });
-    expect(registry.extensions).toEqual(["ui.shell"]);
+    expect(registry.sections.map((section) => section.key)).toEqual(["documents:documents"]);
+    expect(registry.sections[0]?.opens).toBe("documents:document");
+    expect(registry.kinds).toEqual({ "process-result": "context", "documents:document": "block-editor" });
+    expect(registry.extensions).toEqual(["documents"]);
   });
 
   it("gives a kind's default view that kind, and a further view the kinds it names", () => {
@@ -113,10 +113,10 @@ describe("building the server registry", () => {
   it("keys readers by section and tables by extension", () => {
     const reader = async () => [];
     const registry = buildServerRegistry([
-      { id: "ui.shell", contributions: { readers: { documents: reader }, routes: [route("GET", "documents")] } },
+      { id: "documents", contributions: { readers: { documents: reader }, routes: [route("GET", "d")] } },
     ]);
-    expect(registry.readers["ui.shell:documents"]).toBe(reader);
-    expect(registry.routes["ui.shell"]?.length).toBe(1);
+    expect(registry.readers["documents:documents"]).toBe(reader);
+    expect(registry.routes["documents"]?.length).toBe(1);
   });
 
   it("refuses a handler table naming one method and path twice", () => {
@@ -144,6 +144,30 @@ describe("building the server registry", () => {
         ]),
       ),
     ).toBe("party_collision");
+  });
+
+  it("keeps a runtime roster by extension, and merges its answer under its namespace without shadowing", () => {
+    const roster = async () => [party("publishing-c1"), party("publishing-c2")];
+    const registry = buildServerRegistry([
+      { id: "settings", contributions: { parties: [party("honcho")] } },
+      { id: "publishing", contributions: { partyRoster: roster } },
+    ]);
+    expect(registry.rosters).toEqual([{ extension: "publishing", roster }]);
+
+    const held = registry.parties;
+    const merged = mergeRoster(held, "publishing", [
+      party("publishing-c1"),
+      // Outside the roster's namespace: dropped.
+      party("honcho"),
+      party("other-c9"),
+      // Already held: dropped rather than shadowing.
+      party("publishing-c1"),
+      party("publishing-c2"),
+    ]);
+    expect(merged.map((entry) => entry.id)).toEqual(["honcho", "publishing-c1", "publishing-c2"]);
+    expect(merged[1]?.extension).toBe("publishing");
+    // The static roster is untouched.
+    expect(held.map((entry) => entry.id)).toEqual(["honcho"]);
   });
 
   it("matches a path against the table in order, with named and rest parameters", () => {

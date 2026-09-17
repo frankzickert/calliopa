@@ -1,0 +1,1737 @@
+/* The block editor.
+ *
+ * Reading is the resting state, so the surface is quiet: no block borders, no
+ * control chrome until a block is reached by pointer or keyboard. The active
+ * block keeps the same type and the same box it had while being read, because
+ * text that shifts when you click it reads as two documents rather than one. */
+
+.view--block-editor {
+  /* The bar's height as one value: the bar takes it and the block rows clear
+   * it. Two numbers that had to agree would drift, and a block would end up
+   * activated under the bar. */
+  --block-bar-height: 2.5rem;
+  /* The room a block reserves on each side for its grips. One number, so the
+   * gutter the row holds open and the box the grips sit in cannot drift apart
+   * and leave a grip over the text. */
+  --block-grip-gutter: 1.75rem;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 0.5rem;
+}
+
+/* The editor owns the whole tab region while it is presenting a document. It
+ * negates the region's inset on the three edges the bar docks to, so the bar's
+ * own edges are the region's, and the content below puts the reading inset
+ * back. The bottom keeps the inset: nothing docks there, and the gap holds the
+ * document off the command dock.
+ *
+ * Only the branch that presents a document, which is the branch that carries a
+ * mode. A view that could not read its document renders a notice and nothing
+ * else, and a notice has no bar to dock, so it keeps the region's inset as
+ * every other view does. That is also why the inset is named here rather than
+ * on the view: where it is undefined, the fallback leaves the region's own
+ * padding alone. */
+.view--block-editor[data-editor-mode] {
+  --editor-region-inset: var(--workspace-inset, 0px);
+  margin: calc(-1 * var(--editor-region-inset))
+    calc(-1 * var(--editor-region-inset)) 0;
+}
+
+/* What the editor says in its own voice — a notice, or that it is still
+ * reading — is inset like the document it speaks about, rather than left
+ * against the region's edge by the negation above. Named rather than every
+ * paragraph, so the announcement region keeps the offsets that hide it. */
+.view--block-editor[data-editor-mode] > .block-notice,
+.view--block-editor[data-editor-mode] > [data-block-loading] {
+  margin-inline: var(--editor-region-inset);
+}
+
+/* The bar is out of the document's flow, docked to the top of the tab region.
+ * In flow it would push the document down the moment a block was activated.
+ * The space it lands on belongs to the headline and is reserved on the surface
+ * whether or not a bar ever appears, which is why showing and hiding the bar
+ * moves nothing. The editor negates the region's inset, so `top` and
+ * `inset-inline` of zero are the region's own edges. */
+.block-toolbar {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  z-index: 2;
+  box-sizing: border-box;
+  min-height: var(--block-bar-height);
+  display: flex;
+  /* No wrap: a second row would double what the bar covers, and the scroll
+   * margin below is one bar high on every viewport. Controls that do not fit
+   * scroll sideways instead. */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.5rem;
+  /* Docked rather than floating, so it is bordered the way the command dock is:
+   * one line on the edge facing the content, none on the three edges that are
+   * the region's, and no radius. The header already draws a line above, and a
+   * second one a pixel below it would read as a doubled seam. */
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  /* Opaque: the surface scrolls underneath it. */
+  background: var(--panel-raised);
+}
+
+.toolbar-group {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.block-toolbar button {
+  min-width: 2rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.block-toolbar button:hover:not(:disabled),
+.block-toolbar button:focus-visible {
+  border-color: var(--border);
+  background: var(--panel);
+}
+
+.block-toolbar button[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.block-toolbar button:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.block-toolbar [data-mark="bold"] {
+  font-weight: 700;
+}
+
+.block-toolbar [data-mark="italic"] {
+  font-style: italic;
+}
+
+.block-toolbar [data-mark="strikethrough"] {
+  text-decoration: line-through;
+}
+
+.block-toolbar [data-mark="code"] {
+  font-family: var(--font-mono);
+}
+
+/* A refused save, on the block it belongs to. */
+.block-failure {
+  margin: 0.25rem 0 0;
+  color: var(--error);
+  font-size: 0.85rem;
+}
+
+.block-notice {
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--error);
+  border-radius: 0.4rem;
+  color: var(--error);
+}
+
+.block-surface {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* The reading inset the view negated on the region, put back here so the
+   * document keeps the line length it had and only the vertical arrangement
+   * changed. The surface itself reaches the region's edges, which is what lets
+   * the document scroll under the full height of the bar.
+   *
+   * The top is the headline's own space rather than a slot held for the bar:
+   * it is here whether or not a block is active, so showing and hiding the bar
+   * still moves no document content, and the bar lands on it rather than on
+   * the title. It is padding inside the scrolling element, so the surface
+   * still reaches the region's top edge and the document still scrolls under
+   * the whole bar. Same expression as a block row's clearance, so the space
+   * above the headline cannot drift from the space above a block. */
+  padding: calc(var(--block-bar-height) + 0.5rem)
+    calc(var(--editor-region-inset, 0px) + 0.25rem) 2rem;
+}
+
+/* The document's name, and the largest text in the tab. The shell renders no
+ * heading above a view, so this is the headline the reader sees, presented at
+ * first-level scale whatever its semantic level. */
+.document-title {
+  margin: 0 0 1rem;
+  font-family: var(--font-narrative);
+  font-size: 2rem;
+  line-height: 1.2;
+}
+
+/* Reading and editing the title are the same box, so clicking it moves
+ * nothing. Only the colour says it is editable. */
+.document-title__text {
+  display: block;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  outline: none;
+  /* The title is tabbable, so focus reaching it from further down the document
+   * scrolls it into view. Without this it would stop under the bar there, the
+   * one route the space above cannot cover. Same expression a block row
+   * carries, on the box that takes the focus. */
+  scroll-margin-top: calc(var(--block-bar-height) + 0.5rem);
+}
+
+.document-title__text:focus {
+  border-color: var(--accent);
+  background: var(--panel);
+}
+
+/* Who proposed a started document, under its title while nobody has taken
+ * it. BO_0251_010 */
+.document-title__proposed {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+  padding: 0 0.35rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.document-title__face {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.document-title__face img {
+  width: 100%;
+  height: 100%;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+.block-row {
+  position: relative;
+  /* Held open whether or not the block is active, so a grip appearing changes
+   * colour and never geometry. */
+  padding-inline: var(--block-grip-gutter);
+  /* What keeps an activated block clear of the one bar above it. Scroll margin
+   * costs nothing until something scrolls to this row, so a block already clear
+   * stays where it is. */
+  scroll-margin-top: calc(var(--block-bar-height) + 0.5rem);
+  scroll-margin-bottom: 0.5rem;
+}
+
+/* Where a dragged block would land. Reserved rather than inserted, so the
+ * document does not jump as the pointer crosses a boundary. */
+.drop-mark {
+  display: block;
+  height: 2px;
+  margin: 0.1rem 0;
+  border-radius: 1px;
+  background: transparent;
+}
+
+.drop-mark[data-drop-active="true"] {
+  background: var(--accent);
+}
+
+/* The two gestures that move a block, on the block's own edges: the grip the
+ * drag starts from at the leading edge, the arrows at the trailing one. Out of
+ * the row's flow and inside the gutter the row already holds open, so a grip
+ * appearing moves no text. Everything else acting on the active block is in the
+ * bar at the top of the editor area; repositioning is the one operation whose
+ * meaning is spatial, so it is the one that gets a place. */
+.block-grip {
+  position: absolute;
+  top: 0.4rem;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+.block-grip--start {
+  inset-inline-start: 0;
+}
+
+.block-grip--end {
+  inset-inline-end: 0;
+}
+
+.block-grip button {
+  min-width: 1.4rem;
+  padding: 0.05rem 0.2rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.block-grip button:hover:not(:disabled),
+.block-grip button:focus-visible {
+  background: var(--panel);
+  color: var(--text);
+}
+
+.block-grip button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.block-handle {
+  cursor: grab;
+  touch-action: none;
+}
+
+/* A block marked as a reference, which only command mode draws: leaving the
+ * mode leaves no trace on any block. An outline rather than a border, and on
+ * the row rather than on the text, so marking changes colour and never
+ * geometry. Dashed and around the whole block, it is visibly neither the active
+ * block's solid accent border nor anything the document could have authored. */
+.view--block-editor[data-editor-mode="command"] .block-row[data-reference] {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+  border-radius: 0.35rem;
+}
+
+.view--block-editor[data-editor-mode="command"] .block-row {
+  cursor: pointer;
+}
+
+.view--block-editor[data-editor-mode="command"] .block-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The number, in the gutter the grips use and out of the row's flow. The state
+ * never rests on colour alone: the mark is an outline and a number a reader can
+ * name. */
+.block-reference {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.4rem;
+  z-index: 1;
+  min-width: 1.4rem;
+  padding: 0.05rem 0.2rem;
+  /* The accent is the border rather than the ground: reversed out of it, text
+   * this size does not reach the contrast a number has to be read at. The
+   * raised ground is what carries it against the reading surface. */
+  border: 1px solid var(--accent);
+  border-radius: 0.25rem;
+  background: var(--panel-raised);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+}
+
+/* One box for reading and for editing. The border is reserved transparently
+ * while reading rather than added on activation, so becoming an editor changes
+ * colour and never geometry, and an inactive block shows its content and
+ * nothing else. An empty block still occupies its line, which is why the
+ * minimum height is here and not on a marker element. */
+.block-text {
+  margin: 0.25rem 0;
+  padding: 0.15rem 0.35rem;
+  min-height: 1.6em;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  font-family: var(--font-narrative);
+  line-height: 1.6;
+  cursor: text;
+}
+
+.block-text[data-block-reading]:focus-visible {
+  border-color: var(--accent);
+}
+
+.block-text--active {
+  border-color: var(--accent);
+  background: var(--panel);
+  outline: none;
+  cursor: text;
+}
+
+blockquote.block-text {
+  border-left: 3px solid var(--border);
+  padding-left: 0.75rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.block-text code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+/* A document that says nothing yet: a blank page, not a row reporting that a
+ * block is empty. The hint sits where the first line will be, so the caret
+ * arrives where the reader was already looking. */
+.document-empty {
+  display: block;
+  width: 100%;
+  min-height: 12rem;
+  margin: 0;
+  padding: 0.15rem 0.35rem;
+  border: 1px solid transparent;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: text;
+}
+
+.document-empty__hint {
+  color: var(--text-muted);
+  font-family: var(--font-narrative);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+/* The rest of the page below the last block. Clicking it continues writing, so
+ * the blank area means the same thing whether or not the document holds
+ * anything. */
+.document-append {
+  display: block;
+  width: 100%;
+  min-height: 6rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: text;
+}
+
+.run-link {
+  color: var(--accent);
+}
+
+.block-unsupported {
+  margin: 0.25rem 0;
+  padding: 0.35rem 0.5rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.3rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+hr[data-block-divider] {
+  margin: 0.75rem 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+/*
+ * A retired block shown in place. It must be unmistakable: with the toggle on
+ * after a merge, the absorbed block sits beside the text that now contains it,
+ * which reads as duplication unless the retired one is obviously not content.
+ * Distinct by more than colour — a dashed rule, an inset, and a standing label
+ * — so it survives a monochrome or high-contrast rendering.
+ */
+.retired-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0.35rem 0;
+  padding: 0.35rem 0.6rem;
+  border: 1px dashed var(--border);
+  border-left: 3px solid var(--text-muted);
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--panel) 60%, transparent);
+}
+
+.retired-row__mark {
+  margin: 0;
+  flex: none;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.retired-row__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+  text-decoration: line-through;
+  overflow-wrap: anywhere;
+}
+
+.retired-row button {
+  flex: none;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+/*
+ * A proposed change, drawn as the block it would become. BO_0233_004
+ *
+ * It keeps the accepted blocks' geometry — the grip gutter on both sides and
+ * the role's own typography — so a proposal reads in the space it would take.
+ * What sets it apart from truth, from a retired block (dashed and struck) and
+ * from a marked one is its proposer's ground and edge, the proposer's face on
+ * its left border, and its answer icons on its top edge: never colour alone,
+ * since the face and the accessible name say who, and a label line no more.
+ */
+.proposal-block {
+  --proposal-ground: var(--proposal-person);
+  --proposal-edge: var(--proposal-person-edge);
+  position: relative;
+  margin: 0.9rem 0 0.6rem;
+  padding-block: 0.35rem;
+  padding-inline: var(--block-grip-gutter);
+  border: 1px solid var(--proposal-edge);
+  border-radius: 0.35rem;
+  background: var(--proposal-ground);
+}
+
+/* A long press on touch is the drag's, never the page's callout; once it
+   has armed, the block lifts so the reader sees it is theirs to move.
+   BO_0233_012 */
+.proposal-block {
+  -webkit-touch-callout: none;
+}
+
+.proposal-block[data-lifted="true"] {
+  box-shadow: 0 0.4rem 1.2rem var(--selection);
+  outline: 2px solid var(--proposal-edge);
+}
+
+.proposal-block__portrait {
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
+}
+
+.proposal-block[data-proposal-tone="codex"] {
+  --proposal-ground: var(--proposal-codex);
+  --proposal-edge: var(--proposal-codex-edge);
+}
+
+.proposal-block[data-proposal-tone="claude"] {
+  --proposal-ground: var(--proposal-claude);
+  --proposal-edge: var(--proposal-claude-edge);
+}
+
+.proposal-block[data-proposal-tone="hermes"] {
+  --proposal-ground: var(--proposal-hermes);
+  --proposal-edge: var(--proposal-hermes-edge);
+}
+
+/* A system run's proposal that is not a derived block — a question beside a
+   pinned framing — keeps its answer icons but wears no agent's colour: the
+   panel's ground, the border, and the sparkle as its face. BO_0245 */
+.proposal-block[data-proposal-tone="system"] {
+  --proposal-ground: var(--panel);
+  --proposal-edge: var(--border);
+}
+.proposal-block[data-proposal-tone="system"] .proposal-block__face {
+  color: var(--text-muted);
+  background: var(--panel);
+}
+
+/* A removal or a move frames the block that stands, whose row brings its own
+   gutters. */
+.proposal-block[data-proposal-kind="remove"],
+.proposal-block[data-proposal-kind="move"] {
+  padding-inline: 0;
+}
+
+.proposal-block[data-proposal-kind="remove"] .block-text {
+  text-decoration: line-through;
+}
+
+/* The face, centred on the left border: half in the gutter, half over the
+   edge, taking none of the text's width. It is the handle too. It sits at the
+   border's middle, but never above the clearance: a removal or a move frames
+   a row whose ⠿ handle and standing glyph take the top of that same edge,
+   down to 2.13rem, so on a block of one line the face hangs below the border
+   rather than covering them. The rule is the same for every kind.
+   CA_0043_001 */
+.proposal-block__face {
+  position: absolute;
+  top: max(2.35rem, calc(50% - 14px));
+  left: 0;
+  transform: translateX(-50%);
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid var(--proposal-edge);
+  border-radius: 50%;
+  background: var(--panel-raised);
+  color: var(--text);
+  cursor: grab;
+  touch-action: none;
+}
+
+.proposal-block[data-proposal-kind="remove"] .proposal-block__face {
+  cursor: default;
+}
+
+.proposal-block__portrait {
+  display: block;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+/* The answers ride the top edge, right-aligned, half above it, so they take
+   no line of their own. */
+.proposal-block__answers {
+  position: absolute;
+  top: 0;
+  right: 0.6rem;
+  transform: translateY(-50%);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.proposal-block__answer,
+.proposal-block__moves {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--proposal-edge);
+  border-radius: 50%;
+  background: var(--panel-raised);
+  color: var(--text);
+}
+
+.proposal-block__answer {
+  cursor: pointer;
+}
+
+.proposal-block__answer:hover,
+.proposal-block__answer:focus-visible {
+  background: var(--proposal-ground);
+}
+
+.proposal-block__moves {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+/* A touch needs a larger target than the face and the icons draw. */
+@media (pointer: coarse) {
+  .proposal-block__answer {
+    width: 44px;
+    height: 44px;
+  }
+
+  .proposal-block__face::before {
+    content: "";
+    position: absolute;
+    inset: -8px;
+  }
+}
+
+.proposal-block__text {
+  color: var(--text);
+  cursor: text;
+  outline: none;
+  overflow-wrap: anywhere;
+}
+
+.proposal-block__text:focus-visible {
+  box-shadow: 0 0 0 2px var(--proposal-edge);
+}
+
+/* A work item — a possible relation, a proposed reason, a claim, a kind —
+   drawn under the block it concerns as a small card in the proposer's ground:
+   a label line, the claim and its target quoted, and the reason, editable.
+   BO_0244_010 */
+.proposal-block__work {
+  display: grid;
+  gap: 0.25rem;
+  padding-block: 0.2rem;
+  font-size: 0.9375rem;
+}
+
+.proposal-block__label {
+  margin: 0;
+  font-weight: 600;
+}
+
+.proposal-block__origin {
+  margin-inline-start: 0.5rem;
+  padding: 0 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.proposal-block__line,
+.proposal-block__field {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.proposal-block__line .proposal-block__quote,
+.proposal-block__work .proposal-block__quote {
+  color: var(--text);
+  quotes: "\201C" "\201D";
+}
+
+.proposal-block__meta {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.proposal-block__reason {
+  margin: 0;
+}
+
+/* A block's standing, in the leading gutter beside any reference number: one
+ * glyph per standing, so the state rests on neither colour nor a bar's width,
+ * and its word in the margin where there is room for it. BO_0227_012 */
+.block-standing {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.45rem;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  width: 1.4rem;
+  justify-content: center;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.view--block-editor[data-editor-mode="command"]
+  .block-row[data-reference]
+  .block-standing {
+  top: 2rem;
+}
+
+.block-standing[data-standing-mark="pin"] {
+  color: var(--accent);
+}
+
+.block-standing__glyph {
+  font-size: 0.95rem;
+}
+
+.block-standing__word {
+  position: absolute;
+  inset-inline-end: calc(100% + 0.25rem);
+  display: none;
+  white-space: nowrap;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+@media (min-width: 44em) {
+  .block-standing__word {
+    display: inline;
+  }
+}
+
+/* Resolved stays where it is, quieted: preserved, out of active thought. */
+.block-row[data-standing="resolved"] .block-text[data-block-reading] {
+  color: var(--text-muted);
+}
+
+/* Reading text claims the horizontal axis alone, so vertical scrolling stays
+ * the browser's and a horizontal touch drag reaches the swipe rather than being
+ * taken for panning. BO_0227_011 */
+.block-text[data-block-reading] {
+  touch-action: pan-y;
+}
+
+.block-row[data-swiping="true"] {
+  z-index: 2;
+}
+
+/* The swipe's reveal: the strip the row has vacated, naming what release would
+ * commit. Drawn in the page's body, never inside a row Qwik renders. */
+.block-swipe-reveal {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  padding-inline: 0.5rem;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: pre;
+}
+
+.block-swipe-reveal[data-direction="left"] {
+  justify-content: flex-start;
+}
+
+.block-swipe-reveal[data-direction="right"] {
+  justify-content: flex-end;
+}
+
+.block-swipe-reveal[data-armed=""] {
+  color: var(--text-muted);
+}
+
+.block-swipe-reveal[data-armed="discarded"] {
+  background: color-mix(in srgb, var(--error) 18%, var(--panel));
+}
+
+/* A discarded block, drawn where it sits only while the panel asks. Dimmed and
+ * dotted, and named as discarded, so it is visibly neither the flow nor a
+ * retired block's dashed, struck-through row. BO_0227_014 */
+.discarded-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0.35rem 0;
+  padding: 0.35rem 0.6rem;
+  border: 1px dotted var(--border);
+  border-radius: 0.35rem;
+  opacity: 0.75;
+}
+
+.discarded-row__mark {
+  margin: 0;
+  flex: none;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.discarded-row__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.discarded-row button {
+  flex: none;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* The bar's control for the active block's standing. */
+.block-toolbar__standing {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+/* A passage, painted over its words without a node written into them: a tint
+ * and a dotted underline, so it is visibly not the active block, not a marked
+ * block's outline and not authored formatting, and rests on more than colour.
+ * BO_0227_009 */
+::highlight(calliopa-passage) {
+  background-color: color-mix(in srgb, var(--accent) 22%, transparent);
+  text-decoration: underline dotted var(--accent);
+}
+
+/* What a chip in the composer points at, shown for a moment
+   (`REVEAL_MS`, `reveal.ts`): a solid ring in the selection colour, wider
+   than the marked block's dashed accent outline and unlike the active block's
+   accent border, fading as the emphasis ends; a passage's words tinted and
+   underlined, so the words are found by more than colour. The attribute is
+   written onto the row and taken off again, so nothing stays. CA_0039_005 */
+.block-row[data-revealed] {
+  outline: 3px solid var(--selection);
+  outline-offset: 4px;
+  border-radius: 0.35rem;
+  animation: block-reveal 1.6s ease-out forwards;
+}
+
+@keyframes block-reveal {
+  0%,
+  70% {
+    outline-color: var(--selection);
+  }
+  100% {
+    outline-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .block-row[data-revealed] {
+    animation: none;
+  }
+}
+
+::highlight(calliopa-reveal) {
+  background-color: var(--selection);
+  text-decoration: underline solid var(--text);
+}
+
+/* A passage's number, beside its words and out of the flow. */
+.passage-number {
+  position: absolute;
+  z-index: 1;
+  transform: translateY(-85%);
+  padding: 0 0.15rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.2rem;
+  background: var(--panel-raised);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  line-height: 1.3;
+  /* Pressing a number takes its passage back. */
+  cursor: pointer;
+}
+
+/* A stale passage keeps its number, in the gutter, saying so; pressing it
+ * takes the passage back. */
+.passage-stale > span {
+  cursor: pointer;
+}
+
+/* A stale passage keeps its number, in the gutter, saying so. */
+.passage-stale {
+  position: absolute;
+  inset-inline-start: 0;
+  bottom: 0.2rem;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  width: var(--block-grip-gutter);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  line-height: 1.2;
+  color: var(--error);
+  overflow-wrap: anywhere;
+}
+
+/* Reference, and Re-point for a stale passage, beside the selection. Chrome
+ * that comes and goes with the selection, never a permanent bar. */
+.passage-affordance {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  max-width: calc(100vw - 2rem);
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--panel-raised);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--text) 18%, transparent);
+}
+
+.passage-affordance button {
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.passage-affordance__refusal {
+  padding: 0.2rem 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+/* A block's standing in command mode, on its top border like a tab: shown
+ * while the pointer is over the block and while focus is within it, and not
+ * drawn otherwise, so a hidden button takes no focus. Out of the flow, so
+ * showing it moves no text. The pressed standing carries its glyph and the
+ * accent, the dock toggle's pattern. BO_0231_004 */
+.standing-toolbar {
+  position: absolute;
+  top: 0;
+  inset-inline-start: calc(var(--block-grip-gutter) + 0.5rem);
+  z-index: 3;
+  display: none;
+  gap: 0.15rem;
+  padding: 0.1rem 0.2rem;
+  transform: translateY(-55%);
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--panel-raised);
+}
+
+@media (hover: hover) {
+  .view--block-editor[data-editor-mode="command"]
+    .block-row:hover
+    > .standing-toolbar {
+    display: flex;
+  }
+}
+
+.view--block-editor[data-editor-mode="command"]
+  .block-row:focus-within
+  > .standing-toolbar {
+  display: flex;
+}
+
+.standing-toolbar button {
+  min-width: 1.6rem;
+  min-height: 1.6rem;
+  padding: 0 0.25rem;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.standing-toolbar button:hover {
+  color: var(--text);
+}
+
+.standing-toolbar button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel-raised));
+  color: var(--text);
+}
+
+.standing-toolbar
+  button[data-standing-option="discarded"][aria-pressed="false"]:hover {
+  color: var(--error);
+}
+
+/* The words' marking control in command mode, around the words so its state
+ * can be patched (BO_0231_001). It keeps the focus ring the words had. */
+.block-marking:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 0.3rem;
+}
+
+/* On a phone the text takes the screen's width. Last in the file, so it wins
+ * over every rule it narrows. The handle is what a reader
+ * reaches for first and what a drag is aimed at, so it keeps a gutter of its
+ * own on the leading side, just wide enough for it, and nothing else holds
+ * room: the surface puts back none of the region's inset there and a hairline
+ * on the trailing side, so the active block's border stays off the screen's
+ * edge. One number still governs the gutter and everything standing in it, so
+ * the leading side cannot drift; activation still moves nothing. CA_0045_001
+ *
+ * The arrows leave the trailing edge, where they covered the end of the
+ * block's first line, for its top border: they stand on it, above the block,
+ * opaque. Their upper part may cover the right end of the last line of the
+ * block above, which nobody is editing. `--block-arrows` is their height, and
+ * a row's scroll margin grows by it, so a block activated under the bar
+ * brings its arrows clear of the bar too. CA_0045_002 */
+@media (max-width: 640px) {
+  .view--block-editor {
+    --block-grip-gutter: 1.25rem;
+    --block-arrows: 1.25rem;
+  }
+
+  .block-surface {
+    padding-inline: 0 0.25rem;
+  }
+
+  /* The headline keeps its left edge on the text's. */
+  .document-title {
+    margin-inline-start: var(--block-grip-gutter);
+  }
+
+  .block-row {
+    padding-inline-end: 0;
+    scroll-margin-top: calc(
+      var(--block-bar-height) + 0.5rem + var(--block-arrows)
+    );
+  }
+
+  /* The handle fills the gutter's width, and a finger gets its height: the
+   * glyph where it always was, the target down the row, out of its flow. */
+  .block-grip--start {
+    top: 0;
+    width: var(--block-grip-gutter);
+  }
+
+  .block-grip--start .block-handle {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding: 0.4rem 0 0;
+  }
+
+  .block-standing,
+  .block-reference {
+    min-width: 0;
+    width: var(--block-grip-gutter);
+    padding-inline: 0;
+  }
+
+  .block-reference {
+    box-sizing: border-box;
+    font-size: 0.6rem;
+  }
+
+  /* On the text's top border: below the row's top by the drop mark and the
+   * text's own margin (the mark's upper margin collapses out of the row),
+   * then lifted by its full height. */
+  .block-grip--end {
+    top: calc(2px + 0.25rem);
+    box-sizing: border-box;
+    height: var(--block-arrows);
+    transform: translateY(-100%);
+    border: 1px solid var(--border);
+    border-radius: 0.35rem;
+    background: var(--panel-raised);
+  }
+
+  .block-grip--end button {
+    padding-block: 0;
+    line-height: 1.2;
+  }
+
+  /* The proposer's face stands in the gutter, over the border's inner side,
+   * rather than centred on the border: the border is at the screen's edge,
+   * and half the face would be off it. It keeps its place down the border
+   * (CA_0043_001), measured from its own size. */
+  .proposal-block__face {
+    top: max(2.35rem, calc(50% - var(--block-grip-gutter) / 2));
+    left: -1px;
+    transform: none;
+    width: var(--block-grip-gutter);
+    height: var(--block-grip-gutter);
+    border-width: 1px;
+  }
+
+  .proposal-block__portrait {
+    width: calc(var(--block-grip-gutter) - 2px);
+    height: calc(var(--block-grip-gutter) - 2px);
+  }
+}
+
+/* A focused block and its depth (CA_0046). Focus is a fact within reading:
+ * a first press focuses and reveals the affordance line under the text, a
+ * second edits. The ring is an outline, so focusing changes no geometry, and
+ * it is visibly neither the active block's accent border nor command mode's
+ * dashed mark. */
+.view--block-editor[data-editor-mode="reading"] .block-row[data-focused="true"] {
+  outline: 2px solid var(--selection);
+  outline-offset: 2px;
+  border-radius: 0.35rem;
+}
+
+/* The affordance line and the rail unfold below the block's text and never
+ * above it, so the block's top edge stays where it was. The row reserves
+ * nothing for them. */
+.block-depth {
+  margin: 0.15rem 0 0.35rem;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.block-depth__line {
+  margin: 0;
+}
+
+.block-depth__category {
+  padding: 0 0.1rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.block-depth__category:hover,
+.block-depth__category:focus-visible,
+.block-depth__category[aria-pressed="true"] {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.block-depth__rail {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+  padding-inline-start: 0.75rem;
+  border-inline-start: 2px solid var(--border);
+}
+
+.block-depth__heading {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0 0 0.15rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.block-depth__list {
+  margin: 0;
+  padding-inline-start: 1rem;
+}
+
+.block-depth__list li {
+  margin: 0.1rem 0;
+  color: var(--text);
+}
+
+.block-depth__text,
+.block-depth__reason {
+  margin: 0;
+  color: var(--text);
+}
+
+.block-depth__reason {
+  color: var(--text-muted);
+}
+
+.block-depth__standing,
+.block-depth__meta {
+  color: var(--text-muted);
+}
+
+.block-depth__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.2rem 0 0;
+}
+
+.block-depth__actions button {
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--panel-raised);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Derived blocks follow the body under small headings, each with its glyph
+ * in the leading gutter below where a standing glyph stands. */
+.derived-heading {
+  margin: 1.25rem 0 0.25rem;
+  padding-inline: var(--block-grip-gutter);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.block-derived-mark {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.5rem;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: var(--block-grip-gutter);
+  color: var(--text-muted);
+}
+
+.block-row[data-standing="keep"] .block-derived-mark,
+.block-row[data-standing="pin"] .block-derived-mark {
+  top: 1.7rem;
+}
+
+/* On a phone the focused block stays at the bar's edge while its depth
+ * unfolds beneath it, and the affordance line wraps. */
+/* A focused block scrolls with the page on a phone as on a desktop: the
+   sticky row `CA_0046` gave it read as a changed block that no longer
+   scrolled when a return from focused work focused it. User decision,
+   2026-09-14 (`CA_0047_007`). */
+@media (max-width: 640px) {
+  .block-depth__line {
+    white-space: normal;
+  }
+}
+
+/* The route above the headline: Back and the crumbs the reader passed
+   through, the current root last and not a button. CA_0047_004 */
+.document-route {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.document-route button {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+.document-route button:hover,
+.document-route button:focus-visible {
+  color: var(--text);
+}
+.document-route__back {
+  margin-right: 0.5rem;
+}
+.document-route [data-route-current] {
+  color: var(--text);
+}
+
+/* The surface reads the pinch itself (`block-pinch.ts`): vertical panning
+   stays the browser's, the browser's zoom does not, so two fingers on the
+   surface open or leave focused work rather than scaling the page.
+   CA_0047_006 */
+.block-surface {
+  touch-action: pan-y;
+}
+
+/* The pinch shows itself while it runs (`block-pinch.ts`): the row under
+   an outward pinch grows with the spread and takes the accent ring once the
+   threshold is passed; under an inward pinch the surface's content draws
+   back and the route's Back reads as armed. `--pinch` is the progress,
+   -1 to 1. CA_0047_006 */
+.block-row[data-pinch] {
+  transform: scale(calc(1 + 0.06 * var(--pinch, 0)));
+  transform-origin: center;
+  transition: none;
+  z-index: 2;
+  position: relative;
+}
+.block-row[data-pinch="open"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 0.3rem;
+}
+.block-surface[data-pinch] > * {
+  transform: scale(calc(1 + 0.04 * var(--pinch, 0)));
+  transform-origin: center top;
+  transition: none;
+}
+.block-surface[data-pinch="back"] .document-route__back {
+  color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 0.3rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  .block-row[data-pinch],
+  .block-surface[data-pinch] > * {
+    transform: none;
+  }
+}
+
+/* The parent's face: the focused child's synthesis under the block's runs.
+   CA_0047_005 */
+.block-face {
+  display: block;
+  width: 100%;
+  appearance: none;
+  border: 0;
+  border-left: 2px solid var(--text-muted);
+  background: none;
+  margin: 0.25rem 0 0;
+  padding: 0 0 0 0.75rem;
+  font: inherit;
+  font-size: 0.9em;
+  color: var(--text-muted);
+  text-align: left;
+  cursor: pointer;
+}
+.block-face:hover,
+.block-face:focus-visible {
+  color: var(--text);
+}
+
+
+/* A derived candidate of a system run (`BO_0246_006`): the body's quiet
+   idiom rather than a proposer's colour — no face, no answer icons, the
+   derived mark in the gutter — since it is accepted by use. */
+.proposal-block--derived {
+  border-color: var(--border);
+  background: transparent;
+}
+.proposal-block--derived .proposal-block__face {
+  display: none;
+}
+.proposal-block--derived .proposal-block__derived-mark {
+  position: absolute;
+  left: 0.15rem;
+  top: 0.35rem;
+  color: var(--text-muted);
+}
+
+/* Changed since you last read this: a small dot beside the derived mark.
+   BO_0246_007 */
+.block-derived-changed {
+  position: absolute;
+  left: 1.35rem;
+  top: 0.55rem;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.block-depth__text[data-depth-changed] p {
+  margin: 0.15rem 0;
+}
+
+
+/* The Possible relation card (`BO_0247_005`): the derived idiom's quiet
+   ground, its own three answers in a row, and the two provenance lines. */
+.proposal-block__card .proposal-block__use button,
+.proposal-relations-more button {
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8125rem;
+  padding: 0.1rem 0.5rem;
+  cursor: pointer;
+}
+.proposal-block__card .proposal-block__use {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.proposal-relations-more {
+  margin: 0.25rem 0 0.5rem;
+  padding-inline-start: var(--block-grip-gutter);
+}
+
+/* A relation's provenance under its entry in a layer: where it came from,
+   in words, confirmation laundering nothing. BO_0247_006 */
+.block-depth__provenance {
+  margin: 0.1rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+/* Changed upstream (`BO_0248_008`, screen 5): the quiet marker at rest in
+   the trailing gutter for unresolved material or invalidated pressure. It
+   sits in the gutter the grips use, out of the row's flow, so it changes
+   colour and never geometry. */
+.block-pressure-mark {
+  position: absolute;
+  inset-inline-end: 0;
+  top: 0.5rem;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: var(--block-grip-gutter);
+  color: var(--text-muted);
+}
+
+/* The root's derived state under the title, derived from the judgements. */
+.document-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+/* The pressure layer: the premise before and after, the effect, the source
+   and the way to it, and the line saying why and when. */
+.block-depth__pressure {
+  margin: 0 0 0.35rem;
+}
+
+.block-depth__pressure-headline {
+  color: var(--text);
+}
+
+.block-depth__field {
+  color: var(--text);
+}
+
+/* The edit's classification and its correction, in the depth above the
+   affordance line. BO_0248_009 */
+.block-depth__classification {
+  margin: 0 0 0.1rem;
+}
+
+.block-depth__classification [aria-pressed="true"] {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+/* A relation's track record under its entry. BO_0248_016 */
+.block-depth__record {
+  margin: 0.1rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+/* The root's phase under the intent (BO_0249_008): a muted line like the
+ * derived state's; *Proposed* is the one control, the words otherwise. */
+.document-phase {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.document-phase button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--text-muted);
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+
+.document-phase button:hover,
+.document-phase button:focus-visible {
+  color: var(--text);
+}
+
+/* The transition card (BO_0249_009), under the intent: the question, the
+ * consequences, the one control beside *Not yet*. It sits in the page's
+ * flow, so opening it moves nothing above it. */
+.phase-card {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--proposal-edge);
+  border-radius: 0.5rem;
+  background: var(--panel-raised);
+  color: var(--text);
+  max-width: 100%;
+}
+
+.phase-card p {
+  margin: 0 0 0.5rem;
+}
+
+.phase-card__question {
+  font-weight: 600;
+}
+
+.phase-card__lead,
+.phase-card__sentence,
+.phase-card__note {
+  color: var(--text-muted);
+}
+
+.phase-card__consequences {
+  margin: 0 0 0.5rem;
+  padding-inline-start: 1.25rem;
+}
+
+.phase-card__conflict {
+  color: var(--text);
+}
+
+.phase-card__refusal {
+  color: var(--error);
+}
+
+.phase-card__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.phase-card__controls button {
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.phase-card__establish {
+  border-color: var(--accent);
+}
+
+/* A person's branch (BO_0250_020–_022): a muted line under the intent like
+ * the phase's, the marker in the text colour, the acceptance card in the
+ * page's flow, and what a rejected branch held as rows under the line. */
+.document-branch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem 0.6rem;
+  margin: 0 0 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.document-branch button,
+.branch-rejected button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--text-muted);
+  text-decoration: underline dotted;
+  cursor: pointer;
+}
+
+.document-branch button:hover,
+.document-branch button:focus-visible,
+.branch-rejected button:hover,
+.branch-rejected button:focus-visible {
+  color: var(--text);
+}
+
+.document-branch__marker {
+  color: var(--text);
+}
+
+.branch-card {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--proposal-edge);
+  border-radius: 0.5rem;
+  background: var(--panel-raised);
+  color: var(--text);
+  max-width: 100%;
+}
+
+.branch-card p {
+  margin: 0 0 0.5rem;
+}
+
+.branch-card__question {
+  font-weight: 600;
+}
+
+.branch-card__lead,
+.branch-card__note {
+  color: var(--text-muted);
+}
+
+.branch-card__members {
+  margin: 0 0 0.5rem;
+  padding-inline-start: 1.25rem;
+  color: var(--text-muted);
+}
+
+.branch-card__members [data-member-standing="drifted"] {
+  color: var(--text);
+}
+
+.branch-card__choices {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-inline-start: 0.5rem;
+}
+
+.branch-card__refusal {
+  color: var(--error);
+}
+
+.branch-card__controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.branch-card button {
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--proposal-edge);
+  border-radius: 0.375rem;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.branch-card__choices button {
+  padding: 0.1rem 0.5rem;
+}
+
+.branch-card button[aria-pressed="true"],
+.branch-card__accept {
+  border-color: var(--text);
+}
+
+.branch-rejected {
+  margin: 0 0 1rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.branch-rejected__rows {
+  margin: 0 0 0.25rem;
+  padding-inline-start: 1.25rem;
+}
+
+.branch-rejected__rows li {
+  margin: 0 0 0.25rem;
+}
+
+.branch-rejected__label {
+  color: var(--text);
+}
+
+/* At phone width they keep the headline's left edge, after the rules above so
+ * the margins those set do not win (BO_0250_020); found on the served build,
+ * where they began at the screen's edge. */
+@media (max-width: 640px) {
+  .document-branch,
+  .branch-card,
+  .branch-rejected {
+    margin-inline-start: var(--block-grip-gutter);
+  }
+}

@@ -1,6 +1,6 @@
 import type { IconName } from "./icons";
 import { createContextId, type QRL } from "@builder.io/qwik";
-import type { TabKind } from "~/lib/tabs";
+import type { RouteEntry, TabKind } from "~/lib/tabs";
 import type { DragOperation, DragPayload } from "~/lib/drag";
 import type { Pointing, RevealTarget } from "~/lib/command-target";
 
@@ -212,12 +212,41 @@ export interface ViewReveal {
  * line, so a tab move and a view's change are taken back in one place, the
  * same way. BO_0227_013
  */
+/**
+ * Words a view asks the composer to start the next command with — a
+ * challenge to a derived framing — and a count that rises with every ask, so
+ * the same words asked twice are taken twice. The field takes them as its
+ * text and the caret; the reader still presses *Run*. CA_0046_006
+ */
+export interface ViewCompose {
+  text: string;
+  seq: number;
+}
+
+/**
+ * A block the view is asked to focus once it shows a target: coming back to
+ * a parent from its focused work lands on the block that was opened, with
+ * its depth. Page-only, never the workspace record — focus is never
+ * persisted (`CA_0046_001`). CA_0047_004
+ */
+export interface ViewFocus {
+  itemId: string | null;
+  blockId: string | null;
+  seq: number;
+}
+
 export interface UndoOffer {
   readonly label: string;
   readonly undo$: QRL<() => void>;
 }
 
 export interface ViewBridge {
+  /**
+   * The workspace the view is mounted in, read-only: what a contributed view
+   * names when it creates a process through the shell's registry, the way the
+   * composer's run does. A view never changes the workspace it is in. CA_0050_001
+   */
+  readonly workspaceId: string;
   readonly drag: ViewDragState;
   readonly inspector: ViewInspector;
   readonly dock: ViewDock;
@@ -239,6 +268,9 @@ export interface ViewBridge {
    * under whichever target the reader moved to.
    */
   readonly setPointing$: QRL<(itemId: string, pointing: Pointing) => void>;
+  /** Records the branch a document's tab works in, or none, so the composer's
+   * strip says the run proposes into it and the run names it. BO_0250_010 */
+  readonly setBranch$: QRL<(itemId: string, branch: string | null) => void>;
   /** The last run aimed at a target that ended. BO_0226_007 */
   readonly proposed: ViewProposed;
   /** The last chip the reader pressed in the composer, asking the view to
@@ -296,6 +328,18 @@ export interface ViewBridge {
    * sections whose rows open the tab's kind read again. BO_0222_007
    */
   readonly targetChanged$: QRL<() => void>;
+  /** Puts words into the composer's field for the reader to finish and run.
+   * CA_0046_006 */
+  readonly composeCommand$: QRL<(text: string) => void>;
+  /**
+   * Retargets the active tab in place — opening a block as focused work, or
+   * going back along the route — keeping the tab and its view; the shell
+   * rewrites the tab's target, title and route in the workspace record and
+   * remounts the view. `focus` names the block to land on. CA_0047_004
+   */
+  readonly retarget$: QRL<(target: { itemId: string; title: string; route: readonly RouteEntry[]; focus?: string }) => void>;
+  /** The block to focus once the retargeted view shows. CA_0047_004 */
+  readonly focus: ViewFocus;
 }
 
 export const ViewBridgeContext = createContextId<ViewBridge>(

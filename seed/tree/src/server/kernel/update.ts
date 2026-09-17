@@ -41,6 +41,8 @@ export interface UpdateView {
   /** The release the images were built from; empty when the kernel was not told. */
   readonly release: string;
   readonly servedPin?: number;
+  /** The newest accepted extension truth; past `servedPin`, accepted content waits to be served. BO_0242_004 */
+  readonly extensionTruth?: number;
   readonly updateCheck: boolean;
   readonly updater: UpdaterStatus;
   readonly pending: PendingUpdate | null;

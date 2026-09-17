@@ -85,23 +85,34 @@ describe("the owner network", () => {
     expect(links.some((run) => run.link === "calliopa:ext:ui.shell/docs/system/ui-kernel.md")).toBe(true);
   });
 
-  it("Given change documents, Then the Changes section lists them open first by title descending, each opening the document, with the files still held listed after (BO_0222_009)", () => {
-    const changes = [
-      { documentId: "d-done", title: "BO_0001_FEAT_done", change: "ui.shell", status: "completed" as const, revisedAt: 0 },
-      { documentId: "d-a", title: "BO_0002_FEAT_a", change: "ui.shell", status: "idea" as const, revisedAt: 0 },
-      { documentId: "d-b", title: "BO_0003_FEAT_b", change: "ui.shell", status: "wip" as const, revisedAt: 0 },
-    ];
-    const document = renderExtension(network, facts, changes);
+  it("Given change members, Then the Changes section lists them by identifier, each opening in this view (BO_0254_010)", () => {
+    const document = renderExtension(network, facts);
     const blocks = document.blocks.filter((block) => block.kind === "text");
     const start = blocks.findIndex((block) => block.kind === "text" && block.runs[0]?.text === "Changes");
-    const rows = blocks
-      .slice(start + 1)
-      .filter((block) => block.kind === "text" && block.role === "paragraph" && block.runs.some((run) => run.link?.startsWith("calliopa:doc:")))
-      .map((block) => (block.kind === "text" ? block.runs.map((run) => run.text).join("") : ""));
-    expect(rows).toEqual(["wip BO_0003_FEAT_b", "idea BO_0002_FEAT_a", "completed BO_0001_FEAT_done"]);
-    const files = blocks.findIndex((block) => block.kind === "text" && block.runs[0]?.text === "Files not yet imported");
-    expect(files).toBeGreaterThan(start);
-    expect(renderExtension(network, facts).blocks.some((block) => block.kind === "text" && block.runs[0]?.text === "Files not yet imported")).toBe(true);
+    expect(start).toBeGreaterThanOrEqual(0);
+    // The section ends at the next heading; Questions and History link to
+    // changes too, and they are not this section's rows.
+    const after = blocks.slice(start + 1);
+    const end = after.findIndex((block) => block.kind === "text" && block.role === "h2");
+    const rows = (end === -1 ? after : after.slice(0, end)).filter(
+      (block) =>
+        block.kind === "text" &&
+        block.role === "paragraph" &&
+        block.runs.some((run) => run.link?.startsWith("calliopa:ext:ui.shell/docs/changes/")),
+    );
+    expect(rows.length).toBe(network.changes.length);
+    expect(rows.length).toBeGreaterThan(0);
+    // The status badge leads each row and the link names the member, so a
+    // change opens where a topic opens rather than in the editor.
+    expect(
+      rows.map((block) => (block.kind === "text" ? block.runs[0]?.text : "")),
+    ).toEqual(network.changes.map((change) => change.status));
+    // Nothing is listed as waiting for an import any more: members are the
+    // one form a change document has.
+    expect(
+      blocks.some((block) => block.kind === "text" && block.runs[0]?.text === "Files not yet imported"),
+    ).toBe(false);
+    expect(document.blocks.some((block) => block.kind === "text" && block.runs.some((run) => run.link?.startsWith("calliopa:doc:")))).toBe(false);
   });
 
   it("Given a topic node, Then fixed lines and open work come before mutable truth within a section", () => {

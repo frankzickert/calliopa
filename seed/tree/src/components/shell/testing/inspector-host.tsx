@@ -34,7 +34,7 @@ const process = (id: string, title: string): ProcessRecord => ({
 
 const tab = (id: string): Tab => ({
   id,
-  kind: "ui.shell:document",
+  kind: "documents:document",
   title: id,
   itemId: id,
   viewType: "block-editor",
@@ -52,7 +52,7 @@ export const InspectorHost = component$(() => {
     tabs: [tab("a"), tab("b")],
     activeTabId: "a",
   });
-  const proposed = useStore<ProposedRead>({ processId: null, documents: [] });
+  const proposed = useStore<ProposedRead>({ processId: null, documents: [], attachments: [] });
   const inspector = useStore<ViewInspector>({
     text: null,
     facts: [],

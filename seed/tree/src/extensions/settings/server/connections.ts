@@ -7,7 +7,7 @@ import {
   type RuntimeStatus,
 } from "~/lib/connections";
 import { HttpError } from "~/server/http-error";
-import { kernelSecrets, type PartyView } from "~/server/kernel/client";
+import { kernelSecrets, type PartyChange, type PartyView } from "~/server/kernel/client";
 import type { RegisteredParty } from "~/registry";
 import { parties, partyOf } from "~/server/registry";
 import { agentStatus, apiKeyModelConfigured, runtimeStatuses } from "~/server/agent/adapters";
@@ -30,6 +30,21 @@ import { agentStatus, apiKeyModelConfigured, runtimeStatuses } from "~/server/ag
  */
 const SECRET_FIELD = "apiKey";
 
+/** An oauth party's one typed secret is the provider's client secret; its tokens are the kernel's. BO_0252_007 */
+const secretFieldOf = (credential: string): string => (credential === "oauth" ? "clientSecret" : SECRET_FIELD);
+
+/** What the kernel is handed with every save: the descriptor's probe, provider, prefixes and fixed configuration. */
+function specOf(party: RegisteredParty): Omit<PartyChange, "secrets" | "configuration"> & { readonly configuration?: Readonly<Record<string, string>> } {
+  const spec = party.probe;
+  return {
+    kind: party.credential,
+    ...(spec === undefined ? {} : { authorization: spec.authorization, test: spec.test }),
+    ...(party.provider === undefined ? {} : { provider: { ...party.provider, scopes: [...party.provider.scopes] } }),
+    ...(party.paths === undefined ? {} : { paths: [...party.paths] }),
+    ...(party.fixed === undefined ? {} : { configuration: { ...party.fixed } }),
+  };
+}
+
 const STATES: readonly string[] = ["unconfigured", "configured", "verified", "failing"];
 
 /**
@@ -39,7 +54,7 @@ const STATES: readonly string[] = ["unconfigured", "configured", "verified", "fa
  * record, so the browser holds no roster of its own. BO_0202_008
  */
 function asRecord(party: RegisteredParty, view: PartyView): ConnectionRecord {
-  const key = view.secretFields[SECRET_FIELD];
+  const key = view.secretFields[secretFieldOf(party.credential)];
   const kind = party.credential;
   return withConfiguration(party, {
     party: party.id,
@@ -59,6 +74,10 @@ function asRecord(party: RegisteredParty, view: PartyView): ConnectionRecord {
     configuration: view.configuration ?? {},
     lastTestedAt: view.lastTestedAt ?? null,
     lastError: view.lastError ?? null,
+    flow:
+      view.flow === undefined
+        ? null
+        : { state: view.flow.state, userCode: view.flow.userCode ?? null, verificationUrl: view.flow.verificationUrl ?? null, expiresAt: view.flow.expiresAt ?? null, lastError: view.flow.lastError ?? null },
     status: null,
     agent: null,
   });
@@ -171,8 +190,8 @@ function asAgent(
  * the kernel still holds for one is kept and not shown, as the listing
  * already did for an unknown party. BO_0202_008
  */
-export function assertParty(party: string): RegisteredParty {
-  const registered = partyOf(party);
+export async function assertParty(party: string): Promise<RegisteredParty> {
+  const registered = await partyOf(party);
   if (registered === undefined) {
     throw new HttpError(404, `unknown connection ${party}`);
   }
@@ -180,16 +199,23 @@ export function assertParty(party: string): RegisteredParty {
 }
 
 /**
- * Every contributed party, by credential kind then name: the roster is the
- * registry's, so a party the kernel holds nothing for still lists,
- * unconfigured.
+ * Every party, the contributed ones by credential kind then name and the
+ * runtime rosters' — a channel the author made — after them by label: the
+ * roster is the registry's, so a party the kernel holds nothing for still
+ * lists, unconfigured. CA_0049_003
  */
 export async function listConnections(): Promise<ConnectionRecord[]> {
-  const roster = [...parties()].sort((left, right) =>
-    left.credential === right.credential
-      ? left.id.localeCompare(right.id)
-      : left.credential.localeCompare(right.credential),
-  );
+  const every = await parties();
+  const contributed = every.filter((party) => !isDynamic(party));
+  const dynamic = every.filter(isDynamic);
+  const roster = [
+    ...contributed.sort((left, right) =>
+      left.credential === right.credential
+        ? left.id.localeCompare(right.id)
+        : left.credential.localeCompare(right.credential),
+    ),
+    ...dynamic.sort((left, right) => left.label.localeCompare(right.label)),
+  ];
   const records = await Promise.all(
     roster.map(async (party) => asRecord(party, await kernelSecrets.read(party.id))),
   );
@@ -200,8 +226,11 @@ export async function listConnections(): Promise<ConnectionRecord[]> {
   return records.map((record) => withStatus(record, reported, stamped, apiKeyModel));
 }
 
+/** A party a runtime roster answered rather than the build: its id is namespaced by its extension. */
+const isDynamic = (party: RegisteredParty): boolean => party.id.startsWith(`${party.extension}-`);
+
 export async function readConnection(party: string): Promise<ConnectionRecord> {
-  const registered = assertParty(party);
+  const registered = await assertParty(party);
   return asRecord(registered, await kernelSecrets.read(registered.id));
 }
 
@@ -215,23 +244,51 @@ export async function saveConnectionSecret(
   party: string,
   plain: string,
 ): Promise<ConnectionRecord> {
-  const registered = assertParty(party);
+  const registered = await assertParty(party);
   const secret = plain.trim();
   if (secret === "") {
     throw new HttpError(400, "a key is required");
   }
-  if (registered.credential !== "apiKey") {
+  if (registered.credential !== "apiKey" && registered.credential !== "oauth") {
     throw new HttpError(400, `${registered.id} takes no key`);
   }
-  const spec = registered.probe;
   return asRecord(
     registered,
     await kernelSecrets.write(registered.id, {
-      kind: registered.credential,
-      secrets: { [SECRET_FIELD]: secret },
-      ...(spec === undefined ? {} : { authorization: spec.authorization, test: spec.test }),
+      ...specOf(registered),
+      secrets: { [secretFieldOf(registered.credential)]: secret },
     }),
   );
+}
+
+/**
+ * Starting an oauth party's device flow: the kernel asks the provider for the
+ * code the person types and polls on its own; the row shows the code and the
+ * URL while the flow is awaiting. BO_0252_007
+ */
+export async function startSignIn(party: string): Promise<ConnectionRecord & { readonly signIn: { readonly userCode: string; readonly verificationUrl: string; readonly expiresAt: string } }> {
+  const registered = await assertParty(party);
+  if (registered.credential !== "oauth") {
+    throw new HttpError(400, `${registered.id} does not sign in; it takes a key`);
+  }
+  const current = await readConnection(registered.id);
+  if (!current.keySet) {
+    throw new HttpError(409, `${registered.id} has no client secret stored`);
+  }
+  const refusal = configurationRefusal(registered, current.configuration);
+  if (refusal !== null) {
+    throw new HttpError(409, refusal);
+  }
+  // The provider and prefixes travel with the sign-in as with a save, so the kernel holds the current spec.
+  await kernelSecrets.write(registered.id, specOf(registered));
+  let started;
+  try {
+    started = await kernelSecrets.signIn(registered.id);
+  } catch (error) {
+    throw new HttpError(502, error instanceof Error ? error.message : String(error));
+  }
+  const record = asRecord(registered, await kernelSecrets.read(registered.id));
+  return { ...record, signIn: { userCode: started.userCode, verificationUrl: started.verificationUrl, expiresAt: started.expiresAt } };
 }
 
 /**
@@ -243,7 +300,7 @@ export async function saveConnectionConfiguration(
   party: string,
   configuration: Readonly<Record<string, string>>,
 ): Promise<ConnectionRecord> {
-  const registered = assertParty(party);
+  const registered = await assertParty(party);
   const trimmed = Object.fromEntries(
     Object.entries(configuration).map(([field, value]) => [field, value.trim()]),
   );
@@ -251,20 +308,19 @@ export async function saveConnectionConfiguration(
   if (refusal !== null) {
     throw new HttpError(400, refusal);
   }
-  const spec = registered.probe;
+  const spec = specOf(registered);
   return asRecord(
     registered,
     await kernelSecrets.write(registered.id, {
-      kind: registered.credential,
-      configuration: trimmed,
-      ...(spec === undefined ? {} : { authorization: spec.authorization, test: spec.test }),
+      ...spec,
+      configuration: { ...(spec.configuration ?? {}), ...trimmed },
     }),
   );
 }
 
 /** Clearing removes the stored secret and returns the party to `unconfigured`. */
 export async function clearConnectionSecret(party: string): Promise<ConnectionRecord> {
-  const registered = assertParty(party);
+  const registered = await assertParty(party);
   await kernelSecrets.remove(registered.id);
   return asRecord(registered, await kernelSecrets.read(registered.id));
 }
@@ -318,10 +374,13 @@ function asConfiguration(
  * request is refused for the same reason.
  */
 export async function proveConnection(party: string): Promise<ConnectionRecord> {
-  const registered = assertParty(party);
+  const registered = await assertParty(party);
   const current = await readConnection(registered.id);
   if (!current.keySet) {
     throw new HttpError(409, `${registered.id} has no key stored`);
+  }
+  if (registered.credential === "oauth" && current.flow?.state !== "verified") {
+    throw new HttpError(409, `${registered.id} is not signed in`);
   }
   const refusal = configurationRefusal(registered, current.configuration);
   if (refusal !== null) {

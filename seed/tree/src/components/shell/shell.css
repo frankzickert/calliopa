@@ -666,6 +666,80 @@
   color: var(--text);
 }
 
+/* The paperclip beside the field: the native picker behind a round control,
+   and the files the command carries as chips before the reference chips, each
+   with its name, its size or state, and a × that takes it off (BO_0229_010). */
+.dock .composer__attach {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.dock .composer__attach:hover,
+.dock .composer__attach:focus-within {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.dock .composer__attach[aria-disabled="true"] {
+  cursor: default;
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+
+.dock .chip--attachment {
+  max-width: 16rem;
+  padding-inline-end: 0.15rem;
+}
+
+.dock .chip--attachment .chip__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.dock .chip--attachment .chip__meta {
+  flex: none;
+}
+
+.dock .chip--attachment[data-attachment-state="uploading"] .chip__meta {
+  font-style: italic;
+}
+
+.dock .chip--attachment[data-attachment-state="refused"] {
+  border-color: var(--warning);
+}
+
+.dock .chip--attachment[data-attachment-state="refused"] svg {
+  color: var(--warning);
+}
+
+.dock .chip__remove {
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.dock .chip__remove:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+}
+
 /* A stale passage says so by its icon and its name as well as its colour. */
 .dock .chip[data-stale="true"] {
   border-color: var(--warning);
@@ -722,6 +796,8 @@
 @media (pointer: coarse) {
   .dock .composer__run,
   .dock .chip,
+  .dock .chip__remove,
+  .dock .composer__attach,
   .dock .command-strip__dismiss {
     min-width: 44px;
     min-height: 44px;
@@ -1156,6 +1232,16 @@
   .shell[data-sheet="left"] .drawer--left,
   .shell[data-sheet="right"] .drawer--right {
     display: block;
+  }
+
+  /* A drawer state names a sheet here, never a column: the desktop's
+     three-column templates for compact and hidden drawers are more specific
+     than the phone's one column above, and a record with the inspector
+     hidden on the desktop left the header, the workspace and the dock in a
+     16rem first column on the phone. CA_0047_007 */
+  .shell[data-left],
+  .shell[data-right] {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .sheet-handle,
@@ -2038,4 +2124,66 @@
 .dock-actions button[aria-pressed="true"]::before {
   border-color: var(--accent);
   background: var(--accent);
+}
+
+
+/* A system process — the kernel's own refinement — carries its glyph in the
+   console row and the inspector. BO_0245_010 */
+.process-entry__system {
+  display: inline-flex;
+  margin-inline-end: 0.35rem;
+  color: var(--text-muted);
+  vertical-align: middle;
+}
+.process-detail [data-process-system-label] {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.process-detail .process-trigger,
+.process-detail .process-concluded {
+  color: var(--text-muted);
+}
+
+/* The agent row's refinement switch and settle time. BO_0245_011 */
+.agent-report__refinement {
+  margin-top: 0.5rem;
+}
+.agent-report__refinement .connection__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.agent-report__refinement input[type="number"] {
+  width: 5rem;
+}
+
+/* A document's derived state as a glyph beside its label in the library:
+   under pressure, needs review. BO_0248_012 */
+.library-entry__glyph {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+
+/* A document nobody has taken yet carries its proposer's face before its
+   label, where a glyph stands: an agent's character, or a neutral figure.
+   BO_0251_012 */
+.library-entry__face {
+  flex: 0 0 auto;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  object-fit: cover;
+  color: var(--text-muted);
+}
+
+/* The run proposes into the person's proposal (BO_0250_010). */
+.command-strip__branch {
+  color: var(--text-muted);
+  font-size: 0.8125rem;
 }

@@ -45,9 +45,34 @@ const section = (data: unknown) =>
 const listing = (over: Record<string, unknown> = {}) => ({
   reachable: true,
   extensions: [],
-  other: [],
   ...over,
 });
+
+const change = (path: string, status: string) => ({
+  path: `docs/changes/${path}`,
+  id: /^([A-Z]{2}_\d{4})_/u.exec(path)?.[1] ?? "",
+  title: path.replace(/\.md$/u, ""),
+  change: "ui.shell",
+  status,
+});
+
+const withChanges = (...changes: readonly unknown[]) =>
+  listing({
+    extensions: [
+      {
+        id: "ui.shell",
+        version: "0.1.0",
+        category: "bundled",
+        newestRevision: 1,
+        servedPin: 1,
+        ahead: false,
+        active: true,
+        pinned: false,
+        pinnedAt: null,
+        changes,
+      },
+    ],
+  });
 
 const mount = async (data: unknown = listing()) => {
   const dom = await createDOM();
@@ -89,6 +114,32 @@ describe("the Extensions section's own controls", () => {
     expect(row()).not.toContain("hidden");
     await view.userEvent("[data-filter-changes]", "click");
     expect(row()).toContain("hidden");
+  });
+
+  it("Given an extension's change members, Then each lists under it with its status and none carries a create control (BO_0254_009)", async () => {
+    const view = await mount(
+      withChanges(
+        change("CA_0044_FEAT_library-side-bar.md", "wip"),
+        change("completed/CA_0040_FIX_inspector.md", "completed"),
+      ),
+    );
+    const html = view.html();
+    // The row's `+` is gone: a change document is written by an agent from a
+    // checkout, in the proposal that carries the code.
+    expect(html).not.toContain("data-new-change");
+    // The default filter lists what is open and hides what is finished.
+    expect(html).toContain("docs/changes/CA_0044_FEAT_library-side-bar.md");
+    expect(html).not.toContain("CA_0040_FIX_inspector");
+    // The identity the row carries is the member's path, which is what opens
+    // it in the extension view.
+    expect(html).toContain('data-change-status="wip"');
+  });
+
+  it("Given a listing with no group for an unknown extension, Then nothing renders one (BO_0254_009)", async () => {
+    // A change is a member of the extension whose subtree holds it, so the
+    // *Other* group has nothing it could hold.
+    const view = await mount(withChanges(change("CA_0044_FEAT_library-side-bar.md", "idea")));
+    expect(view.html()).not.toContain('data-library-group="other"');
   });
 
   it("Given a person who is not the owner, Then no import control is offered", async () => {

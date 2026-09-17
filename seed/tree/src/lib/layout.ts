@@ -38,7 +38,7 @@ export function sectionState(layout: Layout, key: string): SectionState {
  * so a workspace saved before `BO_0202` opens with its sections as they were.
  */
 export const LEGACY_SECTION_KEYS: Readonly<Record<string, string>> = {
-  library: "ui.shell:documents",
+  library: "documents:documents",
   episodes: "calliopa-video:episodes",
   standing: "calliopa-video:standing",
   destinations: "calliopa-video:destinations",

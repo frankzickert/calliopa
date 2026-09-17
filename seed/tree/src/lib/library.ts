@@ -15,9 +15,9 @@ export interface DocumentSummary {
 
 /**
  * A change document's status: the change protocol's vocabulary, in its order.
- * The graph declares the same set as the permitted values of the document
- * type's `changeStatus` property, so a seventh value is refused at the write,
- * not here. BO_0222_004
+ * A change document is an `ext.source` member of its extension and its status
+ * is the `Status:` line of that file, so this set is what the parse
+ * recognises and a line carrying anything else reads as `idea`. BO_0254_009
  */
 export const CHANGE_STATUSES = [
   "idea",
@@ -46,17 +46,19 @@ export const DEFAULT_CHANGE_FILTER: readonly ChangeStatus[] = [
 
 /**
  * A change of an extension as the `Extensions` category lists it under the
- * extension: a document carrying `change` (the extension's id) and
- * `changeStatus`, read from the graph the way the documents listing reads,
- * never from the pinned extension snapshot. BO_0222_005
+ * extension: one of its `docs/changes/` members, read from the same snapshot
+ * its topics are read from, with the status its `Status:` line carries. A
+ * member is always under the extension whose subtree holds it, so there is no
+ * change that names an extension the graph does not hold. BO_0254_009
  */
 export interface ChangeDocumentSummary {
-  readonly documentId: string;
+  /** The member path, e.g. `docs/changes/CA_0044_FEAT_library-side-bar.md`. */
+  readonly path: string;
+  /** The change identifier from the file name, e.g. `CA_0044`, or "". */
+  readonly id: string;
   readonly title: string;
   readonly change: string;
   readonly status: ChangeStatus;
-  /** When the document node itself was last revised — its title or status. */
-  readonly revisedAt: number;
 }
 
 /**
@@ -77,6 +79,6 @@ export interface ExtensionSummary {
   /** Whether it is served at a revision of its own rather than the release pin (`BO_0219_006`). */
   readonly pinned: boolean;
   readonly pinnedAt: number | null;
-  /** The extension's change documents, by title. */
+  /** The extension's change documents: its `docs/changes/` members. */
   readonly changes: readonly ChangeDocumentSummary[];
 }

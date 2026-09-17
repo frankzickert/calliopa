@@ -54,7 +54,9 @@ async function refusalOf(response: Response): Promise<HttpError> {
   // The kernel's code rides along — `sign_in_required` is what a page loader
   // turns into the sign-in redirect. BO_0209_003
   return new HttpError(
-    response.status === 404 ? 404 : response.status >= 500 ? 503 : 400,
+    // A refusal of what is someone else's stays a refusal of that, not a
+    // malformed request. BO_0232_007
+    response.status === 404 ? 404 : response.status === 403 ? 403 : response.status >= 500 ? 503 : 400,
     message,
     refusal.diagnostics?.[0]?.code,
   );
@@ -135,6 +137,34 @@ export interface PartyView {
   readonly lastTestedAt?: string;
   readonly lastError?: string;
   readonly updatedAt?: string;
+  /** An oauth party's authorization server and the device flow's state. BO_0252_006 */
+  readonly provider?: PartyProvider;
+  readonly flow?: PartyFlow;
+  readonly paths?: readonly string[];
+}
+
+export interface PartyProvider {
+  readonly deviceAuthorizationUrl: string;
+  readonly tokenUrl: string;
+  readonly scopes?: readonly string[];
+}
+
+/** The device flow as the row shows it: the code to type while awaiting, verified, or failing with the provider's words. */
+export interface PartyFlow {
+  readonly state: "awaiting" | "verified" | "failing";
+  readonly userCode?: string;
+  readonly verificationUrl?: string;
+  readonly expiresAt?: string;
+  readonly interval?: number;
+  readonly lastError?: string;
+}
+
+export interface PartySignIn {
+  readonly party: string;
+  readonly userCode: string;
+  readonly verificationUrl: string;
+  readonly expiresAt: string;
+  readonly interval: number;
 }
 
 export interface PartyChange {
@@ -143,6 +173,8 @@ export interface PartyChange {
   readonly secrets?: Readonly<Record<string, string | null>>;
   readonly authorization?: PartyAuthorization;
   readonly test?: PartyTest;
+  readonly provider?: PartyProvider;
+  readonly paths?: readonly string[];
 }
 
 export interface PartyTestOutcome {
@@ -174,11 +206,19 @@ export const kernelSecrets = {
     if (!response.ok) throw await refusalOf(response);
     return (await response.json()) as PartyTestOutcome;
   },
+  /** Starts an oauth party's device flow: the code the person types and where. BO_0252_006 */
+  async signIn(party: string): Promise<PartySignIn> {
+    const response = await call(`/__kernel/secrets/parties/${party}/sign-in`, { method: "POST" });
+    if (!response.ok) throw await refusalOf(response);
+    return (await response.json()) as PartySignIn;
+  },
   /**
    * One outbound request to the party, brokered: the kernel resolves the
    * address, adds the credential and forwards. The destination's status and
-   * body come back verbatim; a kernel refusal carries no party status header
-   * and is thrown instead.
+   * body come back verbatim, with its `Location` and `Range` when it sent
+   * them; a kernel refusal carries no party status header and is thrown
+   * instead. A body may be bytes, JSON, or a CCGW blob — a slice of one with
+   * `range` — the kernel streams without the shell holding it (BO_0252_006).
    */
   async request(
     party: string,
@@ -187,9 +227,12 @@ export const kernelSecrets = {
       readonly path: string;
       readonly body?: unknown;
       readonly bytes?: Uint8Array;
+      readonly blob?: string;
+      readonly range?: readonly [number, number];
       readonly contentType?: string;
+      readonly headers?: Readonly<Record<string, string>>;
     },
-  ): Promise<{ readonly status: number; readonly text: string }> {
+  ): Promise<{ readonly status: number; readonly text: string; readonly location: string | null; readonly range: string | null }> {
     const response = await call(
       `/__kernel/secrets/parties/${party}/request`,
       jsonInit("POST", {
@@ -197,12 +240,15 @@ export const kernelSecrets = {
         path: input.path,
         ...(input.body === undefined ? {} : { body: input.body }),
         ...(input.bytes === undefined ? {} : { bytesBase64: Buffer.from(input.bytes).toString("base64") }),
+        ...(input.blob === undefined ? {} : { blob: input.blob }),
+        ...(input.range === undefined ? {} : { range: input.range }),
         ...(input.contentType === undefined ? {} : { contentType: input.contentType }),
+        ...(input.headers === undefined ? {} : { headers: input.headers }),
       }),
     );
     if (response.headers.get("x-calliopa-party-status") === null) {
       throw await refusalOf(response);
     }
-    return { status: response.status, text: await response.text() };
+    return { status: response.status, text: await response.text(), location: response.headers.get("x-calliopa-party-location"), range: response.headers.get("x-calliopa-party-range") };
   },
 };

@@ -130,6 +130,32 @@ describe("reading the graph's extension namespace", () => {
     );
     expect(docs.map((doc) => doc.path)).toEqual(["README.md"]);
   });
+
+  it("Given docs members, Then the changes are the docs/changes/ files with the status their line carries (BO_0254_009)", () => {
+    const member = (path: string, code: string) =>
+      ({ id: `node:${path}`, revision: { content: { path, code } } }) as never;
+    const changes = forTesting.changesOf("ui.shell", [
+      member("docs/system/workspace/layout.md", "# Layout\n\n- A topic, not a change.\n"),
+      member(
+        "docs/changes/CA_0044_FEAT_library-side-bar.md",
+        "# CA_0044_FEAT_library-side-bar\n\nStatus: wip\n\nThe side bar.\n",
+      ),
+      member(
+        "docs/changes/completed/CA_0040_FIX_inspector.md",
+        "# CA_0040_FIX_inspector\n\nStatus: completed\n\nDone.\n",
+      ),
+      // A file whose status line names nothing the protocol knows is open
+      // work, not hidden work: it reads as idea. BO_0254_009
+      member("docs/changes/CA_0099_FEAT_odd.md", "# CA_0099_FEAT_odd\n\nStatus: halfway\n"),
+      member("README.md", "# ui.shell\n"),
+    ]);
+    expect(changes.map((change) => [change.id, change.status, change.path])).toEqual([
+      ["CA_0044", "wip", "docs/changes/CA_0044_FEAT_library-side-bar.md"],
+      ["CA_0099", "idea", "docs/changes/CA_0099_FEAT_odd.md"],
+      ["CA_0040", "completed", "docs/changes/completed/CA_0040_FIX_inspector.md"],
+    ]);
+    expect(changes.every((change) => change.change === "ui.shell")).toBe(true);
+  });
 });
 
 describe("an extension's history", () => {

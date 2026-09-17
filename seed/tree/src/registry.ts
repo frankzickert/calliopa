@@ -5,7 +5,9 @@ import type {
   ApiRoute,
   ClientContributions,
   LibrarySection,
+  Decorations,
   PartyDescriptor,
+  ProposedTarget,
   ServerContributions,
   ViewContribution,
 } from "~/contract";
@@ -69,12 +71,20 @@ export interface RegisteredSection extends LibrarySection {
   readonly opens?: string;
 }
 
+/** One extension's decorations for a kind, in contribution order. BO_0256_007 */
+export interface RegisteredDecorations {
+  readonly extension: string;
+  readonly decorations: Decorations;
+}
+
 export interface Registry {
   readonly extensions: readonly string[];
   readonly sections: readonly RegisteredSection[];
   /** Every qualified tab kind and the id of the view it opens with. */
   readonly kinds: Readonly<Record<string, string>>;
   readonly views: readonly ViewType[];
+  /** Decorations by qualified kind, in extension order. BO_0256_007 */
+  readonly decorations: Readonly<Record<string, readonly RegisteredDecorations[]>>;
 }
 
 export function buildRegistry(
@@ -83,6 +93,7 @@ export function buildRegistry(
 ): Registry {
   const sections: RegisteredSection[] = [];
   const kinds: Record<string, string> = {};
+  const decorations: Record<string, RegisteredDecorations[]> = {};
   const views = new Map<string, { view: ViewType; source: ViewContribution }>();
 
   const addView = (extension: string, source: ViewContribution, presents: readonly string[]) => {
@@ -135,11 +146,43 @@ export function buildRegistry(
     for (const view of contributions.views ?? []) addView(id, view, []);
   }
 
+  // Decorations are keyed by the *qualified* kind they draw on, so an
+  // extension decorates another's kind by naming it bare, the way it
+  // contributes a section for one. A kind nothing contributes is refused,
+  // because a decoration nothing would ever draw is a stale contribution.
+  // BO_0256_007
+  for (const { id, contributions } of entries) {
+    for (const [kind, set] of Object.entries(contributions.decorations ?? {})) {
+      const qualified = kinds[qualify(id, kind)] !== undefined ? qualify(id, kind) : kind;
+      const known = Object.keys(kinds).find(
+        (candidate) => candidate === qualified || candidate.endsWith(`:${kind}`),
+      );
+      if (known === undefined) {
+        throw new RegistryError(
+          "decoration_kind_unknown",
+          `${id} decorates ${kind}, which no extension contributes`,
+        );
+      }
+      if (set.provider !== undefined) {
+        const provided = (decorations[known] ?? []).find(
+          (candidate) => candidate.decorations.provider !== undefined,
+        );
+        if (provided !== undefined) {
+          throw new RegistryError(
+            "decoration_provider_collision",
+            `${provided.extension} and ${id} both provide for ${known}; a kind takes one provider, and the presenting view wraps it once`,
+          );
+        }
+      }
+      (decorations[known] ??= []).push({ extension: id, decorations: set });
+    }
+  }
   const registry: Registry = {
     extensions: entries.map((entry) => entry.id),
     sections,
     kinds,
     views: [...views.values()].map((entry) => entry.view),
+    decorations,
   };
   // A view contributed for a kind nothing declares would never be reached;
   // saying so is what keeps a stale contribution from surviving unnoticed.
@@ -159,6 +202,18 @@ export interface RegisteredParty extends PartyDescriptor {
   readonly extension: string;
 }
 
+/** A runtime party roster and the extension that answers it. CA_0049_001 */
+export interface RegisteredRoster {
+  readonly extension: string;
+  readonly roster: () => Promise<readonly PartyDescriptor[]>;
+}
+
+/** What one extension says a run proposed into it. BO_0255_007 */
+export interface RegisteredProposedTargets {
+  readonly extension: string;
+  readonly read: (group: string) => Promise<readonly ProposedTarget[]>;
+}
+
 export interface ServerRegistry {
   readonly extensions: readonly string[];
   /** Readers by section key, `<ext>:<name>`. */
@@ -166,6 +221,32 @@ export interface ServerRegistry {
   /** Handler tables by extension id. */
   readonly routes: Readonly<Record<string, readonly ApiRoute[]>>;
   readonly parties: readonly RegisteredParty[];
+  /** The rosters read at runtime, in extension order. */
+  readonly rosters: readonly RegisteredRoster[];
+  /** What each extension says a run proposed into it, in extension order. */
+  readonly proposedTargets: readonly RegisteredProposedTargets[];
+  /** What each extension says the items of a kind are marked with. BO_0256_008 */
+  readonly itemGlyphs: readonly NonNullable<ServerContributions["itemGlyphs"]>[];
+}
+
+/**
+ * Lays one roster's answer over the parties already held: an id must start
+ * with the roster's extension followed by a hyphen, and must not be held
+ * already, or it is dropped — a roster can add rows, never shadow one.
+ * Pure, so the rule is proven over fixture rosters. CA_0049_001
+ */
+export function mergeRoster(
+  held: readonly RegisteredParty[],
+  extension: string,
+  answered: readonly PartyDescriptor[],
+): RegisteredParty[] {
+  const merged = [...held];
+  for (const party of answered) {
+    if (!party.id.startsWith(`${extension}-`)) continue;
+    if (merged.some((candidate) => candidate.id === party.id)) continue;
+    merged.push({ ...party, extension });
+  }
+  return merged;
 }
 
 export function buildServerRegistry(
@@ -174,7 +255,19 @@ export function buildServerRegistry(
   const readers: Record<string, () => Promise<unknown>> = {};
   const routes: Record<string, readonly ApiRoute[]> = {};
   const parties: RegisteredParty[] = [];
+  const rosters: RegisteredRoster[] = [];
+  const proposedTargets: RegisteredProposedTargets[] = [];
+  const itemGlyphs: NonNullable<ServerContributions["itemGlyphs"]>[] = [];
   for (const { id, contributions } of entries) {
+    if (contributions.partyRoster !== undefined) {
+      rosters.push({ extension: id, roster: contributions.partyRoster });
+    }
+    if (contributions.itemGlyphs !== undefined) {
+      itemGlyphs.push(contributions.itemGlyphs);
+    }
+    if (contributions.proposedTargets !== undefined) {
+      proposedTargets.push({ extension: id, read: contributions.proposedTargets });
+    }
     for (const [name, reader] of Object.entries(contributions.readers ?? {})) {
       readers[qualify(id, name)] = reader;
     }
@@ -210,7 +303,15 @@ export function buildServerRegistry(
       parties.push({ ...party, extension: id });
     }
   }
-  return { extensions: entries.map((entry) => entry.id), readers, routes, parties };
+  return {
+    extensions: entries.map((entry) => entry.id),
+    readers,
+    routes,
+    parties,
+    rosters,
+    proposedTargets,
+    itemGlyphs,
+  };
 }
 
 /**

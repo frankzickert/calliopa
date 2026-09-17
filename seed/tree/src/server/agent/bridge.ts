@@ -31,7 +31,50 @@ export interface BridgeRun {
   readonly pin: number;
   readonly status: string;
   readonly agent?: string;
+  /** Whose run it was: a person's command, or the kernel's own refinement
+   * (`BO_0245`). Absent on a record from before system runs: a person's. */
+  readonly trigger?: "person" | "system";
+  /** The document a refinement was about — set on a system run, and on a
+   * person's run that carried a queued refinement with it. */
+  readonly refined?: string;
+  readonly refinedFrom?: number;
+  readonly refinedAt?: number;
+  /** The newest judgement the run recorded: what it concluded. */
+  readonly judgement?: BridgeJudgement;
+  /** The files the command carried and what the run was given of each. BO_0229_003 */
+  readonly attachments?: readonly BridgeAttachment[];
 }
+
+/** An attachment as the run's record names it (`BO_0229_003`). */
+export interface BridgeAttachment {
+  readonly id: string;
+  readonly filename: string;
+  readonly mediaType: string;
+  readonly size: number;
+  /** `text`, `image` or `metadata`. */
+  readonly delivered: string;
+}
+
+/** A judgement a system run recorded as truth (`BO_0245_004`). */
+export interface BridgeJudgement {
+  readonly about: string;
+  readonly outcome: string;
+  readonly explanation?: readonly { readonly text: string }[];
+  readonly subject?: string;
+}
+
+/** Whether the kernel refines on its own, and after how long a quiet. BO_0245_006 */
+export interface RefinementSettings {
+  readonly enabled: boolean;
+  readonly settleSeconds: number;
+}
+
+/** A system run's trigger, in words for the process. */
+export const triggerOf = (run: BridgeRun): "person" | "system" => (run.trigger === "system" ? "system" : "person");
+
+/** The words a judgement's explanation holds, joined. */
+export const judgementWords = (judgement: BridgeJudgement | undefined): string =>
+  judgement === undefined ? "" : (judgement.explanation ?? []).map((run) => run.text).join("").trim() || judgement.outcome;
 
 /** One normalized event on the bridge's stream. */
 interface BridgeEvent {
@@ -41,6 +84,8 @@ interface BridgeEvent {
   readonly ok?: boolean;
   readonly group?: string;
   readonly error?: string;
+  /** On a terminal event: the document a run started from a command created. BO_0251_004 */
+  readonly document?: string;
   readonly at: number;
 }
 
@@ -68,7 +113,11 @@ async function ask<T>(path: string, init: RequestInit, read: (body: unknown) => 
     body = null;
   }
   if (!response.ok) {
-    const error = (body as { error?: string } | null)?.error;
+    // A refusal is either the agent surface's `{error}` or the kernel's
+    // diagnostics `{status: "refused", diagnostics: [{code, message}]}`;
+    // the words come back as they are either way. BO_0245_011
+    const refused = body as { error?: string; diagnostics?: { message?: string }[] } | null;
+    const error = refused?.error ?? refused?.diagnostics?.[0]?.message;
     return { ok: false, status: response.status, detail: error ?? `The kernel answered ${response.status}.` };
   }
   return { ok: true, value: read(body) };
@@ -86,6 +135,10 @@ export function startBridgeRun(input: {
   readonly context?: string;
   readonly agent?: string;
   readonly target?: CommandTarget | null;
+  /** The person's branch the run proposes into, when the command came from a tab in one. BO_0250_005 */
+  readonly group?: string;
+  /** The attachment nodes written for the files the command carries. BO_0229_009 */
+  readonly attachments?: readonly string[];
 }): Promise<BridgeReply<BridgeRun>> {
   const target = input.target ?? null;
   return ask(
@@ -97,15 +150,19 @@ export function startBridgeRun(input: {
         goal: input.goal,
         context: input.context ?? "",
         agent: input.agent ?? "",
+        ...(input.group === undefined || input.group === "" ? {} : { group: input.group }),
+        ...(input.attachments === undefined || input.attachments.length === 0 ? {} : { attachments: input.attachments }),
         ...(target === null
           ? {}
-          : {
-              artifact: target.artifact,
-              delivery: target.delivery,
-              // A passage travels with its words; a block with its identity
-              // alone. BO_0227_015
-              references: target.references,
-            }),
+          : !("artifact" in target)
+            ? { delivery: target.delivery }
+            : {
+                artifact: target.artifact,
+                delivery: target.delivery,
+                // A passage travels with its words; a block with its identity
+                // alone. BO_0227_015
+                references: target.references,
+              }),
       }),
     },
     (body) => (body as { run: BridgeRun }).run,
@@ -143,6 +200,37 @@ export function readBridgeRun(runId: string): Promise<BridgeReply<BridgeRun>> {
   return ask(`/runs/${encodeURIComponent(runId)}`, { method: "GET" }, (body) => (body as { run: BridgeRun }).run);
 }
 
+/** The bridge's recent runs, newest last as it lists them. A system run the
+ * kernel started on its own is found here and nowhere else. BO_0245_009 */
+export function listBridgeRuns(): Promise<BridgeReply<readonly BridgeRun[]>> {
+  return ask("/runs", { method: "GET" }, (body) => {
+    const runs = (body as { runs?: BridgeRun[] } | null)?.runs;
+    return Array.isArray(runs) ? runs : [];
+  });
+}
+
+/** Whether refinement is on and its settle time, as the kernel keeps it. BO_0245_011 */
+export function readRefinement(): Promise<BridgeReply<RefinementSettings>> {
+  return ask("/refinement", { method: "GET" }, (body) => refinementOf(body));
+}
+
+/** Sets the switch and the settle time; the kernel refuses anyone but the owner. */
+export function configureRefinement(settings: RefinementSettings): Promise<BridgeReply<RefinementSettings>> {
+  return ask(
+    "/refinement",
+    { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(settings) },
+    (body) => refinementOf(body),
+  );
+}
+
+function refinementOf(body: unknown): RefinementSettings {
+  const record = (body ?? {}) as { enabled?: unknown; settleSeconds?: unknown };
+  return {
+    enabled: record.enabled !== false,
+    settleSeconds: typeof record.settleSeconds === "number" && record.settleSeconds >= 0 ? record.settleSeconds : 30,
+  };
+}
+
 export function cancelBridgeRun(runId: string): Promise<BridgeReply<string>> {
   return ask(
     `/runs/${encodeURIComponent(runId)}/cancel`,
@@ -169,16 +257,21 @@ export function translateBridgeEvent(runId: string, event: BridgeEvent): RunEven
       return { kind: "toolCompleted", runId, at, tool: event.tool ?? "", failed: event.ok === false, seconds: null };
     case "proposal.staged":
       return { kind: "assistantDelta", runId, at, text: `Staged into proposal ${event.group ?? ""}` };
+    // A run started from a command names the document it created on its
+    // end, whatever the end, so the shell can open it. BO_0251_007
     case "run.completed":
-      return { kind: "runCompleted", runId, at, output: event.text ?? "" };
+      return { kind: "runCompleted", runId, at, output: event.text ?? "", ...started(event) };
     case "run.failed":
-      return { kind: "runFailed", runId, at, error: event.error ?? event.text ?? "The run failed." };
+      return { kind: "runFailed", runId, at, error: event.error ?? event.text ?? "The run failed.", ...started(event) };
     case "run.cancelled":
-      return { kind: "runCancelled", runId, at };
+      return { kind: "runCancelled", runId, at, ...started(event) };
     default:
       return null;
   }
 }
+
+const started = (event: BridgeEvent): { readonly document?: string } =>
+  typeof event.document === "string" && event.document !== "" ? { document: event.document } : {};
 
 /** The frames of one SSE chunk: `event:` name and parsed `data:` payload. */
 export function parseSseFrames(chunk: string): { readonly event: string; readonly data: unknown }[] {

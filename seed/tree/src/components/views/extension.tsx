@@ -379,26 +379,6 @@ export const ExtensionView = component$<ViewProps>(({ tab }) => {
 
   const follow$ = $(async (link: string) => {
     const nodeId = link.replace(/^calliopa:/u, "");
-    // A change document opens in the editor, as the library opens it: the
-    // link names the document, not a node of the owner network. BO_0222_009
-    if (nodeId.startsWith("doc:")) {
-      const documentId = nodeId.slice("doc:".length);
-      const named = state.document?.blocks.find(
-        (block) =>
-          block.kind === "text" &&
-          block.runs.some((run) => run.link === link),
-      );
-      const title =
-        named !== undefined && named.kind === "text"
-          ? (named.runs.find((run) => run.link === link)?.text ?? documentId)
-          : documentId;
-      await bridge.openTarget$({
-        kind: "ui.shell:document",
-        itemId: documentId,
-        title,
-      });
-      return;
-    }
     const { extension, path } = nodeTarget(nodeId);
     const title =
       path === undefined

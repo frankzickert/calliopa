@@ -1,14 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  activeTab,
-  closeTab,
-  EMPTY_TABS,
-  moveTab,
-  openTab,
-  selectTab,
-  type Tab,
-  updateTab,
-} from "./tabs";
+import { EMPTY_TABS, activeTab, closeTab, moveTab, openTab, retargetTab, routeOf, selectTab, type Tab, updateTab } from "./tabs";
 
 const tab = (
   id: string,
@@ -79,5 +70,35 @@ describe("tab operations", () => {
       unsaved: true,
     });
     expect(state.tabs[1]).not.toHaveProperty("scroll");
+  });
+});
+
+describe("a tab's route", () => {
+  const tab = {
+    id: "t1",
+    kind: "documents:document" as const,
+    title: "Caching",
+    itemId: "doc-1",
+    viewType: "block-editor",
+    selection: "sel",
+    drawerContext: null,
+    unsaved: true,
+  };
+
+  it("reads as a route of one, the tab's own target, when the tab carries none", () => {
+    expect(routeOf(tab)).toEqual([{ itemId: "doc-1", title: "Caching" }]);
+    expect(routeOf(tab, "Renamed")).toEqual([{ itemId: "doc-1", title: "Renamed" }]);
+    expect(routeOf({ ...tab, route: [{ itemId: "doc-0", title: "Roots" }, { itemId: "doc-1", title: "Caching" }] })).toHaveLength(2);
+  });
+
+  it("retargets a tab in place, keeping its identity and view and dropping the old target's selection and unsaved state", () => {
+    const state = { tabs: [tab], activeTabId: "t1" };
+    const next = retargetTab(state as never, "t1", {
+      itemId: "doc-2",
+      title: "Focused",
+      route: [{ itemId: "doc-1", title: "Caching", blockId: "blk-a" }, { itemId: "doc-2", title: "Focused" }],
+    });
+    expect(next.tabs[0]).toMatchObject({ id: "t1", itemId: "doc-2", title: "Focused", viewType: "block-editor", selection: null, unsaved: false });
+    expect(next.tabs[0]?.route?.map((entry) => entry.itemId)).toEqual(["doc-1", "doc-2"]);
   });
 });

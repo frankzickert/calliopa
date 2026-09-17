@@ -9,8 +9,7 @@ import {
   clearConnectionSecret,
   listConnections,
   proveConnection,
-  writeConnectionSecret,
-} from "./server/connections";
+  writeConnectionSecret, startSignIn } from "./server/connections";
 
 /**
  * The server half of the settings extension: its handler table under
@@ -153,6 +152,12 @@ const routes: readonly ApiRoute[] = [
     method: "POST",
     path: "connections/[party]/test",
     handle: async (event, params) => event.json(200, await proveConnection(params["party"] ?? "")),
+  },
+  {
+    // An oauth party's device flow, started from its row. BO_0252_007
+    method: "POST",
+    path: "connections/[party]/sign-in",
+    handle: async (event, params) => event.json(200, await startSignIn(params["party"] ?? "")),
   },
   {
     // What Hermes's own loop reasons with, set explicitly from the agent's

@@ -1,0 +1,12 @@
+{
+  "capabilities": {
+    "renders": [
+      "routes",
+      "views"
+    ]
+  },
+  "category": "bundled",
+  "entrypoint": "contributions",
+  "id": "documents",
+  "version": "0.1.0"
+}

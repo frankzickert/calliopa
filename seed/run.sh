@@ -20,6 +20,12 @@
 #                  nothing lands without their review (`docs/extending.md`),
 #                  and the pin is left where it is until they accept.
 #
+# An instance holds at most one open update (BO_0242_001). An update whose
+# release already has an open proposal stages nothing: the diff is against
+# accepted truth, so a second run would stage the same content again. An open
+# proposal for any other release is superseded — this release's diff carries
+# everything it would have brought — and is rejected before this one stages.
+#
 # Either way an up-to-date install produces an empty change set and stages
 # nothing: `kernel commit` reports nothing to commit and exits 0, which is how
 # "already applied" is decided — by the diff, not by a version marker.
@@ -52,6 +58,20 @@ version="$(node "$here/ccgw.mjs" field "$here/bundle.json" version)"
 if node "$here/ccgw.mjs" exists "$base" "$principal" ext.manifest "$marker"; then
   updating=1
   echo "pre-seed: updating bundled extensions to release $version (dogfood pin $pin)"
+  open_updates="$(node "$here/ccgw.mjs" updates "$base" "$principal")"
+  waiting="$(printf '%s\n' "$open_updates" | awk -v v="$version" '$2 == v { print $1; exit }')"
+  if [ -n "$waiting" ]; then
+    echo "pre-seed: release $version's update proposal $waiting is already waiting for review; staging nothing"
+    echo "pre-seed: accept it in Calliopa, then promote it to serve the new release"
+    echo "pre-seed complete"
+    exit 0
+  fi
+  printf '%s\n' "$open_updates" | while read -r proposal older; do
+    [ -n "$proposal" ] || continue
+    echo "pre-seed: rejecting release $older's update proposal $proposal, superseded by release $version"
+    kernel proposal reject "$proposal" --ccgw "$base" --principal "$principal" \
+      -m "superseded by release $version"
+  done
 else
   updating=0
   echo "pre-seed: importing bundled extensions (release $version, dogfood pin $pin)"

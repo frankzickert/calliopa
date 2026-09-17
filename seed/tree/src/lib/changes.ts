@@ -9,9 +9,10 @@ import {
 /**
  * The pure rules behind the Extensions category's tree of changes: which
  * statuses a filter set lists, how a set is read back from a stored layout,
- * and where a change goes when the graph holds no extension of the id it
- * names. Settled without a graph, so the drawer's shape is provable on its
- * own. BO_0222_005 BO_0222_006
+ * and how a status line is read. Settled without a graph, so the drawer's
+ * shape is provable on its own. A change is a member of the extension whose
+ * subtree holds it, so nothing here groups or rehomes one. BO_0222_006
+ * BO_0254_009
  */
 
 /** A stored filter set, or the default when nothing was stored. Unknown
@@ -64,33 +65,10 @@ export function byChangeTitle(
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/**
- * Groups changes under the extension each names. A change naming an id the
- * graph holds no extension for goes under `other`, by that id, rather than
- * vanishing.
- */
-export function groupChanges(
-  changes: readonly ChangeDocumentSummary[],
-  extensionIds: readonly string[],
-): {
-  readonly byExtension: ReadonlyMap<string, readonly ChangeDocumentSummary[]>;
-  readonly other: readonly ChangeDocumentSummary[];
-} {
-  const byExtension = new Map<string, ChangeDocumentSummary[]>();
-  for (const id of extensionIds) byExtension.set(id, []);
-  const other: ChangeDocumentSummary[] = [];
-  for (const change of [...changes].sort(byChangeTitle)) {
-    const group = byExtension.get(change.change);
-    if (group === undefined) other.push(change);
-    else group.push(change);
-  }
-  other.sort((a, b) => (a.change < b.change ? -1 : a.change > b.change ? 1 : byChangeTitle(a, b)));
-  return { byExtension, other };
-}
-
-/** A change document's status as stored, or `idea` for a document that
- * carries `change` and no status, which the shell never writes but the graph
- * permits. */
+/** A change document's status as its `Status:` line carries it, or `idea` for
+ * a member whose line is missing or names something the protocol does not
+ * know: unreadable work is open work, and hiding it behind the default filter
+ * would be worse than listing it. BO_0254_009 */
 export function statusOf(value: unknown): ChangeStatus {
   return isChangeStatus(value) ? value : "idea";
 }

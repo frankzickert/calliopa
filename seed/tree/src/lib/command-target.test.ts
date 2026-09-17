@@ -6,10 +6,13 @@ import {
   documentOf,
   DOCUMENT_KIND,
   NO_CHOICE,
+  NO_UNAIMED,
   proposedFor,
+  startedDocument,
   readCommandTarget,
   revealFor,
   revealTarget,
+  type DocumentTarget,
   type PointedReference,
   type Pointing,
 } from "./command-target";
@@ -35,7 +38,7 @@ const pointing: Record<string, Pointing> = {
 
 describe("aiming a command", () => {
   it("Given a document tab, Then the command is aimed at it, proposes by default, and carries its marks in mark order", () => {
-    expect(commandTarget(documentTab("doc-1"), NO_CHOICE, pointing)).toEqual({
+    expect(commandTarget(documentTab("doc-1"), NO_CHOICE, pointing, "answer")).toEqual({
       artifact: "doc-1",
       delivery: "propose",
       references: [
@@ -63,7 +66,7 @@ describe("aiming a command", () => {
       },
     };
     expect(
-      commandTarget(documentTab("doc-1"), NO_CHOICE, withPassage)?.references,
+      (commandTarget(documentTab("doc-1"), NO_CHOICE, withPassage, "answer") as DocumentTarget | null)?.references,
     ).toEqual([
       { kind: "block", blockId: "blk-a", number: 1 },
       { kind: "passage", blockId: "blk-a", number: 2, quote: "a clause" },
@@ -76,6 +79,7 @@ describe("aiming a command", () => {
         { kind: "ui.shell:extension", itemId: "calliopa-video" },
         NO_CHOICE,
         pointing,
+        "answer",
       ),
     ).toBeNull();
     expect(
@@ -83,10 +87,21 @@ describe("aiming a command", () => {
         { kind: "settings:settings", itemId: null },
         NO_CHOICE,
         pointing,
+        "answer",
       ),
     ).toBeNull();
-    expect(commandTarget(undefined, NO_CHOICE, pointing)).toBeNull();
+    expect(commandTarget(undefined, NO_CHOICE, pointing, "answer")).toBeNull();
     expect(documentOf({ kind: DOCUMENT_KIND, itemId: "" })).toBeNull();
+  });
+
+  it("Given nothing open, Then the command starts a document by default, sends no artifact and no references, and after × is aimed at nothing", () => {
+    expect(NO_UNAIMED).toBe("start");
+    for (const tab of [undefined, { kind: "settings:settings", itemId: "instance" }]) {
+      expect(commandTarget(tab, NO_CHOICE, pointing, NO_UNAIMED)).toEqual({ delivery: "start" });
+      expect(commandTarget(tab, NO_CHOICE, pointing, "answer")).toBeNull();
+    }
+    // A document tab is aimed at its document whatever the unaimed choice.
+    expect(commandTarget(documentTab("doc-1"), NO_CHOICE, pointing, "start")?.delivery).toBe("propose");
   });
 
   it("Given Answer chosen in one document, Then it governs that document and never the next", () => {
@@ -94,13 +109,13 @@ describe("aiming a command", () => {
     expect(deliveryFor("doc-1", choice)).toBe("answer");
     expect(deliveryFor("doc-2", choice)).toBe("propose");
     expect(
-      commandTarget(documentTab("doc-2"), choice, pointing)?.delivery,
+      commandTarget(documentTab("doc-2"), choice, pointing, "answer")?.delivery,
     ).toBe("propose");
   });
 
   it("Given a document with nothing marked, Then it carries no references rather than another document's", () => {
     expect(
-      commandTarget(documentTab("doc-2"), NO_CHOICE, pointing)?.references,
+      (commandTarget(documentTab("doc-2"), NO_CHOICE, pointing, "answer") as DocumentTarget | null)?.references,
     ).toEqual([]);
   });
 
@@ -109,9 +124,9 @@ describe("aiming a command", () => {
     const live: Record<string, Pointing> = {
       "doc-1": { references, pinned: [] },
     };
-    const sent = commandTarget(documentTab("doc-1"), NO_CHOICE, live);
+    const sent = commandTarget(documentTab("doc-1"), NO_CHOICE, live, "answer");
     references.push(block("blk-c", 2));
-    expect(sent?.references).toEqual([
+    expect((sent as DocumentTarget | null)?.references).toEqual([
       { kind: "block", blockId: "blk-a", number: 1 },
     ]);
   });
@@ -120,6 +135,17 @@ describe("aiming a command", () => {
 describe("reading a target back", () => {
   it("Given a body aimed at nothing, Then the command is aimed at nothing", () => {
     expect(readCommandTarget({})).toEqual({ ok: true, target: null });
+  });
+
+  it("Given start with nothing open, Then it reads as a command that starts a document", () => {
+    expect(readCommandTarget({ delivery: "start" })).toEqual({ ok: true, target: { delivery: "start" } });
+  });
+
+  it("Given start with a document or with references, Then it is refused by name", () => {
+    const withDocument = readCommandTarget({ artifact: "doc-1", delivery: "start" });
+    expect(withDocument).toEqual({ ok: false, error: "A started document is not delivered into an open one." });
+    const withReferences = readCommandTarget({ delivery: "start", references: [{ number: 1, blockId: "blk-a" }] });
+    expect(withReferences).toEqual({ ok: false, error: "A started document carries no references: they need the document they point into." });
   });
 
   it("Given a coherent body, Then it reads as the target it describes", () => {
@@ -234,6 +260,26 @@ describe("reading a target back", () => {
       const read = readCommandTarget(body);
       expect(read.ok, JSON.stringify(body)).toBe(false);
     }
+  });
+});
+
+describe("the document a started run created", () => {
+  it("Given a run whose end names a document, Then that document is what opens, whatever the end", () => {
+    for (const kind of ["runCompleted", "runFailed", "runCancelled"] as const) {
+      const end =
+        kind === "runCompleted"
+          ? { kind, runId: "r", at: 2, output: "done", document: "doc-new" }
+          : kind === "runFailed"
+            ? { kind, runId: "r", at: 2, error: "x", document: "doc-new" }
+            : { kind, runId: "r", at: 2, document: "doc-new" };
+      expect(startedDocument([{ kind: "runStarted", runId: "r", at: 1 }, end])).toBe("doc-new");
+    }
+  });
+
+  it("Given a run still going, or one that ended naming nothing, Then nothing opens", () => {
+    expect(startedDocument([{ kind: "runStarted", runId: "r", at: 1 }])).toBeNull();
+    expect(startedDocument([{ kind: "runCompleted", runId: "r", at: 2, output: "done" }])).toBeNull();
+    expect(startedDocument([{ kind: "runCompleted", runId: "r", at: 2, output: "done", document: "" }])).toBeNull();
   });
 });
 

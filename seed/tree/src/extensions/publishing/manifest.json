@@ -1,0 +1,16 @@
+{
+  "capabilities": {
+    "renders": [
+      "views"
+    ]
+  },
+  "category": "bundled",
+  "dependencies": {
+    "documents": "\u003e=0.1.0",
+    "settings": "\u003e=1.0.0",
+    "ui.shell": "\u003e=0.1.0"
+  },
+  "entrypoint": "contributions",
+  "id": "publishing",
+  "version": "0.1.0"
+}

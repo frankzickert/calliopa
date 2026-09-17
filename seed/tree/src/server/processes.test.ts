@@ -19,6 +19,14 @@ describe("process input", () => {
     });
   });
 
+  it("Given an affected item of a kind an extension contributes, Then it is accepted qualified by the extension", () => {
+    // A publish is a process of the publishing extension's own (CA_0050_002): the item kind is the registry's.
+    expect(parseProcessInput({ title: "Publish E1 to Calliopa.com", itemId: "e1", itemKind: "publishing:deliverable" })).toMatchObject({
+      itemId: "e1",
+      itemKind: "publishing:deliverable",
+    });
+  });
+
   it("Given an untitled, half-identified, or unknown-kind request, Then it is rejected", () => {
     expect(() => parseProcessInput({ title: "  " })).toThrow(HttpError);
     expect(() => parseProcessInput({ title: "Render", itemId: "a" })).toThrow(

@@ -8,7 +8,7 @@ import { parseWorkspaceState } from "./workspaces";
 /** A document tab as the shell stores one; the default state opens none (BO_0203_005). */
 const documentTab = {
   id: "t",
-  kind: "ui.shell:document",
+  kind: "documents:document",
   title: "Untitled",
   itemId: "x",
   viewType: "block-editor",
@@ -116,7 +116,7 @@ describe("a workspace's section states", () => {
       }),
     );
     expect(parsed.layout.sections).toEqual({
-      "ui.shell:documents": "collapsed",
+      "documents:documents": "collapsed",
       "calliopa-video:episodes": "expanded",
       "calliopa-video:standing": "collapsed",
       "calliopa-video:destinations": "expanded",
@@ -134,18 +134,18 @@ describe("a workspace's section states", () => {
 
   it("Given the keys ui.shell held for one pin, Then they read as calliopa-video's", () => {
     const parsed = parseWorkspaceState(
-      withLayout({ sections: { "ui.shell:episodes": "collapsed", "ui.shell:documents": "collapsed" } }),
+      withLayout({ sections: { "ui.shell:episodes": "collapsed", "documents:documents": "collapsed" } }),
     );
     expect(parsed.layout.sections).toEqual({
       "calliopa-video:episodes": "collapsed",
-      "ui.shell:documents": "collapsed",
+      "documents:documents": "collapsed",
     });
   });
 
   it("Given a layout carrying no section state at all, Then a section reads expanded when asked", () => {
     const parsed = parseWorkspaceState(withLayout({ sections: {} }));
     expect(parsed.layout.sections).toEqual({});
-    expect(sectionState(parsed.layout, "ui.shell:documents")).toBe("expanded");
+    expect(sectionState(parsed.layout, "documents:documents")).toBe("expanded");
   });
 
   it("Given a section state outside the vocabulary, Then it is refused rather than defaulted", () => {
@@ -164,14 +164,14 @@ describe("a tab's kind", () => {
   });
 
   it("Given a kind stored before kinds were qualified, Then it is rewritten to its extension's", () => {
-    expect(parseWorkspaceState(withTab("document")).tabs[0]?.kind).toBe("ui.shell:document");
+    expect(parseWorkspaceState(withTab("document")).tabs[0]?.kind).toBe("documents:document");
     expect(parseWorkspaceState(withTab("settings")).tabs[0]?.kind).toBe("settings:settings");
   });
 
   it("Given a kind nothing contributes, Then the tab is dropped and the active tab moves on", () => {
     // Absence tolerates what it finds (BO_0203_006): the workspace keeps
     // working without the tab, and nothing else is touched.
-    const stored = withTab("ui.shell:document") as { tabs: Record<string, unknown>[]; activeTabId: string };
+    const stored = withTab("documents:document") as { tabs: Record<string, unknown>[]; activeTabId: string };
     stored.tabs = [{ ...stored.tabs[0], id: "gone", kind: "some-extension:thing", itemId: "y" }, stored.tabs[0]!];
     stored.activeTabId = "gone";
     const state = parseWorkspaceState(stored);
@@ -185,7 +185,7 @@ describe("a tab's kind", () => {
     // absent extension — is the tolerate rule's, tested above.
     expect(migrateTabKind("ui.shell:episode")).toBe("calliopa-video:episode");
     expect(migrateTabKind("front")).toBe("calliopa-video:front");
-    expect(migrateTabKind("document")).toBe("ui.shell:document");
+    expect(migrateTabKind("document")).toBe("documents:document");
   });
 
   it("Given a tab with no view, Then it opens in its kind's default from the registry", () => {

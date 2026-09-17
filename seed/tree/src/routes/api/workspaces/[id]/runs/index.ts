@@ -1,6 +1,7 @@
 import type { RequestHandler } from "@builder.io/qwik-city";
 import { api } from "~/server/api";
-import { readCommandTarget } from "~/lib/command-target";
+import { readAttachments, readCommandTarget } from "~/lib/command-target";
+import { writeAttachments } from "~/server/agent/attachments";
 import { conductRun, followRun } from "~/server/agent/conductor";
 
 /**
@@ -16,6 +17,10 @@ import { conductRun, followRun } from "~/server/agent/conductor";
  * document, where its work goes, and what the reader marked — and a shape the
  * composer never sends is refused here by name rather than forwarded.
  * BO_0226_004
+ *
+ * The files a command carries arrive as the descriptors the upload answered;
+ * each becomes one `attachment` node, written as the person before the run
+ * starts, and the run is handed their ids. BO_0229_009
  */
 export const onPost: RequestHandler = (event) =>
   api(event, async () => {
@@ -25,6 +30,8 @@ export const onPost: RequestHandler = (event) =>
       artifact?: unknown;
       delivery?: unknown;
       references?: unknown;
+      branch?: unknown;
+      attachments?: unknown;
     };
     const goal = typeof body.goal === "string" ? body.goal.trim() : "";
     if (goal === "") {
@@ -36,15 +43,28 @@ export const onPost: RequestHandler = (event) =>
       event.json(400, { error: target.error });
       return;
     }
+    const attached = readAttachments(body.attachments);
+    if (!attached.ok) {
+      event.json(400, { error: attached.error });
+      return;
+    }
+    const written = await writeAttachments(attached.attachments);
+    if (!written.ok) {
+      event.json(written.status, { error: written.error });
+      return;
+    }
 
     const started = await conductRun({
       workspaceId: event.params.id ?? "",
       goal,
       ...(typeof body.agent === "string" && body.agent !== "" ? { agent: body.agent } : {}),
       target: target.target,
+      // A command from a tab in a branch: the run proposes into it. BO_0250_005
+      ...(typeof body.branch === "string" && body.branch !== "" ? { group: body.branch } : {}),
+      ...(written.ids.length === 0 ? {} : { attachments: written.ids }),
     });
     if (!started.ok) {
-      event.json(started.reason === "busy" ? 409 : started.reason === "refused" ? 400 : 502, {
+      event.json(started.reason === "busy" ? 409 : started.reason === "refused" ? 400 : started.reason === "forbidden" ? 403 : 502, {
         error: started.detail,
       });
       return;

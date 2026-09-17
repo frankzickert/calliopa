@@ -8,15 +8,18 @@ import {
   type DeliveryChoice,
   type Pointing,
   type RevealTarget,
+  type UnaimedDelivery,
 } from "~/lib/command-target";
 import type { SelectableRuntime } from "~/lib/connections";
 import { activeTab, type TabsState } from "~/lib/tabs";
+import type { AttachmentChip } from "~/lib/attachments";
 import { AgentMenu } from "./agent-menu";
+import { AttachButton, AttachmentChips } from "./command-attachments";
 import { CommandField } from "./command-field";
 import { CommandStrip } from "./command-strip";
 import { Icon } from "./icons";
 import { ReferenceChips } from "./reference-chips";
-import type { ViewDock, ViewReveal } from "./view-bridge";
+import type { ViewCompose, ViewDock, ViewReveal } from "./view-bridge";
 
 /**
  * The command bar: the strip naming where the work goes, then one bar — the
@@ -28,8 +31,9 @@ import type { ViewDock, ViewReveal } from "./view-bridge";
  * Its own component over the shell's stores, so the render harness mounts the
  * wiring the shell mounts (`testing/composer-host.tsx`). What a press sends is
  * the shell's `sendGoal$`, which reads the same stores through
- * `commandTarget`. The composer is no drop target: the attachment it once
- * showed was never sent, and a file as context is `BO_0229`'s (`CA_0039_006`).
+ * `commandTarget`. The composer is no drop target (`CA_0039_006`): a file
+ * reaches a command through the paperclip, uploaded as it is chosen and shown
+ * as a chip before the reference chips (`BO_0229_010`).
  */
 
 /** What the reader has marked per document, and where the next command's
@@ -37,6 +41,11 @@ import type { ViewDock, ViewReveal } from "./view-bridge";
 export interface ComposerAim {
   pointing: Record<string, Pointing>;
   choice: DeliveryChoice;
+  /** Where a command with no document active goes: a started document, or
+   * the console. BO_0251_006 */
+  unaimed: UnaimedDelivery;
+  /** The branch each document's tab works in, by document. BO_0250_010 */
+  branch?: Record<string, string>;
 }
 
 /** What the composer reads of the run: the agents, the chosen one, whether a
@@ -46,6 +55,10 @@ export interface ComposerRun {
   agent: string | null;
   sending: boolean;
   notice: string | null;
+  /** The files the next command carries, and a file refused before its
+   * upload, said beside the paperclip. BO_0229_010 */
+  attachments: AttachmentChip[];
+  attachNotice: string | null;
 }
 
 export const Composer = component$<{
@@ -54,9 +67,11 @@ export const Composer = component$<{
   aim: ComposerAim;
   run: ComposerRun;
   reveal: ViewReveal;
+  /** Words a view asked the field to start with. CA_0046_006 */
+  compose?: ViewCompose;
   onRun$: QRL<() => void>;
   onChooseAgent$: QRL<(agent: string) => void>;
-}>(({ dock, tabs, aim, run, reveal, onRun$, onChooseAgent$ }) => {
+}>(({ dock, tabs, aim, run, reveal, compose, onRun$, onChooseAgent$ }) => {
   const active = activeTab(tabs);
   const aimedAt = documentOf(active);
   const title =
@@ -65,12 +80,16 @@ export const Composer = component$<{
     aimedAt === null ? "propose" : deliveryFor(aimedAt, aim.choice);
   const pointing =
     aimedAt === null ? NO_POINTING : (aim.pointing[aimedAt] ?? NO_POINTING);
+  const branch = aimedAt === null ? null : (aim.branch?.[aimedAt] ?? null);
 
   // The document is read from the store at the press, never captured: a
   // closure from an earlier render names the tab that was active then.
   const setDelivery$ = $((next: Delivery) => {
     const itemId = documentOf(activeTab(tabs));
     if (itemId !== null) aim.choice = { itemId, delivery: next };
+  });
+  const setUnaimed$ = $((next: UnaimedDelivery) => {
+    aim.unaimed = next;
   });
   const reveal$ = $((target: RevealTarget) => {
     reveal.itemId = documentOf(activeTab(tabs));
@@ -84,7 +103,10 @@ export const Composer = component$<{
         dock={dock}
         title={title}
         delivery={delivery}
+        unaimed={aim.unaimed}
+        branch={branch}
         onDelivery$={setDelivery$}
+        onUnaimed$={setUnaimed$}
       />
       <div class="composer__bar">
         <AgentMenu
@@ -93,11 +115,13 @@ export const Composer = component$<{
           disabled={run.sending}
           onChoose$={onChooseAgent$}
         />
+        <AttachButton holder={run} disabled={run.sending} />
         <div class="composer__field">
           <label for="command" class="visually-hidden">
             Command
           </label>
-          <CommandField pointing={pointing} />
+          <CommandField pointing={pointing} {...(compose === undefined ? {} : { compose })} />
+          <AttachmentChips holder={run} />
           <ReferenceChips pointing={pointing} onReveal$={reveal$} />
           <button
             type="button"
@@ -111,6 +135,11 @@ export const Composer = component$<{
           </button>
         </div>
       </div>
+      {run.attachNotice !== null && (
+        <p class="composer__notice" role="status" data-attach-refusal>
+          {run.attachNotice}
+        </p>
+      )}
       {run.notice !== null && (
         <p class="composer__notice" role="status" data-run-notice>
           {run.notice}

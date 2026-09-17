@@ -1,4 +1,5 @@
 import type { GraphOutcome } from "../outcome";
+import { currentBranch, outsideBranch } from "./branch-scope";
 import { graphEnv } from "./env";
 import { forwardedHeaders } from "../request-context";
 
@@ -127,6 +128,11 @@ const firstCode = (envelope: Envelope): string =>
 
 /** One rooted, bounded read of the graph as CCGW assembles it. */
 export async function query(read: GraphRead): Promise<GraphOutcome<ReadResult>> {
+  // A request in a branch reads through it unless the read names an overlay
+  // of its own; a branch nobody has staged into yet has no group, and reads
+  // as truth, which is what an empty branch is. BO_0250_011
+  const branch = read.proposalOverlay === undefined ? currentBranch() : undefined;
+  const overlay = read.proposalOverlay ?? branch;
   let answer;
   try {
     answer = await post(`${graphEnv().ccgwUrl}/v1/cypher/query`, {
@@ -134,7 +140,7 @@ export async function query(read: GraphRead): Promise<GraphOutcome<ReadResult>> 
       parameters: read.parameters ?? {},
       ...(read.roots === undefined ? {} : { roots: read.roots }),
       ...(read.dataRevision === undefined ? {} : { dataRevision: read.dataRevision }),
-      ...(read.proposalOverlay === undefined ? {} : { proposalOverlay: read.proposalOverlay }),
+      ...(overlay === undefined ? {} : { proposalOverlay: overlay }),
       ...(read.unbounded === true ? { unbounded: true } : {}),
       ...(read.metadataOnly === true ? { metadataOnly: true } : {}),
       context: { principal: PRINCIPAL, purpose: read.purpose ?? "ui.shell read" },
@@ -143,6 +149,14 @@ export async function query(read: GraphRead): Promise<GraphOutcome<ReadResult>> 
     return { outcome: "storageError", detail: `CCGW is unreachable: ${String(error)}` };
   }
   const { envelope } = answer;
+  // A branch with no group yet reads as truth, and so does one that has
+  // been accepted: its candidates are truth now and the core refuses an
+  // accepted group as an overlay (`proposal_not_open`), which the tab that
+  // just accepted its branch hit on the read that followed. Found live in
+  // the BO_0250 walk-through, 2026-09-15.
+  if (branch !== undefined && envelope.status === "validation_failed" && (firstCode(envelope) === "unknown_proposal" || firstCode(envelope) === "proposal_not_open")) {
+    return outsideBranch(() => query(read));
+  }
   if (envelope.status === "no_result") {
     return { outcome: "noResult", detail: "Nothing in the graph matched." };
   }
@@ -166,7 +180,19 @@ export interface TouchedSet {
   readonly proposal: string;
   readonly status: string;
   readonly touchedNodes: readonly string[];
+  /** The touched nodes whose staged candidate is a content-unchanged
+   * carry-forward anchor: an endpoint a staged relation anchors at, never a
+   * member anyone decides. Absent from a core that predates it. BO_0248 */
+  readonly carryForwardNodes?: readonly string[];
   readonly stagedRelations: readonly {
+    readonly id: string;
+    readonly type: string;
+    readonly fromNodeId: string;
+    readonly toKind: string;
+    readonly toId: string;
+  }[];
+  /** The relations the group's close intents name. BO_0110_001 */
+  readonly closedRelations?: readonly {
     readonly id: string;
     readonly type: string;
     readonly fromNodeId: string;
@@ -267,6 +293,37 @@ export async function stage(
     return { outcome: "refused", detail: describe(envelope, "the kernel refused the staging") };
   }
   return { outcome: "storageError", detail: describe(envelope, `the kernel answered ${status}`) };
+}
+
+/** A member's standing against head, as acceptance would judge it. BO_0250_002 */
+export interface MemberStanding {
+  readonly ref: string;
+  readonly kind: string;
+  readonly standing: "clean" | "autoCorrected" | "drifted";
+}
+
+export interface Standing {
+  readonly proposal: string;
+  readonly status: string;
+  readonly base: number;
+  readonly head: number;
+  readonly members: readonly MemberStanding[];
+}
+
+/** The core's standing read: the drift judgement per member, made without deciding. BO_0250_002 */
+export async function standing(proposal: string): Promise<GraphOutcome<Standing>> {
+  try {
+    const response = await fetch(`${graphEnv().ccgwUrl}/v1/proposals/${proposal}/standing`);
+    // A branch nothing has staged into yet has no group for the core to know.
+    if (response.status === 404) return { outcome: "noResult", detail: `No proposal ${proposal}.` };
+    if (!response.ok) {
+      return { outcome: "storageError", detail: `standing of ${proposal}: ${response.status}` };
+    }
+    const body = (await response.json()) as { result?: Standing } & Partial<Standing>;
+    return { outcome: "success", result: (body.result ?? body) as Standing };
+  } catch (error) {
+    return { outcome: "storageError", detail: `CCGW is unreachable: ${String(error)}` };
+  }
 }
 
 export type Decision = "accept" | "reject";

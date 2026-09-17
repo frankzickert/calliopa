@@ -192,6 +192,19 @@ export async function readElevated(): Promise<GatewayReply<readonly string[]>> {
   }
 }
 
+/** The extensions under separation of duties, as the core enforces them
+ * (`ccgw.md` §15). BO_0212_011 */
+export async function readSeparation(): Promise<GatewayReply<readonly string[]>> {
+  const reply = await ask("/v1/schema", { method: "GET" }, 5_000);
+  if (!reply.ok) return reply;
+  try {
+    const set = (JSON.parse(reply.value) as { separationOfDuties?: unknown }).separationOfDuties;
+    return { ok: true, value: Array.isArray(set) ? (set as string[]) : [] };
+  } catch {
+    return { ok: false, detail: "The gateway's schema was not JSON." };
+  }
+}
+
 /** The nodes of one `_type` in a result, in the order returned. */
 export function nodesOfType(result: GraphResult, type: string): GraphNode[] {
   return result.nodes.filter(

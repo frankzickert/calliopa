@@ -13,7 +13,9 @@ import {
   type ProcessSelection,
 } from "~/lib/process-selection";
 import type { TabsState } from "~/lib/tabs";
-import type { ProposedDocument } from "~/server/agent/proposed";
+import type { ProposedItem } from "~/server/agent/proposed";
+import type { BridgeAttachment } from "~/server/agent/bridge";
+import { deliveredWords, formatSize } from "~/lib/command-target";
 import { Icon } from "./icons";
 import type {
   InspectorFact,
@@ -36,10 +38,13 @@ export interface ProcessRegistry {
   selection: ProcessSelection;
 }
 
-/** What the selected process's run proposed, read when the selection changes. */
+/** What the selected process's run proposed, and the files it was sent with,
+ * read when the selection changes. */
 export interface ProposedRead {
   processId: string | null;
-  documents: ProposedDocument[];
+  documents: ProposedItem[];
+  /** BO_0229_011 */
+  attachments: BridgeAttachment[];
 }
 
 /** The process the active tab's inspector shows, when it shows one. */
@@ -96,6 +101,11 @@ export const ProcessList = component$<{
               );
             }}
           >
+            {process.trigger === "system" && (
+              <span class="process-entry__system" data-process-system aria-hidden="true">
+                <Icon name="sparkle" size={14} />
+              </span>
+            )}
             {describeProcess(process)}
           </button>
         </li>
@@ -141,11 +151,47 @@ export const InspectorPanel = component$<{
       );
     }
     return (
-      <div class="process-detail" data-process-id={detail.id}>
-        <p class="eyebrow">Process</p>
+      <div class="process-detail" data-process-id={detail.id} data-process-trigger={detail.trigger ?? "person"}>
+        <p class="eyebrow">
+          {/* A system process says so at a glance: the kernel's own refinement,
+              with its glyph, told apart from a person's run. BO_0245_010 */}
+          {detail.trigger === "system" ? (
+            <span data-process-system-label>
+              <Icon name="sparkle" size={14} /> System
+            </span>
+          ) : (
+            "Process"
+          )}
+        </p>
         <h3>{detail.title}</h3>
         <p data-process-state={detail.state}>{detail.state}</p>
         <p data-process-step>{detail.step ?? "no step reported"}</p>
+        {detail.refined !== undefined && (
+          <p class="process-trigger" data-process-refined={detail.refined.documentId}>
+            {detail.trigger === "system" ? "Triggered by the change at revision " : "Carried the refinement of the change at revision "}
+            {detail.refined.dataRevision}
+            {" to "}
+            <button
+              type="button"
+              data-process-refined-document
+              onClick$={() =>
+                openTarget$({
+                  kind: DOCUMENT_KIND,
+                  itemId: detail.refined?.documentId ?? "",
+                  title: detail.title.replace(/^Refine: /u, ""),
+                })
+              }
+            >
+              {detail.title.replace(/^Refine: /u, "")}
+            </button>
+            .
+          </p>
+        )}
+        {detail.concluded !== undefined && detail.concluded !== "" && (
+          <p class="process-concluded" data-process-concluded>
+            {detail.concluded}
+          </p>
+        )}
         {detail.error !== null && (
           <p class="process-error" data-process-error>
             {detail.error}
@@ -159,14 +205,14 @@ export const InspectorPanel = component$<{
             ) : (
               <ul class="proposed__list">
                 {proposed.documents.map((document) => (
-                  <li key={document.documentId}>
+                  <li key={document.itemId}>
                     <button
                       type="button"
-                      data-proposed-document={document.documentId}
+                      data-proposed-document={document.itemId}
                       onClick$={() =>
                         openTarget$({
-                          kind: DOCUMENT_KIND,
-                          itemId: document.documentId,
+                          kind: document.openKind,
+                          itemId: document.itemId,
                           title: document.title,
                         })
                       }
@@ -180,6 +226,27 @@ export const InspectorPanel = component$<{
                 ))}
               </ul>
             )}
+          </div>
+        )}
+        {proposed.processId === detail.id && proposed.attachments.length > 0 && (
+          <div class="proposed" data-process-attachments>
+            <p class="eyebrow">Attached</p>
+            <ul class="proposed__list">
+              {proposed.attachments.map((attachment) => (
+                <li key={attachment.id} data-process-attachment={attachment.filename}>
+                  <a
+                    href={`/api/attachments/${encodeURIComponent(attachment.id.replace(/^node:/u, ""))}/file?process=${encodeURIComponent(detail.id)}`}
+                    download={attachment.filename}
+                    data-attachment-open={attachment.id}
+                  >
+                    {attachment.filename}
+                  </a>
+                  <span data-attachment-delivered={attachment.delivered}>
+                    {formatSize(attachment.size)} · {deliveredWords(attachment.delivered)}
+                  </span>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
         {detail.state === "failed" &&

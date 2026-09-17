@@ -9,7 +9,8 @@ import {
   type Layout,
   type SectionState,
 } from "~/lib/layout";
-import { migrateTabKind, type Tab } from "~/lib/tabs";
+import { migrateTabKind, type RouteEntry,
+  type Tab } from "~/lib/tabs";
 import { defaultViewFor } from "~/lib/views";
 import { REGISTRY } from "~/registry.gen";
 import { isRegisteredKind } from "./registry";
@@ -65,7 +66,8 @@ function parseTab(value: unknown): Tab {
     !(typeof tab.selection === "string" || tab.selection === null) ||
     !(typeof tab.drawerContext === "string" || tab.drawerContext === null) ||
     typeof tab.unsaved !== "boolean" ||
-    !(typeof tab.viewType === "string" || tab.viewType === undefined)
+    !(typeof tab.viewType === "string" || tab.viewType === undefined) ||
+    !(tab.route === undefined || isRoute(tab.route))
   ) {
     throw new HttpError(400, "invalid tab context");
   }
@@ -82,7 +84,25 @@ function parseTab(value: unknown): Tab {
     selection: tab.selection as string | null,
     drawerContext: tab.drawerContext as string | null,
     unsaved: tab.unsaved,
+    // A tab stored before routes carries none and reads as a route of one,
+    // its own target. CA_0047_003
+    ...(Array.isArray(tab.route) && tab.route.length > 0 ? { route: tab.route as RouteEntry[] } : {}),
   };
+}
+
+/** A route is a list of documents passed through, each by id and title. */
+function isRoute(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (entry) =>
+        typeof entry === "object" &&
+        entry !== null &&
+        typeof (entry as Record<string, unknown>)["itemId"] === "string" &&
+        typeof (entry as Record<string, unknown>)["title"] === "string" &&
+        ((entry as Record<string, unknown>)["blockId"] === undefined || typeof (entry as Record<string, unknown>)["blockId"] === "string"),
+    )
+  );
 }
 
 function parsePreferredViews(value: unknown): Record<string, string> {

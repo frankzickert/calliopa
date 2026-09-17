@@ -7,5 +7,10 @@ import { runEvents } from "~/server/agent/conductor";
 export const onGet: RequestHandler = (event) =>
   api(event, async () => {
     const id = event.params.id ?? "";
-    event.json(200, id === "" ? [] : await runEvents(id));
+    const events = id === "" ? [] : await runEvents(id);
+    if (events === null) {
+      event.json(404, { error: `No run ${id} is known to the kernel.` });
+      return;
+    }
+    event.json(200, events);
   });

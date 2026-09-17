@@ -1,4 +1,4 @@
-import { bareId, nodeRef } from "../documents/assemble";
+import { bareId, nodeRef } from "../ccgw/nodes";
 import type { GraphOutcome } from "../outcome";
 import { query, write, type ReadResult } from "./client";
 

@@ -1,6 +1,6 @@
 /**
  * A tab kind is a string qualified by the extension that contributes it —
- * `ui.shell:document`, `settings:settings` — so a collision is impossible
+ * `documents:document`, `settings:settings` — so a collision is impossible
  * rather than caught (`BO_0202_004`). The frame's one kind of its own stays
  * bare: `process-result`, which the process registry owns. The story-development
  * placeholders that stood beside it were dropped with `BO_0203_005`. What kinds
@@ -19,7 +19,11 @@ export const HOST_KINDS = ["process-result"] as const;
  * next save stores the current kind.
  */
 export const LEGACY_TAB_KINDS: Readonly<Record<string, string>> = {
-  document: "ui.shell:document",
+  document: "documents:document",
+  // The document surface left `ui.shell` for `documents` under `BO_0255`, so
+  // a workspace that remembers a document tab opens it rather than falling to
+  // the `context` placeholder. BO_0255_006
+  "ui.shell:document": "documents:document",
   episode: "calliopa-video:episode",
   front: "calliopa-video:front",
   extension: "ui.shell:extension",
@@ -37,6 +41,14 @@ export function migrateTabKind(kind: string): string {
  * that target is a third, independent field: a tab never changes its view in
  * place, because choosing another view opens another tab.
  */
+/** One document the reader passed through on the way to a tab's target, and
+ * the block it was opened from there. CA_0047_003 */
+export interface RouteEntry {
+  readonly itemId: string;
+  readonly title: string;
+  readonly blockId?: string;
+}
+
 export interface Tab {
   readonly id: string;
   readonly kind: TabKind;
@@ -46,6 +58,11 @@ export interface Tab {
   readonly selection: string | null;
   readonly drawerContext: string | null;
   readonly unsaved: boolean;
+  /** The route by which the reader reached the target: the documents passed
+   * through, the parent last. Absent or empty, the target is where the reader
+   * started. Navigation only — no governance, ownership or containment
+   * meaning. CA_0047_003 */
+  readonly route?: readonly RouteEntry[];
 }
 
 export interface TabsState {
@@ -102,6 +119,36 @@ export function moveTab(
   return {
     ...state,
     tabs: [...rest.slice(0, index), moving, ...rest.slice(index)],
+  };
+}
+
+/** The route by which a tab's reader reached its target: the tab's, or a
+ * route of one — the target under `title` — when the tab was opened from
+ * the library or stored before routes. CA_0047_003 */
+export function routeOf(tab: Pick<Tab, "route" | "itemId" | "title">, title?: string | null): RouteEntry[] {
+  return tab.route !== undefined && tab.route.length > 0
+    ? [...tab.route]
+    : [{ itemId: tab.itemId ?? "", title: title ?? tab.title }];
+}
+
+/**
+ * Retargets a tab in place — opening a block as focused work, or going back
+ * to the containing work — keeping the tab's identity and view while its
+ * target, title and route change; the selection and unsaved state are the
+ * old target's and go. CA_0047_003
+ */
+export function retargetTab(
+  state: TabsState,
+  id: string,
+  target: { readonly itemId: string; readonly title: string; readonly route: readonly RouteEntry[] },
+): TabsState {
+  return {
+    ...state,
+    tabs: state.tabs.map((tab) =>
+      tab.id === id
+        ? { ...tab, itemId: target.itemId, title: target.title, route: target.route, selection: null, unsaved: false }
+        : tab,
+    ),
   };
 }
 

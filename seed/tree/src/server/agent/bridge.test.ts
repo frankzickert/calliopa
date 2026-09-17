@@ -45,6 +45,20 @@ describe("translating bridge events", () => {
     expect(translateBridgeEvent("r1", { type: "run.cancelled", at })).toEqual({ kind: "runCancelled", runId: "r1", at });
   });
 
+  it("Given a terminal event naming the document the run started, Then the contract's end carries it, and an end naming none carries nothing", () => {
+    const at = 1_700_000_000_000;
+    expect(translateBridgeEvent("r1", { type: "run.completed", text: "done", document: "doc-new", at })).toEqual({
+      kind: "runCompleted",
+      runId: "r1",
+      at,
+      output: "done",
+      document: "doc-new",
+    });
+    expect(translateBridgeEvent("r1", { type: "run.failed", error: "x", document: "doc-new", at })).toMatchObject({ document: "doc-new" });
+    expect(translateBridgeEvent("r1", { type: "run.cancelled", document: "doc-new", at })).toEqual({ kind: "runCancelled", runId: "r1", at, document: "doc-new" });
+    expect(translateBridgeEvent("r1", { type: "run.cancelled", at })).toEqual({ kind: "runCancelled", runId: "r1", at });
+  });
+
   it("Given a type the contract does not know, Then it is reported as nothing rather than as something else", () => {
     expect(translateBridgeEvent("r1", { type: "reasoning.available", at: 1 })).toBeNull();
   });
@@ -173,9 +187,37 @@ describe("starting a run aimed at a document", () => {
     });
   });
 
+  it("Given a command that starts a document, Then only the delivery travels", async () => {
+    const bodies = sentBodies();
+    await startBridgeRun({ goal: "Draft an onboarding checklist", agent: "codex", target: { delivery: "start" } });
+    expect(bodies[0]).toEqual({ goal: "Draft an onboarding checklist", context: "", agent: "codex", delivery: "start" });
+  });
+
+  it("Given attachment nodes, Then their ids travel as attachments, and a command with none sends no field", async () => {
+    const bodies = sentBodies();
+    await startBridgeRun({ goal: "summarise", agent: "codex", target: null, attachments: ["node:att-1", "node:att-2"] });
+    await startBridgeRun({ goal: "summarise", agent: "codex", target: null, attachments: [] });
+    expect(bodies[0]).toEqual({ goal: "summarise", context: "", agent: "codex", attachments: ["node:att-1", "node:att-2"] });
+    expect(bodies[1]).toEqual({ goal: "summarise", context: "", agent: "codex" });
+  });
+
   it("Given no target, Then none of the three is sent", async () => {
     const bodies = sentBodies();
     await startBridgeRun({ goal: "g", target: null });
     expect(bodies[0]).toEqual({ goal: "g", context: "", agent: "" });
+  });
+});
+
+describe("a run's trigger and judgement", () => {
+  it("Given a record with no trigger, Then it is a person's; with system, Then the system's", async () => {
+    const { judgementWords, triggerOf } = await import("./bridge");
+    const base = { id: "r", goal: "g", staged: false, pin: 1, status: "completed" };
+    expect(triggerOf(base)).toBe("person");
+    expect(triggerOf({ ...base, trigger: "system" })).toBe("system");
+    expect(judgementWords(undefined)).toBe("");
+    expect(judgementWords({ about: "threshold", outcome: "none", explanation: [{ text: "The edit reworded " }, { text: "the caching claim." }] })).toBe(
+      "The edit reworded the caching claim.",
+    );
+    expect(judgementWords({ about: "threshold", outcome: "premise accepted" })).toBe("premise accepted");
   });
 });

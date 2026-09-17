@@ -1,6 +1,7 @@
-import { $, component$, useSignal } from "@builder.io/qwik";
+import { $, component$, useSignal, useTask$ } from "@builder.io/qwik";
 
 import type { Pointing } from "~/lib/command-target";
+import type { ViewCompose } from "./view-bridge";
 import {
   insertReference,
   pendingReference,
@@ -43,10 +44,27 @@ export function fitField(element: HTMLTextAreaElement): void {
 
 export const CommandField = component$<{
   pointing: Pointing;
-}>(({ pointing }) => {
+  /** Words a view asked the field to start with. CA_0046_006 */
+  compose?: ViewCompose;
+}>(({ pointing, compose }) => {
   const field = useSignal<HTMLTextAreaElement>();
   const pending = useSignal<PendingReference | null>(null);
   const caret = useSignal(0);
+
+  // A view's words become the field's text with the caret after them, and
+  // the field takes the focus, so the reader finishes the sentence and runs
+  // it. Only when asked, never on mount: the count is what rises.
+  useTask$(({ track }) => {
+    const seq = track(() => compose?.seq ?? 0);
+    const element = field.value;
+    if (seq === 0 || element === undefined || compose === undefined) return;
+    element.value = compose.text;
+    fitField(element);
+    element.focus();
+    element.setSelectionRange(element.value.length, element.value.length);
+    caret.value = element.value.length;
+    pending.value = null;
+  });
 
   const choose$ = $((number: number) => {
     const element = field.value;

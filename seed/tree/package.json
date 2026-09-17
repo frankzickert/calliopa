@@ -19,6 +19,8 @@
     "test:unit": "vitest run --project unit",
     "pretest:behavior": "node scripts/gen-registry.mjs",
     "test:behavior": "vitest run --project behavior",
+    "verify:publish:website": "vitest run --project publish src/extensions/publishing/tests/publish/website.test.ts",
+    "verify:publish:bunny-stream": "vitest run --project publish src/extensions/publishing/tests/publish/bunny-stream.test.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "gen": "node scripts/gen-registry.mjs"

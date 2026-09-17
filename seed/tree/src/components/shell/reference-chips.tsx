@@ -5,7 +5,7 @@ import {
   type Pointing,
   type RevealTarget,
 } from "~/lib/command-target";
-import { chipName, pinnedChipName } from "~/lib/pointing";
+import { chipName, pinnedChipName } from "~/lib/command-target";
 import { Icon } from "./icons";
 
 /**

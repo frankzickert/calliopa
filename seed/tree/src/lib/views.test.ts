@@ -30,7 +30,7 @@ const outline = view("outline", "Outline", ["script", "scene"]);
 const editor = view("block-editor", "Editor");
 const registry = buildRegistry(
   { kinds: { script: context, scene: context, media: context }, views: [outline] },
-  [{ id: "ui.shell", contributions: { kinds: { document: editor } } }],
+  [{ id: "documents", contributions: { kinds: { document: editor } } }],
 );
 
 describe("the resolved registry", () => {
@@ -41,8 +41,8 @@ describe("the resolved registry", () => {
   });
 
   it("qualifies an extension's kind and leaves the host's bare", () => {
-    expect(Object.keys(registry.kinds).sort()).toEqual(["media", "scene", "script", "ui.shell:document"]);
-    expect(defaultViewFor(registry, "ui.shell:document").id).toBe("block-editor");
+    expect(Object.keys(registry.kinds).sort()).toEqual(["documents:document", "media", "scene", "script"]);
+    expect(defaultViewFor(registry, "documents:document").id).toBe("block-editor");
   });
 
   it("lists only the views compatible with a target kind", () => {

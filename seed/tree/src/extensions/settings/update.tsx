@@ -5,6 +5,7 @@ import { ViewBridgeContext } from "~/components/shell/view-bridge";
 import { candidates, fetchReleases, parseReleases, type Candidate, type Release } from "~/lib/releases";
 import type { UpdateProposal, UpdateView } from "~/server/kernel/update";
 import { updateCommands } from "./update-commands";
+import { supersedes, unserved, updateRunning, type Phase } from "./update-view";
 
 /**
  * The Update tab: the installed release, the releases above it worth
@@ -15,18 +16,10 @@ import { updateCommands } from "./update-commands";
  * proposal it stages is accepted by the owner's press here — the kernel takes
  * only the update it recorded, staged wholly by her, with no confirmation
  * page (BO_0241) — and the release pin moves through the kernel's promotion
- * gate. BO_0223_014
+ * gate. A pending update blocks nothing: choosing another release supersedes
+ * it, and *Promote* is offered whenever accepted content waits to be served
+ * (BO_0242). BO_0223_014
  */
-
-type Phase =
-  | "idle"
-  | "running"
-  | "waiting"
-  | "returned"
-  | "accepted"
-  | "promoting"
-  | "served"
-  | "failed";
 
 interface State {
   info: UpdateView | null;
@@ -41,6 +34,8 @@ interface State {
   phase: Phase;
   detail: string;
   proposal: UpdateProposal | null;
+  /** The release whose pending update the chosen one supersedes, rejected by its install. BO_0242_005 */
+  superseding: string | null;
   /** The session ended while the stack restarted: the page must be reloaded and the owner sign in. BO_0241_005 */
   sessionEnded: boolean;
   busy: boolean;
@@ -70,6 +65,7 @@ export const UpdateTabView = component$<ViewProps>(() => {
     phase: "idle",
     detail: "",
     proposal: null,
+    superseding: null,
     sessionEnded: false,
     busy: false,
   });
@@ -173,8 +169,13 @@ export const UpdateTabView = component$<ViewProps>(() => {
       state.phase = "returned";
       await readProposal$();
     }
+    // A promotion started before the page loaded is followed like one
+    // started here. BO_0242_005
+    if (state.info?.promotion?.status === "running") state.phase = "promoting";
+    // While a proposal waits for review the answer is read too, so an
+    // acceptance in another window shows here. BO_0242_005
     const timer = setInterval(() => {
-      if (state.phase === "idle" || state.phase === "served" || state.phase === "failed" || state.phase === "returned" || state.phase === "accepted") {
+      if (state.phase === "idle" || state.phase === "served" || state.phase === "failed" || state.phase === "accepted") {
         return;
       }
       void follow$();
@@ -185,7 +186,9 @@ export const UpdateTabView = component$<ViewProps>(() => {
   const start$ = $(async (version: string) => {
     state.busy = true;
     state.detail = "";
+    state.superseding = supersedes(state.info, version);
     state.chosen = version;
+    state.proposal = null;
     try {
       if (state.info?.updater.state === "absent") {
         // No updater: the commands are shown, and the tab waits for the
@@ -251,7 +254,7 @@ export const UpdateTabView = component$<ViewProps>(() => {
 
   const info = state.info;
   const installed = versionOf(info);
-  const inFlight = state.phase !== "idle" && state.phase !== "served" && state.phase !== "failed";
+  const running = updateRunning(state.phase);
   const describe = (release: Release, type?: Candidate["type"]): string => {
     const date = release.publishedAt === "" ? "" : ` · ${new Date(release.publishedAt).toLocaleDateString()}`;
     const label = type === undefined ? "" : ` · newest ${type}`;
@@ -293,6 +296,12 @@ export const UpdateTabView = component$<ViewProps>(() => {
               : `updater ${info.updater.state}`}
           </p>
         )}
+        {info?.pending !== null && info?.pending !== undefined && !running && (
+          <p class="settings-section__lead" data-update-pending={info.pending.version}>
+            The update to release {info.pending.version} waits for your review. Choosing another release supersedes
+            it: that release's install rejects it.
+          </p>
+        )}
         {info !== null && state.checked === "off" && (
           <p class="settings-empty" data-update-check="off">
             The release check is off (<code>CALLIOPA_UPDATE_CHECK=off</code> in <code>.env</code>), so nothing is
@@ -325,7 +334,7 @@ export const UpdateTabView = component$<ViewProps>(() => {
                   <button
                     type="button"
                     class="connection__action"
-                    disabled={state.busy || inFlight}
+                    disabled={state.busy || running}
                     onClick$={() => start$(candidate.release.version)}
                   >
                     Update to {candidate.release.version}
@@ -379,7 +388,7 @@ export const UpdateTabView = component$<ViewProps>(() => {
                     <button
                       type="button"
                       class="connection__action"
-                      disabled={state.busy || inFlight}
+                      disabled={state.busy || running}
                       onClick$={() => start$(release.version)}
                     >
                       {older(release) ? `Downgrade to ${release.version}` : `Update to ${release.version}`}
@@ -392,10 +401,32 @@ export const UpdateTabView = component$<ViewProps>(() => {
         )}
       </section>
 
-      {state.chosen !== null && (
+      {(state.phase === "accepted" || (unserved(info) && !running)) && (
+        <section class="settings-section" aria-labelledby="update-promote" data-update-promote>
+          <h2 class="settings-section__heading" id="update-promote">
+            Promote
+          </h2>
+          <p class="connection__controls">
+            <span class="settings-section__lead" role="status">
+              {state.phase === "accepted" && state.chosen !== null
+                ? `The proposal is accepted. Promote it so the instance serves release ${state.chosen}.`
+                : `Accepted changes up to revision ${info?.extensionTruth ?? ""} are not served yet${
+                    info?.servedPin === undefined ? "" : `: the instance serves pin ${info.servedPin}`
+                  }. Promote them so the instance serves them.`}
+            </span>
+            <button type="button" class="connection__action" disabled={state.busy} onClick$={() => promote$()}>
+              Promote
+            </button>
+          </p>
+        </section>
+      )}
+
+      {(state.chosen !== null || state.phase === "promoting" || state.phase === "served" || state.phase === "failed") && (
         <section class="settings-section" aria-labelledby="update-progress" data-update-progress>
           <h2 class="settings-section__heading" id="update-progress">
-            {older(state.releases.find((r) => r.version === state.chosen) ?? { version: "", major: 0, minor: 0, patch: 0, publishedAt: "", url: "" })
+            {state.chosen === null
+              ? "Promote"
+              : older(state.releases.find((r) => r.version === state.chosen) ?? { version: "", major: 0, minor: 0, patch: 0, publishedAt: "", url: "" })
               ? `Downgrade to ${state.chosen}`
               : `Update to ${state.chosen}`}
           </h2>
@@ -404,7 +435,12 @@ export const UpdateTabView = component$<ViewProps>(() => {
               This rolls the images back. Graph content versions on its own and is not rolled back with them.
             </p>
           )}
-          {info?.updater.state === "absent" && (state.phase === "waiting" || state.phase === "running") && (
+          {state.superseding !== null && (state.phase === "running" || state.phase === "waiting") && (
+            <p class="settings-section__lead" data-update-supersedes={state.superseding}>
+              The update to release {state.superseding} is superseded: this install rejects its proposal.
+            </p>
+          )}
+          {state.chosen !== null && info?.updater.state === "absent" && (state.phase === "waiting" || state.phase === "running") && (
             <div data-update-commands>
               <p class="settings-section__lead">
                 No updater is running on this machine. Run these on it, then come back here:
@@ -461,27 +497,17 @@ export const UpdateTabView = component$<ViewProps>(() => {
               </p>
             </div>
           )}
-          {state.phase === "accepted" && (
-            <p class="connection__controls">
-              <span class="settings-section__lead" role="status">
-                The proposal is accepted. Promote it so the instance serves release {state.chosen}.
-              </span>
-              <button type="button" class="connection__action" disabled={state.busy} onClick$={() => promote$()}>
-                Promote
-              </button>
-            </p>
-          )}
           {state.phase === "promoting" && (
             <p class="settings-section__lead" role="status">
               Promoting: the kernel builds and checks the release before it serves it.
             </p>
           )}
           {state.phase === "served" && (
-            <p class="connection__controls" role="status" data-update-served={state.chosen}>
+            <p class="connection__controls" role="status" data-update-served={state.chosen ?? ""}>
               <span class="settings-section__lead">
-                Calliopa now serves release {state.chosen}
-                {info?.servedPin !== undefined && ` at pin ${info.servedPin}`}. This page still runs the previous release:
-                reload it to use the new one.
+                {state.chosen === null
+                  ? `Calliopa now serves pin ${info?.servedPin ?? ""}. This page still runs what was served before: reload it to use what is served now.`
+                  : `Calliopa now serves release ${state.chosen}${info?.servedPin === undefined ? "" : ` at pin ${info.servedPin}`}. This page still runs the previous release: reload it to use the new one.`}
               </span>
               <button type="button" class="connection__action" onClick$={() => location.reload()}>
                 Reload

@@ -1,19 +1,4 @@
-import {
-  serverContributions as declare,
-  type ApiRoute,
-  type LibraryItem,
-} from "~/contract";
-import {
-  handleDocumentChanges,
-  handleDocumentCommand,
-  handleDocumentCreate,
-  handleDocumentList,
-  handleDocumentRead,
-  handleProposalsRead,
-  handleRetiredRead,
-  unknownDocument,
-} from "~/server/documents/api";
-import { listDocuments } from "~/server/documents/documents";
+import { serverContributions as declare, type ApiRoute } from "~/contract";
 import {
   declaresVocabulary,
   listExtensions,
@@ -22,72 +7,17 @@ import {
 import { HttpError } from "~/server/http-error";
 import { kernelExtensions } from "~/server/kernel/extensions";
 import { readSession } from "~/server/session";
-import { isRecordId } from "~/server/uuid";
 
 /**
- * The server half of `ui.shell`'s contributions: the readers behind its two
- * library sections and its handler table under `/api/x/ui.shell/` — documents
- * and extensions. Episodes, fronts, standing assets and the two channels are
- * `calliopa-video`'s since `BO_0203`. Only the server imports this module.
- * BO_0202_002 BO_0202_005 BO_0202_006
+ * The server half of `ui.shell`'s contributions: the reader behind its
+ * Extensions section and its handler table under `/api/x/ui.shell/`, which is
+ * extension administration and nothing else. Documents left for the
+ * `documents` extension under `BO_0255`, as episodes and publishing left for
+ * `calliopa-video` under `BO_0203`. Only the server imports this module.
+ * BO_0202_002 BO_0202_005 BO_0202_006 BO_0255_006
  */
 
-/** A document route names a record identifier or is answered as a missing document. */
-const document =
-  (
-    handle: (id: string) => Promise<{ status: number; body: unknown }>,
-  ): ApiRoute["handle"] =>
-  async (event, params) => {
-    const id = params["id"] ?? "";
-    const { status, body } = isRecordId(id)
-      ? await handle(id)
-      : unknownDocument(id);
-    event.json(status, body);
-  };
-
 const routes: readonly ApiRoute[] = [
-  {
-    method: "GET",
-    path: "documents",
-    handle: async (event) => {
-      const { status, body } = await handleDocumentList();
-      event.json(status, body);
-    },
-  },
-  {
-    method: "POST",
-    path: "documents",
-    handle: async (event) => {
-      const { status, body } = await handleDocumentCreate(event.request);
-      event.json(status === 200 ? 201 : status, body);
-    },
-  },
-  {
-    method: "GET",
-    path: "documents/[id]",
-    handle: document(handleDocumentRead),
-  },
-  {
-    method: "GET",
-    path: "documents/[id]/changes",
-    handle: document(handleDocumentChanges),
-  },
-  {
-    method: "GET",
-    path: "documents/[id]/proposals",
-    handle: document(handleProposalsRead),
-  },
-  {
-    method: "GET",
-    path: "documents/[id]/retired",
-    handle: document(handleRetiredRead),
-  },
-  {
-    method: "POST",
-    path: "documents/[id]/commands",
-    handle: (event, params) =>
-      document((id) => handleDocumentCommand(event.request, id))(event, params),
-  },
   {
     /** The extensions the graph holds, as the library lists them. BO_0201_005 */
     method: "GET",
@@ -214,22 +144,15 @@ const routes: readonly ApiRoute[] = [
     handle: (event, params) =>
       kernelAnswer(event, async () => {
         const id = params["id"] ?? "";
+        // The kernel's one-extension read, never the listing: a person
+        // looking at one extension waits on that extension alone. BO_0257_009
         const [listing, health, vocabulary] = await Promise.all([
-          kernelExtensions.list(),
+          kernelExtensions.one(id),
           kernelExtensions.health().catch(() => null),
           declaresVocabulary(id),
         ]);
-        const extension = listing.extensions.find(
-          (candidate) => candidate.id === id,
-        );
-        if (extension === undefined)
-          throw new HttpError(
-            404,
-            `no extension ${id} is established`,
-            "extension_unknown",
-          );
         return {
-          extension,
+          extension: listing.extension,
           required: listing.required,
           head: listing.head,
           servedPin: listing.servedPin ?? null,
@@ -310,22 +233,6 @@ async function kernelAnswer(
 
 export const contributions = declare({
   readers: {
-    // A document as the library lists it is its identity and its title; the
-    // listing carries nothing else, so opening the drawer never reads block
-    // content the section does not render.
-    documents: async (): Promise<readonly LibraryItem[]> => {
-      const outcome = await listDocuments();
-      if (outcome.outcome !== "success") return [];
-      return outcome.result.map((document) => ({
-        id: document.documentId,
-        label: document.title,
-        open: {
-          kind: "document",
-          itemId: document.documentId,
-          title: document.title,
-        },
-      }));
-    },
     // The knowledge graph's extensions, or why they could not be read; the
     // section's component renders either. BO_0201_005 The reader adds whether
     // the person is the owner, for the import control, outside the snapshot's

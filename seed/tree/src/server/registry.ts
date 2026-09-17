@@ -1,7 +1,7 @@
 import type { RequestEvent } from "@builder.io/qwik-city";
-import type { LibraryItem } from "~/contract";
+import type { LibraryGlyph, LibraryItem, PartyDescriptor } from "~/contract";
 import { HOST_KINDS } from "~/lib/tabs";
-import { matchRoute, qualify, type RegisteredParty, type RegisteredSection } from "~/registry";
+import { matchRoute, mergeRoster, qualify, type RegisteredParty, type RegisteredSection } from "~/registry";
 import { REGISTRY } from "~/registry.gen";
 import { SERVER_REGISTRY } from "~/registry.server.gen";
 import { api } from "./api";
@@ -56,6 +56,43 @@ export async function readLibrary(): Promise<Record<string, unknown>> {
   return Object.fromEntries(entries);
 }
 
+/**
+ * What an item is called, asked of the sections that list its kind. The frame
+ * names things it does not own — a refinement process names the document it
+ * refined — and what an item is called is the extension's to say, so this asks
+ * rather than reads another extension's model. Answers null when nothing lists
+ * it, which is what a tree without that extension answers. BO_0255_007
+ */
+export async function labelOf(kind: string, itemId: string): Promise<string | null> {
+  for (const section of REGISTRY.sections) {
+    if (section.opens !== kind) continue;
+    const answered = await readOne(section);
+    if (!Array.isArray(answered)) continue;
+    for (const item of answered as readonly { id?: unknown; label?: unknown }[]) {
+      if (item.id === itemId && typeof item.label === "string") return item.label;
+    }
+  }
+  return null;
+}
+
+/**
+ * What the items of a kind are marked with, asked of every extension that has
+ * something to say about them and merged in extension order. An extension that
+ * throws contributes nothing, the way a section reader that throws renders its
+ * section empty. BO_0256_008
+ */
+export async function glyphsFor(kind: string): Promise<Readonly<Record<string, LibraryGlyph>>> {
+  const merged: Record<string, LibraryGlyph> = {};
+  for (const read of SERVER_REGISTRY.itemGlyphs) {
+    try {
+      Object.assign(merged, await read(kind));
+    } catch {
+      continue;
+    }
+  }
+  return merged;
+}
+
 /** One section re-read, or `undefined` for a section nothing contributes. */
 export async function readSection(extension: string, name: string): Promise<unknown> {
   const section = REGISTRY.sections.find((candidate) => candidate.key === qualify(extension, name));
@@ -77,15 +114,31 @@ export async function dispatch(event: RequestEvent, extension: string, path: str
   await api(event, () => matched.route.handle(event, matched.params));
 }
 
-export function parties(): readonly RegisteredParty[] {
-  return SERVER_REGISTRY.parties;
+/**
+ * Every party: the descriptors the build contributes, then each runtime
+ * roster's answer in extension order, merged by `mergeRoster`'s rule. A roster
+ * that throws contributes nothing for that read, the way a section reader
+ * that throws renders its section empty. CA_0049_001
+ */
+export async function parties(): Promise<readonly RegisteredParty[]> {
+  let merged: readonly RegisteredParty[] = SERVER_REGISTRY.parties;
+  for (const { extension, roster } of SERVER_REGISTRY.rosters) {
+    let answered: readonly PartyDescriptor[];
+    try {
+      answered = await roster();
+    } catch {
+      continue;
+    }
+    merged = mergeRoster(merged, extension, answered);
+  }
+  return merged;
 }
 
-export function partyOf(id: string): RegisteredParty | undefined {
-  return SERVER_REGISTRY.parties.find((party) => party.id === id);
+export async function partyOf(id: string): Promise<RegisteredParty | undefined> {
+  return (await parties()).find((party) => party.id === id);
 }
 
 /** Whether a party is a channel — somewhere the author's work goes — which publishing consults. BO_0202_008 */
-export function isChannelParty(id: string): boolean {
-  return partyOf(id)?.kind === "channel";
+export async function isChannelParty(id: string): Promise<boolean> {
+  return (await partyOf(id))?.kind === "channel";
 }

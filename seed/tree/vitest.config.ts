@@ -22,6 +22,15 @@ export default defineConfig({
         },
       },
       {
+        // A kind's environment-gated gate, reaching a real destination; never
+        // run by `check`. PU_0003_007
+        extends: true,
+        test: {
+          name: "publish",
+          include: ["src/extensions/*/tests/publish/**/*.test.{ts,mjs}"],
+        },
+      },
+      {
         extends: true,
         test: {
           name: "behavior",

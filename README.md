@@ -1,10 +1,12 @@
 # Calliopa
 
 Calliopa is a local-first knowledge system you run on your own machine. Your
-knowledge lives in a versioned graph. The application you work in is itself
-built from that graph, so it can grow with what you keep in it. And Hermes —
-an agent that lives in the stack — extends the system for you, always through
-proposals you review and accept.
+knowledge lives in a versioned graph, and nothing in it changes without a
+proposal someone accepted. The application you work in is itself built from
+that graph — a frame, and extensions over it: documents to write in, settings,
+publishing. It grows with what you keep in it, and you can add extensions of
+your own. And Hermes — an agent that lives in the stack — extends the system
+for you, always through proposals you review and accept.
 
 It is for people who want their notes, writing, and work to be a system they
 own and can reshape, rather than a product they rent. Everything runs on your
@@ -93,7 +95,14 @@ and *Promote* makes your instance serve the new release. Until you accept, it
 keeps serving what it served before. Once it serves the new release, the tab
 asks you to reload the page, which still runs the previous release's code. If
 the tab says your session ended while the stack restarted, reload and sign in
-again.
+again. *Promote* stays offered as long as accepted content is not yet served,
+also after a reload or when you accepted in another window.
+
+A waiting update never holds you back. You can choose another release in the
+tab while one waits: the tab says the waiting proposal will be superseded, and
+the install of the release you chose rejects it and brings its own. That is
+how a waiting update you do not want is set aside. Installing the same release
+again leaves its waiting proposal as it is and adds no second one.
 
 Where no updater could be installed (the installer says so at its end), the
 tab shows the three commands to run instead:

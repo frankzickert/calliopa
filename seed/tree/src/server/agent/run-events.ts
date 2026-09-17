@@ -39,17 +39,21 @@ export type RunEvent =
       readonly runId: string;
       readonly at: number;
       readonly output: string;
+      /** The one document a run started from a command created. BO_0251_007 */
+      readonly document?: string;
     }
   | {
       readonly kind: "runFailed";
       readonly runId: string;
       readonly at: number;
       readonly error: string;
+      readonly document?: string;
     }
   | {
       readonly kind: "runCancelled";
       readonly runId: string;
       readonly at: number;
+      readonly document?: string;
     };
 
 /** The first event of every run, recorded the moment the run opens. */
