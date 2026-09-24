@@ -20,9 +20,10 @@ const draft: DocumentView = {
   revisionId: "rev-doc",
   title: "Draft",
   blocks: [
-    { kind: "text", blockId: "blk-a", revisionId: "rev-a", containmentId: "c-a", order: "a", role: "paragraph", standing: "neutral", runs: [{ text: "Opening." }] },
-    { kind: "text", blockId: "blk-b", revisionId: "rev-b", containmentId: "c-b", order: "b", role: "paragraph", standing: "neutral", runs: [{ text: "The storm arrives." }] },
-    { kind: "text", blockId: "blk-c", revisionId: "rev-c", containmentId: "c-c", order: "c", role: "paragraph", standing: "neutral", runs: [{ text: "Closing." }] },
+    { kind: "text", blockId: "blk-a", revisionId: "rev-a", containmentId: "c-a", order: "a", role: "paragraph", standing: "keep", runs: [{ text: "Opening." }] },
+    { kind: "text", blockId: "blk-b", revisionId: "rev-b", containmentId: "c-b", order: "b", role: "paragraph", standing: "keep", runs: [{ text: "The storm arrives." }] },
+    { kind: "text", blockId: "blk-c", revisionId: "rev-c", containmentId: "c-c", order: "c", role: "paragraph", standing: "keep", runs: [{ text: "Closing." }] },
+    { kind: "text", blockId: "blk-d", revisionId: "rev-d", containmentId: "c-d", order: "d", role: "paragraph", standing: "keep", runs: [{ text: "Afterword." }] },
   ],
 };
 
@@ -30,10 +31,15 @@ const rewrite = "node:run-claude|replace|node:blk-b";
 const newBlock = "node:run-claude|insert|node:blk-new";
 const removal = "node:chg-person|remove|node:blk-c|c-c";
 const move = "node:run-codex|move|node:blk-a";
+/** Codex's rewrite of blk-d, refined by a Claude Code run. BO_0271_011 */
+const refined = "node:run-codex|replace|node:blk-d";
+/** Claude Code's new block after c, which a Hermes run proposes to withdraw
+ * in favour of Codex's move. BO_0286_011 */
+const withdrawn = "node:run-claude2|insert|node:blk-w";
 
 const proposals: DocumentProposals = {
   documentId: "doc-1",
-  unanswered: 4,
+  unanswered: 6,
   groups: [
     {
       groupId: "node:run-claude",
@@ -45,14 +51,31 @@ const proposals: DocumentProposals = {
           groupId: "node:run-claude",
           kind: "replace",
           blockId: "blk-b",
-          block: { kind: "text", blockId: "blk-b", revisionId: "rev-b2", containmentId: "c-b", order: "b", role: "h1", standing: "neutral", runs: [{ text: "The storm arrives early." }] },
+          block: { kind: "text", blockId: "blk-b", revisionId: "rev-b2", containmentId: "c-b", order: "b", role: "h1", standing: "keep", runs: [{ text: "The storm arrives early." }] },
         },
         {
           itemId: newBlock,
           groupId: "node:run-claude",
           kind: "insert",
           blockId: "blk-new",
-          block: { kind: "text", blockId: "blk-new", revisionId: "rev-n", containmentId: "", order: "bb", role: "paragraph", standing: "neutral", runs: [{ text: "A new line." }] },
+          block: { kind: "text", blockId: "blk-new", revisionId: "rev-n", containmentId: "", order: "bb", role: "paragraph", standing: "keep", runs: [{ text: "A new line." }] },
+        },
+      ],
+    },
+    {
+      // A second Claude Code run's new block, which a Hermes run proposes
+      // to withdraw in favour of Codex's move. BO_0286_011
+      groupId: "node:run-claude2",
+      stagedBy: ["agent:hermes"],
+      proposer: { kind: "agent", agent: "claude-code", executedBy: "claude-code (claude-sonnet-5)" },
+      items: [
+        {
+          itemId: withdrawn,
+          groupId: "node:run-claude2",
+          kind: "insert",
+          blockId: "blk-w",
+          block: { kind: "text", blockId: "blk-w", revisionId: "rev-w", containmentId: "", order: "cc", role: "paragraph", standing: "keep", runs: [{ text: "A surplus line." }] },
+          withdrawal: { runId: "arun-w", proposer: { kind: "agent", agent: "hermes", executedBy: "" }, successor: move, reason: "folded into the moved opening" },
         },
       ],
     },
@@ -72,7 +95,15 @@ const proposals: DocumentProposals = {
           groupId: "node:run-codex",
           kind: "move",
           blockId: "blk-a",
-          block: { kind: "text", blockId: "blk-a", revisionId: "rev-a2", containmentId: "c-a", order: "bc", role: "paragraph", standing: "neutral", runs: [{ text: "Opening." }] },
+          block: { kind: "text", blockId: "blk-a", revisionId: "rev-a2", containmentId: "c-a", order: "bc", role: "paragraph", standing: "keep", runs: [{ text: "Opening." }] },
+        },
+        {
+          itemId: refined,
+          groupId: "node:run-codex",
+          kind: "replace",
+          blockId: "blk-d",
+          block: { kind: "text", blockId: "blk-d", revisionId: "rev-d2", containmentId: "c-d", order: "d", role: "paragraph", standing: "keep", runs: [{ text: "Afterword, sharpened." }] },
+          refinedBy: { runId: "arun-refiner", proposer: { kind: "agent", agent: "claude-code", executedBy: "claude-code (claude-opus-5-5)" } },
         },
       ],
     },
@@ -90,7 +121,7 @@ const mount = async (
   vi.stubGlobal("fetch", documentsApi(draft, sent, { proposals, ...options }));
   const view = await mountEditor(draft);
   // The panel's toggle, pressed as a reader presses it.
-  await view.userEvent('[data-inspector-action="proposed-changes"]', "click");
+  await view.userEvent('[data-bar-action="proposed-changes"]', "click");
   await view.settle(() => view.root.querySelector("[data-proposal-id]") !== null);
   const proposal = (itemId: string) =>
     view.root.querySelector(`[data-proposal-id="${itemId}"]`) as HTMLElement | null;
@@ -136,28 +167,114 @@ describe("proposed changes in the block editor", () => {
     await view.settle();
   });
 
-  it("Given a proposal, Then its answers are icons named in words, and accept-all only for a group of more than one", async () => {
+  it("Given a proposal, Then one line on its bottom border carries its face, what it does in words, and its answers as icons named in words, and no accept-all", async () => {
     const view = await mount();
-    const claude = view.proposal(rewrite);
-    expect(claude?.querySelector("[data-proposal-accept]")?.getAttribute("aria-label")).toBe("Accept Claude Code's rewrite");
-    expect(claude?.querySelector("[data-proposal-accept] [data-icon='check']")).not.toBeNull();
-    expect(claude?.querySelector("[data-proposal-reject]")?.getAttribute("aria-label")).toBe("Reject Claude Code's rewrite");
-    expect(claude?.querySelector("[data-proposal-reject] [data-icon='x']")).not.toBeNull();
-    expect(claude?.querySelector("[data-proposal-accept-all] [data-icon='checks']")).not.toBeNull();
-    expect(view.proposal(removal)?.querySelector("[data-proposal-accept-all]")).toBeFalsy();
+    const claude = view.proposal(rewrite) as HTMLElement;
+    // The line is the proposal's last child: the face first, then the
+    // words, then the answers. BO_0265_010
+    const mark = claude.lastElementChild as HTMLElement;
+    expect(mark.getAttribute("data-proposal-mark")).toBe(rewrite);
+    expect(Array.from(mark.children).map((child) => child.className)).toEqual([
+      "proposal-block__face",
+      "proposal-block__words",
+      "proposal-block__answers",
+    ]);
+    expect(mark.querySelector("[data-proposal-words]")?.textContent).toBe("Proposes a rewrite");
+    expect(mark.querySelector("[data-proposal-accept]")?.getAttribute("aria-label")).toBe("Accept Claude Code's rewrite");
+    expect(mark.querySelector("[data-proposal-accept] [data-icon='check']")).not.toBeNull();
+    expect(mark.querySelector("[data-proposal-reject]")?.getAttribute("aria-label")).toBe("Reject Claude Code's rewrite");
+    expect(mark.querySelector("[data-proposal-reject] [data-icon='x']")).not.toBeNull();
+    // Nothing stands on the left border or the top edge any more, and a
+    // group's Accept all is the run chip's. BO_0265_010
+    const faces = Array.from(claude.querySelectorAll(".proposal-block__face"));
+    expect(faces.length).toBe(1);
+    expect(faces[0]?.parentElement).toBe(mark);
+    expect(view.root.innerHTML).not.toContain("data-proposal-accept-all");
+    for (const [itemId, words] of [
+      [newBlock, "Proposes a new block"],
+      [removal, "Proposes removal"],
+      [move, "Proposes a move, withdrawing 1"],
+    ] as const) {
+      expect(view.proposal(itemId)?.querySelector("[data-proposal-words]")?.textContent).toBe(words);
+    }
     await view.settle();
   });
 
-  it("Given a rewrite, Then it is drawn in its role's element after the block it rewrites, and editable", async () => {
+  it("Given a rewrite another run refined, Then the chip carries the refiner's face and colour, says whose rewrite it refines, and the names say who proposed and who refined", async () => {
+    // BO_0271_011
+    const view = await mount();
+    const proposal = view.proposal(refined) as HTMLElement;
+    expect(proposal.getAttribute("data-proposal-tone")).toBe("claude");
+    expect(proposal.getAttribute("aria-label")).toBe("Proposed rewrite by Codex, refined by Claude Code (claude-opus-5-5)");
+    const face = proposal.querySelector("[data-proposal-face]");
+    expect(face?.getAttribute("aria-label")).toContain("Proposed by Codex, refined by Claude Code (claude-opus-5-5)");
+    expect(face?.querySelector("img")?.getAttribute("src")).toBe("/agents/clauderic.webp");
+    const mark = proposal.lastElementChild as HTMLElement;
+    expect(mark.querySelector("[data-proposal-words]")?.textContent).toBe("Proposes a rewrite, refining Codex's rewrite");
+    expect(mark.querySelector("[data-proposal-accept]")?.getAttribute("aria-label")).toBe("Accept Claude Code's rewrite");
+    expect(mark.querySelector("[data-proposal-reject]")?.getAttribute("aria-label")).toBe("Reject Claude Code's rewrite");
+    // Nothing else about the chip changes: one face, words, answers.
+    expect(Array.from(mark.children).map((child) => child.className)).toEqual([
+      "proposal-block__face",
+      "proposal-block__words",
+      "proposal-block__answers",
+    ]);
+    // An unrefined item of the same group keeps Codex's face and words.
+    expect(view.proposal(move)?.getAttribute("data-proposal-tone")).toBe("codex");
+    expect(view.proposal(move)?.querySelector("[data-proposal-words]")?.textContent).toBe("Proposes a move, withdrawing 1");
+    await view.settle();
+  });
+
+  it("Given a new block another run proposes to withdraw, Then it stands dimmed with the withdrawer's face and words, its names say both, and its successor's accept says it withdraws one", async () => {
+    // BO_0286_009 BO_0286_011
+    const view = await mount();
+    const proposal = view.proposal(withdrawn) as HTMLElement;
+    expect(proposal.getAttribute("data-proposal-tone")).toBe("hermes");
+    expect(proposal.hasAttribute("data-proposal-withdrawn")).toBe(true);
+    expect(proposal.getAttribute("aria-label")).toBe("Proposed new block by Claude Code (claude-sonnet-5), withdrawal proposed by Hermes");
+    const face = proposal.querySelector("[data-proposal-face]");
+    expect(face?.getAttribute("aria-label")).toContain("Proposed by Claude Code (claude-sonnet-5), withdrawal proposed by Hermes");
+    expect(face?.querySelector("img")?.getAttribute("src")).toBe("/agents/ftrobot.webp");
+    const mark = proposal.lastElementChild as HTMLElement;
+    expect(mark.querySelector("[data-proposal-words]")?.textContent).toBe("Proposes to withdraw Claude Code's new block: folded into the moved opening");
+    expect(mark.querySelector("[data-proposal-accept]")?.getAttribute("aria-label")).toBe("Accept Claude Code's new block");
+    expect(mark.querySelector("[data-proposal-reject]")?.getAttribute("aria-label")).toBe("Reject Claude Code's new block");
+    // The item is still drawn, with its text.
+    expect(proposal.textContent).toContain("A surplus line.");
+    // The successor's accept says what else it does, in its words too; an item nothing names stays as it was.
+    expect(view.proposal(move)?.querySelector("[data-proposal-accept]")?.getAttribute("aria-label")).toBe("Accept Codex's move, withdrawing 1");
+    expect(view.proposal(move)?.querySelector("[data-proposal-words]")?.textContent).toBe("Proposes a move, withdrawing 1");
+    // The withdrawn item offers its successor: the press turns to it. BO_0286_012
+    const show = proposal.querySelector("[data-proposal-successor]") as HTMLElement;
+    expect(show.getAttribute("aria-label")).toBe("Show the proposal that replaces this one");
+    expect(view.proposal(rewrite)?.querySelector("[data-proposal-successor]")).toBeFalsy();
+    await view.userEvent(`[data-proposal-successor="${withdrawn}"]`, "click");
+    await view.waitFor(() => view.proposal(move)?.getAttribute("data-focused") === "true");
+    expect(proposal.getAttribute("data-focused")).not.toBe("true");
+    expect(view.proposal(rewrite)?.querySelector("[data-proposal-accept]")?.getAttribute("aria-label")).toBe("Accept Claude Code's rewrite");
+    expect(view.proposal(rewrite)?.hasAttribute("data-proposal-withdrawn")).toBe(false);
+    await view.settle();
+  });
+
+  it("Given a rewrite, Then it is drawn in its role's element in the place of the block it rewrites, and editable", async () => {
     const view = await mount();
     const text = view.proposal(rewrite)?.querySelector("[data-proposal-text]");
     // A heading proposed for a paragraph is drawn as the heading it would be.
     expect(text?.tagName.toLowerCase()).toBe("h3");
+    // With no pointer that hovers, the text takes the caret once a first
+    // tap has focused the proposal. DO_0004_004
+    expect(text?.getAttribute("contenteditable")).toBe("false");
+    await view.userEvent(`[data-proposal-id="${rewrite}"]`, "focusin");
+    await view.settle(() => text?.getAttribute("contenteditable") === "true");
     expect(text?.getAttribute("contenteditable")).toBe("true");
     const rows = Array.from(view.root.querySelectorAll("[data-block-id], [data-proposal-id]")).map(
       (row) => row.getAttribute("data-proposal-id") ?? row.getAttribute("data-block-id"),
     );
-    expect(rows.indexOf(rewrite)).toBe(rows.indexOf("blk-b") + 1);
+    // The rewrite stands where its block stood, and the block's own row is
+    // not drawn. CA_0055_005
+    expect(rows).not.toContain("blk-b");
+    expect(rows.indexOf(rewrite)).toBeGreaterThan(rows.indexOf("blk-a"));
+    expect(rows.indexOf(rewrite)).toBeLessThan(rows.indexOf("blk-c"));
     await view.settle();
   });
 
@@ -241,7 +358,10 @@ describe("proposed changes in the block editor", () => {
     expect(view.commands("answerProposal")).toHaveLength(1);
     const revise = view.commands("revise")[0]?.body;
     expect(revise?.["blockId"]).toBe("blk-b");
-    expect(revise?.["baseRevisionId"]).toMatch(/^rev-next-/);
+    // On top of the revision the acceptance established: the proposal's own,
+    // which CCGW establishes under its identity (BO_0263_004), never the
+    // block's older one.
+    expect(revise?.["baseRevisionId"]).toBe("rev-b2");
     expect(JSON.stringify(revise?.["runs"])).toContain("xThe storm arrives early.");
     expect(view.proposal(rewrite)).toBeFalsy();
     expect(view.active()).toBeFalsy();
@@ -262,7 +382,9 @@ describe("proposed changes in the block editor", () => {
     const view = await mount();
     await view.userEvent(`[data-proposal-accept="${move}"]`, "click");
     await view.waitFor(() => view.commands("answerProposal").length > 0);
-    await view.userEvent(`[data-proposal-accept-all="node:run-claude"]`, "click");
+    // A run chip's Accept all, as the shell hands it over. BO_0265_014
+    view.record.answerAll = { group: "node:run-claude", answer: "accepted" };
+    await view.userEvent("[data-harness-answer-all]", "click");
     await view.waitFor(() => view.commands("answerProposal").length > 2);
     // Without an edit's say, a rewrite whose block moved since is still
     // refused. CA_0042_003
@@ -320,8 +442,8 @@ describe("proposed changes in the block editor", () => {
     // lands last: the harness's flush waits for the editor's own reads, and a
     // slow one would have corrected the list before anything could be seen.
     delay = 600;
-    await view.userEvent('[data-inspector-action="proposed-changes"]', "click");
-    const reading = view.userEvent('[data-inspector-action="proposed-changes"]', "click");
+    await view.userEvent('[data-bar-action="proposed-changes"]', "click");
+    const reading = view.userEvent('[data-bar-action="proposed-changes"]', "click");
     await new Promise((resolve) => setTimeout(resolve, 20));
     delay = 0;
     // Typed into, and left: accepted, without the block taking the caret.
@@ -480,7 +602,7 @@ describe("work items in the block editor", () => {
     const sent: SentCommand[] = [];
     vi.stubGlobal("fetch", documentsApi(draft, sent, { proposals: work }));
     const view = await mountEditor(draft);
-    await view.userEvent('[data-inspector-action="proposed-changes"]', "click");
+    await view.userEvent('[data-bar-action="proposed-changes"]', "click");
     await view.settle(() => view.root.querySelector("[data-proposal-id]") !== null);
     const proposal = (itemId: string) => view.root.querySelector(`[data-proposal-id="${itemId}"]`) as HTMLElement | null;
     const commands = (name: string) => sent.filter((command) => command.body["command"] === name);
@@ -518,6 +640,17 @@ describe("work items in the block editor", () => {
     await view.settle();
   });
 
+  it("Given a work item, Then it is drawn bare, outside any slot, and keeps the room itself", async () => {
+    // A work item has no place of its own, so the editor draws no slot around
+    // it and nothing stands between its margin and its neighbour's: it is the
+    // row the document's flow holds, and the room is its own. DO_0009_001
+    const view = await mountWork();
+    for (const itemId of [relate, claimItem, kindItem]) {
+      expect(view.proposal(itemId)?.parentElement?.getAttribute("class") ?? "").not.toContain("drop-slot");
+    }
+    await view.settle();
+  });
+
   it("Given a claim and a kind, Then each is drawn as its words, and the kind says what it was derived from", async () => {
     const view = await mountWork();
     expect(view.proposal(claimItem)?.textContent).toContain("Proposed claim");
@@ -552,12 +685,17 @@ describe("work items in the block editor", () => {
     await view.settle();
   });
 
-  it("Given Confirm relation on an inferred relation's card, Then it answers as the icons would, never as an edit", async () => {
-    // An inferred relation is the Possible relation card since BO_0247_005:
-    // no answer icons, its own three buttons.
+  it("Given the chip's ✓ on an inferred relation's card, Then it answers as it does on any proposal, never as an edit", async () => {
+    // An inferred relation is the Possible relation card since BO_0247_005,
+    // answered from its chip like every other proposal since DO_0007_001,
+    // with the card's own words on the icons.
     const view = await mountWork();
-    expect(view.proposal(relate)?.querySelector("[data-proposal-accept]")).toBeFalsy();
-    await view.userEvent(`[data-relation-confirm="${relate}"]`, "click");
+    const card = view.proposal(relate);
+    expect(card?.querySelector("[data-relation-answers]")).toBeFalsy();
+    expect(card?.querySelector("[data-relation-edit]")).toBeFalsy();
+    expect(card?.querySelector("[data-proposal-accept]")?.getAttribute("aria-label")).toBe("Confirm relation");
+    expect(card?.querySelector("[data-proposal-reject]")?.getAttribute("aria-label")).toBe("Not related");
+    await view.userEvent(`[data-proposal-accept="${relate}"]`, "click");
     await view.waitFor(() => view.commands("answerProposal").length === 1);
     expect(view.commands("answerProposal")[0]?.body).toMatchObject({ itemId: relate, answer: "accepted" });
     expect(view.commands("answerProposal")[0]?.body["edited"]).toBeUndefined();

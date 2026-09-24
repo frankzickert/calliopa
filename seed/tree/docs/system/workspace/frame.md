@@ -13,12 +13,10 @@ flowchart TB
     L["Left drawer · library / story tree"]
     W["Active workspace · script / board / timeline"]
     R["Right drawer · inspector / context"]
-    C["Command dock · input + running processes"]
 
     H --> W
     L --> W
     W --> R
-    W --> C
 ```
 
 ## Identity
@@ -31,7 +29,7 @@ flowchart TB
 ## Frame And Scrolling
 
 * The shell occupies the viewport height and does not scroll as a whole.
-* The header and the command dock remain visible whatever any region holds.
+* The header remains visible whatever any region holds.
 * The left drawer, the workspace, and the right drawer each scroll their own content, and scrolling one moves nothing in the other two.
 
 - The frame is stated once for both form factors. A bounded frame is what makes independence mean anything: while the page itself can scroll, every region moves together no matter what each one declares.
@@ -39,9 +37,10 @@ flowchart TB
 - The regions scroll vertically. Horizontal overflow belongs to the content that has it — the tab strip, a view's own bar, a wide table — rather than to the region around it.
 - The region is the scroll container, so a mounted view is handed a bounded height and sizes itself against it. [Block Editor View](../documents/block-editor.md) already describes a surface that scrolls under its bar; this is the height that surface has.
 - The workspace region holds no chrome of its own that stays put. Everything it holds scrolls with the view, including the `Open in <view>` group and the context actions that render after the host. A bar that stays at an edge while content passes under it belongs to the view that owns the content.
-- The frame is bounded with `dvh` and a `vh` fallback, so the page itself never scrolls and the header and dock rows stay put. The viewport meta carries `interactive-widget=resizes-content`, so an on-screen keyboard shrinks the frame rather than covering the dock. The mobile dock's sticky position is gone with the page scroll it worked around (`CA_0014_001`).
+- The frame is bounded with `dvh` and a `vh` fallback, so the page itself never scrolls and the header's row stays put. The viewport meta carries `interactive-widget=resizes-content`, so an on-screen keyboard shrinks the frame rather than covering what is being typed in (`CA_0014_001`).
 - The three regions bound their own content. `.drawer` and `.block-surface` had always declared their overflow and never scrolled, because nothing above them bounded a height; the frame is what they were missing, so this added no overflow rules to them. Each region takes vertical overflow only, and horizontal overflow stays with the content that has it (`CA_0014_002`).
 - The workspace lays its host out as a column and hands it the region's height, so a view that manages its own scrolling gets a definite height to manage. The block editor spends it on the surface that scrolls under its bar, which is why the block editor never makes the region itself scroll; a view that manages no height overflows the region instead (`CA_0014_002`).
+- The view host hands a view the region's width and never more: `.view-host`'s column track is `minmax(0, 1fr)` rather than the implicit `auto`, so an unbreakable line inside a view scrolls in the box that declared its overflow instead of widening the view past the workspace, which clips it. The settings leads did this until `CA_0064`; with them wrapping, the track changes no pixel, and a 400-character command log that widened the view to 2587px now scrolls inside its 864px box (`CA_0064_002`).
 - The workspace region carries a tab stop, as both drawers already did. A region that is a scroll container is reachable from the keyboard whether or not the view mounted in it happens to overflow today, and the shell does not assume every future view will manage its own height (`CA_0014_003`).
 - On a phone both header rows stay above the scrolling workspace: the identity row and the tab strip. This follows from the bounded frame rather than from a rule of its own, because the header is a grid row and only the middle regions scroll (`CA_0014_004`).
 - `tests/browser/layout.spec.ts` drives scroll with the wheel over a region and asserts what moved on screen, rather than naming the element that scrolled. Which element is the scroll container is the view's business, so a test naming one would assert the arrangement instead of the promise that the document moves and the chrome does not.
@@ -56,8 +55,8 @@ flowchart TB
 ## Qwik Boundaries
 
 - Qwik City manages workspace routes and resumable loading boundaries.
-- One workspace shell component owns layout, drawers, tabs, command dock, and global drag coordination.
-- A mounted view reaches the shell through one declared bridge and nothing else: the live drag state, an inspector contribution, a dock action contribution, and the means to start a drag, record the tab's selection, rename its target, report its save state, say its target is gone, and raise a message. The shell renders those surfaces; a view never owns one.
+- One workspace shell component owns layout, drawers, tabs, and global drag coordination.
+- A mounted view reaches the shell through one declared bridge and nothing else: the live drag state, an inspector contribution, and the means to start a drag, record the tab's selection, rename its target, report its save state, say its target is gone, raise a message, and send a command written in its target (`BO_0267_008`). The shell renders those surfaces; a view never owns one.
 - A drop landing on a target the shell does not own is handed to the mounted view rather than interpreted by the shell. The shell resolves the gesture; the view decides what the drop means for its own content.
 - Individual tools mount inside tab contexts; this change ships only a placeholder workspace surface proving the tab-context contract.
 - Shared process state lives above individual tabs.
@@ -71,9 +70,13 @@ flowchart TB
 ## Out Of Scope
 
 - Real tools, AI requests, uploads, process producers, story content records, authentication, users, collaboration, and a workspace list arrive through their own changes.
-- The composer accepts text but has no command backend.
 - The left drawer ships with nothing at all: no node kinds, no records, and no heading. Story records and the node kinds they carry arrive with the content model.
 
 ## Implementation
 
 - The copied 135×177 laurel is the favicon, touch icon, and header wordmark's accessible `C`; the remaining `alliopa` letters are live text. `Calliopa` is the document title and heading, and Playwright proves every identity surface and asset (`CA_0002_011`).
+
+## The Frame Without A Dock
+
+- Under `ui.shell`'s `CA_0058`, set to draft by the user on 2026-09-20 and implemented the same day, the frame lost its dock row. The change and its other halves are [Commands And Runs](./commands-and-runs.md), *The Dock Went*.
+- The grid is the header over the three regions, and the workspace has the height the dock held (`CA_0058_003`). `.dock`, the z-index layer it stood on and `tests/behavior/dock-layer.test.ts` are gone, with `dockAfterTap`, `dockAfterSwipe`, `dockAfterRelease`, `shownDock`, `DOCK_SWIPE_THRESHOLD` and `DOCK_POSITIONS` from `src/lib/layout.ts` and their cases in `layout.test.ts`. `interactive-widget=resizes-content` stays and keeps its reason: an on-screen keyboard shrinks the frame rather than covering what is being typed in. [Messages](./messages.md)'s fixed line no longer names the dock among what a message moves nothing in.

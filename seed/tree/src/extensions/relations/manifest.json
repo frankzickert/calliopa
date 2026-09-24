@@ -1,0 +1,19 @@
+{
+  "capabilities": {
+    "ccgwScopes": [
+      "query",
+      "propose"
+    ],
+    "renders": [
+      "routes"
+    ]
+  },
+  "category": "bundled",
+  "dependencies": {
+    "documents": "\u003e=0.1.0",
+    "ui.shell": "\u003e=0.1.0"
+  },
+  "entrypoint": "contributions",
+  "id": "relations",
+  "version": "0.1.0"
+}

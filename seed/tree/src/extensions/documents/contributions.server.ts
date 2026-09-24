@@ -16,11 +16,13 @@ import {
   handleBranchRead,
   handlePolicyRead,
   handleStandingRead,
+  handleTableFile,
 } from "./server/api";
 import { withBranch } from "~/server/ccgw/branch-scope";
 import { listDocuments } from "./server/documents";
 import { documentItem } from "./lib/library-item";
 import { glyphsFor } from "~/server/registry";
+import { documentFocusedWork } from "./server/focus";
 import { proposedDocuments } from "./server/proposed";
 import { isRecordId } from "~/server/uuid";
 
@@ -115,6 +117,16 @@ const routes: readonly ApiRoute[] = [
     handle: (event, params) => document((id) => handleStandingRead(event.request, id))(event, params),
   },
   {
+    /** The bytes of a file a table stands behind, answered as the blob
+     * reference the insert carries. BO_0287_013 */
+    method: "POST",
+    path: "blobs",
+    handle: async (event) => {
+      const { status, body } = await handleTableFile(event.request);
+      event.json(status, body);
+    },
+  },
+  {
     method: "POST",
     path: "d/[id]/commands",
     handle: (event, params) =>
@@ -144,4 +156,8 @@ export const contributions = declare({
   // What a run staged into this extension's documents, for the frame's run
   // detail. BO_0255_007
   proposedTargets: proposedDocuments,
+  // How a child of a document is made and read, so the shell can open any
+  // block of one as focused work without writing this vocabulary itself.
+  // CA_0065_008
+  focusedWork: { document: documentFocusedWork },
 });

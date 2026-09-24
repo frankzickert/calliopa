@@ -1,0 +1,95 @@
+/* The send beneath a code block and the Runtimes section (BO_0289_019).
+   Every colour is a token, as the theme-token check requires. */
+.code-run {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+}
+
+.code-run__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.code-run__button {
+  font: inherit;
+  color: inherit;
+  background: var(--surface-quiet, transparent);
+  border: 1px solid var(--border-muted, currentColor);
+  border-radius: 0.25rem;
+  padding: 0.125rem 0.625rem;
+  cursor: pointer;
+}
+
+.code-run__button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.code-run__hint,
+.code-run__note {
+  color: var(--text-muted, inherit);
+}
+
+.code-run__live {
+  margin: 0;
+  padding: 0.25rem 0.5rem;
+  max-height: 12rem;
+  overflow: auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-inline-start: 2px solid var(--border-muted, currentColor);
+}
+
+.code-runtimes__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.code-runtime {
+  padding: 0.375rem 0.75rem;
+  border-block-end: 1px solid var(--border-muted, transparent);
+  font-size: 0.8125rem;
+}
+
+.code-runtime__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.code-runtime__name {
+  font-weight: 600;
+}
+
+.code-runtime__state,
+.code-runtime__image {
+  color: var(--text-muted, inherit);
+}
+
+.code-runtime__image {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.code-runtime__error,
+.code-runtimes__refusal {
+  color: var(--text-muted, inherit);
+  font-style: italic;
+}
+
+.code-runtime__controls {
+  display: flex;
+  gap: 0.375rem;
+  margin-top: 0.25rem;
+}

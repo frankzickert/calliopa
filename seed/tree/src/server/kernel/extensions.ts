@@ -69,6 +69,12 @@ export interface KernelExtensionListing {
 /** One extension as `GET /__kernel/extensions/{id}` answers it. BO_0257_009 */
 export interface KernelExtensionOne extends Omit<KernelExtensionListing, "extensions"> {
   readonly extension: KernelExtensionView;
+  /** Whether the owner allowed it to start runs on its own, whether it
+   * declares a trigger that would, and whether the reader is the owner.
+   * BO_0264_018 */
+  readonly autonomous?: boolean;
+  readonly declaresTrigger?: boolean;
+  readonly isOwner?: boolean;
 }
 
 /** The answer to a create: the new extension's view and the revision it was established at. */
@@ -115,6 +121,79 @@ export interface ExtensionChange {
   readonly promotion?: KernelPromotion;
 }
 
+/**
+ * What a staged group is judged by, as `GET /__kernel/extensions/{id}/groups`
+ * answers it (`ui-kernel.md`, `BO_0282_004`). A person does not read code to
+ * judge a change, so this is what stands in its place: the change document
+ * and the status its staged line reads, what the group touches, the runs that
+ * staged into it with their gates, and — for one group — how many files it
+ * adds, changes and removes. There is no diff here and there is meant to be
+ * none.
+ */
+export interface KernelGroupRun {
+  readonly id: string;
+  readonly goal?: string;
+  readonly person?: string;
+  readonly agent?: string;
+  readonly executedBy?: string;
+  readonly model?: string;
+  readonly status?: string;
+  readonly conclusion?: string;
+  readonly buildOk: boolean;
+  readonly checkOk: boolean;
+  readonly testOk: boolean;
+}
+
+export interface KernelGroup {
+  readonly group: string;
+  readonly status: string;
+  readonly createdBy: string;
+  readonly rationale?: string;
+  readonly change?: string;
+  readonly changeStatus?: string;
+  /** Set when the group is a waiting status move. BO_0297_002 */
+  readonly statusMove?: { readonly path: string; readonly from: string; readonly to: string };
+  readonly members?: Readonly<Record<string, number>>;
+  readonly runs?: readonly KernelGroupRun[];
+  readonly files?: {
+    readonly added: number;
+    readonly changed: number;
+    readonly removed: number;
+  };
+}
+
+/** A change document's status move, staged and followed by its confirmation. BO_0282_005 BO_0297_001 */
+export interface ChangeStatusOutcome {
+  readonly extension: string;
+  readonly path: string;
+  readonly node?: string;
+  readonly from?: string;
+  readonly to: string;
+  readonly group?: string;
+  readonly changed: boolean;
+  /** The waiting moves this choice rejected. BO_0297_003 */
+  readonly replaced?: readonly string[];
+  /** The acceptance asked for at once, and where to confirm it. BO_0297_001 */
+  readonly status?: "pending";
+  readonly confirmUrl?: string;
+}
+
+/** A candidate served beside the instance. BO_0282_003 */
+export interface KernelCandidate {
+  readonly group: string;
+  readonly status: "building" | "serving" | "refused" | "stopped";
+  readonly detail?: string;
+  readonly address?: string;
+  readonly by: string;
+  readonly startedAt: string;
+  readonly expiresAt?: string;
+}
+
+export interface KernelCandidateAnswer {
+  readonly running: boolean;
+  readonly candidate?: KernelCandidate;
+}
+
 async function answered<T>(response: Response): Promise<T> {
   if (!response.ok) throw await refusalWithCode(response);
   return (await response.json()) as T;
@@ -140,6 +219,12 @@ export const kernelExtensions = {
       ),
     );
   },
+  /** Allow an extension to start runs on its own, or withdraw it; the owner's alone. BO_0264_018 */
+  async setAutonomous(id: string, allowed: boolean): Promise<{ readonly id: string; readonly allowed: boolean; readonly changed: boolean }> {
+    return answered(
+      await call(`/__kernel/extensions/${encodeURIComponent(id)}/autonomous`, jsonInit("POST", { allowed })),
+    );
+  },
   async setVersion(
     id: string,
     choice: { readonly revision: number } | { readonly follow: true },
@@ -155,6 +240,48 @@ export const kernelExtensions = {
   async health(): Promise<KernelHealth> {
     return answered<KernelHealth>(
       await call("/__kernel/healthz", { method: "GET" }),
+    );
+  },
+  /** The open groups touching this extension's members, with their evidence. BO_0282_004 */
+  async groups(id: string): Promise<{ readonly id: string; readonly groups: readonly KernelGroup[] }> {
+    return answered(
+      await call(`/__kernel/extensions/${encodeURIComponent(id)}/groups`, { method: "GET" }),
+    );
+  },
+  /** One group, which additionally counts the files it touches. BO_0282_004 */
+  async group(id: string, group: string): Promise<KernelGroup> {
+    return answered<KernelGroup>(
+      await call(
+        `/__kernel/extensions/${encodeURIComponent(id)}/groups/${encodeURIComponent(group)}`,
+        { method: "GET" },
+      ),
+    );
+  },
+  /** Stage a change document's status move; acceptance establishes it. BO_0282_005 */
+  async setChangeStatus(id: string, path: string, status: string): Promise<ChangeStatusOutcome> {
+    return answered<ChangeStatusOutcome>(
+      await call(
+        `/__kernel/extensions/${encodeURIComponent(id)}/change-status`,
+        jsonInit("POST", { path, status }),
+      ),
+    );
+  },
+  /** The candidate served beside the instance, if one is. BO_0282_003 */
+  async candidate(): Promise<KernelCandidateAnswer> {
+    return answered<KernelCandidateAnswer>(
+      await call("/__kernel/preview/candidates", { method: "GET" }),
+    );
+  },
+  /** Build and serve a staged group beside the instance. BO_0282_003 */
+  async startCandidate(group: string): Promise<KernelCandidateAnswer> {
+    return answered<KernelCandidateAnswer>(
+      await call("/__kernel/preview/candidates", jsonInit("POST", { group })),
+    );
+  },
+  /** Stop the candidate; the instance is untouched either way. BO_0282_003 */
+  async stopCandidate(): Promise<KernelCandidateAnswer> {
+    return answered<KernelCandidateAnswer>(
+      await call("/__kernel/preview/candidates", { method: "DELETE" }),
     );
   },
   /** A new extension as truth: its manifest and system.md, nothing to serve yet. BO_0224_009 */

@@ -1,0 +1,36 @@
+/* The manuscripts extension's own surfaces (BO_0293_022). */
+.manuscripts-row__meta {
+  display: block;
+  font-size: 0.8125rem;
+  opacity: 0.75;
+}
+
+.manuscript-page {
+  padding: 1rem 1.25rem;
+  max-width: 48rem;
+}
+
+.manuscript-page__facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+}
+
+.manuscript-page__facts dt {
+  font-weight: 600;
+}
+
+.manuscript-page__files {
+  padding-left: 1.25rem;
+}
+
+.manuscript-page__size {
+  opacity: 0.75;
+  font-size: 0.875rem;
+}
+
+.manuscript-page__log {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8125rem;
+  white-space: pre-wrap;
+}

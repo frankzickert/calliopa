@@ -45,9 +45,20 @@ export function configurationRefusal(
   configuration: Readonly<Record<string, string>>,
 ): string | null {
   if (party.kind !== "channel") {
-    return Object.keys(configuration).length === 0
-      ? null
-      : `${party.id} takes no configuration.`;
+    // A service takes what it declares and nothing else: the keys it fixes —
+    // the address of the API it is reached at, which the kernel's broker
+    // refuses a party without (`no_address`) — and the fields it asks the
+    // owner for, which its row now draws as a channel's does. A service that
+    // declares neither still takes nothing, exactly as before.
+    // RF_0002_009 BO_0280_008
+    const unknown = Object.keys(configuration).find(
+      (key) => !party.fields.some((field) => field.key === key) && party.fixed?.[key] === undefined,
+    );
+    if (unknown !== undefined) return `${party.id} takes no configuration.`;
+    for (const field of party.fields) {
+      if ((configuration[field.key] ?? "").trim() === "") return `${field.label} is required.`;
+    }
+    return null;
   }
   // A key the kind fixes — a platform's API address — is written with the record, never typed. BO_0252_006
   const unknown = Object.keys(configuration).find(
@@ -197,6 +208,21 @@ export interface SelectableRuntime {
   readonly label: string;
   readonly selectable: boolean;
   readonly reason: string | null;
+  /**
+   * The icon a contributed sender wears in the menu, where an agent wears its
+   * own face. Absent for an agent. BO_0273_035
+   */
+  readonly icon?: string;
+  /**
+   * The axes a contributed sender offers before the press, carried through to
+   * the menu that draws them. Absent for an agent. BO_0279_007
+   */
+  readonly options?: readonly {
+    readonly axis: string;
+    readonly label: string;
+    readonly values: readonly string[];
+    readonly start: string | null;
+  }[];
 }
 
 /** What the agent container reports about one of its runtimes. */
@@ -302,4 +328,33 @@ export function agentNeeds(
   }
 
   return needs;
+}
+
+/**
+ * What a service row's *Save* would write: the key when one was typed, and the
+ * configuration when the party declares fields. Both may be absent, and then
+ * there is nothing to save and the control is not offered.
+ *
+ * The key is sent only when it was typed. An empty box is a person who did not
+ * touch it, not a person asking for an empty key, and sending it either way
+ * would clear the credential of anyone who came to change a field.
+ * BO_0280_009
+ */
+export function serviceSave(
+  key: string,
+  fields: readonly ConfigurationField[],
+  typed: Readonly<Record<string, string>>,
+  stored: Readonly<Record<string, string>>,
+): { readonly secret?: string; readonly configuration?: Readonly<Record<string, string>> } | null {
+  const entered = key.trim();
+  const configuration =
+    fields.length === 0
+      ? undefined
+      : Object.fromEntries(fields.map((field) => [field.key, typed[field.key] ?? stored[field.key] ?? ""]));
+  const changed = fields.some((field) => typed[field.key] !== undefined && typed[field.key] !== stored[field.key]);
+  if (entered === "" && !changed) return null;
+  return {
+    ...(entered === "" ? {} : { secret: key }),
+    ...(configuration === undefined ? {} : { configuration }),
+  };
 }

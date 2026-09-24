@@ -11,6 +11,11 @@ import { Icon, type IconName } from "./icons";
  * face where a glyph stands, with *proposed by* in the row's name
  * (`BO_0251_012`). A row with no target is named and not opened.
  *
+ * A row the listing marks unnamed draws its label muted (`DO_0012_007`). Its
+ * accessible name stays the label, because the label already says the item is
+ * untitled: the muting repeats what the words say rather than carrying the
+ * fact in colour alone.
+ *
  * Its own component so the render harness presses the row the shell draws
  * (`testing/library-row-host.tsx`). The item is passed whole, never as
  * `item.field`, so a re-read listing reaches the row (`qwik-member-props-freeze`).
@@ -24,7 +29,9 @@ export const LibraryRow = component$<{
   const parts = (
     <>
       {item.proposedBy !== undefined && <ProposerFace agent={item.proposedBy.agent} />}
-      <span class="library-entry__label">{item.label}</span>
+      <span class="library-entry__label" data-unnamed={item.unnamed === true ? "true" : "false"}>
+        {item.label}
+      </span>
       {item.proposedBy !== undefined && (
         <span class="visually-hidden">, proposed by {item.proposedBy.name}</span>
       )}

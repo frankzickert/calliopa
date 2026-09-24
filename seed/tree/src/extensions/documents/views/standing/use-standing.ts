@@ -1,18 +1,16 @@
 import {
   $,
   createContextId,
-  useContext,
   useStore,
   useTask$,
   type QRL,
 } from "@builder.io/qwik";
 
-import { ViewBridgeContext } from "~/components/shell/view-bridge";
 import { DONE, type Standing } from "../../lib/disposition";
 import { openingWords } from "../../lib/pointing";
 import { runsText } from "~/lib/runs";
 import type { BlockView } from "../../server/assemble";
-import { describeOutcome, sendCommand } from "../documents-client";
+import { afterFloor, describeOutcome, refusedByFloor, sendCommand } from "../documents-client";
 import type { MarkingControls } from "../marking/use-marking";
 
 /**
@@ -38,11 +36,28 @@ export interface StandingStore {
   overlay: Readonly<Record<string, Standing>>;
   /** The last change, in words, for assistive technology. */
   announcement: string;
+  /**
+   * The last saved change of standing, and what taking it back writes: the
+   * block, the standing it had, what the change said and what taking it back
+   * says. The bar's trailing group offers it as a control of its own — the
+   * separately named action a saved structural operation is reversed by,
+   * never the undo keystroke. CA_0058_011
+   */
+  takeBack: {
+    readonly blockId: string;
+    readonly to: Standing;
+    /** What the change said, which is what the control offers to take back. */
+    readonly did: string;
+    /** What taking it back says. */
+    readonly said: string;
+  } | null;
 }
 
 export interface StandingControls {
   readonly store: StandingStore;
   readonly setStanding$: QRL<(blockId: string, to: Standing) => Promise<void>>;
+  /** Writes the previous standing of the last change and clears the offer. */
+  readonly takeBack$: QRL<() => Promise<void>>;
 }
 
 export const StandingContext = createContextId<StandingControls>(
@@ -53,7 +68,7 @@ export const StandingContext = createContextId<StandingControls>(
 export const standingOf = (block: BlockView, store: StandingStore): Standing =>
   block.kind === "text"
     ? (store.overlay[block.blockId] ?? block.standing)
-    : "neutral";
+    : "keep";
 
 /** What the hook reads and writes of the surface it serves. */
 export interface StandingSurface {
@@ -89,10 +104,9 @@ export function useStanding(input: {
    * read back — the reader's own act, which is never news to them. BO_0246_007 */
   readonly afterStanding$?: QRL<() => Promise<void>>;
 }): StandingControls {
-  const { documentId, surface, editor, marking, save$, deactivate$, reload$, beforeStanding$, afterStanding$ } =
+  const { documentId, surface, editor, save$, deactivate$, reload$, beforeStanding$, afterStanding$ } =
     input;
-  const bridge = useContext(ViewBridgeContext);
-  const store = useStore<StandingStore>({ overlay: {}, announcement: "" });
+  const store = useStore<StandingStore>({ overlay: {}, announcement: "", takeBack: null });
 
   /** A read of the document is the graph's word on every standing, so what
    * was shown in its place gives way to it. */
@@ -110,7 +124,9 @@ export function useStanding(input: {
       if (verdict === "stop") return false;
       if (verdict === "skip") return true;
     }
-    const editing = surface.activeBlockId === blockId && to !== "discarded";
+    // A discarded block and a prompt leave the flow, so editing either ends.
+    // BO_0267_014
+    const editing = surface.activeBlockId === blockId && to !== "discarded" && to !== "prompt";
     if (editing) {
       if (!(await save$())) return false;
     } else if (surface.activeBlockId !== null) {
@@ -121,12 +137,16 @@ export function useStanding(input: {
       : surface.document?.blocks.find((block) => block.blockId === blockId)
           ?.revisionId;
     if (base === undefined) return false;
-    const outcome = await sendCommand(documentId, {
-      command: "setDisposition",
-      blockId,
-      baseRevisionId: base,
-      standing: to,
-    });
+    const standing = { command: "setDisposition", blockId, baseRevisionId: base, standing: to };
+    let outcome = await sendCommand(documentId, standing);
+    // A standing written in the breath after the block's own save — a send
+    // by `Ctrl`/`Cmd`+`Enter` on a block just typed into — lands inside the
+    // kernel's per-node floor; the write was sound, so it goes again after
+    // the floor. DO_0015_003
+    if (refusedByFloor(outcome)) {
+      await afterFloor();
+      outcome = await sendCommand(documentId, standing);
+    }
     if (outcome.outcome !== "success") {
       surface.notice = describeOutcome(outcome);
       return false;
@@ -143,9 +163,11 @@ export function useStanding(input: {
   });
 
   /**
-   * Sets a standing and offers to take it back. The inverse writes the
-   * previous value — a named action in the dock, never the undo keystroke
-   * (`block-editor.md`, *Undo*) — and puts back any marks a discard dropped.
+   * Sets a standing and records what taking it back would write. The inverse
+   * writes the previous value — a control of its own in the bar's *History*
+   * group, never the undo keystroke (`block-editor.md`, *Undo*). A discard
+   * keeps the block's marks: a reference is what was marked, and a discarded
+   * block is markable. BO_0263_005 CA_0058_011
    */
   const setStanding$ = $(async (blockId: string, to: Standing) => {
     const block = surface.document?.blocks.find(
@@ -154,26 +176,19 @@ export function useStanding(input: {
     if (block === undefined || block.kind !== "text") return;
     const from = standingOf(block, store);
     if (from === to) return;
-    // A discarded block is not markable, so discarding one takes its marks
-    // with it; they are kept here so the undo can put them back.
-    const dropped =
-      to === "discarded"
-        ? marking.store.marking.references.filter(
-            (reference) => reference.blockId === blockId,
-          )
-        : [];
     if (!(await write$(blockId, to))) return;
-    const words = said(to, block);
-    store.announcement = words;
-    await bridge.offerUndo$({
-      label: words,
-      undo$: $(async () => {
-        if (!(await write$(blockId, from))) return;
-        await marking.restore$(dropped);
-        store.announcement = said(from, block);
-      }),
-    });
+    store.announcement = said(to, block);
+    store.takeBack = { blockId, to: from, did: said(to, block), said: said(from, block) };
   });
 
-  return { store, setStanding$ };
+  /** Takes the last change of standing back, writing the previous value. */
+  const takeBack$ = $(async () => {
+    const offer = store.takeBack;
+    if (offer === null) return;
+    store.takeBack = null;
+    if (!(await write$(offer.blockId, offer.to))) return;
+    store.announcement = offer.said;
+  });
+
+  return { store, setStanding$, takeBack$ };
 }

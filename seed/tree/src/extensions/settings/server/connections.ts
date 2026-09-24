@@ -38,6 +38,10 @@ function specOf(party: RegisteredParty): Omit<PartyChange, "secrets" | "configur
   const spec = party.probe;
   return {
     kind: party.credential,
+    // Written with every save, so a run's tool can be held to the party its
+    // own extension declared (`calliopa-bootstrap`'s `ui-kernel.md`,
+    // A Run Uses What Is Signed In). BO_0276_002
+    extension: party.extension,
     ...(spec === undefined ? {} : { authorization: spec.authorization, test: spec.test }),
     ...(party.provider === undefined ? {} : { provider: { ...party.provider, scopes: [...party.provider.scopes] } }),
     ...(party.paths === undefined ? {} : { paths: [...party.paths] }),

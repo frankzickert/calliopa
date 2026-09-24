@@ -1,22 +1,30 @@
 /* The frame is bounded to the viewport, so the page itself never scrolls and
- * the header and the dock stay where they are put. While the page could
+ * the header stays where it is put. While the page could
  * scroll, every region moved together no matter what each one declared: the
  * drawers and the editor's surface have always asked for their own overflow
  * and never got it, because nothing above them bounded a height.
  *
- * `dvh` so a phone browser collapsing its own chrome does not leave the dock
- * under the address bar; the `vh` line before it is the fallback. The viewport
+ * `dvh` so a phone browser collapsing its own chrome does not leave the
+ * workspace under the address bar; the `vh` line before it is the fallback. The viewport
  * meta carries `interactive-widget=resizes-content`, so an on-screen keyboard
- * shrinks this frame rather than covering the dock. */
+ * shrinks this frame rather than covering what is being typed in. */
 .shell {
   height: 100vh;
   height: 100dvh;
   display: grid;
   grid-template:
     "header header header" auto
-    "left workspace right" minmax(0, 1fr)
-    "left dock right" auto /
-    16rem minmax(0, 1fr) 18rem;
+    "left workspace right" minmax(0, 1fr) /
+    var(--left-column) minmax(0, 1fr) var(--right-column);
+  /* Each panel is an icon column and its content: shown, the column and the
+     content; small, the column alone; hidden, nothing. CA_0056_001
+     The content's width is the root's `--left-content` or `--right-content`
+     once the reader has dragged the panel's inner border (`panel.tsx`,
+     `PANEL_WIDTH_SCRIPT`), and the panel's own default until then.
+     CA_0066_003 */
+  --panel-icons: 3rem;
+  --left-column: calc(var(--panel-icons) + var(--left-content, 16rem));
+  --right-column: calc(var(--panel-icons) + var(--right-content, 18rem));
   background: var(--canvas);
   color: var(--text);
   /* The header's line is as tall as the wordmark's laurel (1.55em at the
@@ -63,14 +71,14 @@
   font-size: 0.85rem;
   white-space: nowrap;
 }
-
-.dock button,
 /* Chrome controls carry no resting border; the surface arrives on hover. */
 .layout-control,
 .theme-toggle,
 .settings-control,
+.header-mode-toggle,
 .process-indicator,
 .header-disclosure__button,
+.header-menu__button,
 .tab-action,
 .sheet-close {
   border: 1px solid transparent;
@@ -84,9 +92,12 @@
 .layout-control:hover,
 .theme-toggle:hover,
 .settings-control:hover,
+.header-mode-toggle:hover,
 .process-indicator:hover,
 .header-disclosure__button:hover,
 .header-disclosure__button[aria-expanded="true"],
+.header-menu__button:hover,
+.header-menu__button[aria-expanded="true"],
 .tab-action:hover,
 .sheet-close:hover {
   background: var(--panel-raised);
@@ -98,8 +109,10 @@
 .layout-control,
 .theme-toggle,
 .settings-control,
+.header-mode-toggle,
 .process-indicator,
 .header-disclosure__button,
+.header-menu__button,
 .update-hint {
   display: inline-flex;
   align-items: center;
@@ -185,6 +198,12 @@
   text-overflow: ellipsis;
 }
 
+/* A tab holding an item nobody has named draws the minted name muted, as its
+ * row in the drawer does. DO_0012_008 */
+.tab__label[data-unnamed="true"] {
+  color: var(--text-muted);
+}
+
 .tab__unsaved,
 .tab__marker {
   flex: none;
@@ -250,9 +269,56 @@
   background: var(--panel-raised);
 }
 
+/* The header's controls are one set. On a desktop and in the phone's *Full*
+   the menu and its panel have no box of their own, so the controls sit on
+   the line; the phone's *Minimum* draws the menu (the phone rules below).
+   The mode control, the menu's labels and the tab's faded edges are the
+   phone's alone. The closed panel keeps its `hidden`, which the global rule
+   makes win with `!important`; this is the one place that outranks it, since
+   a panel with no box of its own hides nothing but the menu's grouping, and
+   *Minimum* hides it again below. CA_0054_001 CA_0054_003 CA_0054_007 */
+.header-menu,
+.header-menu__panel {
+  display: contents;
+}
+
+.header-menu__panel[hidden] {
+  display: contents !important;
+}
+
+.header-menu__button,
+.header-menu__announce,
+.header-mode-toggle,
+.menu-label,
+.tab-edge {
+  display: none;
+}
+
+/* Every tab closed at once: at the strip's end on a desktop and in the
+   phone's *Full*; the menu's copy is *Minimum*'s alone (the phone rules
+   below). The strip scrolls, and a strip full enough to want the control is
+   the one that would scroll it out of sight, so it sticks at the strip's
+   visible end on the header's own surface, and the tabs pass beneath it.
+   CA_0067_002 */
+.tab-strip .close-all-tabs {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  flex: 0 0 auto;
+  align-self: center;
+  margin-top: 0.5rem;
+  padding-inline: 0.35rem;
+  background: var(--panel-raised);
+  box-shadow: -0.5rem 0 0.5rem var(--panel-raised);
+}
+
+.close-all-tabs[data-close-all-tabs="menu"] {
+  display: none;
+}
+
 /* An icon button on the header's line whose panel opens under it, aligned
    to its right edge: the signed-in person's menu and the licence warning.
-   Above the workspace, the dock and the phone's sheets; below messages and
+   Above the workspace and the phone's sheets; below messages and
    the drag preview. CA_0041_003 CA_0041_004 */
 .header-disclosure {
   position: relative;
@@ -333,10 +399,128 @@
  * that has it, not to the region around it. */
 .drawer {
   min-width: 0;
-  padding: 1rem;
+  display: flex;
   background: var(--panel);
+  overflow: hidden;
+}
+
+/* The content beside the icon column is what scrolls. CA_0056_001 */
+.panel-content {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
+}
+
+.drawer--right .panel-content {
+  padding: 1rem;
+}
+
+/* A panel's icon column, as VS Code's activity bar: at the panel's outer
+   edge on its own ground, with no rule of its own, so the small mode is the
+   column and the drawer's one border; one transparent icon button per icon,
+   the shown one marked by a bar on the outer edge as well as by
+   aria-pressed. CA_0056_001 */
+.panel-icons {
+  flex: 0 0 var(--panel-icons);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  background: var(--panel-raised);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.panel-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--panel-icons);
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 0;
+  cursor: pointer;
+}
+
+.panel-icon:hover,
+.panel-icon[aria-pressed="true"] {
+  color: var(--text);
+}
+
+.panel-icon:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.panel-icon[aria-pressed="true"]::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  width: 2px;
+  background: var(--accent);
+}
+
+.panel-icons[data-side="left"] .panel-icon::before {
+  inset-inline-start: 0;
+}
+
+.panel-icons[data-side="right"] .panel-icon::before {
+  inset-inline-end: 0;
+}
+
+/* A library icon is dragged to reorder the column: a 2px accent line marks
+   where it lands, above the icon it lands before or below the last. The
+   column's targets draw no dashed outline, the line being the one mark, and a
+   long press opens no callout. CA_0068_002 */
+.panel-icon[data-drop-place] {
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+.panel-icon[data-drop-place="before"]::after,
+.panel-icon[data-drop-place="after"]::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0.375rem;
+  height: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.panel-icon[data-drop-place="before"]::after {
+  top: -1px;
+}
+
+.panel-icon[data-drop-place="after"]::after {
+  bottom: -1px;
+}
+
+.shell[data-dragging] .panel-icons[data-drop-target],
+.shell[data-dragging] .panel-icons [data-drop-target] {
+  outline: none;
+}
+
+/* An icon holding several sections names them above their bands. */
+.panel-title {
+  margin: 0;
+  padding: 0.5rem var(--library-end) 0.25rem var(--library-inset);
+  font-size: 0.6875rem;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+/* A section alone under its icon is named without a caret, on the same
+   line as a caret's title would stand. CA_0056_002 */
+.library-category__title {
+  display: flex;
+  align-items: center;
+  min-height: var(--library-header);
+  padding-inline-start: var(--library-caret);
+  margin-inline-start: 0.25rem;
 }
 
 .drawer h2,
@@ -375,7 +559,7 @@
   border-top: 1px solid var(--border);
 }
 
-.drawer--left > .library-category:first-of-type {
+.drawer--left .panel-content > .library-category:first-of-type {
   border-top: none;
 }
 
@@ -496,6 +680,12 @@
   white-space: nowrap;
 }
 
+/* A row whose listing says nobody has named the item draws the minted name
+ * muted. The words already say it; the colour repeats them. DO_0012_007 */
+.library-entry__label[data-unnamed="true"] {
+  color: var(--text-muted);
+}
+
 .library-entry__marker {
   flex: 0 0 auto;
   width: 0.4rem;
@@ -517,6 +707,11 @@
    * one below it, which would drift apart at the breakpoint. The region does
    * not know which views negate it. */
   --workspace-inset: 2rem;
+  /* The bar's height, named once: the bar takes it and a view contributing a
+   * bar clears it, so the two cannot drift. CA_0053_004 */
+  --view-bar-height: 2.5rem;
+  /* The bar's containing block, so its edges are the region's own. */
+  position: relative;
   min-width: 0;
   padding: var(--workspace-inset);
   background: var(--canvas);
@@ -529,12 +724,189 @@
   flex-direction: column;
 }
 
+/* The view's bar, over the top edge of the tab region: out of the view's flow,
+ * so showing it or changing its groups moves nothing, and a view contributing
+ * one keeps its content clear of `--view-bar-height`. Docked rather than
+ * floating: one border on the edge facing the content and none on the three
+ * that are the region's, since the header already draws a line above and a
+ * second a pixel below would read as a doubled seam; no radius. Opaque, since
+ * the view scrolls under it. One row on every viewport: what does not fit
+ * scrolls sideways, all of it, with nothing held at an edge. CA_0060_001
+ * Above every layer a view draws in the flow, and below the sheets, the
+ * messages and anything dragged. CA_0053_003 CA_0053_004 */
+.view-bar {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  z-index: 4;
+  /* Exactly the one height, whatever a group holds: a taller control would
+   * push the bar past what the view clears. */
+  box-sizing: border-box;
+  height: var(--view-bar-height);
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-raised);
+}
+
+.view-bar__groups,
+.view-bar__trailing {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+
+/* Pushed to the trailing edge by the free space, and no further: an auto
+ * margin takes only space there is, so the group holds the edge while the
+ * groups fit and falls in behind the others the moment they need more room
+ * than the bar has. Nothing is pinned, so the whole row scrolls as one and
+ * every control is reachable on a narrow viewport, where the groups that
+ * stand whatever the reader is doing would otherwise be the whole bar.
+ * CA_0060_001 */
+.view-bar__trailing {
+  margin-inline-start: auto;
+}
+
+/* An end with groups beyond it fades outwards, so the bar says it holds more
+ * than the reader can see — the idiom the phone's one tab uses (CA_0054_007).
+ * It is the bar's own ground thinning out, not a control: it answers no press
+ * and carries no count.
+ *
+ * Each fade is a sticky flex item held at its end of the scrollport, pulled
+ * back out of the flow by a negative margin so it takes no room from the
+ * groups, and painted over them because a positioned box paints above the
+ * in-flow ones. Whether there is anything beyond an end is `data-more-start`
+ * and `data-more-end`, which the bar reads off itself: no stylesheet can see
+ * a scroll position. CA_0060_002 */
+.view-bar::before,
+.view-bar::after {
+  content: "";
+  position: sticky;
+  z-index: 1;
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 1.5rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.view-bar::before {
+  inset-inline-start: 0;
+  margin-inline-end: -1.5rem;
+  background: linear-gradient(to right, var(--panel-raised), transparent);
+}
+
+.view-bar::after {
+  inset-inline-end: 0;
+  margin-inline-start: -1.5rem;
+  background: linear-gradient(to left, var(--panel-raised), transparent);
+}
+
+.view-bar[data-more-start]::before,
+.view-bar[data-more-end]::after {
+  opacity: 1;
+}
+
+/* Nothing moves and nothing fades for a reader who asked for stillness. */
+@media (prefers-reduced-motion: reduce) {
+  .view-bar::before,
+  .view-bar::after {
+    transition: none;
+  }
+}
+
+.view-bar__group {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.25rem;
+  padding-inline: 0.5rem;
+}
+
+/* The line between two groups belongs to the later one, so a group that is
+ * absent leaves no line doubled and none at an edge. */
+.view-bar__group[data-ruled] {
+  border-inline-start: 1px solid var(--border);
+}
+
+.view-bar select,
+.view-bar input {
+  padding-block: 0.15rem;
+}
+
+.view-bar button {
+  min-width: 2rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.view-bar .action-control--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.view-bar button:hover:not(:disabled),
+.view-bar button:focus-visible {
+  border-color: var(--border);
+  background: var(--panel);
+}
+
+/* Pressed by more than colour: the border and the ground change with it. */
+.view-bar button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--panel);
+  color: var(--accent);
+}
+
+.view-bar button:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.view-bar button[data-destructive]:hover:not(:disabled),
+.view-bar button[data-destructive]:focus-visible {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.field-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.field-control input {
+  font: inherit;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--panel);
+  color: var(--text);
+}
+
 /* One row, stretched to the host's height, so a view that manages its own
- * scrolling gets a definite height to manage. */
+ * scrolling gets a definite height to manage. The one column is the region's
+ * width and never more: an unbreakable line inside a view scrolls in the box
+ * that declared its overflow, rather than widening the view past the region,
+ * which clips it. CA_0064_002 */
 .view-host {
   flex: 1;
   min-height: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.5rem;
 }
 
@@ -544,110 +916,7 @@
   letter-spacing: 0.08em;
 }
 
-/* The dock is a layer above the document. A dock taller than the room left
- * to it takes the workspace's row down to nothing, while the workspace's
- * padding still spills over the dock's top edge; the document's rows are
- * positioned, and a positioned box paints — and takes the press — above an
- * unpositioned one, so they lay over the handle and a finger reached the
- * rows. Above every layer a view draws in the flow, and below the sheets, the
- * messages and anything dragged (`dock-layer.test.ts`). BO_0230_003 */
-.dock {
-  grid-area: dock;
-  position: relative;
-  z-index: 5;
-  display: grid;
-  padding: 0.75rem;
-  background: var(--panel-raised);
-  border-top: 1px solid var(--border);
-}
-
-/* The command bar (CA_0039_002): the strip naming where the work goes, then
-   one row — the agent's dropdown at the left, vertically centred on the field,
-   and the field, with the command's chips along its bottom edge and Run inside
-   it at its right end. Calm until engaged: a fine border on the raised panel,
-   no shadow, and the theme's tokens only. */
-.composer {
-  display: grid;
-  gap: 0.4rem;
-  min-width: 0;
-}
-
-.composer__bar {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  min-width: 0;
-}
-
-.composer__field {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.4rem 3.25rem 0.4rem 0.9rem;
-  border: 1px solid var(--border);
-  border-radius: 1.4rem;
-  background: var(--panel-raised);
-}
-
-.composer__field:focus-within {
-  border-color: var(--accent);
-}
-
-/* The field grows with its text up to a bound, then scrolls (`fitField` in
-   `command-field.tsx`); it has no border of its own inside the rounded one. */
-.dock .composer__field textarea {
-  min-height: 1.75rem;
-  max-height: 10rem;
-  padding: 0.25rem 0;
-  border: 0;
-  background: transparent;
-  resize: none;
-  overflow-y: auto;
-}
-
-/* Run: round, inside the field at its right end, the accent's ring and play
-   glyph. `.dock button` is more specific than a lone class, so the look is
-   qualified by the dock. */
-.dock .composer__run {
-  position: absolute;
-  inset-inline-end: 0.35rem;
-  top: 50%;
-  translate: 0 -50%;
-  display: grid;
-  place-items: center;
-  width: 2.25rem;
-  height: 2.25rem;
-  padding: 0;
-  border: 1px solid var(--accent);
-  border-radius: 50%;
-  background: var(--panel);
-  color: var(--accent);
-}
-
-.dock .composer__run:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
-}
-
-.dock .composer__run:disabled {
-  border-color: var(--border);
-  color: var(--text-muted);
-}
-
-/* What the command carries, one chip per reference in mark order and a pin
-   chip per pinned block, wrapping when they do not fit (CA_0039_003). */
-.composer__chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.dock .chip {
+.block-command .chip {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
@@ -661,69 +930,40 @@
   font-variant-numeric: tabular-nums;
 }
 
-.dock .chip:hover {
+.block-command .chip:hover {
   border-color: var(--accent);
   color: var(--text);
 }
 
-/* The paperclip beside the field: the native picker behind a round control,
-   and the files the command carries as chips before the reference chips, each
-   with its name, its size or state, and a × that takes it off (BO_0229_010). */
-.dock .composer__attach {
-  position: relative;
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 2.25rem;
-  height: 2.25rem;
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  background: var(--panel);
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-.dock .composer__attach:hover,
-.dock .composer__attach:focus-within {
-  border-color: var(--accent);
-  color: var(--text);
-}
-
-.dock .composer__attach[aria-disabled="true"] {
-  cursor: default;
-  color: var(--text-muted);
-  border-color: var(--border);
-}
-
-.dock .chip--attachment {
+.block-command .chip--attachment {
   max-width: 16rem;
   padding-inline-end: 0.15rem;
 }
 
-.dock .chip--attachment .chip__name {
+.block-command .chip--attachment .chip__name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
 }
 
-.dock .chip--attachment .chip__meta {
+.block-command .chip--attachment .chip__meta {
   flex: none;
 }
 
-.dock .chip--attachment[data-attachment-state="uploading"] .chip__meta {
+.block-command .chip--attachment[data-attachment-state="uploading"] .chip__meta {
   font-style: italic;
 }
 
-.dock .chip--attachment[data-attachment-state="refused"] {
+.block-command .chip--attachment[data-attachment-state="refused"] {
   border-color: var(--warning);
 }
 
-.dock .chip--attachment[data-attachment-state="refused"] svg {
+.block-command .chip--attachment[data-attachment-state="refused"] svg {
   color: var(--warning);
 }
 
-.dock .chip__remove {
+.block-command .chip__remove {
   display: grid;
   place-items: center;
   width: 1.5rem;
@@ -735,86 +975,21 @@
   color: var(--text-muted);
 }
 
-.dock .chip__remove:hover {
+.block-command .chip__remove:hover {
   color: var(--text);
   background: color-mix(in srgb, var(--accent) 16%, var(--panel));
 }
 
-/* A stale passage says so by its icon and its name as well as its colour. */
-.dock .chip[data-stale="true"] {
+.block-command .chip[data-stale="true"] {
   border-color: var(--warning);
 }
 
-.dock .chip[data-stale="true"] svg {
+.block-command .chip[data-stale="true"] svg {
   color: var(--warning);
 }
 
-/* The strip above the bar: the view's action, then the document the command
-   is aimed at, grayed, and the × that asks for words instead (CA_0039_001).
-   The title gives way first when the line is short. */
-.command-strip {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  min-width: 0;
-  color: var(--text-muted);
-  font-size: 0.85rem;
-}
-
-.command-strip .dock-actions {
-  flex: none;
-  margin: 0;
-}
-
-.command-strip__title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-muted);
-}
-
-.command-strip__answer {
-  flex: none;
-  color: var(--text);
-}
-
-.dock button.command-strip__title {
-  padding: 0;
-  text-decoration: underline dotted;
-  text-underline-offset: 0.2em;
-}
-
-.dock .command-strip__dismiss {
-  flex: none;
-  margin-inline-start: auto;
-  padding: 0 0.4rem;
-  color: var(--text-muted);
-}
-
-/* On a coarse pointer every control in the bar is a fingertip wide. */
-@media (pointer: coarse) {
-  .dock .composer__run,
-  .dock .chip,
-  .dock .chip__remove,
-  .dock .composer__attach,
-  .dock .command-strip__dismiss {
-    min-width: 44px;
-    min-height: 44px;
-  }
-
-  .dock .composer__run {
-    width: 44px;
-    height: 44px;
-  }
-
-  .composer__field {
-    padding-inline-end: 3.5rem;
-  }
-}
-
-/* The agent dropdown: the chosen agent's face and a caret, opening upward
-   from the dock onto the three agents. The faces keep their own ground, so
+/* The agent dropdown: the chosen agent's face and a caret, opening onto the
+   three agents. The faces keep their own ground, so
    they read the same in both themes; a ring marks the chosen one, and an
    agent that cannot run is dimmed and desaturated with its reason beneath
    its name. BO_0228_011 */
@@ -823,17 +998,8 @@
   flex: none;
 }
 
-.dock .agent-menu__button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  min-height: 44px;
-  min-width: 44px;
-  padding: 0.3rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--panel-raised);
-  color: var(--text-muted);
+.speed-toggle[data-speed="fast"] {
+  color: var(--accent);
 }
 
 .agent-menu__face {
@@ -844,6 +1010,10 @@
   box-shadow: 0 0 0 1px var(--border);
 }
 
+/* The list opens on whichever side has room and never grows past it: it is
+   opened from a block's chip as well as the composer, and the models made it
+   long enough to leave the screen. `--agent-menu-room` is what was measured
+   when it opened; the fallback keeps it sane before that. BO_0273_036 */
 .agent-menu__list {
   position: absolute;
   bottom: calc(100% + 0.35rem);
@@ -851,12 +1021,25 @@
   z-index: 20;
   min-width: 16rem;
   max-width: min(22rem, calc(100vw - 2rem));
+  max-height: min(var(--agent-menu-room, 60vh), 60vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   margin: 0;
   padding: 0.3rem;
   list-style: none;
   border: 1px solid var(--border);
   border-radius: 0.6rem;
   background: var(--panel-raised);
+}
+
+.agent-menu__list[data-side="below"] {
+  top: calc(100% + 0.35rem);
+  bottom: auto;
+}
+
+.agent-menu__list[data-from="right"] {
+  left: auto;
+  right: 0;
 }
 
 .agent-menu__option {
@@ -904,65 +1087,8 @@
   display: none;
 }
 
-/* `.dock button` is more specific than a lone class, so the handle qualifies. */
-.dock .dock__handle {
-  display: block;
-  width: 100%;
-  min-height: 2rem;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  touch-action: none;
-}
-
-.dock__handle span {
-  display: block;
-  width: 3rem;
-  height: 0.25rem;
-  margin: auto;
-  border-radius: 1rem;
-  background: var(--border);
-}
-
-/* The action area rides with the composer: present at the dock's composer and
- * console positions, gone at the collapsed handle. A view's way into a mode of
- * its own is reachable wherever the composer is, and the keyboard still opens
- * one from a collapsed dock. */
-.dock-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 0.6rem;
-}
-
-.shell[data-dock="collapsed"] .dock-actions,
-.shell[data-dock="collapsed"] .composer,
-.shell[data-dock="collapsed"] .console,
-.shell[data-dock="composer"] .console {
-  display: none;
-}
-
-.shell[data-dock="console"] .console {
-  display: block;
-  min-height: 8rem;
-}
-
-.console {
-  margin-top: 0.75rem;
-  border-top: 1px solid var(--border);
-  padding-top: 0.6rem;
-  font-family: var(--font-mono);
-  color: var(--text-muted);
-}
-
-.process-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: grid;
-  gap: 0.35rem;
-}
-
+/* An entry of the run list that is a process rather than a run of the open
+   document, in the panel's *Execution* section. CA_0058_005 */
 .process-entry {
   width: 100%;
   text-align: start;
@@ -1009,18 +1135,10 @@
   color: var(--error);
 }
 
-.undo {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0.5rem 0 0;
-  color: var(--text-muted);
-}
-
 /* A message is off the shell's layout: raising or lowering one moves no content
- * in the header, either drawer, the workspace, or the dock. The layer spans the
- * viewport so the card is centred without depending on the height of the header
- * or the dock, and it sits on the drag preview's layer rather than inventing one
+ * in the header, either drawer, or the workspace. The layer spans the
+ * viewport so the card is centred without depending on the height of the
+ * header, and it sits on the drag preview's layer rather than inventing one
  * of its own. It passes pointer events through, so the layer covers nothing the
  * message itself does not. */
 .message-layer {
@@ -1095,34 +1213,83 @@
   outline: 2px solid var(--accent);
 }
 
-.dock textarea {
-  min-height: 2.5rem;
-  resize: vertical;
-  font: inherit;
-  background: var(--panel);
-  color: var(--text);
-  border: 1px solid var(--border);
-}
-
-.shell[data-left="compact"] {
-  grid-template-columns: 4rem minmax(0, 1fr) 18rem;
+.shell[data-left="small"] {
+  --left-column: var(--panel-icons);
 }
 
 .shell[data-left="hidden"] {
-  grid-template-columns: 0 minmax(0, 1fr) 18rem;
+  --left-column: 0;
 }
 
-.shell[data-right="compact"] {
-  grid-template-columns: 16rem minmax(0, 1fr) 4rem;
-}
-
-.shell[data-right="compact"] .drawer--right p,
-.shell[data-right="compact"] .drawer--right h2 {
-  writing-mode: vertical-rl;
+.shell[data-right="small"] {
+  --right-column: var(--panel-icons);
 }
 
 .shell[data-right="hidden"] {
-  grid-template-columns: 16rem minmax(0, 1fr) 0;
+  --right-column: 0;
+}
+
+/* The small mode is the icon column alone on a desktop; a phone's sheet
+   carries content in it too (the phone rules below). CA_0056_002 */
+@media (min-width: 641px) {
+  .shell[data-left="small"] .drawer--left .panel-content,
+  .shell[data-right="small"] .drawer--right .panel-content {
+    display: none;
+  }
+}
+
+/* The handle on a shown panel's inner border: a grid sibling of the drawer
+   in the drawer's own area, held at its inner edge and shifted half its
+   width over the border, since the drawer clips what leaves its box. It is
+   the border's own hit area — nothing at rest but the resize cursor — and
+   paints the accent along the border while hovered, focused or dragged, as
+   the shown icon's bar is painted. While a drag is on, the workspace takes
+   no press and nothing is selected by the travel. CA_0066_002 CA_0066_003 */
+.panel-resize {
+  grid-area: left;
+  position: relative;
+  align-self: stretch;
+  justify-self: end;
+  width: 7px;
+  transform: translateX(4px);
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 5;
+}
+
+.panel-resize[data-side="right"] {
+  grid-area: right;
+  justify-self: start;
+  transform: translateX(-4px);
+}
+
+.panel-resize::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background 120ms ease-out;
+}
+
+.panel-resize:hover::after,
+.panel-resize:focus-visible::after,
+.panel-resize[data-active]::after {
+  background: var(--accent);
+}
+
+.panel-resize:focus-visible {
+  outline: none;
+}
+
+.shell:has(.panel-resize[data-active]) {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.shell:has(.panel-resize[data-active]) .workspace {
+  pointer-events: none;
 }
 
 .shell[data-left="hidden"] .drawer--left,
@@ -1134,8 +1301,13 @@
   .shell {
     grid-template:
       "header" auto
-      "workspace" minmax(0, 1fr)
-      "dock" auto / minmax(0, 1fr);
+      "workspace" minmax(0, 1fr) / minmax(0, 1fr);
+  }
+
+  /* A phone's panel is a sheet across the one column: no border to drag.
+     CA_0066_002 */
+  .panel-resize {
+    display: none;
   }
 
   /* One line and the tab strip under it. The wordmark takes what the
@@ -1188,11 +1360,270 @@
     display: none;
   }
 
+  /* In *Full* the tab strip is the row under the line, from edge to edge:
+     it steps out of the reserve the line keeps for the handles. CA_0054_002 */
   .shell-header .tab-strip {
     display: flex;
     order: 10;
-    flex: 1 0 100%;
+    flex: 1 0 calc(100% + 4.5rem);
+    margin-inline: -2.25rem;
+    padding-inline: 0.25rem;
+    box-sizing: border-box;
     scroll-snap-type: x mandatory;
+  }
+
+  /* The strip's inline padding is inside its scrollport, so the sticky
+     control sits that far in from the edge; it steps out to it, or a sliver
+     of the tab beneath shows past it. CA_0067_002 */
+  .shell-header .tab-strip .close-all-tabs {
+    right: -0.25rem;
+  }
+
+  .shell-header .header-mode-toggle {
+    display: inline-flex;
+    flex: 0 0 auto;
+    padding-inline: 0.2rem;
+  }
+
+  /* *Minimum*: one line — the wordmark, the one tab, the menu. CA_0054_003 */
+  :root[data-header-mode="minimum"] .shell-header {
+    flex-wrap: nowrap;
+    touch-action: pan-y;
+  }
+
+  :root[data-header-mode="minimum"] .shell-header .wordmark {
+    flex: 0 0 auto;
+  }
+
+  :root[data-header-mode="minimum"] .shell-header .tab-strip {
+    order: 0;
+    flex: 1 1 0;
+    margin-inline: 0;
+    padding-inline: 0;
+    gap: 0;
+    overflow: hidden;
+    scroll-snap-type: none;
+  }
+
+  /* The one tab is the active one, taking what the line leaves; its title
+     ends in an ellipsis before its ×. CA_0054_007 */
+  :root[data-header-mode="minimum"] .tab-wrap[data-active="false"] {
+    display: none;
+  }
+
+  :root[data-header-mode="minimum"] .tab-wrap[data-active="true"] {
+    flex: 1 1 auto;
+    max-width: none;
+    touch-action: pan-y;
+  }
+
+  :root[data-header-mode="minimum"] .tab-wrap[data-active="true"] .tab {
+    flex: 1 1 auto;
+  }
+
+  /* A faded edge where tabs lie beyond, carrying their count: a piece of the
+     next tab's shape fading outwards, the count on it at full strength.
+     CA_0054_007 */
+  :root[data-header-mode="minimum"] .tab-edge {
+    position: relative;
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 1.75rem;
+    align-self: end;
+    height: 1.8rem;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+
+  :root[data-header-mode="minimum"] .tab-edge::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 1px solid var(--border);
+    border-bottom: none;
+    background: var(--panel);
+  }
+
+  :root[data-header-mode="minimum"] .tab-edge--before::before {
+    border-right: none;
+    border-radius: 0.4rem 0 0 0;
+    mask-image: linear-gradient(to left, var(--panel) 40%, transparent);
+  }
+
+  :root[data-header-mode="minimum"] .tab-edge--after::before {
+    border-left: none;
+    border-radius: 0 0.4rem 0 0;
+    mask-image: linear-gradient(to right, var(--panel) 40%, transparent);
+  }
+
+  :root[data-header-mode="minimum"] .tab-edge__count {
+    position: relative;
+  }
+
+  /* The one menu, at the line's right, holding every control. CA_0054_003 */
+  :root[data-header-mode="minimum"] .header-menu {
+    position: relative;
+    display: inline-flex;
+    flex: 0 0 auto;
+  }
+
+  :root[data-header-mode="minimum"] .header-menu__button {
+    position: relative;
+    display: inline-flex;
+    padding-inline: 0.2rem;
+  }
+
+  :root[data-header-mode="minimum"] .header-menu__announce {
+    display: block;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
+  :root[data-header-mode="minimum"] .header-menu__panel {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    right: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.15rem;
+    min-width: 13rem;
+    max-width: min(20rem, calc(100vw - 2rem));
+    box-sizing: border-box;
+    padding: 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 0.6rem;
+    background: var(--panel-raised);
+    font-size: 0.85rem;
+  }
+
+  :root[data-header-mode="minimum"] .header-menu__panel[hidden] {
+    display: none !important;
+  }
+
+  :root[data-header-mode="minimum"] .header-menu__panel > * {
+    justify-content: flex-start;
+    gap: 0.5rem;
+    padding: 0.35rem 0.5rem;
+    text-align: start;
+    font: inherit;
+  }
+
+  :root[data-header-mode="minimum"] .header-menu__panel .header-mode-toggle {
+    order: -1;
+  }
+
+  /* The line's layout controls, which the phone's line never showed, are in
+     the menu too: *Minimum* holds every control. On a phone a drawer's state
+     chooses nothing about the grid, so they set the state a desktop reads.
+     CA_0054_003 */
+  :root[data-header-mode="minimum"] .header-menu__panel .layout-control {
+    display: inline-flex;
+  }
+
+  /* *Minimum* has no strip end: *Close all tabs* is a row of the menu there
+     and the strip's copy is not drawn. CA_0067_003 */
+  :root[data-header-mode="minimum"] .header-menu__panel .close-all-tabs {
+    display: inline-flex;
+  }
+
+  :root[data-header-mode="minimum"] .tab-strip .close-all-tabs {
+    display: none;
+  }
+
+  :root[data-header-mode="minimum"] .header-menu__panel .menu-label,
+  :root[data-header-mode="minimum"] .header-menu__panel .update-hint__words {
+    display: inline;
+  }
+
+  :root[data-header-mode="minimum"] .header-menu__panel .save-status__word {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+  }
+
+  :root[data-header-mode="minimum"] .header-menu__panel .save-status {
+    gap: 0.5rem;
+  }
+
+  /* The person and the licence say what they hold in the menu itself, with
+     no second press. */
+  :root[data-header-mode="minimum"] .header-menu__panel .identity,
+  :root[data-header-mode="minimum"] .header-menu__panel .licence-warning {
+    display: block;
+    border-top: 1px solid var(--border);
+    padding-top: 0.5rem;
+  }
+
+  :root[data-header-mode="minimum"]
+    .header-menu__panel
+    .header-disclosure__button {
+    display: none;
+  }
+
+  :root[data-header-mode="minimum"] .header-menu__panel .header-disclosure,
+  :root[data-header-mode="minimum"]
+    .header-menu__panel
+    .header-disclosure__panel {
+    display: block;
+    position: static;
+    min-width: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+  }
+
+  /* Its own `hidden` stays for the line's disclosure; the open menu is
+     already the press that shows it. */
+  :root[data-header-mode="minimum"]
+    .header-menu__panel
+    .header-disclosure__panel[hidden] {
+    display: block !important;
+    position: static;
+    min-width: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+  }
+
+  /* A change holds the button's place, then the list comes back with a dot
+     until the menu is opened. CA_0054_004 */
+  :root[data-header-mode="minimum"] .header-menu__dot {
+    position: absolute;
+    top: 0.1rem;
+    right: 0.05rem;
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 999px;
+    background: var(--accent);
+  }
+
+  :root[data-header-mode="minimum"] .header-menu__count {
+    min-width: 1rem;
+    border-radius: 999px;
+    padding: 0.1rem 0.35rem;
+    background: var(--running);
+    color: var(--canvas);
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    line-height: 1.2;
+    text-align: center;
   }
 
   .tab {
@@ -1231,17 +1662,7 @@
 
   .shell[data-sheet="left"] .drawer--left,
   .shell[data-sheet="right"] .drawer--right {
-    display: block;
-  }
-
-  /* A drawer state names a sheet here, never a column: the desktop's
-     three-column templates for compact and hidden drawers are more specific
-     than the phone's one column above, and a record with the inspector
-     hidden on the desktop left the header, the workspace and the dock in a
-     16rem first column on the phone. CA_0047_007 */
-  .shell[data-left],
-  .shell[data-right] {
-    grid-template-columns: minmax(0, 1fr);
+    display: flex;
   }
 
   .sheet-handle,
@@ -1255,12 +1676,12 @@
     background: var(--panel-raised);
     color: var(--text);
     z-index: 10;
-    /* Centred on the header's line, at the edge as before. CA_0041_008 */
-    inset-block-start: calc(
-      var(--header-pad) + var(--header-line) / 2 - 2.75rem / 2
-    );
+    /* On the header's line and no taller, at the edge as before, so the tab
+       strip below is free from edge to edge. CA_0041_008 CA_0054_002 */
+    inset-block-start: var(--header-pad);
     min-width: 2rem;
-    min-height: 2.75rem;
+    height: var(--header-line);
+    padding-block: 0;
     box-sizing: border-box;
   }
 
@@ -1280,14 +1701,14 @@
 
   /* The library's close control keeps a line of its own above the first
      band, so no sticky header slides beside or under it. CA_0044_004 */
-  .drawer--left > .sheet-close {
+  .drawer--left .panel-content > .sheet-close {
     float: none;
     margin-inline-start: auto;
   }
 
   /* Its × is drawn large inside the same 44px box: the glyph grows, the
      control does not. CA_0044_009 */
-  .drawer--left > .sheet-close {
+  .drawer--left .panel-content > .sheet-close {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1296,24 +1717,9 @@
     line-height: 1;
   }
 
-  /* What grows in the dock scrolls inside itself on a phone, so the dock
-   * cannot push the document's row to nothing — the state a reader met, with
-   * the handle under the document's rows and the dock opened for good. The
-   * agent menu opens upward out of the dock, so the dock itself never clips.
-   * BO_0230_003 */
-  .shell[data-dock="console"] .console,
-  .composer__chips,
-  .composer__references {
-    max-height: 40dvh;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-  }
+  
 
-  /* A fingertip's height across the dock's width, for a tap and a vertical
-   * swipe alike. */
-  .dock .dock__handle {
-    min-height: 44px;
-  }
+  
 }
 
 .view-fallback {
@@ -1412,7 +1818,16 @@
   font-size: 1.1rem;
 }
 
-.settings-section__lead,
+/* A section's lead is prose: what the section is for, in the muted colour,
+   wrapping as a paragraph does. It shares nothing with the command log below:
+   an unbreakable line there is the whole view's minimum width, and the view
+   would grow past the workspace's edge, which clips it, taking the rows'
+   controls with it. CA_0064_001 */
+.settings-section__lead {
+  margin: 0 0 1rem;
+  color: var(--text-muted);
+}
+
 /* The commands the Update tab shows where no updater runs, and the updater's
    log while it does. BO_0223_014 */
 .settings-commands {
@@ -1619,14 +2034,6 @@
   color: var(--text-muted);
 }
 
-/* What the dock says about the last goal, beside the control that sent it.
-   A refusal is not worth taking the whole frame for. */
-.composer__notice {
-  margin: 0;
-  color: var(--error);
-  font-size: 0.85rem;
-}
-
 /* The run's activity, above the list of processes it is one of. */
 .run-activity {
   display: flex;
@@ -1649,10 +2056,6 @@
   font-family: var(--font-mono);
   font-size: 0.8rem;
   color: var(--text-muted);
-}
-
-.run-activity__cancel {
-  align-self: flex-start;
 }
 
 /* What a run proposed, listed in the inspector under the process it belongs to. */
@@ -2035,7 +2438,7 @@
 }
 
 /* A choice action: a label, the current value's icon, a native select — the
-   shell's own idiom in the inspector and the dock (BO_0222_007). */
+   shell's own idiom in the inspector and the view bar (BO_0222_007). */
 .choice-control {
   display: inline-flex;
   align-items: center;
@@ -2054,78 +2457,101 @@
   color: var(--text);
 }
 
-/* The references a `#` being typed could mean, as buttons that open above
-   the field, since its bottom edge holds the chips (CA_0039_002); pointer,
-   touch and Tab all reach them. */
-.composer__references {
-  position: absolute;
-  inset-inline: 0;
-  bottom: calc(100% + 0.4rem);
-  z-index: 1;
-  display: grid;
-  gap: 0.25rem;
-  margin: 0;
-  padding: 0.35rem;
-  list-style: none;
-  border: 1px solid var(--border);
-  border-radius: 0.6rem;
-  background: var(--panel-raised);
-}
-
-.composer__references q {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
+/* On the bar a choice with an icon is that icon and a caret, and no words:
+   room is what the bar has least of, and the current value is already said
+   by the symbol. The native select is what is pressed and what a screen
+   reader reads — it keeps its options, its keyboard and the label as its
+   accessible name — and lies transparent over the two glyphs, which are the
+   face. The resting look is the bar button's, so the control reads as one of
+   the row rather than as a field (DO_0010_009). */
+.choice-control--icon {
+  position: relative;
+  gap: 0.1rem;
+  min-width: 2rem;
+  padding: 0.2rem 0.3rem;
+  border: 1px solid transparent;
+  border-radius: 0.35rem;
   color: var(--text);
+  cursor: pointer;
+}
+.choice-control--icon:hover,
+.choice-control--icon:focus-within {
+  border-color: var(--border);
+  background: var(--panel);
+}
+.choice-control--icon:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.choice-control__caret {
+  color: var(--text-muted);
+}
+/* The select itself: the whole control's box, invisible, so the press, the
+   keyboard and the accessible name are the platform's and the face is ours. */
+.choice-control--icon select {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
 }
 
-.composer__number {
-  font-variant-numeric: tabular-nums;
-  color: var(--accent);
-}
+/* A popover action: a control and the panel it opens beside it, in the bar
+   and the inspector alike (BO_0272_014).
 
-.composer__references button {
-  display: flex;
-  gap: 0.5rem;
-  width: 100%;
-  min-width: 0;
+   The panel is fixed and placed from the control's box, not hung from the
+   control's ground: `.view-bar` is one bar-height tall and scrolls sideways,
+   and a scrollport clips the absolutely positioned descendants whose
+   containing block is inside it, so the panel the reader opened on the bar
+   was cut off at 40px. A fixed box's containing block is the viewport, so it
+   escapes the clip; `inset: auto` clears the centring the top layer's own
+   rules would give it, and `top`/`left` arrive from the control's measured
+   box. The z-index is the fallback for a browser with no top layer, where
+   the panel still paints above everything the workspace draws under the bar
+   (DO_0010_010). */
+.popover-control {
+  position: relative;
+  display: inline-flex;
+}
+.popover-control__panel {
+  position: fixed;
+  inset: auto;
+  /* The whole box is what has to fit the viewport, since the placement is
+     computed from it: with the padding outside the max, a phone's panel was
+     8px wider than the room and hung off the trailing edge. */
+  box-sizing: border-box;
+  margin: 0;
+  z-index: 6;
+  inline-size: max-content;
+  max-inline-size: min(22rem, calc(100vw - 2rem));
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--border);
+  font-size: 0.85rem;
   text-align: start;
 }
-
-/* A contributed toggle says which of the view's modes the surface is in, not
- * only that there is a way in (`command-dock.md`). Every dock button shares a
- * transparent, borderless rest, so the pressed state was in the markup alone
- * and command mode could be on with nothing showing it. At rest the toggle
- * reads as a control with an empty ring; pressed, it takes the accent, a
- * tinted ground and a filled ring — shape as well as colour. BO_0227 */
-.dock-actions button[aria-pressed] {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  border-color: var(--border);
+.popover-control__heading {
+  margin: 0 0 0.45rem;
+  color: var(--text-muted);
 }
-
-.dock-actions button[aria-pressed]::before {
-  content: "";
-  box-sizing: border-box;
-  width: 0.65rem;
-  height: 0.65rem;
-  border: 1.5px solid currentColor;
-  border-radius: 50%;
+.popover-control__panel dl {
+  margin: 0;
+  display: grid;
+  gap: 0.4rem;
 }
-
-.dock-actions button[aria-pressed="true"] {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, var(--panel-raised));
+.popover-control__panel dt {
   font-weight: 600;
 }
-
-.dock-actions button[aria-pressed="true"]::before {
-  border-color: var(--accent);
-  background: var(--accent);
+.popover-control__panel dd {
+  margin: 0;
+  color: var(--text-muted);
 }
-
 
 /* A system process — the kernel's own refinement — carries its glyph in the
    console row and the inspector. BO_0245_010 */
@@ -2182,8 +2608,450 @@
   color: var(--text-muted);
 }
 
-/* The run proposes into the person's proposal (BO_0250_010). */
-.command-strip__branch {
-  color: var(--text-muted);
+/* The run chips (BO_0265_008, CA_0055_001): a line right below the view bar,
+   over the region's top edge as the bar is, opaque, one chip per open run
+   group on the target, newest first. It pushes the content down: its height
+   is published as `--view-chips-height`, which a view adds to what it keeps
+   clear of the bar. The chip itself shows or hides its change and reads as
+   pressed while it is shown; *Reject all* and *Accept all* follow once the
+   run has ended. */
+.run-chips {
+  position: absolute;
+  inset-inline: 0;
+  top: var(--view-bar-height);
+  z-index: 4;
+  box-sizing: border-box;
+  display: flex;
+  /* One row whatever it carries, scrolling sideways when the chips need more
+   * room than it has, with nothing held at an edge — the view bar's shape
+   * (`CA_0060_001`). Wrapped, every extra row pushed the document down by
+   * another row, since the line publishes its own height. CA_0062_001 */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-raised);
+  list-style: none;
+  min-width: 0;
+}
+
+/* An end with chips beyond it fades outwards, so the line says it holds more
+ * than the reader can see: the line's own ground thinning out, answering no
+ * press and taking no room. Each fade is a sticky flex item held at its end of
+ * the scrollport and pulled back out of the flow by a negative margin, painted
+ * over the chips because a positioned box paints above the in-flow ones.
+ * Whether there is anything beyond an end is `data-more-start` and
+ * `data-more-end`, which the line reads off itself: no stylesheet can see a
+ * scroll position. The bar's rules, on the line's ground. CA_0060_002
+ * CA_0062_002 */
+.run-chips::before,
+.run-chips::after {
+  content: "";
+  position: sticky;
+  z-index: 1;
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 1.5rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.run-chips::before {
+  inset-inline-start: 0;
+  margin-inline-end: -1.5rem;
+  background: linear-gradient(to right, var(--panel-raised), transparent);
+}
+
+.run-chips::after {
+  inset-inline-end: 0;
+  margin-inline-start: -1.5rem;
+  background: linear-gradient(to left, var(--panel-raised), transparent);
+}
+
+.run-chips[data-more-start]::before,
+.run-chips[data-more-end]::after {
+  opacity: 1;
+}
+
+/* Nothing moves and nothing fades for a reader who asked for stillness. */
+@media (prefers-reduced-motion: reduce) {
+  .run-chips::before,
+  .run-chips::after {
+    transition: none;
+  }
+}
+
+.run-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  /* A chip keeps its size on the one row, and the expanded one is held to the
+   * line's width: what gives way there is its words, which truncate, never a
+   * control. CA_0062_005 */
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.15rem 0.3rem 0.15rem 0.2rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: var(--panel-raised);
   font-size: 0.8125rem;
+}
+
+.run-chip[data-run-chip-tone="codex"] {
+  border-color: var(--proposal-codex-edge);
+}
+
+.run-chip[data-run-chip-tone="claude"] {
+  border-color: var(--proposal-claude-edge);
+}
+
+.run-chip[data-run-chip-tone="hermes"] {
+  border-color: var(--proposal-hermes-edge);
+}
+
+/* The chip's own press: its face and its words, a toggle of its change. */
+.run-chip__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 1rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.run-chip__toggle:disabled {
+  cursor: default;
+}
+
+.run-chip__toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* A hidden change's chip reads as not pressed: dashed and muted. */
+.run-chip:not([data-run-chip-shown]) {
+  border-style: dashed;
+}
+
+.run-chip:not([data-run-chip-shown]) .run-chip__text,
+.run-chip:not([data-run-chip-shown]) .run-chip__count {
+  color: var(--text-muted);
+}
+
+.run-chip__face {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--text-muted);
+}
+
+.run-chip__portrait {
+  display: block;
+  width: 22px;
+  height: 22px;
+  object-fit: cover;
+}
+
+.run-chip__text {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-chip__answers {
+  flex: none;
+  display: inline-flex;
+  gap: 0.2rem;
+}
+
+.run-chip__answer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.75rem;
+}
+
+.run-chip__answer:hover,
+.run-chip__answer:focus-visible {
+  background: var(--selection);
+}
+
+/* A shown change takes its proposer's ground, as its proposals do; the
+ * session the tab works in takes the accent, edge and ground. CA_0057_015 */
+.run-chip[data-run-chip-shown] {
+  background: var(--proposal-person);
+}
+
+.run-chip[data-run-chip-shown][data-run-chip-tone="codex"] {
+  background: var(--proposal-codex);
+}
+
+.run-chip[data-run-chip-shown][data-run-chip-tone="claude"] {
+  background: var(--proposal-claude);
+}
+
+.run-chip[data-run-chip-shown][data-run-chip-tone="hermes"] {
+  background: var(--proposal-hermes);
+}
+
+.run-chip[data-run-chip-working] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, var(--panel-raised));
+}
+
+/* A session's pencil: work in it, pressed while the tab does. CA_0057_014 */
+.run-chip__work {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.run-chip__work:hover,
+.run-chip__work:focus-visible,
+.run-chip__work[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* A session chip under separation of duties: in place of *Accept all*.
+ * The chips take no touch minimum height: at 44px the line stood taller than
+ * its words on a phone. CA_0057_002 CA_0057_003 */
+.run-chip__note {
+  align-self: center;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+/* A minimized chip: from the second chip on, one that is not the expanded
+ * chip stands as its proposer's face, the number of changes it holds and its
+ * two answers as signs alone. The words and the labels are hidden here rather
+ * than left out of the chip, so only the eye loses them — every name the chip
+ * carries is the one it carries drawn in full. CA_0061_001 */
+.run-chip__count {
+  display: none;
+  min-width: 1ch;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.run-chip__note-sign {
+  display: none;
+  align-self: center;
+  color: var(--text-muted);
+}
+
+.run-chips[data-run-chips-several] .run-chip[data-run-chip-ended]:not([data-run-chip-shown]) .run-chip__text {
+  display: none;
+}
+
+.run-chips[data-run-chips-several] .run-chip[data-run-chip-ended]:not([data-run-chip-shown]) .run-chip__count {
+  display: inline;
+}
+
+.run-chips[data-run-chips-several] .run-chip[data-run-chip-ended]:not([data-run-chip-shown]) .run-chip__answer {
+  padding: 0.1rem 0.25rem;
+}
+
+.run-chips[data-run-chips-several] .run-chip[data-run-chip-ended]:not([data-run-chip-shown]) .run-chip__answer > span {
+  display: none;
+}
+
+.run-chips[data-run-chips-several] .run-chip[data-run-chip-ended]:not([data-run-chip-shown]) .run-chip__note-sign {
+  display: inline-grid;
+  place-items: center;
+}
+
+/* Hidden to the eye only, so the chip still says whose accept it waits on. */
+.run-chips[data-run-chips-several] .run-chip[data-run-chip-ended]:not([data-run-chip-shown]) .run-chip__note {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+/* The inspector's Execution section: the runs of the document in the active
+ * tab, each a face, its command's first line and its state, with its answers
+ * beside it; with a block selected, grouped as from it and touching it.
+ * BO_0267_010 */
+.execution {
+  margin-top: 1rem;
+}
+
+.execution__list {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.execution__group {
+  margin: 0.6rem 0 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.execution__run {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.execution__toggle {
+  display: flex;
+  flex: 1 1 12rem;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.3rem 0.4rem;
+  border: 1px dashed var(--border);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.execution__toggle[aria-pressed="true"] {
+  border-style: solid;
+  border-color: var(--accent);
+}
+
+.execution__toggle:disabled {
+  cursor: default;
+}
+
+/* The caret beside an entry: it opens that run's detail, where its events
+   stand. Its own control, so the entry's body keeps showing and hiding the
+   run's proposals. CA_0058_006 */
+.execution__detail {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.execution__detail:hover:not(:disabled),
+.execution__detail[aria-pressed="true"] {
+  border-color: var(--border);
+  background: var(--panel-raised);
+  color: var(--text);
+}
+
+.execution__detail:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+/* A process of the reader's that is no run of this document keeps the list's
+   shape, with the words the console gave it. CA_0058_005 */
+.execution__toggle.process-entry {
+  border-style: solid;
+}
+
+.execution__face {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.execution__words {
+  display: grid;
+  min-width: 0;
+}
+
+.execution__line,
+.execution__state {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.execution__state {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.execution__answers {
+  display: inline-flex;
+  gap: 0.2rem;
+}
+
+.execution__answer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.execution__answer:hover,
+.execution__answer:focus-visible {
+  background: var(--selection);
+}
+
+.execution__notice {
+  margin: 0.3rem 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+@media (pointer: coarse) {
+  .execution__toggle,
+  .execution__answer {
+    min-height: 44px;
+  }
 }

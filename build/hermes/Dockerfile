@@ -126,6 +126,127 @@ patch(
 )
 EOF
 
+# Pinned-release patches for runs side by side. BO_0269_007 BO_0269_008
+# BO_0269_009 BO_0269_011
+#
+# Each run names itself on its tool calls, so the kernel binds a call to that
+# run's context while other runs are going. The kernel sets every gateway
+# run's session to its own run id. Hermes's own loop hands each tool handler
+# the agent's session id, and the handler's call now carries it as the MCP
+# request's `_meta`. A Codex run is its own `codex app-server` process; it is
+# spawned with CALLIOPA_RUN_ID in its environment, which the toolset's
+# registration sends as the X-Calliopa-Run header (`env_http_headers`, written
+# by the entrypoint).
+#
+# Codex and Hermes share one gateway. A run names its controller and speed by
+# model route; a route may now carry `api_mode` and `reasoning_effort` beside
+# the model and provider it always could, so no run rewrites the gateway's
+# configuration or restarts it. The Codex session takes the route's model and
+# effort on `thread/start`.
+#
+# The assertions are the point, as above.
+RUN python3 - <<'EOF'
+import pathlib
+
+root = pathlib.Path("/usr/local/lib/python3.13/site-packages")
+
+
+def patch(relative, old, new):
+    path = root / relative
+    source = path.read_text()
+    assert source.count(old) == 1, (
+        f"hermes pin changed: the calliopa concurrent-runs patch no longer "
+        f"applies to {relative}. Re-evaluate it against the new release before "
+        f"bumping the pin."
+    )
+    path.write_text(source.replace(old, new))
+
+
+patch(
+    "tools/mcp_tool.py",
+    "                    result = await server.session.call_tool(tool_name, arguments=args)\n",
+    "                    result = await server.session.call_tool(\n"
+    "                        tool_name,\n"
+    "                        arguments=args,\n"
+    "                        meta=(\n"
+    '                            {"calliopa/run": kwargs["session_id"]}\n'
+    '                            if server_name == "calliopa-kernel" and kwargs.get("session_id")\n'
+    "                            else None\n"
+    "                        ),\n"
+    "                    )\n",
+)
+patch(
+    "gateway/platforms/api_server.py",
+    '        allowed_keys = ("model", "provider", "api_key", "base_url")\n',
+    '        allowed_keys = ("model", "provider", "api_key", "base_url", "api_mode", "reasoning_effort")\n',
+)
+patch(
+    "gateway/platforms/api_server.py",
+    '            if route.get("base_url"):\n'
+    '                runtime_kwargs["base_url"] = route["base_url"]\n',
+    '            if route.get("base_url"):\n'
+    '                runtime_kwargs["base_url"] = route["base_url"]\n'
+    '            if route.get("api_mode"):\n'
+    '                runtime_kwargs["api_mode"] = route["api_mode"]\n'
+    '            if route.get("reasoning_effort"):\n'
+    "                from hermes_constants import parse_reasoning_effort\n"
+    '                reasoning_config = parse_reasoning_effort(route["reasoning_effort"]) or reasoning_config\n',
+)
+patch(
+    "agent/transports/codex_app_server_session.py",
+    "        developer_instructions: Optional[str] = None,\n"
+    "    ) -> None:\n",
+    "        developer_instructions: Optional[str] = None,\n"
+    "        thread_overrides: Optional[dict] = None,\n"
+    "    ) -> None:\n"
+    "        self._thread_overrides = dict(thread_overrides or {})\n",
+)
+patch(
+    "agent/transports/codex_app_server_session.py",
+    "        if self._developer_instructions:\n"
+    '            params["developerInstructions"] = self._developer_instructions\n',
+    "        if self._developer_instructions:\n"
+    '            params["developerInstructions"] = self._developer_instructions\n'
+    "        params.update(self._thread_overrides)\n",
+)
+patch(
+    "agent/codex_runtime.py",
+    "            request_routing=_ServerRequestRouting(\n",
+    "            client_factory=_calliopa_client_factory(agent),\n"
+    "            thread_overrides=_calliopa_thread_overrides(agent),\n"
+    "            request_routing=_ServerRequestRouting(\n",
+)
+path = root / "agent/codex_runtime.py"
+path.write_text(
+    path.read_text()
+    + '''
+
+
+def _calliopa_client_factory(agent):
+    """The app-server client of one run, spawned with the run's id in its
+    environment so its tool calls name the run. BO_0269_008"""
+    import functools
+
+    from agent.transports.codex_app_server import CodexAppServerClient
+
+    run = str(getattr(agent, "session_id", "") or "")
+    return functools.partial(CodexAppServerClient, env={"CALLIOPA_RUN_ID": run} if run else None)
+
+
+def _calliopa_thread_overrides(agent):
+    """The run's model and reasoning effort, from its route. BO_0269_011"""
+    overrides = {}
+    model = str(getattr(agent, "model", "") or "")
+    if model:
+        overrides["model"] = model
+    reasoning = getattr(agent, "reasoning_config", None)
+    if isinstance(reasoning, dict) and reasoning.get("effort"):
+        overrides["config"] = {"model_reasoning_effort": reasoning["effort"]}
+    return overrides
+'''
+)
+EOF
+
 # Both trap dependencies, asserted at build time so a broken image never
 # reaches a compose file. `aiohttp` is what the API server needs an adapter
 # from; `mcp.client.streamable_http` is the module the release's transport gate

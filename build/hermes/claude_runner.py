@@ -3,10 +3,11 @@
 
 The kernel bridge speaks a small part of the Hermes gateway's runs API, and
 this process speaks the same part, so a run the reader sends to Claude goes
-through the bridge's event normalization, its status-poll backstop, its busy
-refusal and its record keeping unchanged:
+through the bridge's event normalization, its status-poll backstop and its
+record keeping unchanged. Runs go side by side, each its own `claude -p`
+(BO_0269_002):
 
-  POST /v1/runs              {input, instructions} -> {run_id}
+  POST /v1/runs              {input, instructions, session_id, speed} -> {run_id}
   GET  /v1/runs/{id}         {status, error, model, billing}
   GET  /v1/runs/{id}/events  server-sent events, replayed from the start
   POST /v1/runs/{id}/stop
@@ -61,6 +62,18 @@ FINISHED_RUNS_KEPT = 20
 
 SECRET_PATTERN = re.compile(r"sk-ant-[A-Za-z0-9_\-]{8,}")
 
+# What each speed asks of the CLI. Claude Code reasons on Opus at both speeds
+# (user decision, 2026-09-19): fast at low effort, thorough at the model's
+# default effort. The mapping is recorded in docs/system/hermes.md, Concurrent
+# And Faster Runs (BO_0269_010, BO_0269_012).
+SPEED_ARGS = {
+    "fast": ["--model", "opus", "--effort", "low"],
+    "thorough": ["--model", "opus"],
+}
+# The header a tool call names its run by, so the kernel binds the call to
+# that run's context while other runs are going. BO_0269_008
+RUN_HEADER = "X-Calliopa-Run"
+
 
 def api_key():
     """The gateway's API bearer, which this runner answers under too."""
@@ -105,10 +118,13 @@ def redact(text):
 
 
 class Run:
-    def __init__(self, goal, instructions):
+    def __init__(self, goal, instructions, session="", speed=""):
         self.id = "crun-" + uuid.uuid4().hex[:16]
         self.goal = goal
         self.instructions = instructions
+        # The kernel's run id, which the run's tool calls carry back.
+        self.session = session
+        self.speed = speed if speed in SPEED_ARGS else "thorough"
         self.status = "running"
         self.error = ""
         self.model = ""
@@ -152,16 +168,12 @@ class Runner:
         self.lock = threading.Lock()
         self.runs = {}
         self.order = []
-        self.active = None
 
-    def start(self, goal, instructions):
+    def start(self, goal, instructions, session="", speed=""):
         with self.lock:
-            if self.active is not None and self.active.status == "running":
-                return None, "a run is already active (run %s)" % self.active.id
-            run = Run(goal, instructions)
+            run = Run(goal, instructions, session, speed)
             self.runs[run.id] = run
             self.order.append(run.id)
-            self.active = run
             for stale in self.order[:-FINISHED_RUNS_KEPT]:
                 if self.runs[stale].status != "running":
                     del self.runs[stale]
@@ -174,12 +186,17 @@ class Runner:
             return self.runs.get(run_id)
 
 
-def command(mcp_config, prompt_file):
+def command(mcp_config, prompt_file, speed="thorough"):
     return [
         CLAUDE_BIN,
         "-p",
         "--output-format", "stream-json",
         "--verbose",
+        # The turn as it is written, so a long one shows as progress: its
+        # words as they come, and a tool call as soon as it begins.
+        # BO_0269_010
+        "--include-partial-messages",
+        *SPEED_ARGS.get(speed, []),
         "--tools", ",".join(WEB_TOOLS),
         "--strict-mcp-config",
         "--mcp-config", mcp_config,
@@ -220,6 +237,11 @@ def run_claude(run):
     mcp_config = os.path.join(home, "mcp.json")
     # The bearer is named, never written: the CLI expands the variable when it
     # connects, as Codex's registration reads its own from the environment.
+    # The run header names the kernel's run, so the toolset binds each call to
+    # it while other runs are going. BO_0269_008
+    headers = {"Authorization": "Bearer ${CALLIOPA_AGENT_TOOLS_BEARER}"}
+    if run.session:
+        headers[RUN_HEADER] = run.session
     with open(mcp_config, "w") as handle:
         json.dump(
             {
@@ -227,7 +249,7 @@ def run_claude(run):
                     TOOLSET: {
                         "type": "http",
                         "url": KERNEL_TOOLS_URL,
-                        "headers": {"Authorization": "Bearer ${CALLIOPA_AGENT_TOOLS_BEARER}"},
+                        "headers": headers,
                     }
                 }
             },
@@ -253,7 +275,7 @@ def run_claude(run):
 
     try:
         process = subprocess.Popen(
-            command(mcp_config, prompt_file),
+            command(mcp_config, prompt_file, run.speed),
             cwd=work,
             env=env,
             stdin=subprocess.PIPE,
@@ -315,23 +337,53 @@ def run_claude(run):
 class StreamReader:
     """The CLI's stream-json, read into the event names the bridge consumes.
 
-    Assistant text is held until something follows it, because the final
+    With partial messages on, words travel as they are written and a tool call
+    is reported when it begins, before its input is complete; the whole
+    message that follows repeats both and is not sent again. Without them,
+    assistant text is held until something follows it, because the final
     words arrive again as the result and travel once, in `run.completed`'s
-    `output`, the way the gateway sends them.
+    `output`, the way the gateway sends them. BO_0269_010
     """
 
     def __init__(self, run):
         self.run = run
         self.pending = []
         self.tools = {}
+        # What partial messages already sent: tool calls by id, and whether
+        # the words of the message being written went out.
+        self.announced = set()
+        self.streamed = ""
+        self.last_streamed = ""
 
     def flush(self):
         for text in self.pending:
             self.run.emit("response.output_text.delta", delta=text)
         self.pending = []
 
+    def partial(self, event):
+        kind = event.get("type")
+        if kind == "message_start":
+            self.streamed = ""
+        elif kind == "content_block_start":
+            block = event.get("content_block") or {}
+            if block.get("type") == "tool_use" and block.get("id"):
+                self.flush()
+                self.tools[block["id"]] = block.get("name", "")
+                self.announced.add(block["id"])
+                self.run.emit("tool.started", tool=block.get("name", ""), preview="")
+        elif kind == "content_block_delta":
+            delta = event.get("delta") or {}
+            if delta.get("type") == "text_delta" and delta.get("text"):
+                self.flush()
+                self.streamed += delta["text"]
+                self.last_streamed = self.streamed
+                self.run.emit("response.output_text.delta", delta=delta["text"])
+
     def read(self, message):
         kind = message.get("type")
+        if kind == "stream_event":
+            self.partial(message.get("event") or {})
+            return None
         if kind == "system" and message.get("subtype") == "init":
             self.run.model = message.get("model", "")
             servers = {s.get("name"): s.get("status") for s in message.get("mcp_servers") or []}
@@ -350,9 +402,13 @@ class StreamReader:
         elif kind == "assistant":
             for block in (message.get("message") or {}).get("content") or []:
                 if block.get("type") == "text" and block.get("text"):
+                    if block["text"] in self.streamed:
+                        continue
                     self.flush()
                     self.pending.append(block["text"])
                 elif block.get("type") == "tool_use":
+                    if block.get("id") in self.announced:
+                        continue
                     self.flush()
                     name = block.get("name", "")
                     self.tools[block.get("id")] = name
@@ -371,6 +427,9 @@ class StreamReader:
             if self.pending and self.pending[-1] == result:
                 self.pending.pop()
             self.flush()
+            # Words already streamed are not sent a second time as the output.
+            if result and result.strip() == self.last_streamed.strip():
+                result = ""
             self.run.emit(
                 "run.completed",
                 output=result,
@@ -469,10 +528,12 @@ class Handler(BaseHTTPRequestHandler):
             if body is None or not isinstance(body.get("input"), str) or not body["input"].strip():
                 self.reply(400, {"error": "a run needs an input"})
                 return
-            run, refusal = RUNNER.start(body["input"], str(body.get("instructions") or ""))
-            if run is None:
-                self.reply(409, {"error": refusal})
-                return
+            run, _ = RUNNER.start(
+                body["input"],
+                str(body.get("instructions") or ""),
+                str(body.get("session_id") or ""),
+                str(body.get("speed") or ""),
+            )
             self.reply(202, {"run_id": run.id, "status": "started"})
             return
         match = RUN_PATH.match(self.path)

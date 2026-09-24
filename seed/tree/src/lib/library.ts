@@ -82,3 +82,38 @@ export interface ExtensionSummary {
   /** The extension's change documents: its `docs/changes/` members. */
   readonly changes: readonly ChangeDocumentSummary[];
 }
+
+/**
+ * Whether the item a tab holds is one nobody has named.
+ *
+ * The listing is the one place that knows: the extension owning the title
+ * marks its row (`LibraryItem.unnamed`), and the shell already holds each
+ * section's read answer, re-read whenever a rename reaches the drawer. A tab
+ * reads it from there rather than from a copy of its own — the workspace
+ * record stores the tab's title, and a second field derived from it would have
+ * to be stored, parsed and kept fresh to say what the listing already says.
+ *
+ * A tab whose item no listing carries is named as it always was: a document
+ * another document contains is not in the `Documents` listing, and a tab
+ * reading as unnamed because nothing answered for it would be a guess.
+ * DO_0012_008
+ */
+export function tabUnnamed(
+  sections: readonly { readonly key: string; readonly opens?: string }[],
+  data: Record<string, unknown>,
+  tab: { readonly itemId: string | null; readonly kind: string },
+): boolean {
+  if (tab.itemId === null) return false;
+  return sections.some((section) => {
+    if (section.opens !== tab.kind) return false;
+    const listed = data[section.key];
+    if (!Array.isArray(listed)) return false;
+    return listed.some(
+      (item) =>
+        typeof item === "object" &&
+        item !== null &&
+        (item as { id?: unknown }).id === tab.itemId &&
+        (item as { unnamed?: unknown }).unnamed === true,
+    );
+  });
+}

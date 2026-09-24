@@ -1,0 +1,28 @@
+{
+  "label": "ext.blocktype ext.tool",
+  "checkStatement": "MATCH (b:ext.blocktype {id: $id}) RETURN GRAPH b",
+  "checkParameters": {
+    "id": "ext.tool"
+  },
+  "createStatement": "CREATE (b:ext.blocktype {id: $id, name: $name, properties: $properties, requiredProperties: $requiredProperties, semantics: $semantics, status: $status})",
+  "createParameters": {
+    "id": "ext.tool",
+    "name": "ext.tool",
+    "properties": {
+      "description": "what the tool does, in the words a run reads",
+      "id": "member Block id, conventionally \u003cextId\u003e.\u003ctool name\u003e",
+      "inputSchema": "the JSON Schema of the tool's input",
+      "name": "the tool's name as a run sees it, unique among the tools a run is offered",
+      "route": "the extension's server route, under /api/x/\u003cextId\u003e/, the kernel posts a call to"
+    },
+    "requiredProperties": [
+      "id",
+      "name",
+      "description",
+      "inputSchema",
+      "route"
+    ],
+    "semantics": "Declares an agent tool an extension answers. The kernel's toolset offers it while the extension is active and hands a call to the route with the calling run; what the route writes is staged into that run's proposal group. Never materializes to the working tree. BO_0264",
+    "status": "established"
+  }
+}

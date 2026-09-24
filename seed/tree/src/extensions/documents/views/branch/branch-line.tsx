@@ -1,7 +1,7 @@
 import { $, component$, useContext, useStore, useTask$, useVisibleTask$, type QRL } from "@builder.io/qwik";
 
 import { ViewBridgeContext } from "~/components/shell/view-bridge";
-import { acceptanceReading, BRANCH_WORDS, branchItemsOf, rejectedEntries, runRecordsOf, type DriftChoice, type Standing } from "../../lib/branch";
+import { acceptanceReading, branchItemsOf, rejectedEntries, runRecordsOf, type DriftChoice, type ProposalSession, type Standing } from "../../lib/branch";
 import { activateTab, enterBranch, leaveBranch } from "../../lib/branch-scope";
 import type { BlockView } from "../../server/assemble";
 import { Marked } from "../block-text";
@@ -11,13 +11,15 @@ import type { DocumentView } from "../../server/assemble";
 import type { DocumentProposals } from "../../server/documents";
 
 /**
- * A person's branch on the document (`BO_0250_020`–`BO_0250_022`): the line
- * under the intent that enters and leaves it, the acceptance card that reads
- * the branch's standing, and what a rejected branch held, promotable a block
- * at a time. It is this extension's own, drawn on any document the person can
- * edit whatever else an extension draws beside it, and it asks for no run:
- * the core's standing is the whole of what acceptance reads (`BO_0250`,
- * Decided 2026-09-16).
+ * A person's proposal sessions on the document (`BO_0250_020`–`BO_0250_022`,
+ * `CA_0057`): entering and leaving one, the acceptance card that reads a
+ * session's standing, and what a rejected session held, promotable a block at
+ * a time. Nothing stands under the title for it any more: the view bar's
+ * *Work in a proposal* and the session chips ask through the editor's
+ * `branchAsk`, and the component answers, writing back which session the tab
+ * works in and which stand open. It is this extension's own, drawn on any
+ * document the person can edit, and it asks for no run: the core's standing
+ * is the whole of what acceptance reads (`BO_0250`, Decided 2026-09-16).
  */
 /** What the line reads of the editor: its store, never a copy of it. */
 export interface BranchEditor {
@@ -28,6 +30,25 @@ export interface BranchEditor {
   /** Counts the saves the core refused because documents came under
    * separation of duties while the tab was open. BO_0212_011 */
   readonly policyRefusals?: number;
+  /** The session the tab works in, or null for truth; written here, read by
+   * the bar's toggle and the chips. CA_0057_005 */
+  branchGroup: string | null;
+  /** Documents are under separation of duties: someone else accepts. CA_0057_010 */
+  branchRequired: boolean;
+  /** The person's open sessions on the document, for their chips. CA_0057_008 */
+  sessions: ProposalSession[];
+  /** The last thing the bar's toggle or a session chip asked for. CA_0057_005
+   * CA_0057_008 */
+  readonly branchAsk: BranchAsk;
+}
+
+/** What the bar's toggle and the session chips ask the sessions for: the
+ * toggle enters a new session or leaves; a chip's press works in its session
+ * or leaves it; its answers accept or reject it. CA_0057_005 CA_0057_008 */
+export interface BranchAsk {
+  readonly kind: "toggle" | "work" | "accept" | "reject" | null;
+  readonly group: string | null;
+  readonly seq: number;
 }
 
 /**
@@ -63,12 +84,13 @@ export const BranchLine = component$<{
     failure: null as string | null,
     refusal: null as string | null,
     rejected: null as { group: string; blocks: BlockView[] } | null,
-    /** Documents are under separation of duties: the tab works in the
-     * branch and cannot leave it, and the branch's own person does not
-     * accept it. BO_0212_011 */
+    /** Documents are under separation of duties: the session's own person
+     * does not accept it, and leaving it stays possible. BO_0212_011
+     * CA_0057_010 */
     required: false,
     policyChecked: false,
     refusalsSeen: 0,
+    askSeen: editor.branchAsk.seq,
   });
 
   /** Reads the standing again: on opening the card, and whenever the
@@ -98,10 +120,25 @@ export const BranchLine = component$<{
     branch.refusal = null;
   });
 
-  /** *Work in a proposal*: the tab enters the person's branch on this
-   * document — the open group the read answers, or the one the first staging
-   * will mint — and reads the document through it. BO_0250_020 */
-  const enter$ = $(async (keepActive = false) => {
+  /** The person's open sessions, read again for their chips: on opening,
+   * after entering, leaving and answering, and once the first staging into
+   * the tab's session has minted its group. CA_0057_009 */
+  const readSessions$ = $(async (quiet = false): Promise<string | null> => {
+    if (documentId === null) return null;
+    const read = await fetchBranch(documentId);
+    if (read.outcome !== "success") {
+      // The chips follow quietly: a read that fails leaves them as they were.
+      if (!quiet) editor.notice = describeOutcome(read);
+      return null;
+    }
+    editor.sessions = [...read.result.sessions];
+    return read.result.branch;
+  });
+
+  /** Enters a session: the one named — a session chip's — or a new one, under
+   * the next free name, while earlier ones stand open. The tab reads the
+   * document through it. BO_0250_020 CA_0057_007 */
+  const enter$ = $(async (keepActive = false, named: string | null = null) => {
     if (documentId === null) return;
     // The active block is saved into the scope it was typed in and let go
     // before the scope changes: a block kept active across the change keeps
@@ -110,14 +147,11 @@ export const BranchLine = component$<{
     // whose save the core just refused under separation of duties is kept:
     // truth has not moved, so its base holds in the branch. BO_0212_011
     if (!keepActive) await deactivate$();
-    const read = await fetchBranch(documentId);
-    if (read.outcome !== "success") {
-      editor.notice = describeOutcome(read);
-      return;
-    }
-    const group = read.result.branch;
+    const group = named ?? (await readSessions$());
+    if (group === null) return;
     enterBranch(documentId, group, tab.id);
     branch.group = group;
+    editor.branchGroup = group;
     branch.rejected = null;
     await reset$();
     await bridge.setBranch$(documentId, group);
@@ -125,23 +159,19 @@ export const BranchLine = component$<{
     await reloadProposals$();
   });
 
-  /** *Leave the proposal*: back to truth, the group left open. BO_0250_020 */
+  /** Leaving a session only stops editing in it: back to truth, the group
+   * left open, under separation of duties too. BO_0250_020 CA_0057_010 */
   const leave$ = $(async () => {
     if (documentId === null) return;
     await deactivate$();
     leaveBranch(documentId, tab.id);
     branch.group = null;
+    editor.branchGroup = null;
     await reset$();
     await bridge.setBranch$(documentId, null);
     await reload$();
     await reloadProposals$();
-  });
-
-  /** *Accept this proposal*: the card opens on the standing. BO_0250_021 */
-  const openCard$ = $(async () => {
-    await reset$();
-    branch.card = true;
-    await readStanding$();
+    await readSessions$();
   });
 
   const choose$ = $((ref: string, choice: DriftChoice) => {
@@ -179,8 +209,20 @@ export const BranchLine = component$<{
     await leave$();
   });
 
-  /** *Reject this proposal*: every member rejected, the branch left, and what
-   * it held differently from truth listed under the line. BO_0250_022 */
+  /** A session chip's *Accept all*: the standing is read, and with nothing
+   * drifted the session is accepted at once; otherwise the card stands for
+   * the person to keep or drop each drifted member. BO_0250_021 CA_0057_008 */
+  const openCard$ = $(async () => {
+    await reset$();
+    branch.card = true;
+    await readStanding$();
+    const drifted = (branch.standing?.members ?? []).some((member) => member.standing === "drifted");
+    if (branch.standing !== null && branch.failure === null && !drifted) await accept$();
+  });
+
+  /** A session chip's *Reject all*: every member rejected, the session left,
+   * and what it held differently from truth listed under the title.
+   * BO_0250_022 CA_0057_008 */
   const reject$ = $(async () => {
     if (documentId === null || branch.group === null) return;
     const group = branch.group;
@@ -232,34 +274,88 @@ export const BranchLine = component$<{
     await readStanding$();
   });
 
-  /** Under separation of duties every document opens in the person's branch:
-   * asked once per mount, once the document is read. BO_0212_011 */
+  /** Whether documents are under separation of duties, and the person's open
+   * sessions, asked once per mount once the document is read, for the chips: the tab no longer enters a
+   * session by itself on opening — an edit made outside one does, below.
+   * BO_0212_011 CA_0057_013 */
   useVisibleTask$(async ({ track }) => {
     const loaded = track(() => editor.loaded);
     if (documentId === null || loaded === 0 || branch.policyChecked) return;
     if (editor.document === null || (editor.document as { change?: string }).change !== undefined) return;
     branch.policyChecked = true;
     const policy = await fetchPolicy(documentId);
+    // The person's open sessions, once per mount, for their chips.
+    // CA_0057_009
+    await readSessions$(true);
     if (policy.outcome !== "success" || !policy.result.required) return;
     branch.required = true;
-    if (branch.group === null) await enter$();
+    editor.branchRequired = true;
   });
 
-  /** A save refused because documents came under the policy while the tab was
-   * open: the tab enters the branch and the save is made again, once, into
-   * it. BO_0212_011 */
+  /** An edit made outside a session under separation of duties: the core
+   * refuses the save, the tab enters a new session and the save is made
+   * again, once, into it. BO_0212_011 CA_0057_013 */
   useVisibleTask$(async ({ track }) => {
     const refusals = track(() => editor.policyRefusals ?? 0);
     if (refusals === 0 || refusals === branch.refusalsSeen) return;
     branch.refusalsSeen = refusals;
     branch.required = true;
+    editor.branchRequired = true;
     branch.policyChecked = true;
     if (branch.group === null) {
       await enter$(true);
       if (branch.group === null) return;
-      editor.notice = "Documents are now reviewed by someone else: your edits go into your proposal.";
+      editor.notice = "Documents are reviewed by someone else: your edits go into a proposal.";
       if (retrySave$ !== undefined) await retrySave$();
     }
+  });
+
+  /** What the bar's toggle and the session chips ask for, answered as a
+   * press would be: the toggle enters a new session or leaves; a chip's press
+   * works in its session or leaves it; its answers enter it when the tab is
+   * elsewhere, then accept or reject it. CA_0057_005 CA_0057_008 */
+  const answerAsk$ = $(async (kind: BranchAsk["kind"], group: string | null) => {
+    if (kind === "toggle") {
+      if (branch.group === null) await enter$();
+      else await leave$();
+      return;
+    }
+    if (group === null) return;
+    if (kind === "work") {
+      if (branch.group === group) await leave$();
+      else await enter$(false, group);
+      return;
+    }
+    if (branch.group !== group) await enter$(false, group);
+    if (branch.group !== group) return;
+    if (kind === "accept") await openCard$();
+    else if (kind === "reject") await reject$();
+  });
+
+  /** The ask is answered outside the draw that ran this task, as a press's
+   * handler runs: the draw would otherwise wait on every read and write of
+   * entering or leaving, and a task that draw started writes in its middle.
+   * Qwik's test platform refuses that outright. */
+  useVisibleTask$(({ track }) => {
+    const seq = track(() => editor.branchAsk.seq);
+    if (seq === branch.askSeen) return;
+    branch.askSeen = seq;
+    const { kind, group } = editor.branchAsk;
+    setTimeout(() => void answerAsk$(kind, group), 0);
+  });
+
+  /** The sessions follow the reads of the proposals without a read of their
+   * own: a session answered elsewhere leaves the proposals and so its chip,
+   * and the first staging into the session the tab works in mints its group,
+   * which only the branch read dates. CA_0057_009 */
+  useVisibleTask$(async ({ track }) => {
+    const proposals = track(() => editor.proposals);
+    if (proposals === null || documentId === null) return;
+    const open = new Set(proposals.groups.map((group) => group.groupId));
+    const kept = editor.sessions.filter((session) => open.has(session.branch));
+    if (kept.length !== editor.sessions.length) editor.sessions = kept;
+    const working = branch.group;
+    if (working !== null && open.has(working) && !kept.some((session) => session.branch === working)) await readSessions$(true);
   });
 
   /** The client helpers read the branch from the module registry on every
@@ -269,6 +365,7 @@ export const BranchLine = component$<{
     track(() => tab.id);
     track(() => branch.group);
     activateTab(tab.id);
+    editor.branchGroup = branch.group;
     if (documentId === null) return;
     if (branch.group === null) leaveBranch(documentId, tab.id);
     else enterBranch(documentId, branch.group, tab.id);
@@ -281,39 +378,6 @@ export const BranchLine = component$<{
 
   return (
     <>
-      <p class="document-branch" data-document-branch={branch.group ?? ""}>
-        {branch.group === null ? (
-          <button type="button" data-branch-enter onClick$={() => enter$()}>
-            Work in a proposal
-          </button>
-        ) : (
-          <>
-            <span class="document-branch__marker" data-root-branch={branch.group} data-branch-required={branch.required ? "true" : "false"}>
-              {BRANCH_WORDS}
-            </span>
-            {/* Under separation of duties the branch is where every edit goes
-                and someone else accepts it: its own person neither accepts
-                nor leaves it. BO_0212_011 */}
-            {branch.required ? (
-              <span class="document-branch__review" data-branch-review>
-                Someone else accepts it.
-              </span>
-            ) : (
-              <button type="button" data-branch-accept onClick$={openCard$}>
-                Accept this proposal
-              </button>
-            )}
-            <button type="button" data-branch-reject onClick$={reject$}>
-              Reject this proposal
-            </button>
-            {!branch.required && (
-              <button type="button" data-branch-leave onClick$={leave$}>
-                Leave the proposal
-              </button>
-            )}
-          </>
-        )}
-      </p>
       {branch.group !== null && branch.card && (
         <section class="branch-card" data-branch-card={reading.waiting ? "waiting" : reading.accept ? "ready" : "open"} aria-label={reading.question}>
           <p class="branch-card__question">{reading.question}</p>
@@ -355,7 +419,7 @@ export const BranchLine = component$<{
                 Accept
               </button>
             )}
-            <button type="button" data-branch-not-yet onClick$={() => reset$()}>
+            <button type="button" data-branch-not-yet onClick$={reset$}>
               Not yet
             </button>
           </p>

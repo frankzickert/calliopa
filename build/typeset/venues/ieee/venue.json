@@ -1,0 +1,7 @@
+{
+  "id": "ieee",
+  "name": "IEEE",
+  "class": "IEEEtran",
+  "options": ["conference"],
+  "bibliographyStyle": "IEEEtran"
+}

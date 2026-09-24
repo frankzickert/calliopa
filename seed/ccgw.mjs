@@ -5,12 +5,15 @@
 //   node ccgw.mjs apply  <base-url> <principal> <payload-dir>
 //   node ccgw.mjs exists <base-url> <principal> <block-type> <id>
 //   node ccgw.mjs field  <bundle.json> <field>
+//   node ccgw.mjs list   <bundle.json> <field>
 //   node ccgw.mjs updates <base-url> <principal>
 //
 // apply: check-then-create for each payload, so a re-run against a seeded
 // instance is a no-op and a partial seed is repaired, not duplicated.
 // exists: exit 0 when the block exists, 1 when it does not.
 // field: print one string field of the bundle manifest (no jq in the image).
+// list: print each entry of an array field on its own line — the bundle's
+// `inactive`, the shipped extensions that arrive switched off. BO_0283_005
 // updates: print `<proposal> <version>` for every open update proposal — a
 // group whose rationale is the one run.sh stages an update under — so the
 // hook keeps one open update per instance. BO_0242_001
@@ -119,8 +122,14 @@ try {
     const [path, field] = args;
     const value = JSON.parse(readFileSync(path, "utf8"))[field];
     console.log(value === undefined || value === null ? "" : String(value));
+  } else if (mode === "list") {
+    const [path, field] = args;
+    const value = JSON.parse(readFileSync(path, "utf8"))[field];
+    for (const entry of Array.isArray(value) ? value : []) {
+      if (typeof entry === "string" && entry.length > 0) console.log(entry);
+    }
   } else {
-    console.error("usage: ccgw.mjs apply|exists|updates|field ...");
+    console.error("usage: ccgw.mjs apply|exists|updates|field|list ...");
     process.exit(2);
   }
 } catch (error) {

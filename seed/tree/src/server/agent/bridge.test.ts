@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { describeRunEvent } from "~/lib/runs";
 import { withRequestContext } from "../request-context";
 import { followBridgeEvents, parseSseFrames, startBridgeRun, translateBridgeEvent } from "./bridge";
 
@@ -8,6 +9,43 @@ import { followBridgeEvents, parseSseFrames, startBridgeRun, translateBridgeEven
  * its stream parses frame by frame. Both are pure; the transport is proven
  * where a kernel runs. BO_0207_015
  */
+describe("translating a run's activity in a document", () => {
+  it("Given document.activity, Then it carries the document, scope, action, blocks, group, member and note, and nothing without a document or action", () => {
+    const at = 1_700_000_000_000;
+    expect(
+      translateBridgeEvent("r1", {
+        type: "document.activity",
+        document: "doc-1",
+        group: "node:run-1",
+        activity: { scope: "blocks", action: "replace", blocks: ["blk-b"], member: "node:blk-b", note: "Shorter" },
+        at,
+      }),
+    ).toEqual({
+      kind: "documentActivity",
+      runId: "r1",
+      at,
+      activity: { document: "doc-1", scope: "blocks", action: "replace", blocks: ["blk-b"], group: "node:run-1", member: "node:blk-b", note: "Shorter" },
+    });
+    expect(translateBridgeEvent("r1", { type: "document.activity", document: "doc-1", activity: { scope: "document", action: "read" }, at })).toEqual({
+      kind: "documentActivity",
+      runId: "r1",
+      at,
+      activity: { document: "doc-1", scope: "document", action: "read", blocks: [] },
+    });
+    expect(translateBridgeEvent("r1", { type: "document.activity", activity: { action: "read" }, at })).toBeNull();
+    expect(translateBridgeEvent("r1", { type: "document.activity", document: "doc-1", activity: {}, at })).toBeNull();
+  });
+
+  it("Given the console, Then each activity reads as one line in words", () => {
+    const line = (activity: { scope: string; action: string; blocks: string[] }) => describeRunEvent({ kind: "documentActivity", activity });
+    expect(line({ scope: "document", action: "read", blocks: [] })).toBe("Read the document");
+    expect(line({ scope: "blocks", action: "read", blocks: ["a"] })).toBe("Read 1 block");
+    expect(line({ scope: "blocks", action: "read", blocks: ["a", "b"] })).toBe("Read 2 blocks");
+    expect(line({ scope: "blocks", action: "replace", blocks: ["a"] })).toBe("Proposed a rewrite");
+    expect(line({ scope: "blocks", action: "relate", blocks: ["a"] })).toBe("Proposed a change (relate)");
+  });
+});
+
 describe("translating bridge events", () => {
   it("Given each bridge event type, Then it becomes the contract's kind with its fields", () => {
     const at = 1_700_000_000_000;
@@ -156,6 +194,32 @@ describe("starting a run aimed at a document", () => {
     return bodies;
   };
 
+  it("Given a speed, Then it travels with the run, and none is sent when none was chosen", async () => {
+    const bodies = sentBodies();
+    await startBridgeRun({ goal: "g", agent: "codex", speed: "thorough" });
+    await startBridgeRun({ goal: "g", agent: "codex" });
+    // BO_0269_015
+    expect(bodies[0]).toEqual({ goal: "g", context: "", agent: "codex", speed: "thorough" });
+    expect(bodies[1]).toEqual({ goal: "g", context: "", agent: "codex" });
+  });
+
+  it("Given an intention, Then it travels with the run, and none is sent when none was named (BO_0258_006)", async () => {
+    const bodies = sentBodies();
+    await startBridgeRun({ goal: "Has anything under this moved?", agent: "codex", intention: "calliopa-refine.intention" });
+    await startBridgeRun({ goal: "g", agent: "codex", intention: "" });
+    await startBridgeRun({ goal: "g", agent: "codex" });
+    expect(bodies[0]).toEqual({
+      goal: "Has anything under this moved?",
+      intention: "calliopa-refine.intention",
+      context: "",
+      agent: "codex",
+    });
+    // An empty intention is a command's shape, not a gesture's: the field is
+    // left off rather than sent blank.
+    expect(bodies[1]).toEqual({ goal: "g", context: "", agent: "codex" });
+    expect(bodies[2]).toEqual({ goal: "g", context: "", agent: "codex" });
+  });
+
   it("Given a target, Then the artifact, the delivery and the references travel in mark order", async () => {
     const bodies = sentBodies();
     await startBridgeRun({
@@ -185,12 +249,6 @@ describe("starting a run aimed at a document", () => {
         { kind: "block", number: 3, blockId: "blk-b" },
       ],
     });
-  });
-
-  it("Given a command that starts a document, Then only the delivery travels", async () => {
-    const bodies = sentBodies();
-    await startBridgeRun({ goal: "Draft an onboarding checklist", agent: "codex", target: { delivery: "start" } });
-    expect(bodies[0]).toEqual({ goal: "Draft an onboarding checklist", context: "", agent: "codex", delivery: "start" });
   });
 
   it("Given attachment nodes, Then their ids travel as attachments, and a command with none sends no field", async () => {

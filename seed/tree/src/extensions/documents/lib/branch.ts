@@ -1,18 +1,28 @@
+import type { RunChip } from "~/components/shell/view-bridge";
 import type { BlockView, DocumentView } from "../../documents/server/assemble";
+import { groupShown, type ShownChanges } from "./agent-at-work";
 
 /**
  * A proposal branch as the shell reads it (`BO_0250`): an ordinary open
- * proposal group the person stages into, per document and person, offered on
- * any document the person can edit. Everything decided here is pure — what
- * the marker says, what a member's standing reads as, what the acceptance
- * card offers, what a rejected branch held — so the line, the card and the
+ * proposal group the person stages into, one per proposal session, offered on
+ * any document the person can edit. Everything decided here is pure — what a
+ * session's chip says, what a member's standing reads as, what the acceptance
+ * card offers, what a rejected branch held — so the chips, the card and the
  * client calls cannot disagree. Nothing here writes.
  */
 
-/** The branch read: the person's branch on the document and its status. */
+/** One of the person's open proposal sessions: its group, and when its
+ * first staging minted it. CA_0057_009 */
+export interface ProposalSession {
+  readonly branch: string;
+  readonly since: number;
+}
+
+/** The branch read: the name the next session takes, and the person's open
+ * sessions on the document, newest first. CA_0057_007 CA_0057_009 */
 export interface BranchRead {
   readonly branch: string;
-  readonly status: "open" | "accepted" | "rejected" | "none";
+  readonly sessions: readonly ProposalSession[];
 }
 
 export type MemberStanding = "clean" | "autoCorrected" | "drifted";
@@ -32,8 +42,51 @@ export interface Standing {
   readonly members: readonly StandingMember[];
 }
 
-/** The marker's words on the branch line while the tab is in a branch. */
+/** What a session's chip says before its time. */
 export const BRANCH_WORDS = "Proposal · yours";
+
+/** A session's chip in words: *Proposal · yours · 14:32*, the local time its
+ * session began. CA_0057_008 */
+export function sessionWords(since: number): string {
+  const at = new Date(since);
+  const two = (value: number) => String(value).padStart(2, "0");
+  return `${BRANCH_WORDS} · ${two(at.getHours())}:${two(at.getMinutes())}`;
+}
+
+/**
+ * The chips of the person's own proposal sessions, newest first: the
+ * answers stand at once, since a session has no run to wait for; a chip is
+ * shown as a run's is — the toggle sets them all, its press flips its own —
+ * and always while the tab works in it, which it is `working`; under
+ * separation of duties someone else accepts it. CA_0057_008 CA_0057_010
+ * CA_0057_014
+ */
+export function sessionChipsOf(
+  sessions: readonly ProposalSession[],
+  working: string | null,
+  required: boolean,
+  shown: ShownChanges = { proposalsOpen: true, shownGroups: [], hiddenGroups: [] },
+  /** The open changes each group holds, for the number a minimized chip
+   * draws in place of its words. CA_0061_007 */
+  counts: ReadonlyMap<string, number> = new Map(),
+): RunChip[] {
+  return [...sessions]
+    .sort((left, right) => right.since - left.since)
+    .map((session) => ({
+      key: session.branch,
+      group: session.branch,
+      face: { kind: "icon", icon: "user" },
+      tone: "person",
+      name: "you",
+      text: sessionWords(session.since),
+      count: counts.get(session.branch) ?? 0,
+      ended: true,
+      shown: session.branch === working || groupShown(session.branch, shown),
+      session: true,
+      working: session.branch === working,
+      ...(required ? { accepts: "others" as const } : {}),
+    }));
+}
 
 /** What a member's standing reads as on the card. */
 export function standingWords(standing: MemberStanding): string {

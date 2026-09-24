@@ -33,6 +33,8 @@ const extensionImport: ViewContribution = {
 };
 
 export const contributions = declare({
+  // The icon the sections stand under in the library's icon column. CA_0056_008
+  icon: { title: "Extensions", name: "puzzle-piece" },
   sections: [
     {
       name: "extensions",

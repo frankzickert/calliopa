@@ -3,7 +3,7 @@
 ## Messages
 
 * A message is shell chrome. A view raises one through the view bridge; a view never renders one itself.
-* The message surface is out of the shell's flow. Raising or lowering a message moves no content in the header, either drawer, the workspace, or the dock.
+* The message surface is out of the shell's flow. Raising or lowering a message moves no content in the header, either drawer, or the workspace.
 * A raised message takes focus and holds it. The rest of the frame is inert while it asks, and `Escape` cancels.
 * A message waits until it is answered. The surface carries no timer, and nothing on it dismisses itself.
 
@@ -26,5 +26,5 @@
 - `inert` is not a focus trap by itself: it keeps focus off the frame, but the document still takes a turn in the tab cycle, which is a way out of a question that must not have one. The surface wraps `Tab` and `Shift+Tab` between its first and last answer, and that is what closes the turn (`CA_0018_002`).
 - `Escape` is bound on the document while a message is up, not on the surface, so it cancels wherever focus sits; the listener is removed as the message is lowered (`CA_0018_002`).
 - A tab switch clears the message along with the inspector contribution and the save state. A question left standing over a different tab would ask about a document the reader is no longer looking at, and answering it would act on that one (`CA_0018_001`).
-- `.message-layer` is fixed over the whole viewport on the drag preview's layer and passes pointer events through, so it covers nothing the message itself does not. The card is centred in it, so where it sits depends on neither the header's height nor the dock's (`CA_0018_001`).
+- `.message-layer` is fixed over the whole viewport on the drag preview's layer and passes pointer events through, so it covers nothing the message itself does not. The card is centred in it, so where it sits depends on the height of no region (`CA_0018_001`).
 - `tests/browser/block-editor.spec.ts` proves the surface on desktop and mobile: the document's title and first block occupying the same rectangle with a message raised and lowered, the question reachable without putting the inspector away, focus arriving on the message and `Tab` never leaving it, the frame carrying `inert` while a press aimed straight at a control behind it does nothing, `Escape` cancelling and giving focus back to the control that raised it, and the axe scan clean while a message asks (`CA_0018_001`, `CA_0018_002`).

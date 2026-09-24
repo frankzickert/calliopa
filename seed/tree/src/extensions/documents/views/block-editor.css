@@ -6,14 +6,36 @@
  * text that shifts when you click it reads as two documents rather than one. */
 
 .view--block-editor {
-  /* The bar's height as one value: the bar takes it and the block rows clear
-   * it. Two numbers that had to agree would drift, and a block would end up
-   * activated under the bar. */
-  --block-bar-height: 2.5rem;
+  /* The shell's bar height as the one value the block rows and the headline
+   * clear. Two numbers that had to agree would drift, and a block would end
+   * up activated under the bar. CA_0053_006 */
+  /* The bar and, under it, the run chips' line the shell publishes; the
+     content keeps clear of both. CA_0055_001 */
+  --block-bar-height: calc(var(--view-bar-height, 2.5rem) + var(--view-chips-height, 0px));
   /* The room a block reserves on each side for its grips. One number, so the
    * gutter the row holds open and the box the grips sit in cannot drift apart
    * and leave a grip over the text. */
   --block-grip-gutter: 1.75rem;
+  /* What a bordered row stands over its borders, and so the room it keeps:
+   * half the 28px chip below, half the label's line above. Adjacent margins
+   * collapse to the larger of the two rather than adding, so the room a row
+   * keeps on each side is the sum — the most that can ever meet in one gap —
+   * and a chip and a label never share the space. DO_0008_009
+   *
+   * Which element carries it is `.drop-slot`'s rule below, since the collapse
+   * the sum rests on is only what a row the document's flow holds directly
+   * gets. DO_0009_001 */
+  --row-chip-overhang: 0.875rem;
+  --row-label-overhang: 0.5rem;
+  --row-overhang: calc(var(--row-chip-overhang) + var(--row-label-overhang));
+  /* The drop mark's own height, named because the slot's room is measured
+   * against it: a mark the flow holds stands inside the room, not beside it.
+   * DO_0009_008 */
+  --drop-mark-height: 2px;
+  /* The weight of the ring on the row the reader has turned to. One number
+   * for every kind of row, and heavier than the 1px edge a proposal carries
+   * and the hairlines a retired or discarded row does. DO_0006_012 */
+  --block-focus-width: 2px;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -22,9 +44,9 @@
 }
 
 /* The editor owns the whole tab region while it is presenting a document. It
- * negates the region's inset on the three edges the bar docks to, so the bar's
- * own edges are the region's, and the content below puts the reading inset
- * back. The bottom keeps the inset: nothing docks there, and the gap holds the
+ * negates the region's inset on the three edges the shell's bar docks to, so
+ * the surface reaches the region's edges under the bar, and the content below
+ * puts the reading inset back. The bottom keeps the inset: nothing docks there, and the gap holds the
  * document off the command dock.
  *
  * Only the branch that presents a document, which is the branch that carries a
@@ -46,88 +68,6 @@
 .view--block-editor[data-editor-mode] > .block-notice,
 .view--block-editor[data-editor-mode] > [data-block-loading] {
   margin-inline: var(--editor-region-inset);
-}
-
-/* The bar is out of the document's flow, docked to the top of the tab region.
- * In flow it would push the document down the moment a block was activated.
- * The space it lands on belongs to the headline and is reserved on the surface
- * whether or not a bar ever appears, which is why showing and hiding the bar
- * moves nothing. The editor negates the region's inset, so `top` and
- * `inset-inline` of zero are the region's own edges. */
-.block-toolbar {
-  position: absolute;
-  inset-inline: 0;
-  top: 0;
-  z-index: 2;
-  box-sizing: border-box;
-  min-height: var(--block-bar-height);
-  display: flex;
-  /* No wrap: a second row would double what the bar covers, and the scroll
-   * margin below is one bar high on every viewport. Controls that do not fit
-   * scroll sideways instead. */
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.4rem 0.5rem;
-  /* Docked rather than floating, so it is bordered the way the command dock is:
-   * one line on the edge facing the content, none on the three edges that are
-   * the region's, and no radius. The header already draws a line above, and a
-   * second one a pixel below it would read as a doubled seam. */
-  border: 0;
-  border-bottom: 1px solid var(--border);
-  /* Opaque: the surface scrolls underneath it. */
-  background: var(--panel-raised);
-}
-
-.toolbar-group {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.block-toolbar button {
-  min-width: 2rem;
-  padding: 0.2rem 0.45rem;
-  border: 1px solid transparent;
-  border-radius: 0.35rem;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  cursor: pointer;
-}
-
-.block-toolbar button:hover:not(:disabled),
-.block-toolbar button:focus-visible {
-  border-color: var(--border);
-  background: var(--panel);
-}
-
-.block-toolbar button[aria-pressed="true"] {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.block-toolbar button:disabled {
-  color: var(--text-muted);
-  cursor: default;
-}
-
-.block-toolbar [data-mark="bold"] {
-  font-weight: 700;
-}
-
-.block-toolbar [data-mark="italic"] {
-  font-style: italic;
-}
-
-.block-toolbar [data-mark="strikethrough"] {
-  text-decoration: line-through;
-}
-
-.block-toolbar [data-mark="code"] {
-  font-family: var(--font-mono);
 }
 
 /* A refused save, on the block it belongs to. */
@@ -178,8 +118,13 @@
 /* Reading and editing the title are the same box, so clicking it moves
  * nothing. Only the colour says it is editable. */
 .document-title__text {
+  /* The padding is a value the placeholder needs too, so it is named once:
+     the placeholder is painted over the field, and its offsets are where the
+     field's own content begins. DO_0012_002 */
+  --title-padding-block: 0.1rem;
+  --title-padding-inline: 0.35rem;
   display: block;
-  padding: 0.1rem 0.35rem;
+  padding: var(--title-padding-block) var(--title-padding-inline);
   border: 1px solid transparent;
   border-radius: 0.3rem;
   outline: none;
@@ -193,6 +138,24 @@
 .document-title__text:focus {
   border-color: var(--accent);
   background: var(--panel);
+}
+
+/* A document nobody has named shows the name it was minted with as a
+ * placeholder: painted over the empty field rather than written into it, so
+ * there is nothing to select, copy or delete before the real name is typed.
+ * It stands while the field is empty — at rest and under the caret — and goes
+ * at the first character. DO_0012_002 */
+.document-title__text[data-unnamed="true"] {
+  position: relative;
+}
+
+.document-title__text[data-unnamed="true"]:empty::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  inset-block-start: var(--title-padding-block);
+  inset-inline-start: var(--title-padding-inline);
+  color: var(--text-muted);
+  pointer-events: none;
 }
 
 /* Who proposed a started document, under its title while nobody has taken
@@ -242,7 +205,7 @@
  * document does not jump as the pointer crosses a boundary. */
 .drop-mark {
   display: block;
-  height: 2px;
+  height: var(--drop-mark-height);
   margin: 0.1rem 0;
   border-radius: 1px;
   background: transparent;
@@ -250,6 +213,31 @@
 
 .drop-mark[data-drop-active="true"] {
   background: var(--accent);
+}
+
+/* The room a bordered row keeps belongs to the row the document's flow holds.
+ * Where the editor makes a row a place to drop a block it wraps it in a slot
+ * with the drop mark above it, and a box standing between two margins is what
+ * stops them collapsing — so a slotted row asked to keep the room itself pays
+ * it twice, once on its own margin and once on its neighbour's. The slot keeps
+ * it and the row inside keeps none; the drop mark then falls inside the room
+ * rather than adding to it. A row drawn without a slot — a block row, a work
+ * item like the *Possible relation* card — keeps its own. DO_0009_001 */
+.drop-slot {
+  /* The room, less what the mark standing in it takes, so a slotted row is
+   * spaced exactly as an unslotted one: the mark and its margins are inside
+   * the gap the room already keeps rather than added to it. DO_0009_008 */
+  margin-block: calc(var(--row-overhang) - var(--drop-mark-height));
+}
+
+.drop-slot > .drop-mark {
+  margin-block: 0;
+}
+
+.drop-slot > .proposal-block,
+.drop-slot > .discarded-row,
+.drop-slot > .retired-row {
+  margin-block: 0;
 }
 
 /* The two gestures that move a block, on the block's own edges: the grip the
@@ -361,6 +349,10 @@
   border-radius: 0.3rem;
   font-family: var(--font-narrative);
   line-height: 1.6;
+  /* A line break is a character of a block's text, drawn as a line in
+   * reading and while editing alike, so the caret stands where the reader
+   * sees it. DO_0003_003 */
+  white-space: pre-wrap;
   cursor: text;
 }
 
@@ -453,22 +445,7 @@ hr[data-block-divider] {
   display: flex;
   align-items: baseline;
   gap: 0.6rem;
-  margin: 0.35rem 0;
-  padding: 0.35rem 0.6rem;
-  border: 1px dashed var(--border);
-  border-left: 3px solid var(--text-muted);
-  border-radius: 0.35rem;
-  background: color-mix(in srgb, var(--panel) 60%, transparent);
-}
-
-.retired-row__mark {
-  margin: 0;
-  flex: none;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
+  padding: 0.4rem 0.6rem;
 }
 
 .retired-row__text {
@@ -496,16 +473,25 @@ hr[data-block-divider] {
  * It keeps the accepted blocks' geometry — the grip gutter on both sides and
  * the role's own typography — so a proposal reads in the space it would take.
  * What sets it apart from truth, from a retired block (dashed and struck) and
- * from a marked one is its proposer's ground and edge, the proposer's face on
- * its left border, and its answer icons on its top edge: never colour alone,
- * since the face and the accessible name say who, and a label line no more.
+ * from a marked one is its proposer's ground and edge, and the accessible
+ * name says who proposed it and what it does; the chip on its bottom border —
+ * the proposer's face, what it does in words, and its answers — shows while
+ * the reader turns to it. BO_0265_010 DO_0004_004
+ *
+ * The room its chip takes is reserved, on the proposal itself where the flow
+ * holds it and on its slot where a slot does. DO_0008_009 DO_0009_001
  */
 .proposal-block {
   --proposal-ground: var(--proposal-person);
   --proposal-edge: var(--proposal-person-edge);
   position: relative;
-  margin: 0.9rem 0 0.6rem;
-  padding-block: 0.35rem;
+  margin-inline: 0;
+  /* The room the chip on its bottom border takes, held whether or not the
+   * chip is shown, so showing it still moves nothing and it never covers the
+   * block below. A proposal the editor gave a place is drawn in a slot, which
+   * keeps the room instead. DO_0008_009 DO_0009_001 */
+  margin-block: var(--row-overhang);
+  padding-block: 0;
   padding-inline: var(--block-grip-gutter);
   border: 1px solid var(--proposal-edge);
   border-radius: 0.35rem;
@@ -517,6 +503,21 @@ hr[data-block-divider] {
    BO_0233_012 */
 .proposal-block {
   -webkit-touch-callout: none;
+}
+
+/* A proposal a run proposes to withdraw stands as it did, marked: its text
+ * dimmed to the muted text and its border dashed, with its ground and its
+ * edge colour kept, so it is read as still there and still to answer. The
+ * text element sets its own colour, so the dim is set on it rather than
+ * inherited — found in the BO_0286 walk, when nothing showed at rest.
+ * BO_0286_011 */
+.proposal-block[data-proposal-withdrawn] {
+  border-style: dashed;
+}
+
+.proposal-block[data-proposal-withdrawn] .proposal-block__text,
+.proposal-block[data-proposal-withdrawn] .proposal-block__quote {
+  color: var(--text-muted);
 }
 
 .proposal-block[data-lifted="true"] {
@@ -568,30 +569,109 @@ hr[data-block-divider] {
   text-decoration: line-through;
 }
 
-/* The face, centred on the left border: half in the gutter, half over the
-   edge, taking none of the text's width. It is the handle too. It sits at the
-   border's middle, but never above the clearance: a removal or a move frames
-   a row whose ⠿ handle and standing glyph take the top of that same edge,
-   down to 2.13rem, so on a block of one line the face hangs below the border
-   rather than covering them. The rule is the same for every kind.
-   CA_0043_001 */
-.proposal-block__face {
+/* The chip on the bottom border (BO_0265_010, DO_0004_003): left-aligned,
+   inset by the gutter's width, half over the edge and out of the flow, so it
+   takes no line of the text's and showing it moves nothing. One border around
+   controls of one size, 24px, as the command control's chip is
+   (BO_0267_027): the face — the handle, and in command mode what marks a
+   removal or a move — then what the proposal does in words, then its
+   answers. */
+.proposal-block__mark {
   position: absolute;
-  top: max(2.35rem, calc(50% - 14px));
-  left: 0;
-  transform: translateX(-50%);
-  z-index: 1;
+  bottom: 0;
+  left: var(--block-grip-gutter);
+  transform: translateY(50%);
+  z-index: 2;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.1rem;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: calc(100% - 2 * var(--block-grip-gutter));
+  min-width: 0;
+  padding: 1px;
+  border: 1px solid var(--proposal-edge);
+  border-radius: 999px;
+  background: var(--panel-raised);
+  visibility: hidden;
+}
+
+/* Shown while the reader turns to the proposal: on a pointer that hovers
+   while it is over the proposal or the proposal holds the focus, elsewhere
+   once a first tap has focused it. DO_0004_004 */
+@media (hover: hover) and (pointer: fine) {
+  .proposal-block:hover > .proposal-block__mark,
+  .proposal-block:focus-within > .proposal-block__mark {
+    visibility: visible;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .proposal-block:focus-within > .proposal-block__mark {
+    visibility: visible;
+  }
+}
+
+/* The chip stays with a focused proposal when the pointer moves away, since
+   the focus does. DO_0006_010 */
+.proposal-block[data-focused="true"] > .proposal-block__mark {
+  visibility: visible;
+}
+
+.proposal-block__face {
+  position: relative;
+  flex: none;
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
   padding: 0;
-  border: 2px solid var(--proposal-edge);
+  border: 0;
   border-radius: 50%;
-  background: var(--panel-raised);
+  background: transparent;
   color: var(--text);
   cursor: grab;
   touch-action: none;
+}
+
+.proposal-block__words {
+  min-width: 0;
+  overflow: hidden;
+  padding-inline: 0.35rem;
+  color: var(--text);
+  font-size: 0.8125rem;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A derived candidate's *Fixate this framing* and *Discard*, in the chip at the
+   chip's height. BO_0246_006 */
+.proposal-block__chip-use {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+.proposal-block__word-button {
+  box-sizing: border-box;
+  height: 24px;
+  padding: 0 0.5rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.proposal-block__word-button:hover,
+.proposal-block__word-button:focus-visible {
+  background: var(--proposal-ground);
 }
 
 .proposal-block[data-proposal-kind="remove"] .proposal-block__face {
@@ -600,35 +680,31 @@ hr[data-block-divider] {
 
 .proposal-block__portrait {
   display: block;
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   object-fit: cover;
 }
 
-/* The answers ride the top edge, right-aligned, half above it, so they take
-   no line of their own. */
+/* The answers follow the words in the chip. */
 .proposal-block__answers {
-  position: absolute;
-  top: 0;
-  right: 0.6rem;
-  transform: translateY(-50%);
-  z-index: 1;
+  flex: none;
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  gap: 0.1rem;
 }
 
 .proposal-block__answer,
 .proposal-block__moves {
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
   padding: 0;
-  border: 1px solid var(--proposal-edge);
+  border: 0;
   border-radius: 50%;
-  background: var(--panel-raised);
+  background: transparent;
   color: var(--text);
 }
 
@@ -642,22 +718,7 @@ hr[data-block-divider] {
 }
 
 .proposal-block__moves {
-  border-style: dashed;
   color: var(--text-muted);
-}
-
-/* A touch needs a larger target than the face and the icons draw. */
-@media (pointer: coarse) {
-  .proposal-block__answer {
-    width: 44px;
-    height: 44px;
-  }
-
-  .proposal-block__face::before {
-    content: "";
-    position: absolute;
-    inset: -8px;
-  }
 }
 
 .proposal-block__text {
@@ -719,56 +780,82 @@ hr[data-block-divider] {
   margin: 0;
 }
 
-/* A block's standing, in the leading gutter beside any reference number: one
- * glyph per standing, so the state rests on neither colour nor a bar's width,
- * and its word in the margin where there is room for it. BO_0227_012 */
-.block-standing {
+/* A marked row is a card, and its label sits on the top border, horizontally
+ * centred. The four marks are a fixated block, a revealed discarded block, a
+ * revealed retired block and a revealed prompt — each one a state someone
+ * acted into, which is why a kept block is drawn as it always was and why
+ * nothing marks a block to its left any more. The border's style says which
+ * mark it is, so the four are told apart without colour: solid for a fixated
+ * block, dotted for a discarded one and for a prompt, dashed for a retired
+ * one, which keeps its struck text. DO_0008_002
+ *
+ * The ground stays the page's own. A proposal's ground is its proposer's
+ * colour and its chip is on the bottom border; a suggestion's heading is
+ * inside its card. A card that took a ground or drew on the bottom border
+ * would read as proposed rather than as the reader's own mark. */
+.block-row[data-standing="fixate"],
+.block-row[data-standing="discarded"],
+.block-row[data-standing="prompt"],
+.block-row[data-prompted="true"],
+.retired-row,
+.discarded-row {
+  position: relative;
+  /* The two revealed rows are places to drop a block, so the editor draws
+   * them in a slot and the slot keeps the room for them. DO_0009_001 */
+  margin-block: var(--row-overhang);
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: transparent;
+}
+
+.block-row[data-standing="fixate"],
+.block-row[data-standing="discarded"],
+.block-row[data-standing="prompt"],
+.block-row[data-prompted="true"] {
+  padding-block: 0.4rem;
+}
+
+.block-row[data-standing="discarded"],
+.block-row[data-standing="prompt"],
+.block-row[data-prompted="true"],
+.discarded-row {
+  border-style: dotted;
+}
+
+.retired-row {
+  border-style: dashed;
+}
+
+/* The label over the border: centred, on the page's own ground so it breaks
+ * the line it stands on. It gives way to what the same border already holds —
+ * the standing toolbar at the leading end and the depth's categories at the
+ * trailing one, both of which draw over it, being controls — and truncates
+ * rather than pushing them about. DO_0008_004 */
+.block-card-label {
   position: absolute;
-  inset-inline-start: 0;
-  top: 0.45rem;
+  top: 0;
+  inset-inline-start: 50%;
   z-index: 1;
+  transform: translate(-50%, -50%);
   display: flex;
   align-items: center;
-  width: 1.4rem;
-  justify-content: center;
+  gap: 0.2rem;
+  max-width: 60%;
+  padding: 0 0.35rem;
+  background: var(--canvas);
   color: var(--text-muted);
-  line-height: 1.4;
-}
-
-.view--block-editor[data-editor-mode="command"]
-  .block-row[data-reference]
-  .block-standing {
-  top: 2rem;
-}
-
-.block-standing[data-standing-mark="pin"] {
-  color: var(--accent);
-}
-
-.block-standing__glyph {
-  font-size: 0.95rem;
-}
-
-.block-standing__word {
-  position: absolute;
-  inset-inline-end: calc(100% + 0.25rem);
-  display: none;
-  white-space: nowrap;
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.05em;
+  line-height: 1.4;
   text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-@media (min-width: 44em) {
-  .block-standing__word {
-    display: inline;
-  }
-}
-
-/* Resolved stays where it is, quieted: preserved, out of active thought. */
-.block-row[data-standing="resolved"] .block-text[data-block-reading] {
-  color: var(--text-muted);
+.block-card-label__glyph {
+  font-size: 0.8rem;
 }
 
 /* Reading text claims the horizontal axis alone, so vertical scrolling stays
@@ -789,30 +876,47 @@ hr[data-block-divider] {
   z-index: 30;
   display: flex;
   align-items: center;
-  overflow: hidden;
-  padding-inline: 0.5rem;
+  /* The chip is not clipped by the strip: at the first movement the strip is
+     a sliver, and the word has to be readable then. BO_0272_016 */
+  overflow: visible;
   pointer-events: none;
   background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+}
+
+/* The word itself, at the row's moving edge, where the finger is. */
+.block-swipe-reveal > span {
+  position: absolute;
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, var(--accent) 22%, var(--panel));
   color: var(--text);
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   font-weight: 600;
   white-space: pre;
 }
 
-.block-swipe-reveal[data-direction="left"] {
-  justify-content: flex-start;
+.block-swipe-reveal[data-direction="left"] > span {
+  inset-inline-start: 0;
 }
 
-.block-swipe-reveal[data-direction="right"] {
-  justify-content: flex-end;
+.block-swipe-reveal[data-direction="right"] > span {
+  inset-inline-end: 0;
 }
 
-.block-swipe-reveal[data-armed=""] {
+/* Before the threshold the word says what release would commit; at it, the
+   chip takes the full ground of what it would do. */
+.block-swipe-reveal[data-armed="false"] > span {
   color: var(--text-muted);
+  background: var(--panel);
+  box-shadow: 0 0 0 1px var(--border);
 }
 
-.block-swipe-reveal[data-armed="discarded"] {
+.block-swipe-reveal[data-action="discarded"] {
   background: color-mix(in srgb, var(--error) 18%, var(--panel));
+}
+
+.block-swipe-reveal[data-armed="true"][data-action="discarded"] > span {
+  background: color-mix(in srgb, var(--error) 30%, var(--panel));
 }
 
 /* A discarded block, drawn where it sits only while the panel asks. Dimmed and
@@ -822,21 +926,8 @@ hr[data-block-divider] {
   display: flex;
   align-items: baseline;
   gap: 0.6rem;
-  margin: 0.35rem 0;
-  padding: 0.35rem 0.6rem;
-  border: 1px dotted var(--border);
-  border-radius: 0.35rem;
+  padding: 0.4rem 0.6rem;
   opacity: 0.75;
-}
-
-.discarded-row__mark {
-  margin: 0;
-  flex: none;
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--text-muted);
 }
 
 .discarded-row__text {
@@ -855,14 +946,6 @@ hr[data-block-divider] {
   color: var(--text);
   font: inherit;
   cursor: pointer;
-}
-
-/* The bar's control for the active block's standing. */
-.block-toolbar__standing {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.85rem;
 }
 
 /* A passage, painted over its words without a node written into them: a tint
@@ -982,40 +1065,59 @@ hr[data-block-divider] {
   font-size: 0.8rem;
 }
 
-/* A block's standing in command mode, on its top border like a tab: shown
- * while the pointer is over the block and while focus is within it, and not
- * drawn otherwise, so a hidden button takes no focus. Out of the flow, so
- * showing it moves no text. The pressed standing carries its glyph and the
- * accent, the dock toggle's pattern. BO_0231_004 */
+/* A block's standing while reading, on its top border like a tab. The row it
+ * stands on is the bar's subject, which the markup decides: it is drawn there
+ * and nowhere else, so no rule has to hide it and no button that should not be
+ * there takes focus. Out of the flow, so showing it moves no text. The pressed
+ * standing carries its glyph and the accent, the dock toggle's pattern.
+ * BO_0231_004 DO_0014_002 */
+/* The block's own toolbars share one place on its top border, so neither
+ * moves the other: the standing scale, and beside it whatever the frame
+ * offers on a block — *Open as focused work* is the one there is. Out of the
+ * flow, so drawing them moves no text. CA_0065_009 */
+.block-toolbars {
+  position: absolute;
+  top: 0;
+  inset-inline-start: calc(var(--block-grip-gutter) + 0.5rem);
+  z-index: 3;
+  display: flex;
+  gap: 0.25rem;
+  transform: translateY(-55%);
+}
+
+/* The scale places itself, because it is drawn in three places and only one
+ * of them is the wrapper above: a proposal row and a revealed discarded row
+ * carry it on their own top border with no block controls beside it
+ * (`StandingButtons`). Inside the wrapper the wrapper does the placing, and
+ * the scale is a plain box in its flow — without this the two standalone
+ * rows fall into the document's flow and push the content down, which the
+ * `CA_0065` walk found. CA_0065_009 */
 .standing-toolbar {
   position: absolute;
   top: 0;
   inset-inline-start: calc(var(--block-grip-gutter) + 0.5rem);
   z-index: 3;
-  display: none;
+  transform: translateY(-55%);
+}
+
+.block-toolbars > .standing-toolbar {
+  position: static;
+  inset-inline-start: auto;
+  transform: none;
+}
+
+.standing-toolbar,
+.block-controls {
+  display: flex;
   gap: 0.15rem;
   padding: 0.1rem 0.2rem;
-  transform: translateY(-55%);
   border: 1px solid var(--border);
   border-radius: 0.35rem;
   background: var(--panel-raised);
 }
 
-@media (hover: hover) {
-  .view--block-editor[data-editor-mode="command"]
-    .block-row:hover
-    > .standing-toolbar {
-    display: flex;
-  }
-}
-
-.view--block-editor[data-editor-mode="command"]
-  .block-row:focus-within
-  > .standing-toolbar {
-  display: flex;
-}
-
-.standing-toolbar button {
+.standing-toolbar button,
+.block-controls button {
   min-width: 1.6rem;
   min-height: 1.6rem;
   padding: 0 0.25rem;
@@ -1028,7 +1130,8 @@ hr[data-block-divider] {
   cursor: pointer;
 }
 
-.standing-toolbar button:hover {
+.standing-toolbar button:hover,
+.block-controls button:hover {
   color: var(--text);
 }
 
@@ -1105,7 +1208,6 @@ hr[data-block-divider] {
     padding: 0.4rem 0 0;
   }
 
-  .block-standing,
   .block-reference {
     min-width: 0;
     width: var(--block-grip-gutter);
@@ -1135,39 +1237,105 @@ hr[data-block-divider] {
     line-height: 1.2;
   }
 
-  /* The proposer's face stands in the gutter, over the border's inner side,
-   * rather than centred on the border: the border is at the screen's edge,
-   * and half the face would be off it. It keeps its place down the border
-   * (CA_0043_001), measured from its own size. */
-  .proposal-block__face {
-    top: max(2.35rem, calc(50% - var(--block-grip-gutter) / 2));
-    left: -1px;
-    transform: none;
-    width: var(--block-grip-gutter);
-    height: var(--block-grip-gutter);
-    border-width: 1px;
-  }
-
-  .proposal-block__portrait {
-    width: calc(var(--block-grip-gutter) - 2px);
-    height: calc(var(--block-grip-gutter) - 2px);
+  /* On a phone the chip may take the width inside the border, and the words
+   * give way before the face and the answers do. BO_0265_010 */
+  .proposal-block__mark {
+    left: 0.35rem;
+    max-width: calc(100% - 0.7rem);
   }
 }
 
-/* A focused block and its depth (CA_0046). Focus is a fact within reading:
- * a first press focuses and reveals the affordance line under the text, a
- * second edits. The ring is an outline, so focusing changes no geometry, and
- * it is visibly neither the active block's accent border nor command mode's
- * dashed mark. */
-.view--block-editor[data-editor-mode="reading"] .block-row[data-focused="true"] {
-  outline: 2px solid var(--selection);
+/* The row the reader has turned to, whatever kind it is: a block, a proposal
+ * or a revealed discarded or retired block (DO_0016_005). One ring, heavier than any edge a row
+ * carries of its own — solid `--accent` rather than the translucent
+ * `--selection` tint, which a proposal's own ground swallowed — so the row
+ * the bar's block groups act on can be told from the rows beside it. The
+ * ring is an outline, so focusing changes no geometry. User decision,
+ * 2026-09-21 (CA_0046, DO_0006_012). */
+.view--block-editor[data-editor-mode="reading"] .block-row[data-focused="true"],
+.proposal-block[data-focused="true"],
+.discarded-row[data-focused="true"],
+.retired-row[data-focused="true"] {
+  outline: var(--block-focus-width) solid var(--accent);
   outline-offset: 2px;
   border-radius: 0.35rem;
 }
 
+/* The ring is drawn wherever a row is focused, hover included. The focus
+ * holds once given — the pointer leaving no longer takes it — so the ring
+ * stands on one row rather than following the pointer about, and the block
+ * the bar's groups name is the one that is visibly focused. DO_0006_003 */
+
 /* The affordance line and the rail unfold below the block's text and never
  * above it, so the block's top edge stays where it was. The row reserves
  * nothing for them. */
+/* The depth's categories as icon buttons on the block's top border, at the
+ * trailing end — the standing toolbar's idiom (`BO_0231_004`) at the opposite
+ * side. Out of the row's flow, so the set changing from block to block moves
+ * no text: the row grows leftward. It needs no hover gating, because the
+ * depth is only rendered for the block the reader has turned to. BO_0258_021 */
+.block-depth-toolbar {
+  position: absolute;
+  top: 0;
+  inset-inline-end: calc(var(--block-grip-gutter) + 0.5rem);
+  z-index: 3;
+  display: flex;
+  gap: 0.15rem;
+  padding: 0.1rem 0.2rem;
+  transform: translateY(-55%);
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--panel-raised);
+}
+
+.block-depth-toolbar__button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.6rem;
+  min-height: 1.6rem;
+  padding: 0 0.25rem;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.block-depth-toolbar__button:hover,
+.block-depth-toolbar__button:focus-visible {
+  color: var(--text);
+}
+
+.block-depth-toolbar__button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel-raised));
+  color: var(--text);
+}
+
+/* A category whose content is waiting for an answer, so the reader can see
+   which one to open without opening each. It is a different statement from
+   `aria-pressed`, which says the category is open, and the two can stand at
+   once. RF_0001_005 */
+.block-depth-toolbar__button {
+  position: relative;
+}
+
+.block-depth-toolbar__button[data-depth-owed] {
+  color: var(--accent);
+}
+
+.block-depth-toolbar__button[data-depth-owed]::after {
+  content: "";
+  position: absolute;
+  inset-block-start: 0.15rem;
+  inset-inline-end: 0.15rem;
+  width: 0.3rem;
+  height: 0.3rem;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
 .block-depth {
   margin: 0.15rem 0 0.35rem;
   font-size: 0.875rem;
@@ -1192,6 +1360,28 @@ hr[data-block-divider] {
 .block-depth__category[aria-pressed="true"] {
   color: var(--text);
   text-decoration: underline;
+}
+
+/* The open category, anchored under the icon row that opened it. It is taken
+   out of the flow so neither this block's text nor any block after it moves
+   when it opens: it had been an expansion in the flow, which pushed the whole
+   document down. Its width is bounded by the block and it scrolls rather than
+   growing without limit, so a category with many relations cannot cover the
+   page. RF_0001_004 */
+.block-depth__rail[data-depth-overlay] {
+  position: absolute;
+  inset-inline-end: calc(var(--block-grip-gutter) + 0.5rem);
+  top: 0;
+  z-index: 4;
+  width: min(30rem, calc(100% - var(--block-grip-gutter) - 1rem));
+  max-height: min(22rem, 60vh);
+  overflow-y: auto;
+  margin-top: 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--panel-raised);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--text) 22%, transparent);
 }
 
 .block-depth__rail {
@@ -1265,20 +1455,31 @@ hr[data-block-divider] {
   color: var(--text-muted);
 }
 
-.block-derived-mark {
-  position: absolute;
-  inset-inline-start: 0;
-  top: 0.5rem;
-  z-index: 1;
-  display: grid;
-  place-items: center;
-  width: var(--block-grip-gutter);
+/* What a block is, said above its words in the kind's own word and coloured by
+   the register that kind carries: supported holds the claim up, contradicted
+   pushes against it, open is unresolved. Drawn by `calliopa-refine` through the
+   headline decoration, because only the extension that declares the kinds can
+   say what one means; a block carrying no kind draws nothing, so an ordinary
+   document is undecorated. The derived block's glyph, which this view drew from
+   `DERIVED_SECTIONS` until `RF_0004_008`, comes with it. RF_0004_001 */
+.block-register {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-block-end: 0.1rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--text-muted);
 }
 
-.block-row[data-standing="keep"] .block-derived-mark,
-.block-row[data-standing="pin"] .block-derived-mark {
-  top: 1.7rem;
+.block-register[data-register="supported"] {
+  color: var(--accent);
+}
+
+.block-register[data-register="contradicted"] {
+  color: var(--error);
 }
 
 /* On a phone the focused block stays at the bar's edge while its depth
@@ -1400,13 +1601,29 @@ hr[data-block-divider] {
   background: transparent;
 }
 .proposal-block--derived .proposal-block__face {
-  display: none;
+  border-color: var(--border);
+  cursor: default;
 }
 .proposal-block--derived .proposal-block__derived-mark {
   position: absolute;
   left: 0.15rem;
   top: 0.35rem;
   color: var(--text-muted);
+}
+
+/* Something on this block is waiting for the reader's answer, in whatever
+   category holds it: one dot, drawn while the block is not the active one. It
+   replaces the sparkle and the warning glyph, which said one thing in two
+   shapes. What is owed, and where, is the depth's to say. RF_0001_006 */
+.block-owed-mark {
+  position: absolute;
+  inset-inline-end: calc(var(--block-grip-gutter) / 2);
+  top: 0.6rem;
+  z-index: 1;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--accent);
 }
 
 /* Changed since you last read this: a small dot beside the derived mark.
@@ -1425,9 +1642,9 @@ hr[data-block-divider] {
 }
 
 
-/* The Possible relation card (`BO_0247_005`): the derived idiom's quiet
-   ground, its own three answers in a row, and the two provenance lines. */
-.proposal-block__card .proposal-block__use button,
+/* The line that opens the possible relations a block holds beyond the first
+   two (`BO_0247_005`). The cards themselves are answered from their chips
+   (`DO_0007_001`), so this is the only button the card's idiom still draws. */
 .proposal-relations-more button {
   appearance: none;
   border: 1px solid var(--border);
@@ -1438,11 +1655,6 @@ hr[data-block-divider] {
   font-size: 0.8125rem;
   padding: 0.1rem 0.5rem;
   cursor: pointer;
-}
-.proposal-block__card .proposal-block__use {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
 }
 .proposal-relations-more {
   margin: 0.25rem 0 0.5rem;
@@ -1601,20 +1813,10 @@ hr[data-block-divider] {
   border-color: var(--accent);
 }
 
-/* A person's branch (BO_0250_020–_022): a muted line under the intent like
- * the phase's, the marker in the text colour, the acceptance card in the
- * page's flow, and what a rejected branch held as rows under the line. */
-.document-branch {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.3rem 0.6rem;
-  margin: 0 0 0.5rem;
-  font-size: 0.8125rem;
-  color: var(--text-muted);
-}
-
-.document-branch button,
+/* A person's proposal session (BO_0250_021–_022, CA_0057_006): the
+ * acceptance card in the page's flow, and what a rejected session held as
+ * rows under the title. Nothing else stands there: the bar's toggle and the
+ * session chips enter and answer a session. */
 .branch-rejected button {
   padding: 0;
   border: 0;
@@ -1625,14 +1827,8 @@ hr[data-block-divider] {
   cursor: pointer;
 }
 
-.document-branch button:hover,
-.document-branch button:focus-visible,
 .branch-rejected button:hover,
 .branch-rejected button:focus-visible {
-  color: var(--text);
-}
-
-.document-branch__marker {
   color: var(--text);
 }
 
@@ -1729,9 +1925,1047 @@ hr[data-block-divider] {
  * the margins those set do not win (BO_0250_020); found on the served build,
  * where they began at the screen's edge. */
 @media (max-width: 640px) {
-  .document-branch,
   .branch-card,
   .branch-rejected {
     margin-inline-start: var(--block-grip-gutter);
   }
+}
+
+/* A proposal, a retired and a discarded row marked as a reference, in the
+ * block row's own treatment: a dashed outline and the number in the gutter,
+ * visibly apart from the proposal's solid edge, the retired row's dashed rule
+ * and the discarded row's dotted one by the accent and the number. The rows
+ * hold the gutter number as a block row does. BO_0263_005 */
+.view--block-editor[data-editor-mode="command"] :is(.proposal-block, .retired-row, .discarded-row)[data-reference] {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+  border-radius: 0.35rem;
+}
+
+.retired-row,
+.discarded-row {
+  position: relative;
+}
+
+.view--block-editor[data-editor-mode="command"] :is(.retired-row__text, .discarded-row__text) {
+  cursor: pointer;
+}
+
+.row-passages {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.row-passages__number {
+  position: static;
+}
+
+/* The agent's mark on a block it is reading (BO_0265_013): its face and one
+   line on the block's bottom border, inset as a proposal's line is, over the
+   row and out of its flow, so it changes no geometry. It fades three seconds
+   after the last read; a read again draws it anew. */
+/* A gesture's answer where the question was asked (`BO_0258_006c`): the
+   question while its run goes, then what the run concluded, below the block
+   it was asked about. It is announced, unlike the reading mark beside it:
+   the reader asked for this one. It goes by itself after `ANSWER_MS`, so
+   nothing accumulates at rest. */
+.gesture-answer {
+  margin: 0.25rem 0 0;
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.25rem;
+  background: var(--surface-sunken, transparent);
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  max-width: 48ch;
+  animation: gesture-answer-in 160ms ease-out;
+}
+
+@keyframes gesture-answer-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.agent-read-mark {
+  position: absolute;
+  bottom: 0;
+  left: var(--block-grip-gutter);
+  transform: translateY(50%);
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: calc(100% - 2 * var(--block-grip-gutter));
+  pointer-events: none;
+  animation: agent-read-mark 3s linear forwards;
+}
+
+.agent-read-mark__face {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--panel-raised);
+  color: var(--text-muted);
+}
+
+.agent-read-mark__portrait {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.agent-read-mark__words {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: var(--panel-raised);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes agent-read-mark {
+  0% {
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-read-mark {
+    animation: none;
+  }
+}
+
+/* Every row's grip while reading (BO_0263_013, BO_0263_014): the active
+ * block's handle and arrows, drawn on a desktop while the pointer is over the
+ * row and on a phone on the focused row. Hidden rather than absent, and in the
+ * gutter or the row's own line, so showing one changes no geometry. */
+.block-grip--idle {
+  visibility: hidden;
+}
+
+@media (hover: hover) {
+  :is(.block-row, .proposal-block, .retired-row, .discarded-row):hover > .block-grip--idle,
+  .block-grip--idle:focus-within {
+    visibility: visible;
+  }
+}
+
+@media (hover: none) {
+  .block-row[data-focused="true"] > .block-grip--idle,
+  :is(.proposal-block, .retired-row, .discarded-row):focus-within > .block-grip--idle {
+    visibility: visible;
+  }
+}
+
+/* On a retired or discarded row the grip stands in the row's own line,
+ * before its label, since the row holds no gutters. */
+.block-grip--inline {
+  position: static;
+  flex: none;
+}
+
+/* On a phone the arrows stand on a row's top border (CA_0045_002); on a
+ * proposal they stand beside the handle instead, since its answers ride the
+ * top edge at the right. */
+@media (max-width: 640px) {
+  .proposal-block > .block-grip--end.block-grip--idle {
+    inset-inline-start: var(--block-grip-gutter);
+    inset-inline-end: auto;
+  }
+}
+
+/* A block's command control, below its bottom border where proposals and the
+ * agent's mark put their line: left-aligned, inset by the gutter, its middle
+ * 0.9375rem (15px) under the edge so it covers little of the block being
+ * edited, and out of the flow, so showing it moves no block. One compact line —
+ * the agent, Point from this block, Attach files, Send with its caret, then the
+ * chips of what the command carries, clipped where the line ends. BO_0267_012 */
+.block-command {
+  position: absolute;
+  bottom: 0;
+  left: var(--block-grip-gutter);
+  right: var(--block-grip-gutter);
+  transform: translateY(calc(50% + 0.9375rem));
+  z-index: 3;
+  pointer-events: none;
+}
+
+.block-command > * {
+  pointer-events: auto;
+}
+
+/* One chip holds the whole line: the agent, Point from this block and Attach
+ * files, then what the command carries, then Send and its caret at the end —
+ * a single border around buttons of one size, each an icon named by its
+ * label. Written through the line, so the shell's own rules for the dock's
+ * controls never outweigh these. BO_0267_027 BO_0267_028 */
+.block-command .block-command__line {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.1rem;
+  min-width: 0;
+  max-width: 100%;
+  width: max-content;
+  padding: 1px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-raised);
+}
+
+.block-command .block-command__line .agent-menu {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+}
+
+.block-command .block-command__line .agent-menu__button,
+.block-command .block-command__line .speed-toggle,
+.block-command .block-command__line .block-command__point,
+.block-command .block-command__line .block-command__send-main,
+.block-command .block-command__line .block-command__send-more,
+.block-command .block-command__line .composer__attach {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* The agent is its face alone in the chip; its list still opens from it. */
+/* What a model lets a person choose, in the chip beside the model itself
+   (`BO_0279_007`). One line of 24px controls: the value shows and the axis is
+   the control's name, so `Ratio` and `Quality` read as `1:1` and `2k` without
+   crowding the line. They stand in the chip rather than in the list, because
+   choosing a model closes the list. */
+.block-command .block-command__line .agent-menu__options {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-inline-start: 2px;
+}
+
+.block-command .block-command__line .agent-menu__option-control {
+  flex: none;
+  box-sizing: border-box;
+  height: 24px;
+  max-width: 5.5rem;
+  padding: 0 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 4px);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1;
+}
+
+.block-command .block-command__line .agent-menu__option-control:disabled {
+  opacity: 0.5;
+}
+
+.block-command .block-command__line .agent-menu__button .icon {
+  display: none;
+}
+
+.block-command .block-command__line .agent-menu__face {
+  width: 18px;
+  height: 18px;
+}
+
+.block-command .block-command__line .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.block-command .block-command__line .block-command__point[aria-pressed="true"] {
+  color: var(--accent);
+  background: var(--selection);
+}
+
+.block-command .block-command__line .block-command__send {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+}
+
+.block-command .block-command__line .block-command__send-main {
+  color: var(--accent);
+}
+
+.block-command .block-command__line .agent-menu__button:hover,
+.block-command .block-command__line .speed-toggle:hover,
+.block-command .block-command__line .block-command__point:hover,
+.block-command .block-command__line .block-command__send-main:hover,
+.block-command .block-command__line .block-command__send-more:hover,
+.block-command .block-command__line .composer__attach:hover,
+.block-command .block-command__line .agent-menu__button:focus-visible,
+.block-command .block-command__line .speed-toggle:focus-visible,
+.block-command .block-command__line .block-command__point:focus-visible,
+.block-command .block-command__line .block-command__send-main:focus-visible,
+.block-command .block-command__line .block-command__send-more:focus-visible,
+.block-command .block-command__line .composer__attach:focus-within {
+  background: var(--selection);
+  color: var(--text);
+}
+
+.block-command button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.block-command__menu {
+  position: absolute;
+  inset-inline-start: 0;
+  top: calc(100% + 0.25rem);
+  z-index: 4;
+  display: grid;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--panel-raised);
+}
+
+.block-command__menu button {
+  padding: 0.3rem 0.6rem;
+  border: 0;
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.block-command__menu button:hover,
+.block-command__menu button:focus-visible {
+  background: var(--selection);
+}
+
+.block-command .block-command__line .composer__chips {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  gap: 0.2rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+}
+
+.block-command .block-command__line .chip {
+  min-width: 0;
+  height: 20px;
+  min-height: 20px;
+  padding: 0 0.35rem;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+/* A refusal floats under the line, over what follows, and moves nothing. */
+.block-command__notice {
+  position: absolute;
+  top: calc(100% + 0.2rem);
+  inset-inline-start: 0;
+  z-index: 4;
+  max-width: 100%;
+  margin: 0;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: var(--panel-raised);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+/* The prompt pointed from: an accent edge on its start side, so it reads as
+ * where the pointing comes from and never as a marked block's dashed outline.
+ * BO_0267_013 */
+.block-row[data-pointing-from] {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* A prompt drawn in place under Show prompts: the dotted card every marked
+ * row is drawn as, labelled `prompt` on its top border (`CardLabel`), with
+ * muted words in the monospace face — visibly neither proposed, retired nor
+ * discarded. BO_0267_015 DO_0008_002 */
+.block-row[data-standing="prompt"] .block-text[data-block-reading] {
+  color: var(--text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.9em;
+}
+
+/* A fast command's speed at the accent, as in the dock. BO_0269_015 */
+.block-command .block-command__line .speed-toggle[data-speed="fast"] {
+  color: var(--accent);
+}
+/* On a phone the move arrows already stand on the top border at the trailing
+ * end (`CA_0045_002`) and a focused row draws them, so the depth's icons take
+ * the leading end rather than fight them for the same corner. BO_0258_023 */
+@media (max-width: 640px) {
+  .block-depth-toolbar {
+    inset-inline-end: auto;
+    inset-inline-start: var(--block-grip-gutter);
+  }
+}
+
+/* A picture or a moving picture in a document (BO_0273_011).
+
+   The box is reserved from the block's own width and height, which it stores
+   because the blob reference carries no dimensions. `aspect-ratio` holds the
+   shape while the element scales to the column, so nothing moves when the
+   bytes land and a pending block occupies exactly what its picture will. */
+.media-block {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-block, 4px);
+}
+
+.media-block[style*="--media-width"] {
+  aspect-ratio: var(--media-width) / var(--media-height);
+  width: min(100%, calc(var(--media-width) * 1px));
+}
+
+/* Not made yet: the box with its words, on the quiet ground, told apart from
+   a loaded block by its border rather than by colour alone. */
+.media-block--pending {
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--border-muted, currentColor);
+  background: var(--surface-quiet, transparent);
+  min-height: 3rem;
+  padding: 0.75rem;
+}
+
+.media-block__words {
+  font-size: 0.875rem;
+  opacity: 0.75;
+  text-align: center;
+}
+
+/* A table in a document (BO_0287_011). The grid scrolls sideways inside its
+   row rather than widening the column; a cell that does not fit its column
+   is ringed where it is, and the words say why below. */
+.table-block {
+  margin: 0;
+  max-width: 100%;
+}
+
+.table-block__scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.table-block__table {
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+  min-width: 100%;
+}
+
+.table-block__header,
+.table-block__cell {
+  border: 1px solid var(--border-muted, currentColor);
+  padding: 0.25rem 0.5rem;
+  text-align: start;
+  vertical-align: top;
+}
+
+.table-block__header {
+  background: var(--surface-quiet, transparent);
+  font-weight: 600;
+}
+
+.table-block__header-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.table-block__name,
+.table-block__type,
+.table-block__input,
+.table-block__caption-input {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  min-width: 4ch;
+}
+
+.table-block__input {
+  width: 100%;
+}
+
+.table-block__type-word {
+  font-weight: 400;
+  opacity: 0.7;
+}
+
+.table-block__cell[data-table-cell-type="number"] {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.table-block__cell[data-table-cell-type="number"] .table-block__input {
+  text-align: end;
+}
+
+.table-block__cell[data-table-misfit] {
+  outline: 2px solid var(--accent, currentColor);
+  outline-offset: -2px;
+}
+
+.table-block__cell--remove,
+.table-block__header--add {
+  border: 0;
+  background: transparent;
+  padding: 0 0.25rem;
+}
+
+.table-block__remove,
+.table-block__add {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-block, 4px);
+  padding: 0 0.375rem;
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.table-block__remove:hover,
+.table-block__add:hover,
+.table-block__remove:focus-visible,
+.table-block__add:focus-visible {
+  opacity: 1;
+  border-color: var(--border-muted, currentColor);
+}
+
+.table-block__controls {
+  margin-top: 0.25rem;
+}
+
+.table-block__count,
+.table-block__caption {
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  opacity: 0.75;
+}
+
+.table-block__failure {
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  color: var(--accent, currentColor);
+}
+
+.table-block__caption-input {
+  width: 100%;
+}
+
+/* The manuscript's head beneath the title (BO_0293_016): the authors with
+   their affiliations' numbers, then the affiliations. */
+.document-authors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  margin: 0.25rem 0 0.75rem;
+}
+.document-authors__affiliations {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 1rem;
+  font-size: 0.875rem;
+  opacity: 0.75;
+}
+
+/* The head's lines, folded away until opened (BO_0293_016). */
+.document-front {
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+}
+.document-front > summary {
+  cursor: pointer;
+  opacity: 0.75;
+}
+.document-front__line {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.25rem 0.5rem;
+  margin-top: 0.5rem;
+}
+.document-front__label {
+  grid-column: 1 / -1;
+}
+
+/* An abstract (BO_0293_014): set apart from the prose around it — its label
+   above, the text a little smaller and inset — while it is read and while it
+   is edited alike. The label is a pseudo-element, so the editing surface
+   counts none of it among the caret's characters. */
+.block-text[data-role="abstract"] {
+  margin-inline: 1.5rem;
+  font-size: 0.95em;
+}
+.block-text[data-role="abstract"]::before {
+  content: "Abstract";
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+/* A figure's caption line (BO_0295_010): the number's label, then the
+   caption, set as the table's caption is. */
+.media-block__figure {
+  margin: 0;
+}
+.figure-caption {
+  display: flex;
+  gap: 0.35rem;
+  align-items: baseline;
+  margin: 0.25rem 0 0;
+  font-size: 0.875rem;
+  opacity: 0.75;
+}
+.figure-caption__label {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.figure-caption__input {
+  flex: 1;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  min-width: 4ch;
+}
+
+/* A display equation (BO_0290_014). The equation arrives already set as SVG,
+   so nothing here waits on a font or resizes once the page is live. */
+.equation-block {
+  margin: 0;
+  max-width: 100%;
+}
+
+/* The number stands outside the scrolling box, so a long equation never
+   scrolls its own number out of sight. */
+.equation-block__set {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  max-width: 100%;
+}
+
+/* A long equation scrolls inside its own block rather than widening the page,
+   which is what keeps it usable at phone width. */
+.equation-block__body {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 0.25rem 0;
+  text-align: center;
+}
+
+.equation-block__number {
+  color: var(--text-muted, currentColor);
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.equation-block__caption {
+  color: var(--text-muted, currentColor);
+  font-size: 0.9375rem;
+  margin: 0.25rem 0 0;
+  text-align: center;
+}
+
+/* TeX the engine could not read: the source as it was written, with one
+   restrained sentence. Nothing is repaired and nothing is guessed. */
+.equation-block__source {
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
+.equation-block__failure {
+  color: var(--text-muted, currentColor);
+  font-size: 0.9375rem;
+  margin: 0.25rem 0 0;
+}
+
+/* Mathematics inside a sentence (BO_0290_015). It is drawn typeset in reading
+   and in editing alike, as one thing the caret steps over rather than into. */
+.run-math {
+  display: inline-block;
+  vertical-align: baseline;
+}
+
+.run-math[data-math-unset] {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9375rem;
+}
+
+.run-equation-ref {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A reference to a numbered figure or table (BO_0295_012): one atom whose
+   words come from an attribute on the editing surface, as a citation's do,
+   and from its text in the reading row. */
+.run-block-ref {
+  white-space: nowrap;
+}
+.run-block-ref[data-block-ref-label]::before {
+  content: attr(data-block-ref-label);
+}
+.run-block-ref--missing {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* A citation (BO_0291_025): the work's number in the document, one atom the
+   caret steps over, muted until the read numbers it and marked when its work
+   is gone. */
+.run-cite {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--accent);
+}
+
+/* While the block is edited the label comes from its attribute, so the atom
+   holds nothing the caret could count. */
+.run-cite[data-cite-label]::before {
+  content: attr(data-cite-label);
+}
+
+.run-cite--missing {
+  color: var(--error);
+}
+
+/* Code and its output (BO_0289_018): the source in a monospace field that
+   grows with it, the language beside it, and beneath it whatever the runs it
+   contributes; an output as the execution streamed it. Every colour is a
+   token, as the theme-token check requires. */
+.code-block {
+  margin: 0;
+  max-width: 100%;
+  border: 1px solid var(--border-muted, currentColor);
+  border-radius: 0.25rem;
+  background: var(--surface-quiet, transparent);
+}
+
+.code-block__head {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.125rem 0.5rem 0;
+  font-size: 0.75rem;
+  color: var(--text-muted, inherit);
+}
+
+.code-block__language {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  text-align: end;
+  min-width: 6ch;
+}
+
+.code-block__source {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0.25rem 0.5rem 0.5rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  tab-size: 4;
+}
+
+.code-block__source--read {
+  overflow-x: auto;
+}
+
+.code-block__failure {
+  margin: 0;
+  padding: 0 0.5rem 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--text-danger, inherit);
+}
+
+.output-block {
+  margin: 0;
+  max-width: 100%;
+  border-inline-start: 2px solid var(--border-muted, currentColor);
+  padding-inline-start: 0.5rem;
+}
+
+.output-block__head {
+  font-size: 0.75rem;
+  color: var(--text-muted, inherit);
+}
+
+.output-block__stream,
+.output-block__error,
+.output-block__text {
+  margin: 0.25rem 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.output-block__stream--stderr,
+.output-block__error {
+  color: var(--text-danger, inherit);
+}
+
+.output-block__picture {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.25rem 0;
+}
+
+.output-block__cut {
+  margin: 0.25rem 0;
+  font-size: 0.8125rem;
+  color: var(--text-muted, inherit);
+}
+
+.output-block__files {
+  margin: 0.25rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8125rem;
+}
+
+.output-block__file-size {
+  color: var(--text-muted, inherit);
+}
+
+/* The one editing surface for mathematics (BO_0290_016). It stands beside the
+   equation rather than in its place, so what is being edited never moves. */
+.equation-popover {
+  background: var(--surface, Canvas);
+  border: 1px solid var(--border-muted, currentColor);
+  border-radius: 0.375rem;
+  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 0.18);
+  display: grid;
+  gap: 0.375rem;
+  left: 0;
+  margin-top: 0.25rem;
+  max-width: min(30rem, 100%);
+  padding: 0.625rem;
+  position: absolute;
+  top: 100%;
+  z-index: 3;
+}
+
+.equation-popover__label {
+  color: var(--text-muted, currentColor);
+  font-size: 0.8125rem;
+}
+
+.equation-popover__source {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9375rem;
+  resize: vertical;
+  width: 100%;
+}
+
+.equation-popover__preview {
+  border-top: 1px solid var(--border-muted, currentColor);
+  min-height: 2.5rem;
+  overflow-x: auto;
+  padding-top: 0.375rem;
+  text-align: center;
+}
+
+.equation-popover__failure {
+  color: var(--text-muted, currentColor);
+  font-size: 0.9375rem;
+}
+
+.equation-popover__number {
+  align-items: center;
+  display: flex;
+  gap: 0.375rem;
+  font-size: 0.9375rem;
+}
+
+/* The block is the panel's positioning context. */
+.equation-block {
+  position: relative;
+}
+
+/* The source chooser (BO_0291_024): the body of the bar's Cite popover, drawn
+   by the shell inside the panel it places under the control, so it carries
+   no position of its own. Every colour is a token. */
+.cite-popover {
+  display: grid;
+  gap: 0.375rem;
+  min-width: min(20rem, 80vw);
+  max-width: min(30rem, 90vw);
+}
+
+.cite-popover__search {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.35rem 0.5rem;
+  width: 100%;
+}
+
+.cite-popover__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.125rem;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.cite-popover__choice {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  padding: 0.35rem 0.5rem;
+  cursor: pointer;
+}
+
+.cite-popover__choice:hover,
+.cite-popover__choice:focus-visible {
+  background: var(--selection);
+  outline: none;
+}
+
+.cite-popover__refusal {
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+  margin: 0;
+}
+
+/* A citation's hover card (BO_0291_026): opened by the pointer or by focus,
+   beneath the citation. Every colour is a token. */
+.block-text .run-cite {
+  position: relative;
+}
+
+.run-cite .cite-card {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 4;
+  margin-top: 0.25rem;
+  min-width: 16rem;
+  max-width: min(28rem, 80vw);
+  padding: 0.5rem 0.625rem;
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 0.875rem;
+  white-space: normal;
+}
+
+.run-cite:hover .cite-card,
+.run-cite:focus-within .cite-card {
+  display: grid;
+  gap: 0.375rem;
+}
+
+.cite-card__locator {
+  color: var(--text-muted);
+}
+
+.cite-card__links {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.cite-card__open {
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.cite-card__links a {
+  color: var(--accent);
+}
+
+/* A citation's locator, edited over it (BO_0291_034): the equation popover's
+   panel, holding one field. */
+.locator-popover__field {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.3rem 0.5rem;
+  width: 100%;
 }

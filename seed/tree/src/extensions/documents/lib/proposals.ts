@@ -127,7 +127,7 @@ export function proposerName(proposer: Proposer): string {
 }
 
 /** The proposer as the possessive the answer buttons read: *Claude Code's*. */
-const possessive = (proposer: Proposer): string => {
+export const possessive = (proposer: Proposer): string => {
   if (proposer.kind === "person") return `${proposer.name}'s`;
   if (proposer.kind === "system") return "the system's";
   if (proposer.agent === null) return "an agent's";
@@ -153,23 +153,52 @@ export const kindNoun = (kind: string): string => KIND_NOUN[kind] ?? "change";
 
 /**
  * The names a derived candidate carries: the system's reading, drawn in the
- * derived idiom and answered by use — pinned, edited into or referenced to
- * accept, discarded to reject — so it names no proposer and no icons. A
- * rewrite of a pinned framing says it challenges it. BO_0246_006
+ * derived idiom, so it names no proposer. A rewrite of a framing that
+ * governs says it challenges it rather than replacing it: a fixated block is
+ * the framing a person chose (`BO_0246_006`), and a governed one is a derived
+ * block whose words a person made their own by editing them (`BO_0258_016`).
  */
-export function derivedNames(kind: string, blockKind: string, pinned: boolean): { readonly block: string } {
+export function derivedNames(
+  kind: string,
+  blockKind: string,
+  fixated: boolean,
+  governed = false,
+): { readonly block: string } {
   const what = blockKind === "" ? "block" : blockKind;
-  if (kind === "replace") {
-    return { block: pinned ? `Derived ${what}, challenges the pinned framing` : `Derived ${what}, a rewrite` };
-  }
-  return { block: `Derived ${what}` };
+  if (kind !== "replace") return { block: `Derived ${what}` };
+  if (fixated) return { block: `Derived ${what}, challenges the fixated framing` };
+  if (governed) return { block: `Derived ${what}, challenges the reader's own words` };
+  return { block: `Derived ${what}, a rewrite` };
 }
+
+/**
+ * The names the *Possible relation* card's two answers carry. The card's own
+ * words, not the generic ones: confirming an inferred relation is not
+ * accepting a rewrite, and *Not related* says the relation is not there
+ * rather than that it was refused (`BO_0247_005`). Only their place changed
+ * when they moved into the chip. DO_0007_001
+ */
+export const INFERRED_RELATION_NAMES = {
+  accept: "Confirm relation",
+  reject: "Not related",
+} as const;
 
 /** The accessible names of a proposal and its controls, in words. */
 export function proposalNames(
   kind: string,
   proposer: Proposer,
   destination: string | null,
+  /** The run that refined the proposal, when one did: the words in front
+   * of the reader are the refiner's, so the answers name the refiner, and
+   * the block and the face name both. BO_0271_011 */
+  refinedBy: Proposer | null = null,
+  /** The run that proposes the item's withdrawal, when one does: the block
+   * and the face name it beside the proposer, and the answers still name
+   * whose the words are. BO_0286_011 */
+  withdrawal: Proposer | null = null,
+  /** How many withdrawn items accepting this one rejects with it, said on
+   * the accept before the press. BO_0286_009 */
+  withdrawing = 0,
 ): {
   readonly block: string;
   readonly face: string;
@@ -177,13 +206,16 @@ export function proposalNames(
   readonly reject: string;
   readonly acceptAll: string;
 } {
-  const who = possessive(proposer);
+  const who = possessive(refinedBy ?? proposer);
+  const refined = refinedBy === null ? proposerName(proposer) : `${proposerName(proposer)}, refined by ${proposerName(refinedBy)}`;
+  const by = withdrawal === null ? refined : `${refined}, withdrawal proposed by ${proposerName(withdrawal)}`;
   const noun = kindNoun(kind);
   const going = destination === null ? "" : `, ${destination}`;
+  const also = withdrawing === 0 ? "" : `, withdrawing ${withdrawing}`;
   return {
-    block: `Proposed ${noun} by ${proposerName(proposer)}${going}`,
-    face: `Proposed by ${proposerName(proposer)}`,
-    accept: `Accept ${who} ${noun}`,
+    block: `Proposed ${noun} by ${by}${going}`,
+    face: `Proposed by ${by}`,
+    accept: `Accept ${who} ${noun}${also}`,
     reject: `Reject ${who} ${noun}`,
     acceptAll: `Accept all of ${who} proposed changes`,
   };
@@ -213,8 +245,12 @@ export function destinationOf(
   return next === undefined ? "would move to the end" : `would move before “${next.words}”`;
 }
 
-/** Where a placement asks a proposal to go: before a block, or at the end. */
-export type ProposalPlacement = { readonly before: string } | { readonly at: "end" };
+/** Where a placement asks a proposal to go: before a block, between two
+ * drawn rows' order keys (BO_0263_001), or at the end. */
+export type ProposalPlacement =
+  | { readonly before: string }
+  | { readonly between: readonly [string | null, string | null] }
+  | { readonly at: "end" };
 
 /**
  * The placement one arrow press asks for. A proposal sits before the first

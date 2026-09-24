@@ -1,13 +1,14 @@
 import type { PointedReference } from "./command-target";
 
 /**
- * Naming a reference by typing `#` in the composer. BO_0227_015
+ * Naming a reference by typing `#` in a block being written as a command.
+ * BO_0227_015 BO_0267_013
  *
- * Typing `#` offers the document's references by number, narrowing as digits
- * follow, and choosing one writes `#<number>` where the reader was typing.
- * Typing a number that exists creates nothing and needs nothing: the words
- * already name it. Pure, so where a pending reference begins and what
- * choosing inserts are settled without a textarea.
+ * Typing `#` offers the prompt's references by number, narrowing as digits
+ * follow, and choosing one writes `#<number>` where the reader was typing
+ * (`command-control.tsx`). Typing a number that exists creates nothing and
+ * needs nothing: the words already name it. Pure, so where a pending
+ * reference begins is settled without an editor.
  */
 
 export interface PendingReference {
@@ -41,22 +42,6 @@ export function referenceMatches(
   return references.filter((reference) =>
     String(reference.number).startsWith(typed),
   );
-}
-
-/** The text with the pending reference written out as `#<number>`, and the
- * caret after it, a space following so the reader types on. */
-export function insertReference(
-  text: string,
-  pending: PendingReference,
-  caret: number,
-  number: number,
-): { readonly text: string; readonly caret: number } {
-  const written = `#${number} `;
-  const after = text.slice(caret).replace(/^ /u, "");
-  return {
-    text: `${text.slice(0, pending.start)}${written}${after}`,
-    caret: pending.start + written.length,
-  };
 }
 
 /**

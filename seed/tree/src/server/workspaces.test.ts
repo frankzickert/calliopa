@@ -59,6 +59,21 @@ describe("workspace input", () => {
     ).toThrow(HttpError);
   });
 
+  it("Given a panel stored as a drawer state, Then it reads as a panel; a new workspace hides the inspector", () => {
+    const read = (left: unknown, right: unknown) =>
+      parseWorkspaceState({ ...DEFAULT_WORKSPACE_STATE, layout: { ...DEFAULT_WORKSPACE_STATE.layout, left, right } }).layout;
+    expect(read("expanded", "compact")).toMatchObject({ left: { shown: true }, right: { shown: true, icon: null } });
+    expect(read("hidden", { shown: true, icon: "publishing" })).toMatchObject({
+      left: { shown: false },
+      right: { shown: true, icon: "publishing" },
+    });
+    expect(DEFAULT_WORKSPACE_STATE.layout.right).toEqual({ shown: false });
+    expect(DEFAULT_WORKSPACE_STATE.layout.left).toEqual({ shown: true });
+    expect(() => read("wide", "hidden")).toThrow(HttpError);
+    expect(() => read({ shown: "yes" }, "hidden")).toThrow(HttpError);
+    expect(() => read({ shown: true, icon: 3 }, "hidden")).toThrow(HttpError);
+  });
+
   it("Given invalid layout or active tab data, Then validation rejects it", () => {
     expect(() =>
       parseWorkspaceState({ ...DEFAULT_WORKSPACE_STATE, activeTabId: "missing" }),
@@ -66,9 +81,17 @@ describe("workspace input", () => {
     expect(() =>
       parseWorkspaceState({
         ...DEFAULT_WORKSPACE_STATE,
-        layout: { ...DEFAULT_WORKSPACE_STATE.layout, dock: "floating" },
+        layout: { ...DEFAULT_WORKSPACE_STATE.layout, right: "wide" },
       }),
     ).toThrow(HttpError);
+    // A layout stored with a dock position reads without it: the dock is gone
+    // and what it stored is no longer anyone's to refuse. CA_0058_004
+    expect(
+      parseWorkspaceState({
+        ...DEFAULT_WORKSPACE_STATE,
+        layout: { ...DEFAULT_WORKSPACE_STATE.layout, dock: "console" },
+      }).layout,
+    ).not.toHaveProperty("dock");
     expect(() =>
       parseWorkspaceState({
         ...DEFAULT_WORKSPACE_STATE,
@@ -82,6 +105,17 @@ describe("a workspace's section states", () => {
   const withLayout = (layout: Record<string, unknown>): unknown => ({
     ...DEFAULT_WORKSPACE_STATE,
     layout: { ...DEFAULT_WORKSPACE_STATE.layout, ...layout },
+  });
+
+  it("Given a layout stored before the library's icon order existed, Then it reads empty, and a stored order reads back as given", () => {
+    // CA_0068_003: the order is the workspace's, beside the panels; an id
+    // nothing contributes is kept for the column to pass over.
+    expect(parseWorkspaceState(withLayout({ libraryOrder: undefined })).layout.libraryOrder).toEqual([]);
+    expect(
+      parseWorkspaceState(withLayout({ libraryOrder: ["ui.shell", "gone", "documents"] })).layout.libraryOrder,
+    ).toEqual(["ui.shell", "gone", "documents"]);
+    expect(() => parseWorkspaceState(withLayout({ libraryOrder: "ui.shell" }))).toThrow(/invalid workspace layout/u);
+    expect(() => parseWorkspaceState(withLayout({ libraryOrder: [1] }))).toThrow(/invalid workspace layout/u);
   });
 
   it("Given a layout stored before filters existed, Then it reads with no filter stored, and a stored set reads back as given", () => {

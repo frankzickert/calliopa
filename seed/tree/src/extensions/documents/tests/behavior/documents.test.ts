@@ -4,10 +4,14 @@ import {
   answerDocumentProposal,
   createDocument,
   deleteDocument,
+  fillMediaBlock,
+  reviseEquation,
+  reviseTable,
   insertBlock,
   listDocuments,
   mergeTextBlocks,
   moveBlock,
+  moveRetiredBlock,
   placeProposedItem,
   proposeDocumentChanges,
   readDocument,
@@ -19,13 +23,18 @@ import {
   retireBlock,
   reviseTextBlock,
   setBlockDisposition,
+  setCitationStyle,
+  setFigure,
+  setFrontMatter,
   splitTextBlock,
 } from "~/extensions/documents/server/documents";
+import { documentsCiting } from "~/extensions/documents/server/cited-by";
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { orderBetween } from "~/lib/order";
 import { readGraphEnv } from "~/server/ccgw/env";
 import { stage } from "~/server/ccgw/client";
+import { blobReference, objectIdOfHash, putBlob } from "~/server/ccgw/blobs";
 
 /**
  * The document operations over the one graph, against a real CCGW and a real
@@ -136,7 +145,7 @@ describe.skipIf(!configured)("documents over CCGW", () => {
     expect(stale.outcome).toBe("conflict");
   });
 
-  it("Given a standing set with the base, Then it lands, survives a save and a split, counts as a change, and neutral clears it", async () => {
+  it("Given a standing set with the base, Then it lands, survives a save and a split, counts as a change, and keep clears it", async () => {
     // Its own document, so the split it makes moves nothing the other
     // scenarios count.
     const { documentId: standingId, blockId: headId } = ok<{ documentId: string; blockId: string }>(
@@ -151,9 +160,9 @@ describe.skipIf(!configured)("documents over CCGW", () => {
     const changesBefore = await counted();
     await settle();
     const pinned = ok<{ revisionId: string }>(
-      await setBlockDisposition({ documentId: standingId, blockId: headId, baseRevisionId: before?.revisionId ?? "", standing: "pin" }),
+      await setBlockDisposition({ documentId: standingId, blockId: headId, baseRevisionId: before?.revisionId ?? "", standing: "fixate" }),
     );
-    expect((await block(headId))?.standing).toBe("pin");
+    expect((await block(headId))?.standing).toBe("fixate");
     expect(await counted()).toBe(changesBefore + 1);
 
     // A stale base is a conflict that writes nothing.
@@ -164,20 +173,33 @@ describe.skipIf(!configured)("documents over CCGW", () => {
     // Typing writes runs and role by property, so the standing stands.
     await settle();
     const saved = ok<{ revisionId: string }>(
-      await reviseTextBlock({ documentId: standingId, blockId: headId, baseRevisionId: pinned.revisionId, runs: [{ text: "Pinned words, split here." }] }),
+      await reviseTextBlock({ documentId: standingId, blockId: headId, baseRevisionId: pinned.revisionId, runs: [{ text: "Fixated words, split here." }] }),
     );
-    expect((await block(headId))?.standing).toBe("pin");
+    expect((await block(headId))?.standing).toBe("fixate");
 
-    // A split carries the standing to the tail, as it carries the role.
+    // A split carries the standing to the tail, as it carries the role — and
+    // the head's words as the editor holds them, split in place of the runs
+    // the graph holds, in one write of the head. DO_0015_001
     await settle();
     const split = ok<{ revisionId: string; tailBlockId: string }>(
-      await splitTextBlock({ documentId: standingId, blockId: headId, baseRevisionId: saved.revisionId, at: 13 }),
+      await splitTextBlock({ documentId: standingId, blockId: headId, baseRevisionId: saved.revisionId, at: 13, runs: [{ text: "Typed words, split here, and more." }], role: "h2" }),
     );
-    expect((await block(split.tailBlockId))?.standing).toBe("pin");
+    expect((await block(split.tailBlockId))?.standing).toBe("fixate");
+    type Words = { blocks: readonly { blockId: string; kind: string; runs?: readonly { text: string }[]; role?: string }[] };
+    const words = ok<Words>(await readDocument(standingId)).blocks;
+    expect(words.find((candidate) => candidate.blockId === headId)?.runs?.map((run) => run.text).join("")).toBe("Typed words, ");
+    expect(words.find((candidate) => candidate.blockId === split.tailBlockId)?.runs?.map((run) => run.text).join("")).toBe("split here, and more.");
+    expect(words.find((candidate) => candidate.blockId === headId)?.role).toBe("h2");
+    expect(words.find((candidate) => candidate.blockId === split.tailBlockId)?.role).toBe("h2");
+    // A stale base is a conflict that writes nothing, words or no words.
+    await settle();
+    const staleSplit = await splitTextBlock({ documentId: standingId, blockId: headId, baseRevisionId: saved.revisionId, at: 3, runs: [{ text: "Never written." }] });
+    expect(staleSplit.outcome).toBe("conflict");
+    expect(ok<Words>(await readDocument(standingId)).blocks.length).toBe(words.length);
 
     await settle();
-    ok(await setBlockDisposition({ documentId: standingId, blockId: headId, baseRevisionId: split.revisionId, standing: "neutral" }));
-    expect((await block(headId))?.standing).toBe("neutral");
+    ok(await setBlockDisposition({ documentId: standingId, blockId: headId, baseRevisionId: split.revisionId, standing: "keep" }));
+    expect((await block(headId))?.standing).toBe("keep");
 
     await settle();
     await deleteDocument({ documentId: standingId, baseRevisionId: ok<Read>(await readDocument(standingId)).revisionId });
@@ -196,6 +218,150 @@ describe.skipIf(!configured)("documents over CCGW", () => {
     expect(refused.outcome).toBe("validationFailure");
     const after = ok<{ blocks: readonly { revisionId: string }[] }>(await readDocument(documentId));
     expect(after.blocks[0]?.revisionId).toBe(document.blocks[0]?.revisionId);
+  });
+
+  it("Given a picture proposed and then made, Then the same block carries it", async () => {
+    // A generation is proposed before it is made: the block goes in with no
+    // reference, which is the whole of the pending state, and filling it keeps
+    // the same block so the reader answers the proposal already in front of
+    // them. BO_0273_017
+    const pending = ok<{ blockId: string; revisionId: string }>(
+      await insertBlock({
+        documentId,
+        block: { kind: "image", alt: "a laurel", source: { extension: "media", model: "seedream_v5_pro" } },
+        placement: { at: "end" },
+      }),
+    );
+    let document = ok<{ blocks: readonly { blockId: string; kind: string; objectId?: string; alt?: string }[] }>(
+      await readDocument(documentId),
+    );
+    const before = document.blocks.find((block) => block.blockId === pending.blockId);
+    expect(before?.kind).toBe("image");
+    expect(before?.objectId).toBeUndefined();
+    expect(before?.alt).toBe("a laurel");
+
+    await settle();
+    const filled = ok<{ blockId: string }>(
+      await fillMediaBlock({
+        documentId,
+        blockId: pending.blockId,
+        baseRevisionId: pending.revisionId,
+        reference: { _kind: "blob", hash: "sha256:" + "a".repeat(64), mediaType: "image/png", size: 12 },
+        width: 1280,
+        height: 720,
+        source: { extension: "media", model: "seedream_v5_pro", cost: "$0.42" },
+      }),
+    );
+    expect(filled.blockId).toBe(pending.blockId);
+
+    document = ok(await readDocument(documentId));
+    const after = document.blocks.find((block) => block.blockId === pending.blockId) as
+      | { objectId?: string; width?: number; height?: number }
+      | undefined;
+    expect(after?.objectId).toBe("a".repeat(64));
+    expect(after?.width).toBe(1280);
+    expect(after?.height).toBe(720);
+  });
+
+  it("Given a text block, Then filling it with a picture is refused", async () => {
+    const document = ok<{ blocks: readonly { blockId: string; revisionId: string }[] }>(
+      await readDocument(documentId),
+    );
+    const text = document.blocks[0]!;
+    const refused = await fillMediaBlock({
+      documentId,
+      blockId: text.blockId,
+      baseRevisionId: text.revisionId,
+      reference: { _kind: "blob", hash: "sha256:" + "b".repeat(64), mediaType: "image/png", size: 4 },
+    });
+    expect(refused.outcome).not.toBe("success");
+  });
+
+  it("Given a table, Then it is written whole, read as cells, revised on the same block, and the file behind it goes with a cell edit", async () => {
+    // A table is one block revised whole (BO_0287_008, BO_0287_009): a cell
+    // edit keeps the block's identity, a misfit is refused naming the cell,
+    // and a table behind a file drops the reference once its rows are no
+    // longer the file's first hundred.
+    const columns = [
+      { name: "City", type: "text" as const },
+      { name: "Population", type: "number" as const },
+    ];
+    // The file behind the table is a real object: CCGW refuses a reference
+    // that resolves to nothing, as the blob contract says.
+    const bytes = new TextEncoder().encode("City,Population\nBerlin,3755000\nHamburg,1892000\n");
+    const uploaded = ok<{ hash: string; size: number }>(await putBlob(bytes));
+    const objectId = objectIdOfHash(uploaded.hash)!;
+    const inserted = ok<{ blockId: string; revisionId: string }>(
+      await insertBlock({
+        documentId,
+        block: {
+          kind: "table",
+          columns,
+          rows: [["Berlin", "3755000"]],
+          caption: "German cities",
+          reference: blobReference(objectId, "text/csv", uploaded.size),
+          rowCount: 12400,
+          source: { extension: "documents", file: "cities.csv" },
+        },
+        placement: { at: "end" },
+      }),
+    );
+    type Table = { blockId: string; revisionId: string; kind: string; columns?: unknown; rows?: unknown; caption?: string; file?: { objectId: string; rowCount: number } };
+    let document = ok<{ blocks: readonly Table[] }>(await readDocument(documentId));
+    const before = document.blocks.find((block) => block.blockId === inserted.blockId);
+    expect(before?.kind).toBe("table");
+    expect(before?.columns).toEqual(columns);
+    expect(before?.rows).toEqual([["Berlin", "3755000"]]);
+    expect(before?.caption).toBe("German cities");
+    expect(before?.file).toEqual({ objectId, rowCount: 12400 });
+
+    await settle();
+    const misfit = await reviseTable({
+      documentId,
+      blockId: inserted.blockId,
+      baseRevisionId: inserted.revisionId,
+      columns,
+      rows: [["Berlin", "many"]],
+    });
+    expect(misfit.outcome).toBe("validationFailure");
+    const detail = misfit.outcome === "validationFailure" ? misfit.failures[0]?.detail : "";
+    expect(detail).toContain('column "Population": "many" is not a number');
+
+    // The caption alone changes: the file stays behind the block.
+    const captioned = ok<{ blockId: string; revisionId: string }>(
+      await reviseTable({ documentId, blockId: inserted.blockId, baseRevisionId: inserted.revisionId, columns, rows: [["Berlin", "3755000"]], caption: "Cities" }),
+    );
+    expect(captioned.blockId).toBe(inserted.blockId);
+    document = ok(await readDocument(documentId));
+    const kept = document.blocks.find((block) => block.blockId === inserted.blockId);
+    expect(kept?.caption).toBe("Cities");
+    expect(kept?.file).toEqual({ objectId, rowCount: 12400 });
+
+    await settle();
+    const revised = ok<{ blockId: string; revisionId: string }>(
+      await reviseTable({
+        documentId,
+        blockId: inserted.blockId,
+        baseRevisionId: captioned.revisionId,
+        columns,
+        rows: [["Berlin", "3755000"], ["Hamburg", "1892000"]],
+        caption: "Cities",
+      }),
+    );
+    expect(revised.blockId).toBe(inserted.blockId);
+    document = ok(await readDocument(documentId));
+    const after = document.blocks.find((block) => block.blockId === inserted.blockId);
+    expect(after?.rows).toEqual([["Berlin", "3755000"], ["Hamburg", "1892000"]]);
+    expect(after?.file).toBeUndefined();
+
+    const stale = await reviseTable({ documentId, blockId: inserted.blockId, baseRevisionId: captioned.revisionId, columns, rows: [] });
+    expect(stale.outcome).toBe("conflict");
+    const text = document.blocks.find((block) => block.kind === "text")!;
+    const wrongKind = await reviseTable({ documentId, blockId: text.blockId, baseRevisionId: text.revisionId, columns, rows: [] });
+    expect(wrongKind.outcome).toBe("validationFailure");
+
+    await settle();
+    await retireBlock({ documentId, blockId: inserted.blockId });
   });
 
   it("Given inserts, a split, a move, a merge, a retire and a restore, Then identity and order hold", async () => {
@@ -488,13 +654,13 @@ describe.skipIf(!configured)("documents over CCGW", () => {
     // The reader pins the block after the proposal was staged: a revision
     // CCGW reads as drift, though not a word moved. BO_0233_011
     await settle();
-    ok(await setBlockDisposition({ documentId, blockId: target?.blockId ?? "", baseRevisionId: target?.revisionId ?? "", standing: "pin" }));
+    ok(await setBlockDisposition({ documentId, blockId: target?.blockId ?? "", baseRevisionId: target?.revisionId ?? "", standing: "fixate" }));
     await settle();
     ok(await answerDocumentProposal({ documentId, itemId: staged.items[0]?.itemId ?? "", answer: "accepted" }));
     document = ok<Read>(await readDocument(documentId));
     const accepted = document.blocks.find((block) => block.blockId === target?.blockId);
     expect(accepted?.runs).toEqual([{ text: "Rewritten while pinned" }]);
-    expect(accepted?.standing).toBe("pin");
+    expect(accepted?.standing).toBe("fixate");
 
     // A rewrite whose block's words changed since is refused in words, and
     // nothing is written.
@@ -511,7 +677,7 @@ describe.skipIf(!configured)("documents over CCGW", () => {
     );
     // And the reader takes the pin back, after the rewrite that carries it.
     await settle();
-    ok(await setBlockDisposition({ documentId, blockId: target?.blockId ?? "", baseRevisionId: written.revisionId, standing: "neutral" }));
+    ok(await setBlockDisposition({ documentId, blockId: target?.blockId ?? "", baseRevisionId: written.revisionId, standing: "keep" }));
     await settle();
     const stale = await answerDocumentProposal({ documentId, itemId: again.items[0]?.itemId ?? "", answer: "accepted" });
     expect(stale.outcome).not.toBe("success");
@@ -526,7 +692,7 @@ describe.skipIf(!configured)("documents over CCGW", () => {
     document = ok<Read>(await readDocument(documentId));
     const edited = document.blocks.find((block) => block.blockId === target?.blockId);
     expect(edited?.runs).toEqual([{ text: "A stale rewrite" }]);
-    expect(edited?.standing).toBe("neutral");
+    expect(edited?.standing).toBe("keep");
 
     // A move takes no typing, so an edit's acceptance of a stale one is
     // refused as the icons' is.
@@ -686,5 +852,429 @@ describe.skipIf(!configured)("documents over CCGW", () => {
     expect(listed.some((entry) => entry.documentId === started.startedId)).toBe(false);
   });
 
+  it("Given a sentence citing a work, Then the work is cited by that document and block, and no longer once the block is retired (BO_0291_023)", async () => {
+    const work = randomUUID();
+    const created = ok<{ documentId: string }>(await createDocument({ title: "Citing" }));
+    const documentId = created.documentId;
+    await settle();
+    const inserted = ok<{ blockId: string }>(
+      await insertBlock({ documentId, block: { kind: "text", runs: [{ text: "Measured " }, { text: "", cite: { work, locator: "p. 4" } }, { text: "." }] }, placement: { at: "end" } }),
+    );
+    const cited = ok<readonly { documentId: string; citations: readonly { blockId: string; words: string }[] }[]>(await documentsCiting(work));
+    expect(cited).toEqual([{ documentId, title: "Citing", citations: [{ blockId: inserted.blockId, words: "Measured ." }] }]);
+
+    await settle();
+    ok(await retireBlock({ documentId, blockId: inserted.blockId }));
+    expect(ok<readonly unknown[]>(await documentsCiting(work))).toEqual([]);
+  });
+
+  it("Given a document, Then its own citation style is set on its base, read back, and cleared to follow the instance (BO_0291_037)", async () => {
+    const created = ok<{ documentId: string; revisionId: string }>(await createDocument({ title: "Cited" }));
+    const documentId = created.documentId;
+    type Read = { revisionId: string; citationStyle?: string };
+    const first = ok<Read>(await readDocument(documentId));
+    expect(first.citationStyle).toBeUndefined();
+
+    await settle();
+    const set = ok<{ revisionId: string }>(await setCitationStyle({ documentId, baseRevisionId: first.revisionId, style: "apa" }));
+    expect(ok<Read>(await readDocument(documentId)).citationStyle).toBe("apa");
+
+    // A stale base is refused; a style the declaration does not permit is refused by it.
+    await settle();
+    expect((await setCitationStyle({ documentId, baseRevisionId: first.revisionId, style: "ieee" })).outcome).toBe("conflict");
+    expect((await setCitationStyle({ documentId, baseRevisionId: set.revisionId, style: "harvard" })).outcome).not.toBe("success");
+
+    await settle();
+    ok(await setCitationStyle({ documentId, baseRevisionId: set.revisionId, style: null }));
+    expect(ok<Read>(await readDocument(documentId)).citationStyle).toBeUndefined();
+  });
+
+  it("Given a manuscript's head, Then the front matter is set whole on the document's base, read back, and the abstract is a block of its role", async () => {
+    const created = ok<{ documentId: string; revisionId: string }>(await createDocument({ title: "A Manuscript" }));
+    const documentId = created.documentId;
+    type Read = { revisionId: string; frontMatter?: Record<string, unknown>; blocks: readonly { blockId: string; role?: string }[] };
+    let document = ok<Read>(await readDocument(documentId));
+    expect(document.frontMatter).toBeUndefined();
+
+    await settle();
+    const set = ok<{ revisionId: string }>(
+      await setFrontMatter({
+        documentId,
+        baseRevisionId: document.revisionId,
+        frontMatter: {
+          authors: [{ name: "Ada Lovelace", affiliations: [0], corresponding: true }, { name: "Charles Babbage", affiliations: [0, 1] }],
+          affiliations: ["Analytical Engines Ltd", "Difference Works"],
+          keywords: ["provenance", "typesetting"],
+          venue: "ieee",
+        },
+      }),
+    );
+    document = ok<Read>(await readDocument(documentId));
+    expect(document.frontMatter).toEqual({
+      authors: [{ name: "Ada Lovelace", affiliations: [0], corresponding: true }, { name: "Charles Babbage", affiliations: [0, 1] }],
+      affiliations: ["Analytical Engines Ltd", "Difference Works"],
+      keywords: ["provenance", "typesetting"],
+      venue: "ieee",
+    });
+
+    // A stale base is refused; setting it whole again clears what is left out.
+    await settle();
+    // The document's first revision is stale now that the front matter moved it.
+    expect((await setFrontMatter({ documentId, baseRevisionId: created.revisionId, frontMatter: {} })).outcome).toBe("conflict");
+    ok(await setFrontMatter({ documentId, baseRevisionId: set.revisionId, frontMatter: { keywords: ["provenance"] } }));
+    document = ok<Read>(await readDocument(documentId));
+    expect(document.frontMatter).toEqual({ keywords: ["provenance"] });
+
+    // The abstract is a text block of its own role, written and read as one.
+    await settle();
+    const abstract = ok<{ blockId: string }>(
+      await insertBlock({ documentId, block: { kind: "text", role: "abstract", runs: [{ text: "We show that a record can emit a paper." }] }, placement: { at: "start" } }),
+    );
+    document = ok<Read>(await readDocument(documentId));
+    expect(document.blocks.find((block) => block.blockId === abstract.blockId)?.role).toBe("abstract");
+  });
+
+  it("Given pictures and a table, Then numbering one is a setFigure on its base, figures and tables count apart, and a reference follows", async () => {
+    const created = ok<{ documentId: string }>(await createDocument({ title: "Figures" }));
+    const documentId = created.documentId;
+    type Figure = { blockId: string; revisionId: string; kind: string; caption?: string; numbered?: boolean; number?: number };
+    type Read = { blocks: readonly Figure[]; figureNumbers?: Record<string, number>; tableNumbers?: Record<string, number> };
+
+    const first = ok<{ blockId: string; revisionId: string }>(
+      await insertBlock({ documentId, block: { kind: "image" }, placement: { at: "end" } }),
+    );
+    const second = ok<{ blockId: string; revisionId: string }>(
+      await insertBlock({ documentId, block: { kind: "image" }, placement: { at: "end" } }),
+    );
+    const table = ok<{ blockId: string; revisionId: string }>(
+      await insertBlock({ documentId, block: { kind: "table", columns: [{ name: "x", type: "number" }], rows: [["1"]] }, placement: { at: "end" } }),
+    );
+    let document = ok<Read>(await readDocument(documentId));
+    expect(document.figureNumbers).toBeUndefined();
+
+    await settle();
+    // The second picture asks for a number with a caption; the first none.
+    const captioned = ok<{ blockId: string; revisionId: string }>(
+      await setFigure({ documentId, blockId: second.blockId, baseRevisionId: second.revisionId, caption: "The control", numbered: true }),
+    );
+    ok(await setFigure({ documentId, blockId: table.blockId, baseRevisionId: table.revisionId, numbered: true }));
+    document = ok<Read>(await readDocument(documentId));
+    expect(document.figureNumbers).toEqual({ [second.blockId]: 1 });
+    expect(document.tableNumbers).toEqual({ [table.blockId]: 1 });
+    expect(document.blocks.find((block) => block.blockId === second.blockId)).toMatchObject({ caption: "The control", number: 1 });
+
+    await settle();
+    // Numbering the picture above renumbers the one below with nothing
+    // written to it, and a number needs no caption.
+    ok(await setFigure({ documentId, blockId: first.blockId, baseRevisionId: first.revisionId, numbered: true }));
+    document = ok<Read>(await readDocument(documentId));
+    expect(document.figureNumbers).toEqual({ [first.blockId]: 1, [second.blockId]: 2 });
+    expect(document.blocks.find((block) => block.blockId === second.blockId)?.revisionId).toBe(captioned.revisionId);
+
+    // A sentence refers to the figure and the table; the references survive
+    // the write and the read, and carry no text of their own.
+    await settle();
+    ok(
+      await insertBlock({
+        documentId,
+        block: { kind: "text", runs: [{ text: "See " }, { text: "", figureRef: second.blockId }, { text: " and " }, { text: "", tableRef: table.blockId }] },
+        placement: { at: "start" },
+      }),
+    );
+    const withWords = ok<{ blocks: readonly (Figure & { runs?: readonly Record<string, unknown>[] })[] }>(await readDocument(documentId));
+    expect(withWords.blocks[0]?.runs).toEqual([
+      { text: "See " },
+      { text: "", figureRef: second.blockId },
+      { text: " and " },
+      { text: "", tableRef: table.blockId },
+    ]);
+
+    // A stale base is refused as for text, a table's caption is the table's
+    // own revise, and a block that is neither is refused by name.
+    await settle();
+    expect((await setFigure({ documentId, blockId: second.blockId, baseRevisionId: second.revisionId, numbered: false })).outcome).toBe("conflict");
+    const tableAgain = document.blocks.find((block) => block.blockId === table.blockId);
+    expect((await setFigure({ documentId, blockId: table.blockId, baseRevisionId: tableAgain?.revisionId ?? "", caption: "x" })).outcome).toBe("validationFailure");
+    const words = withWords.blocks[0];
+    expect((await setFigure({ documentId, blockId: words?.blockId ?? "", baseRevisionId: words?.revisionId ?? "", numbered: true })).outcome).toBe("validationFailure");
+  });
+
+  it("Given an equation, Then it is written and read back with its number, revised whole, and renumbered by what stands above it", async () => {
+    const created = ok<{ documentId: string }>(await createDocument({ title: "Mathematics" }));
+    const documentId = created.documentId;
+    type Equation = {
+      blockId: string;
+      revisionId: string;
+      kind: string;
+      tex?: string;
+      caption?: string;
+      numbered?: boolean;
+      number?: number;
+    };
+
+    const plain = ok<{ blockId: string; revisionId: string }>(
+      await insertBlock({
+        documentId,
+        block: { kind: "equation", tex: "a^2 + b^2 = c^2" },
+        placement: { at: "end" },
+      }),
+    );
+    const numbered = ok<{ blockId: string; revisionId: string }>(
+      await insertBlock({
+        documentId,
+        block: { kind: "equation", tex: "e^{i\\pi} + 1 = 0", caption: "Euler's identity", numbered: true },
+        placement: { at: "end" },
+      }),
+    );
+
+    let document = ok<{ blocks: readonly Equation[]; equationNumbers?: Record<string, number> }>(
+      await readDocument(documentId),
+    );
+    const stored = document.blocks.find((block) => block.blockId === numbered.blockId);
+    expect(stored?.kind).toBe("equation");
+    expect(stored?.tex).toBe("e^{i\\pi} + 1 = 0");
+    expect(stored?.caption).toBe("Euler's identity");
+    // The number is the document's order, answered by the read and stored
+    // nowhere: the equation that asked for none carries none.
+    expect(stored?.number).toBe(1);
+    expect(document.blocks.find((block) => block.blockId === plain.blockId)?.number).toBeUndefined();
+    expect(document.equationNumbers).toEqual({ [numbered.blockId]: 1 });
+
+    await settle();
+    // A revise carries the whole equation onto the same block; asking for a
+    // number gives the one its place earns, not the one it was written with.
+    const revised = ok<{ blockId: string; revisionId: string }>(
+      await reviseEquation({
+        documentId,
+        blockId: plain.blockId,
+        baseRevisionId: plain.revisionId,
+        tex: "c = \\sqrt{a^2 + b^2}",
+        numbered: true,
+      }),
+    );
+    expect(revised.blockId).toBe(plain.blockId);
+
+    document = ok<{ blocks: readonly Equation[]; equationNumbers?: Record<string, number> }>(
+      await readDocument(documentId),
+    );
+    // Nothing was written to the equation below, and it renumbered all the
+    // same: the number was never its content.
+    expect(document.equationNumbers).toEqual({ [plain.blockId]: 1, [numbered.blockId]: 2 });
+    const grown = document.blocks.find((block) => block.blockId === plain.blockId);
+    expect(grown?.tex).toBe("c = \\sqrt{a^2 + b^2}");
+    expect(grown?.number).toBe(1);
+    expect(document.blocks.find((block) => block.blockId === numbered.blockId)?.revisionId).toBe(
+      numbered.revisionId,
+    );
+
+    await settle();
+    // A revise that leaves the ask out takes the number away, and a stale
+    // base is refused as it is for text.
+    const plainAgain = ok<{ revisionId: string }>(
+      await reviseEquation({
+        documentId,
+        blockId: plain.blockId,
+        baseRevisionId: revised.revisionId,
+        tex: "c = \\sqrt{a^2 + b^2}",
+      }),
+    );
+    document = ok<{ blocks: readonly Equation[]; equationNumbers?: Record<string, number> }>(
+      await readDocument(documentId),
+    );
+    expect(document.equationNumbers).toEqual({ [numbered.blockId]: 1 });
+
+    await settle();
+    const stale = await reviseEquation({
+      documentId,
+      blockId: plain.blockId,
+      baseRevisionId: revised.revisionId,
+      tex: "x",
+    });
+    expect(stale.outcome).toBe("conflict");
+    expect(plainAgain.revisionId).not.toBe(revised.revisionId);
+
+    // A block that is not an equation is refused by name, and so is an
+    // equation carrying no source.
+    const wrongKind = await reviseEquation({
+      documentId,
+      blockId: numbered.blockId,
+      baseRevisionId: numbered.revisionId,
+      tex: "",
+    });
+    expect(wrongKind.outcome).toBe("validationFailure");
+
+    // Mathematics inside a sentence survives the write and the read: the
+    // source is the run's text, and a reference carries none of its own.
+    await settle();
+    const sentence = ok<{ blockId: string; revisionId: string }>(
+      await insertBlock({
+        documentId,
+        block: {
+          kind: "text",
+          runs: [
+            { text: "Einstein wrote " },
+            { text: "E = mc^2", math: true },
+            { text: ", see " },
+            { text: "", equationRef: numbered.blockId },
+            { text: "." },
+          ],
+        },
+        placement: { at: "end" },
+      }),
+    );
+    const withWords = ok<{ blocks: readonly (Equation & { runs?: readonly Record<string, unknown>[] })[] }>(
+      await readDocument(documentId),
+    );
+    const words = withWords.blocks.find((block) => block.blockId === sentence.blockId);
+    expect(words?.runs?.[1]).toEqual({ text: "E = mc^2", math: true });
+    expect(words?.runs?.[3]).toEqual({ text: "", equationRef: numbered.blockId });
+  });
 });
 
+
+/**
+ * Every drawn row has a place (BO_0263_001): a block moves between the keys
+ * of any two rows the reader saw — a proposed insert, a retired block — and
+ * lands there; the insert, once accepted, stays after it; a dragged proposal
+ * is placed the same way, unanswered. Over the one graph.
+ */
+describe.skipIf(!configured)("a move between drawn rows", () => {
+  let documentId = "";
+
+  afterAll(async () => {
+    const document = await readDocument(documentId);
+    if (document.outcome === "success") {
+      await settle();
+      await deleteDocument({ documentId, baseRevisionId: document.result.revisionId });
+    }
+  });
+
+
+  it("Given a staged insert and a retired block, When blocks are moved between their keys, Then each lands where it was dropped", async () => {
+    type Read = { blocks: readonly { blockId: string; revisionId: string; order: string }[] };
+    const created = ok<{ documentId: string; blockId: string }>(await createDocument({ title: "Between rows" }));
+    documentId = created.documentId;
+    const a = created.blockId;
+    const b = ok<{ blockId: string }>(
+      await insertBlock({ documentId, block: { kind: "text", runs: [{ text: "B" }] }, placement: { at: "end" } }),
+    ).blockId;
+    const c = ok<{ blockId: string }>(
+      await insertBlock({ documentId, block: { kind: "text", runs: [{ text: "C" }] }, placement: { at: "end" } }),
+    ).blockId;
+    await settle();
+    const staged = ok<{ groupId: string; items: readonly { itemId: string; kind: string; blockId: string }[] }>(
+      await proposeDocumentChanges({
+        documentId,
+        items: [{ kind: "insert", block: { kind: "text", runs: [{ text: "Proposed" }] }, placement: { after: a } }],
+        request: { by: "the behaviour suite" },
+      }),
+    );
+    const proposals = ok<{ groups: readonly { groupId: string; items: readonly { itemId: string; block: { order: string } | null }[] }[] }>(
+      await readDocumentProposals(documentId),
+    );
+    const insert = proposals.groups.find((group) => group.groupId === staged.groupId)?.items[0];
+    const proposedKey = insert?.block?.order ?? "";
+    let document = ok<Read>(await readDocument(documentId));
+    const keyOf = (blockId: string) => document.blocks.find((block) => block.blockId === blockId)?.order ?? "";
+    expect(keyOf(a) < proposedKey && proposedKey < keyOf(b)).toBe(true);
+
+    // C dropped directly before the proposed insert, after A.
+    await settle();
+    ok(await moveBlock({
+      documentId,
+      blockId: c,
+      baseRevisionId: document.blocks.find((block) => block.blockId === c)?.revisionId ?? "",
+      placement: { between: [keyOf(a), proposedKey] },
+    }));
+    document = ok<Read>(await readDocument(documentId));
+    expect(keyOf(a) < keyOf(c) && keyOf(c) < proposedKey).toBe(true);
+
+    // B retired; A dropped directly before the retired row, where it sits.
+    await settle();
+    ok(await retireBlock({ documentId, blockId: b }));
+    const retiredKey = ok<readonly { blockId: string; order: string }[]>(await readRetiredBlocks(documentId)).find((block) => block.blockId === b)?.order ?? "";
+    await settle();
+    ok(await moveBlock({
+      documentId,
+      blockId: a,
+      baseRevisionId: document.blocks.find((block) => block.blockId === a)?.revisionId ?? "",
+      placement: { between: [proposedKey, retiredKey] },
+    }));
+    document = ok<Read>(await readDocument(documentId));
+    expect(proposedKey < keyOf(a) && keyOf(a) < retiredKey).toBe(true);
+
+    // Accepted, the insert stays where it stood: after C, before A.
+    ok(await answerDocumentProposal({ itemId: insert?.itemId ?? "", answer: "accepted" }));
+    document = ok<Read>(await readDocument(documentId));
+    expect(document.blocks.map((block) => block.blockId)).toEqual([c, staged.items[0]?.blockId, a]);
+
+    // Two keys out of order are refused, and nothing moves.
+    await settle();
+    const refused = await moveBlock({
+      documentId,
+      blockId: c,
+      baseRevisionId: document.blocks.find((block) => block.blockId === c)?.revisionId ?? "",
+      placement: { between: [retiredKey, proposedKey] },
+    });
+    expect(refused.outcome).not.toBe("success");
+    expect(ok<Read>(await readDocument(documentId)).blocks.map((block) => block.blockId)).toEqual([c, staged.items[0]?.blockId, a]);
+  });
+
+  it("Given a retired block, When it is moved, Then it stays retired at its new key, a stale base is refused, and restoring there lands it there", async () => {
+    type Read = { blocks: readonly { blockId: string; revisionId: string; order: string }[] };
+    type Retired = readonly { blockId: string; revisionId: string; order: string }[];
+    const document = ok<Read>(await readDocument(documentId));
+    const [first, second] = document.blocks;
+    const retired = ok<Retired>(await readRetiredBlocks(documentId))[0];
+    expect(retired).toBeDefined();
+    await settle();
+    ok(await moveRetiredBlock({
+      documentId,
+      blockId: retired?.blockId ?? "",
+      baseRevisionId: retired?.revisionId ?? "",
+      placement: { between: [first?.order ?? null, second?.order ?? null] },
+    }));
+    const moved = ok<Retired>(await readRetiredBlocks(documentId)).find((block) => block.blockId === retired?.blockId);
+    expect((first?.order ?? "") < (moved?.order ?? "") && (moved?.order ?? "") < (second?.order ?? "")).toBe(true);
+    expect(ok<Read>(await readDocument(documentId)).blocks.some((block) => block.blockId === retired?.blockId)).toBe(false);
+
+    await settle();
+    const stale = await moveRetiredBlock({
+      documentId,
+      blockId: retired?.blockId ?? "",
+      baseRevisionId: retired?.revisionId ?? "",
+      placement: { at: "end" },
+    });
+    expect(stale.outcome).not.toBe("success");
+    const notRetired = await moveRetiredBlock({ documentId, blockId: first?.blockId ?? "", baseRevisionId: first?.revisionId ?? "", placement: { at: "end" } });
+    expect(notRetired.outcome).not.toBe("success");
+
+    await settle();
+    ok(await restoreBlock({ documentId, blockId: retired?.blockId ?? "", placement: { between: [first?.order ?? null, second?.order ?? null] } }));
+    expect(ok<Read>(await readDocument(documentId)).blocks.map((block) => block.blockId).slice(0, 3)).toEqual([first?.blockId, retired?.blockId, second?.blockId]);
+  });
+
+  it("Given a staged insert, When it is placed between two keys, Then it is staged there and stays unanswered", async () => {
+    type Read = { blocks: readonly { blockId: string; order: string }[] };
+    const document = ok<Read>(await readDocument(documentId));
+    const [first, second] = document.blocks;
+    await settle();
+    const staged = ok<{ groupId: string; items: readonly { itemId: string }[] }>(
+      await proposeDocumentChanges({
+        documentId,
+        items: [{ kind: "insert", block: { kind: "text", runs: [{ text: "Placed" }] }, placement: { at: "end" } }],
+        request: { by: "the behaviour suite" },
+      }),
+    );
+    const itemId = staged.items[0]?.itemId ?? "";
+    await settle();
+    const placed = ok<{ order: string }>(
+      await placeProposedItem({ documentId, itemId, placement: { between: [first?.order ?? null, second?.order ?? null] } }),
+    );
+    expect((first?.order ?? "") < placed.order && placed.order < (second?.order ?? "")).toBe(true);
+    const proposals = ok<{ groups: readonly { groupId: string; items: readonly { itemId: string; block: { order: string } | null }[] }[] }>(
+      await readDocumentProposals(documentId),
+    );
+    expect(proposals.groups.find((group) => group.groupId === staged.groupId)?.items[0]?.block?.order).toBe(placed.order);
+  });
+});

@@ -2,6 +2,8 @@ import { component$ } from "@builder.io/qwik";
 import { QwikCityProvider, RouterOutlet } from "@builder.io/qwik-city";
 
 import { RouterHead } from "./components/router-head/router-head";
+import { HEADER_MODE_SCRIPT } from "./lib/header-mode";
+import { PANEL_WIDTH_SCRIPT } from "./lib/layout";
 import { THEME_SCRIPT, themeCss } from "./lib/theme";
 
 import "./global.css";
@@ -21,6 +23,8 @@ export default component$(() => {
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         <style dangerouslySetInnerHTML={themeCss()} />
         <script dangerouslySetInnerHTML={THEME_SCRIPT} />
+        <script dangerouslySetInnerHTML={HEADER_MODE_SCRIPT} />
+        <script dangerouslySetInnerHTML={PANEL_WIDTH_SCRIPT} />
         <RouterHead />
       </head>
       <body>

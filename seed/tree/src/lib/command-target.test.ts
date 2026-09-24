@@ -1,25 +1,23 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  commandTarget,
-  deliveryFor,
+  blockCommand,
   documentOf,
   DOCUMENT_KIND,
-  NO_CHOICE,
-  NO_UNAIMED,
   proposedFor,
   startedDocument,
   readCommandTarget,
   revealFor,
   revealTarget,
-  type DocumentTarget,
   type PointedReference,
+  readRunShape,
+  readGestureTarget,
   type Pointing,
 } from "./command-target";
 
 /**
- * What a command is aimed at, built by the composer and read back by the
- * route. BO_0226_004 BO_0226_005
+ * What a command is aimed at, built by a block's command control and read
+ * back by the route. BO_0226_004 BO_0226_005 CA_0058_002
  */
 const documentTab = (itemId: string) => ({ kind: DOCUMENT_KIND, itemId });
 const block = (blockId: string, number: number): PointedReference => ({
@@ -32,135 +30,111 @@ const block = (blockId: string, number: number): PointedReference => ({
 const pointing: Record<string, Pointing> = {
   "doc-1": {
     references: [block("blk-b", 1), block("blk-a", 2)],
-    pinned: [{ blockId: "blk-c", words: "pinned words" }],
+    fixated: [{ blockId: "blk-c", words: "fixated words" }],
   },
 };
 
+const source = { block: "blk-p", revisionId: "rev-p" };
+
 describe("aiming a command", () => {
-  it("Given a document tab, Then the command is aimed at it, proposes by default, and carries its marks in mark order", () => {
-    expect(commandTarget(documentTab("doc-1"), NO_CHOICE, pointing, "answer")).toEqual({
+  it("Given a block sent as a command, Then it proposes into its document, names the block and the revision sent, and carries its marks in mark order", () => {
+    expect(blockCommand("doc-1", source, pointing["doc-1"]?.references ?? [])).toEqual({
       artifact: "doc-1",
       delivery: "propose",
       references: [
         { kind: "block", blockId: "blk-b", number: 1 },
         { kind: "block", blockId: "blk-a", number: 2 },
       ],
+      source,
     });
   });
 
-  it("Given a passage marked, Then it travels with its words, and neither the shown words, the staleness nor the pinned blocks do", () => {
-    const withPassage: Record<string, Pointing> = {
-      "doc-1": {
-        references: [
-          block("blk-a", 1),
-          {
-            kind: "passage",
-            blockId: "blk-a",
-            number: 2,
-            quote: "a clause",
-            words: "a clause",
-            stale: false,
-          },
-        ],
-        pinned: [{ blockId: "blk-c", words: "pinned words" }],
-      },
-    };
-    expect(
-      (commandTarget(documentTab("doc-1"), NO_CHOICE, withPassage, "answer") as DocumentTarget | null)?.references,
-    ).toEqual([
+  it("Given a passage marked, Then it travels with its words, and neither the shown words, the staleness nor the fixated blocks do", () => {
+    const references: PointedReference[] = [
+      block("blk-a", 1),
+      { kind: "passage", blockId: "blk-a", number: 2, quote: "a clause", words: "a clause", stale: false },
+    ];
+    expect(blockCommand("doc-1", source, references).references).toEqual([
       { kind: "block", blockId: "blk-a", number: 1 },
       { kind: "passage", blockId: "blk-a", number: 2, quote: "a clause" },
     ]);
   });
 
-  it("Given a tab that is not a document, Then the command is aimed at nothing", () => {
-    expect(
-      commandTarget(
-        { kind: "ui.shell:extension", itemId: "calliopa-video" },
-        NO_CHOICE,
-        pointing,
-        "answer",
-      ),
-    ).toBeNull();
-    expect(
-      commandTarget(
-        { kind: "settings:settings", itemId: null },
-        NO_CHOICE,
-        pointing,
-        "answer",
-      ),
-    ).toBeNull();
-    expect(commandTarget(undefined, NO_CHOICE, pointing, "answer")).toBeNull();
+  it("Given a tab that is not a document, or one with no target, Then it shows no document to command", () => {
+    expect(documentOf({ kind: "ui.shell:extension", itemId: "calliopa-video" })).toBeNull();
+    expect(documentOf({ kind: "settings:settings", itemId: null })).toBeNull();
+    expect(documentOf(undefined)).toBeNull();
     expect(documentOf({ kind: DOCUMENT_KIND, itemId: "" })).toBeNull();
-  });
-
-  it("Given nothing open, Then the command starts a document by default, sends no artifact and no references, and after × is aimed at nothing", () => {
-    expect(NO_UNAIMED).toBe("start");
-    for (const tab of [undefined, { kind: "settings:settings", itemId: "instance" }]) {
-      expect(commandTarget(tab, NO_CHOICE, pointing, NO_UNAIMED)).toEqual({ delivery: "start" });
-      expect(commandTarget(tab, NO_CHOICE, pointing, "answer")).toBeNull();
-    }
-    // A document tab is aimed at its document whatever the unaimed choice.
-    expect(commandTarget(documentTab("doc-1"), NO_CHOICE, pointing, "start")?.delivery).toBe("propose");
-  });
-
-  it("Given Answer chosen in one document, Then it governs that document and never the next", () => {
-    const choice = { itemId: "doc-1", delivery: "answer" as const };
-    expect(deliveryFor("doc-1", choice)).toBe("answer");
-    expect(deliveryFor("doc-2", choice)).toBe("propose");
-    expect(
-      commandTarget(documentTab("doc-2"), choice, pointing, "answer")?.delivery,
-    ).toBe("propose");
-  });
-
-  it("Given a document with nothing marked, Then it carries no references rather than another document's", () => {
-    expect(
-      (commandTarget(documentTab("doc-2"), NO_CHOICE, pointing, "answer") as DocumentTarget | null)?.references,
-    ).toEqual([]);
+    expect(documentOf(documentTab("doc-1"))).toBe("doc-1");
   });
 
   it("Given the marks change after the press, Then what was sent does not", () => {
     const references = [block("blk-a", 1)];
-    const live: Record<string, Pointing> = {
-      "doc-1": { references, pinned: [] },
-    };
-    const sent = commandTarget(documentTab("doc-1"), NO_CHOICE, live, "answer");
+    const sent = blockCommand("doc-1", source, references);
     references.push(block("blk-c", 2));
-    expect((sent as DocumentTarget | null)?.references).toEqual([
-      { kind: "block", blockId: "blk-a", number: 1 },
-    ]);
+    expect(sent.references).toEqual([{ kind: "block", blockId: "blk-a", number: 1 }]);
+  });
+});
+
+describe("reading a block command back", () => {
+  it("Given a source, Then it is read back trimmed beside the references", () => {
+    expect(readCommandTarget({ artifact: "doc-1", delivery: "propose", references: [], source: { block: " blk-p ", revisionId: " rev-p " } })).toEqual({
+      ok: true,
+      target: { artifact: "doc-1", delivery: "propose", references: [], source },
+    });
+  });
+
+  it("Given a source that cannot mean anything, or the retired answer, Then it is refused by name", () => {
+    for (const [body, error] of [
+      [{ source }, "A command is written in a block of a document: it names the document its block is in."],
+      [{ artifact: "doc-1", delivery: "propose", source: "blk-p" }, "A command's source is the block it was sent from and the revision sent."],
+      [{ artifact: "doc-1", delivery: "propose", source: { revisionId: "rev-p" } }, "A command's source names no block."],
+      [{ artifact: "doc-1", delivery: "propose", source: { block: "blk-p", revisionId: "" } }, "A command's source block blk-p names no revision."],
+      [{ artifact: "doc-1", delivery: "answer" }, "The answer delivery is retired: a command aimed at a document proposes into it, a question's answer included."],
+    ] as const) {
+      expect(readCommandTarget(body)).toEqual({ ok: false, error });
+    }
   });
 });
 
 describe("reading a target back", () => {
-  it("Given a body aimed at nothing, Then the command is aimed at nothing", () => {
-    expect(readCommandTarget({})).toEqual({ ok: true, target: null });
+  it("Given a body naming no document, Then it is refused: a command is written in a block of one", () => {
+    expect(readCommandTarget({})).toEqual({
+      ok: false,
+      error: "A command is written in a block of a document: it names the document its block is in.",
+    });
   });
 
-  it("Given start with nothing open, Then it reads as a command that starts a document", () => {
-    expect(readCommandTarget({ delivery: "start" })).toEqual({ ok: true, target: { delivery: "start" } });
+  it("Given a body with no source, Then it is refused: a command names the block it was sent from", () => {
+    expect(readCommandTarget({ artifact: "doc-1", delivery: "propose" })).toEqual({
+      ok: false,
+      error: "A command names the block it was sent from and the revision sent.",
+    });
   });
 
-  it("Given start with a document or with references, Then it is refused by name", () => {
-    const withDocument = readCommandTarget({ artifact: "doc-1", delivery: "start" });
-    expect(withDocument).toEqual({ ok: false, error: "A started document is not delivered into an open one." });
-    const withReferences = readCommandTarget({ delivery: "start", references: [{ number: 1, blockId: "blk-a" }] });
-    expect(withReferences).toEqual({ ok: false, error: "A started document carries no references: they need the document they point into." });
+  it("Given the retired start delivery, Then it is refused by name rather than forwarded to the kernel", () => {
+    expect(readCommandTarget({ artifact: "doc-1", delivery: "start", source })).toEqual({
+      ok: false,
+      error: "Starting a document from a command is retired: a command is written in a block of the document it works in.",
+    });
+    expect(readCommandTarget({ delivery: "start" }).ok).toBe(false);
   });
 
   it("Given a coherent body, Then it reads as the target it describes", () => {
     expect(
       readCommandTarget({
         artifact: " doc-1 ",
-        delivery: "answer",
+        delivery: "propose",
         references: [{ number: 3, blockId: " blk-a " }],
+        source,
       }),
     ).toEqual({
       ok: true,
       target: {
         artifact: "doc-1",
-        delivery: "answer",
+        delivery: "propose",
         references: [{ kind: "block", blockId: "blk-a", number: 3 }],
+        source,
       },
     });
   });
@@ -179,6 +153,7 @@ describe("reading a target back", () => {
             quote: "  spaced words ",
           },
         ],
+        source,
       }),
     ).toEqual({
       ok: true,
@@ -194,11 +169,12 @@ describe("reading a target back", () => {
             quote: "  spaced words ",
           },
         ],
+        source,
       },
     });
   });
 
-  it("Given a shape the composer never sends, Then it is refused by name rather than forwarded or guessed at", () => {
+  it("Given a shape the shell never sends, Then it is refused by name rather than forwarded or guessed at", () => {
     for (const body of [
       { delivery: "propose" },
       { references: [] },
@@ -329,9 +305,9 @@ describe("a chip asking the view to show its area", () => {
     stale: false,
   };
 
-  it("Given a block reference or a pinned block, Then the view is asked for the block", () => {
+  it("Given a block reference or a fixated block, Then the view is asked for the block", () => {
     expect(revealTarget(block("blk-a", 1))).toEqual({ kind: "block", blockId: "blk-a" });
-    expect(revealTarget({ blockId: "blk-c", words: "pinned words" })).toEqual({
+    expect(revealTarget({ blockId: "blk-c", words: "fixated words" })).toEqual({
       kind: "block",
       blockId: "blk-c",
     });
@@ -353,5 +329,115 @@ describe("a chip asking the view to show its area", () => {
     const target = revealTarget(passage);
     expect(revealFor({ itemId: "doc-2", target, seq: 3 }, 2, "doc-1")).toEqual({ seen: 3, target: null });
     expect(revealFor({ itemId: "doc-1", target, seq: 4 }, 4, "doc-1").target).toBeNull();
+  });
+});
+
+/**
+ * What was marked travels with a reference: a proposal's group and item, a
+ * retired block, and the revision the reader saw — read back by name, and
+ * a shape the shell never sends refused by name. BO_0263_007
+ */
+describe("a reference to what was marked", () => {
+  const proposal = { number: 1, blockId: "blk-n", target: "proposal", group: "node:g", item: "node:g|insert|node:blk-n", revisionId: "rev-n" };
+
+  it("Given a proposal, a retired block and a passage in a proposal, Then they read back with what was marked", () => {
+    expect(
+      readCommandTarget({
+        artifact: "doc-1",
+        delivery: "propose",
+        references: [
+          proposal,
+          { number: 2, blockId: "blk-r", target: "retired", revisionId: "rev-r" },
+          { ...proposal, number: 3, kind: "passage", quote: "new" },
+          { number: 4, blockId: "blk-a", revisionId: "rev-a" },
+        ],
+        source,
+      }),
+    ).toEqual({
+      ok: true,
+      target: {
+        artifact: "doc-1",
+        delivery: "propose",
+        references: [
+          { kind: "block", number: 1, blockId: "blk-n", target: "proposal", group: "node:g", item: "node:g|insert|node:blk-n", revisionId: "rev-n" },
+          { kind: "block", number: 2, blockId: "blk-r", target: "retired", revisionId: "rev-r" },
+          { kind: "passage", number: 3, blockId: "blk-n", quote: "new", target: "proposal", group: "node:g", item: "node:g|insert|node:blk-n", revisionId: "rev-n" },
+          { kind: "block", number: 4, blockId: "blk-a", revisionId: "rev-a" },
+        ],
+        source,
+      },
+    });
+  });
+
+  it("Given a shape the shell never sends, Then it is refused by name", () => {
+    for (const [reference, error] of [
+      [{ number: 1, blockId: "blk-a", target: "claim", revisionId: "rev" }, "Reference #1 points at neither a block, a proposal nor a retired block."],
+      [{ number: 1, blockId: "blk-a", target: "proposal", item: "node:g|insert|node:blk-a", revisionId: "rev" }, "Proposal reference #1 names no group or no item."],
+      [{ number: 1, blockId: "blk-a", group: "node:g" }, "Reference #1 names a proposal but points at none."],
+      [{ number: 1, blockId: "blk-a", target: "retired" }, "Reference #1 names no revision of what was marked."],
+      [{ number: 1, blockId: "blk-a", revisionId: "" }, "Reference #1 carries a revisionId that names nothing."],
+    ] as const) {
+      expect(readCommandTarget({ artifact: "doc-1", delivery: "propose", references: [reference], source })).toEqual({ ok: false, error });
+    }
+  });
+
+  it("Given a reported reference, Then what is sent keeps what was marked and drops what is only shown", () => {
+    const target = blockCommand("doc-1", source, [
+      { kind: "block", number: 1, blockId: "blk-n", target: "proposal", group: "node:g", item: "node:g|insert|node:blk-n", revisionId: "rev-n", words: "A new line.", stale: false, what: "proposal", proposer: "Claude Code", since: "rejected", rowless: true },
+    ]);
+    expect(target.references).toEqual([
+      { kind: "block", number: 1, blockId: "blk-n", target: "proposal", group: "node:g", item: "node:g|insert|node:blk-n", revisionId: "rev-n" },
+    ]);
+  });
+});
+
+describe("a gesture and a command are told apart (BO_0258_006)", () => {
+  it("takes a command: a block's words, no goal beside them", () => {
+    expect(readRunShape({})).toEqual({ ok: true, gesture: false });
+    expect(readRunShape({ goal: "   " })).toEqual({ ok: true, gesture: false });
+  });
+
+  it("takes a gesture: a named intention and the question it asks", () => {
+    expect(readRunShape({ goal: "Has anything under this moved?", intention: "calliopa-refine.intention" })).toEqual({
+      ok: true,
+      gesture: true,
+      intention: "calliopa-refine.intention",
+    });
+  });
+
+  it("refuses a command that carries a goal, which would be a second source of the same words", () => {
+    expect(readRunShape({ goal: "do the thing" })).toEqual({
+      ok: false,
+      error: "A command sent from a block carries no goal: its words are the block's.",
+    });
+  });
+
+  it("refuses a gesture with no question to ask", () => {
+    expect(readRunShape({ intention: "calliopa-refine.intention" })).toEqual({
+      ok: false,
+      error: "A gesture carries the question it asks as its goal.",
+    });
+  });
+});
+
+describe("a gesture's target is the document it was made in (BO_0258_006)", () => {
+  it("takes the document and proposes into it, naming no block and no references", () => {
+    expect(readGestureTarget({ artifact: "doc-1" })).toEqual({
+      ok: true,
+      target: { artifact: "doc-1", delivery: "propose", references: [] },
+    });
+  });
+
+  it("needs no source block, which a command's target demands and a gesture never has", () => {
+    // The same body through a command's reading is refused for exactly that.
+    const asCommand = readCommandTarget({ artifact: "doc-1", delivery: "propose" });
+    expect(asCommand.ok).toBe(false);
+    expect(readGestureTarget({ artifact: "doc-1" }).ok).toBe(true);
+  });
+
+  it("refuses a gesture that names no document", () => {
+    expect(readGestureTarget({})).toEqual({ ok: false, error: "A gesture names the document it was made in." });
+    expect(readGestureTarget({ artifact: "  " }).ok).toBe(false);
+    expect(readGestureTarget({ artifact: 7 })).toEqual({ ok: false, error: "The artifact must be a document's identity." });
   });
 });

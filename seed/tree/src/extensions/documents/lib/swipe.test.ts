@@ -1,125 +1,160 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  EDGE_GUARD,
-  FAR_MIN,
-  NEAR_MIN,
   startsAtEdge,
+  SWIPE,
   swipeOutcome,
   swipeReveal,
   swipeTarget,
   thresholds,
+  type SwipeTable,
 } from "./swipe";
 
-describe("where the thresholds fall", () => {
-  it("Given the 172px column a phone measured, Then the floors hold, not the proportions", () => {
-    expect(thresholds(172, 390)).toEqual({ near: NEAR_MIN, far: FAR_MIN });
+describe("where the threshold falls", () => {
+  it("Given the 172px column a phone measured, Then the floor holds, not the proportion", () => {
+    expect(thresholds(172, 390).commit).toBe(SWIPE.min);
   });
 
-  it("Given a full-width row on a 414px phone, Then the proportions rise above the floors and far stays inside the screen", () => {
+  it("Given a full-width row on a 414px phone, Then the proportion rises above the floor and stays inside the screen", () => {
     const limits = thresholds(414, 414);
-    expect(limits.near).toBeCloseTo(414 * 0.18);
-    expect(limits.far).toBeCloseTo(414 * 0.55);
-    expect(limits.far).toBeLessThanOrEqual(414 * 0.72);
+    expect(limits.commit).toBeCloseTo(414 * SWIPE.fraction);
+    expect(limits.commit).toBeLessThanOrEqual(414 * SWIPE.ofViewport);
   });
 
-  it("Given a wide desktop column, Then the ceilings keep the travel a thumb can make", () => {
-    expect(thresholds(1400, 1600)).toEqual({ near: 120, far: 380 });
+  it("Given a wide desktop column, Then the ceiling keeps the travel a thumb can make", () => {
+    expect(thresholds(1400, 1600).commit).toBe(SWIPE.max);
   });
 
-  it("Given a narrow screen, Then the far threshold stays inside a thumb's reach even below its floor", () => {
-    expect(thresholds(600, 250).far).toBe(250 * 0.72);
+  it("Given a narrow screen, Then the threshold stays inside a thumb's reach even below its floor", () => {
+    expect(thresholds(600, 150).commit).toBe(150 * SWIPE.ofViewport);
+  });
+
+  it("Given the distance in use, Then it sits between the two the five-position scale had", () => {
+    // 18% floored at 64px and 55% floored at 200px were the near and far
+    // thresholds of `BO_0138`; with one action each way there is one
+    // distance, between them. BO_0272_007
+    expect(SWIPE.fraction).toBeGreaterThan(0.18);
+    expect(SWIPE.fraction).toBeLessThan(0.55);
+    expect(SWIPE.min).toBeGreaterThan(64);
+    expect(SWIPE.min).toBeLessThan(200);
   });
 
   it("Given a press within the edge guard, Then it is the system's back gesture and not a swipe", () => {
-    expect(startsAtEdge(EDGE_GUARD - 1, 400)).toBe(true);
-    expect(startsAtEdge(400 - EDGE_GUARD + 1, 400)).toBe(true);
+    expect(startsAtEdge(SWIPE.edgeGuard - 1, 400)).toBe(true);
+    expect(startsAtEdge(400 - SWIPE.edgeGuard + 1, 400)).toBe(true);
     expect(startsAtEdge(200, 400)).toBe(false);
+  });
+});
+
+/** The table is a value, so another one is configuration rather than a
+ * rewrite: every function takes it. BO_0272_007 */
+describe("another table", () => {
+  const short: SwipeTable = { ...SWIPE, fraction: 0.1, min: 20, max: 40, edgeGuard: 2 };
+
+  it("Given a table of its own, Then the threshold and the edge guard follow it", () => {
+    expect(thresholds(414, 414, short).commit).toBe(40);
+    expect(startsAtEdge(3, 400, short)).toBe(false);
+    expect(startsAtEdge(3, 400)).toBe(true);
+  });
+
+  it("Given a threshold made with one table, Then the flick it allows is that table's", () => {
+    const limits = thresholds(414, 414, { ...short, flickVelocity: 10 });
+    expect(swipeOutcome("keep", -limits.commit * 0.7, limits, -3)).toBe("keep");
+    expect(swipeOutcome("keep", -limits.commit * 0.7, thresholds(414, 414, short), -3)).toBe("discarded");
   });
 });
 
 describe("a swipe walked out on a 414px phone", () => {
   const limits = thresholds(414, 414);
 
-  it("Given travel in 30px steps to the left, Then resolve holds between the thresholds and discard begins at the far one", () => {
-    const walked = [30, 60, 90, 120, 150, 180, 210, 240, 270].map((distance) =>
-      swipeTarget("neutral", -distance, limits),
+  it("Given travel in 30px steps to the left, Then nothing is committed before the threshold and discard at it", () => {
+    const walked = [30, 60, 90, 120, 150, 180, 210].map((distance) =>
+      swipeTarget("keep", -distance, limits),
     );
-    expect(walked.slice(0, 2)).toEqual(["neutral", "neutral"]);
-    expect(
-      walked.filter((standing) => standing === "resolved").length,
-    ).toBeGreaterThan(3);
+    expect(walked.slice(0, 4)).toEqual(["keep", "keep", "keep", "keep"]);
     expect(walked.at(-1)).toBe("discarded");
-    expect(walked.indexOf("discarded")).toBeGreaterThan(
-      walked.indexOf("resolved"),
-    );
+    // One action each way: nothing on the way to discard is committed on the
+    // way, and nothing lies beyond it.
+    expect(new Set(walked)).toEqual(new Set(["keep", "discarded"]));
   });
 
-  it("Given travel to the right past both thresholds, Then keep, then pin", () => {
-    expect(swipeTarget("neutral", limits.near, limits)).toBe("keep");
-    expect(swipeTarget("neutral", limits.far, limits)).toBe("pin");
+  it("Given travel to the right at the threshold, Then the block is fixated", () => {
+    expect(swipeTarget("keep", limits.commit - 1, limits)).toBe("keep");
+    expect(swipeTarget("keep", limits.commit, limits)).toBe("fixate");
   });
 
-  it("Given a reversal back inside the neutral zone, Then release commits nothing", () => {
-    expect(swipeOutcome("neutral", limits.near - 1, limits, 0)).toBe("neutral");
+  it("Given a swipe back from either end, Then it returns to keep", () => {
+    expect(swipeTarget("fixate", -limits.commit, limits)).toBe("keep");
+    expect(swipeTarget("discarded", limits.commit, limits)).toBe("keep");
+  });
+
+  it("Given a reversal back short of the threshold, Then release commits nothing", () => {
+    expect(swipeOutcome("keep", limits.commit - 1, limits, 0)).toBe("keep");
   });
 });
 
 describe("what the reveal names", () => {
   const limits = thresholds(414, 414);
 
-  it("Given travel inside the neutral zone, Then nothing is armed and the near action lies ahead", () => {
-    expect(swipeReveal("neutral", -20, limits)).toEqual({
-      armed: null,
-      further: "resolved",
+  // Naming the action only once armed left the reader swiping at nothing
+  // until it appeared, on a phone where the strip is narrow. BO_0272_016
+  it("Given the first movement, Then the action is already named, and not yet armed", () => {
+    expect(swipeReveal("keep", -4, limits)).toEqual({
+      action: "discarded",
+      armed: false,
+    });
+    expect(swipeReveal("keep", 4, limits)).toEqual({
+      action: "fixate",
+      armed: false,
     });
   });
 
-  it("Given travel between the thresholds, Then the near action is armed and the far one named beyond it", () => {
-    expect(swipeReveal("neutral", -(limits.near + 5), limits)).toEqual({
-      armed: "resolved",
-      further: "discarded",
+  it("Given travel at the threshold, Then the same action is armed", () => {
+    expect(swipeReveal("keep", -limits.commit, limits)).toEqual({
+      action: "discarded",
+      armed: true,
+    });
+    expect(swipeReveal("keep", limits.commit + 5, limits)).toEqual({
+      action: "fixate",
+      armed: true,
     });
   });
 
-  it("Given travel past the far threshold, Then only the far action is named", () => {
-    expect(swipeReveal("neutral", limits.far + 5, limits)).toEqual({
-      armed: "pin",
-      further: null,
-    });
+  it("Given no movement at all, Then nothing is named", () => {
+    expect(swipeReveal("keep", 0, limits)).toEqual({ action: null, armed: false });
   });
 
-  it("Given a pinned block swiped right, Then nothing is named, since nothing would change", () => {
-    expect(swipeReveal("pin", limits.far + 5, limits)).toEqual({
-      armed: null,
-      further: null,
-    });
+  it("Given a fixated block swiped right, Then nothing is named at any distance, since nothing would change", () => {
+    for (const offset of [2, limits.commit, limits.commit + 200]) {
+      expect(swipeReveal("fixate", offset, limits)).toEqual({
+        action: null,
+        armed: false,
+      });
+    }
   });
 });
 
 describe("a flick", () => {
   const limits = thresholds(414, 414);
 
-  it("Given a fast release most of the way to the near threshold, Then the near action commits", () => {
-    expect(swipeOutcome("neutral", -limits.near * 0.7, limits, -1.2)).toBe(
-      "resolved",
+  it("Given a fast release most of the way to the threshold, Then the action commits", () => {
+    expect(swipeOutcome("keep", -limits.commit * 0.7, limits, -1.2)).toBe(
+      "discarded",
+    );
+    expect(swipeOutcome("keep", limits.commit * 0.7, limits, 1.2)).toBe(
+      "fixate",
     );
   });
 
-  it("Given a fast release at the near threshold, Then the near action commits and never the far one", () => {
-    expect(swipeOutcome("neutral", -limits.near, limits, -3)).toBe("resolved");
-    expect(swipeOutcome("neutral", limits.near + 1, limits, 3)).toBe("keep");
-  });
-
-  it("Given a fast release travelling back towards neutral, Then it commits nothing", () => {
-    expect(swipeOutcome("neutral", -limits.near * 0.7, limits, 1.2)).toBe(
-      "neutral",
+  it("Given a fast release travelling back towards keep, Then it commits nothing", () => {
+    expect(swipeOutcome("keep", -limits.commit * 0.7, limits, 1.2)).toBe(
+      "keep",
     );
   });
 
-  it("Given a slow release short of the near threshold, Then it commits nothing", () => {
-    expect(swipeOutcome("neutral", -limits.near * 0.7, limits, -0.2)).toBe(
-      "neutral",
+  it("Given a slow release short of the threshold, Then it commits nothing", () => {
+    expect(swipeOutcome("keep", -limits.commit * 0.7, limits, -0.2)).toBe(
+      "keep",
     );
   });
 });

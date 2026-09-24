@@ -22,17 +22,35 @@ export function currentBranch(): string | undefined {
   return branch === undefined || branch === "" ? undefined : branch;
 }
 
+/**
+ * The data revision a call reads at: an extension computing what changed
+ * between two pins reads the same document at each (`BO_0264_012`). A read
+ * at a pin reads truth, never a branch.
+ */
+const pins = new AsyncLocalStorage<{ readonly dataRevision: number }>();
+
+export function atDataRevision<T>(dataRevision: number, run: () => Promise<T>): Promise<T> {
+  return outsideBranch(() => pins.run({ dataRevision }, run));
+}
+
+/** The data revision the current call reads at, or `undefined` for head. */
+export function currentDataRevision(): number | undefined {
+  const pinned = pins.getStore()?.dataRevision;
+  return pinned === undefined || pinned <= 0 ? undefined : pinned;
+}
+
 /** Runs a call against truth, whatever branch the request is in. */
 export function outsideBranch<T>(run: () => Promise<T>): Promise<T> {
   return storage.run({ branch: "" }, run);
 }
 
 /**
- * The name of a person's branch group on a root: one open branch per root and
- * person, and a number once a branch has closed — the first is unnumbered,
- * the next `.2`, then `.3` — since a group's name is taken for good once it
- * is accepted or rejected. Found live in the BO_0250 walk-through,
- * 2026-09-15: the second branch on a root could not be staged. BO_0250_010
+ * The name of a person's branch group on a root: a number per session — the
+ * first is unnumbered, the next `.2`, then `.3` — since a group's name is
+ * taken for good once it is accepted or rejected, and each session is its own
+ * proposal while earlier ones stand open. Found live in the BO_0250
+ * walk-through, 2026-09-15: the second branch on a root could not be staged.
+ * BO_0250_010 CA_0057_007
  */
 export function branchGroupId(documentId: string, account: string, attempt = 1): string {
   return `node:branch-${documentId}-${account}${attempt > 1 ? `.${attempt}` : ""}`;

@@ -1,6 +1,7 @@
 import { $ } from "@builder.io/qwik";
 import { contributions as declare, type ViewContribution } from "~/contract";
 import { BlockEditorView } from "./views/block-editor";
+import { UNNAMED_DOCUMENT } from "./lib/naming";
 
 /**
  * What `documents` contributes to the frame: the Documents section and the
@@ -23,6 +24,8 @@ const blockEditor: ViewContribution = {
 };
 
 export const contributions = declare({
+  // The icon the sections stand under in the library's icon column. CA_0056_009
+  icon: { title: "Docs", name: "files" },
   sections: [
     {
       name: "documents",
@@ -37,7 +40,7 @@ export const contributions = declare({
         const response = await fetch("/api/x/documents/d", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ title: "Untitled document" }),
+          body: JSON.stringify({ title: UNNAMED_DOCUMENT }),
         });
         const outcome = (await response.json()) as
           | { outcome: "success"; result: { documentId: string } }
@@ -46,7 +49,7 @@ export const contributions = declare({
         return {
           kind: "document",
           itemId: (outcome as { result: { documentId: string } }).result.documentId,
-          title: "Untitled document",
+          title: UNNAMED_DOCUMENT,
         };
       }),
     },

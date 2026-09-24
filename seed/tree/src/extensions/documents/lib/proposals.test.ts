@@ -10,6 +10,7 @@ import {
   proposerOf,
   stepPlacement,
   toneOf,
+  derivedNames,
   type Placed,
 } from "./proposals";
 
@@ -169,3 +170,25 @@ describe("a proposals list narrowed by what was answered", () => {
 
 });
 
+
+describe("a rewrite of a framing that governs says it challenges it", () => {
+  it("names the fixated framing it challenges", () => {
+    expect(derivedNames("replace", "frontier", true).block).toBe("Derived frontier, challenges the fixated framing");
+  });
+
+  it("names the reader's own words when a person took the block as theirs (BO_0258_016)", () => {
+    expect(derivedNames("replace", "frontier", false, true).block).toBe("Derived frontier, challenges the reader's own words");
+  });
+
+  it("prefers the fixated words when a block is both", () => {
+    expect(derivedNames("replace", "frontier", true, true).block).toBe("Derived frontier, challenges the fixated framing");
+  });
+
+  it("is a plain rewrite when nothing governs the block", () => {
+    expect(derivedNames("replace", "next", false, false).block).toBe("Derived next, a rewrite");
+  });
+
+  it("says only what it is when the item is not a rewrite", () => {
+    expect(derivedNames("insert", "tension", false, true).block).toBe("Derived tension");
+  });
+});

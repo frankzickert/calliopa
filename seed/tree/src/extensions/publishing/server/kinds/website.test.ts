@@ -81,8 +81,8 @@ const document = (documentId: string): DocumentView => ({
   revisionId: "rev",
   title: "Notes",
   blocks: [
-    { kind: "text", blockId: "b1", revisionId: "r", containmentId: "c", order: "1", role: "h2", runs: [{ text: "Field note" }], standing: "neutral" },
-    { kind: "text", blockId: "b2", revisionId: "r", containmentId: "c", order: "2", role: "paragraph", runs: [{ text: "The ", marks: [] }, { text: "point", marks: ["bold"] }], standing: "neutral" },
+    { kind: "text", blockId: "b1", revisionId: "r", containmentId: "c", order: "1", role: "h2", runs: [{ text: "Field note" }], standing: "keep" },
+    { kind: "text", blockId: "b2", revisionId: "r", containmentId: "c", order: "2", role: "paragraph", runs: [{ text: "The ", marks: [] }, { text: "point", marks: ["bold"] }], standing: "keep" },
     { kind: "divider", blockId: "b3", revisionId: "r", containmentId: "c", order: "3" },
   ],
 } as unknown as DocumentView);
@@ -194,6 +194,16 @@ describe("projecting a container document", () => {
       }),
     );
     expect(rules(projected)).toEqual(["unsupportedBlock"]);
+  });
+
+  it("Given a prose block with a line break, Then its run reaches the site holding the line break as it is (DO_0003_005)", () => {
+    const lined = { ...document("doc-1"), blocks: [{ kind: "text", blockId: "b1", revisionId: "r", containmentId: "c", order: "1", role: "paragraph", runs: [{ text: "First line\nSecond " }, { text: "line", marks: ["italic"] }], standing: "keep" }] } as unknown as DocumentView;
+    const projected = projectContainer(submission({ documents: new Map([["doc-1", lined]]) }));
+    expect(projected.ok, JSON.stringify(projected)).toBe(true);
+    if (!projected.ok) return;
+    expect(projected.document.slots["prose"]?.[0]?.document?.blocks).toEqual([
+      { type: "text", runs: [{ text: "First line\nSecond " }, { text: "line", marks: ["italic"] }] },
+    ]);
   });
 });
 

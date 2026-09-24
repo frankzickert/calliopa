@@ -8,29 +8,42 @@ import {
   useStore,
   useTask$,
   useVisibleTask$,
-  type QRL,
 } from "@builder.io/qwik";
 import {
-  dockAfterRelease,
-  dockAfterTap,
-  nextDrawerState,
+  contentIcon,
+  INSPECTOR_ICON,
+  iconDropBefore,
+  movedIconOrder,
+  orderedIcons,
+  shownIcon,
   nextSectionState,
+  panelDraw,
+  pressClosesSheet,
+  pressHandle,
+  type Sheet,
+  pressIcon,
   sectionState,
+  togglePanel,
   type Layout,
+  type PanelWidths,
 } from "~/lib/layout";
 import { danglingNumbers } from "~/lib/command-typeahead";
 import { LibraryRow } from "./library-row";
-import { Composer, type ComposerAim } from "./composer";
-import { fitField } from "./command-field";
 import { LicenceWarning, PersonMenu } from "./header-disclosure";
+import { CloseAllTabs, HeaderMenu, HeaderModeToggle, TabEdge } from "./header-menu";
+import type { FocusedWork } from "~/server/focused-work";
 import { Icon } from "./icons";
+import { PanelIcons, PanelResizeHandle, SectionHeader, type PanelIconEntry } from "./panel";
 import { SaveStatus } from "./save-status";
 import { ThemeToggle } from "./theme-toggle";
 import { Wordmark } from "./wordmark";
 import {
   activeTab,
+  closeAllTabs,
   closeTab,
+  kindOf,
   moveTab,
+  neighbourTab,
   openTab,
   selectTab,
   retargetTab,
@@ -41,16 +54,20 @@ import {
 } from "~/lib/tabs";
 import {
   activeProcessCount,
-  isTerminal,
   tabProcessState,
   type ProcessRecord,
 } from "~/lib/process";
+import { endedForDocuments } from "~/lib/ended-processes";
+import { tabUnnamed } from "~/lib/library";
 import {
   DRAG_MOVE_TOLERANCE_PX,
   LONG_PRESS_MS,
   movedDistance,
   pointerIntent,
-  resolveOperation,
+  edgeScroll,
+  PANEL_ICON_TARGET,
+  resolveDrop,
+  tabSwipeStep,
   type DragOperation,
   type DragPayload,
   type DropTarget,
@@ -60,21 +77,15 @@ import { qualify } from "~/registry";
 import { REGISTRY } from "~/registry.gen";
 import type { RunEvent } from "~/server/agent/run-events";
 import type { ProposedItem } from "~/server/agent/proposed";
-import { describeRunEvent } from "~/lib/runs";
 import type { SelectableRuntime } from "~/lib/connections";
-import { CHOICE_NOT_REMEMBERED, openingAgent, rememberAgent } from "~/lib/agent-menu";
+import { chooseAgent, loadAgents, refreshAgents, type Speed } from "~/lib/agent-menu";
 import {
-  commandTarget,
-  artifactOf,
-  DOCUMENT_KIND,
-  NO_CHOICE,
-  NO_UNAIMED,
-  startedDocument,
+  blockCommand,
+  type CommandAim,
   NO_POINTING,
   staleIn,
   type Pointing,
 } from "~/lib/command-target";
-import { readyDescriptors, stillUploading, uploadingNames, type AttachmentChip } from "~/lib/attachments";
 import type { BridgeAttachment } from "~/server/agent/bridge";
 import type { WorkspaceRecord } from "~/lib/workspace";
 import type { Person } from "~/server/session";
@@ -86,13 +97,15 @@ import {
   viewsFor,
 } from "~/lib/views";
 import { ViewHost } from "./view-host";
+import { ViewBarPanel } from "./view-bar";
+import { EXECUTION_SECTION, ExecutionSection, type ExecutionRead } from "./execution";
+import { executionProcess, isRunning, type ExecutionRun } from "~/lib/execution";
 import {
   InspectorPanel,
-  ProcessList,
   type ProcessRegistry,
   type ProposedRead,
 } from "./inspector";
-import { keepOpenTabs, NO_SELECTION, selectedProcess } from "~/lib/process-selection";
+import { keepOpenTabs, NO_SELECTION, pressProcess, selectedProcess } from "~/lib/process-selection";
 
 /**
  * Settings has no content to be the target of, so it carries one synthetic
@@ -112,6 +125,21 @@ const UPDATE_KIND = "settings:update";
 
 
 /** The element id a section's header and body are paired by. */
+/** The library's icon column, one icon per extension with sections, and the
+ * inspector's one icon. CA_0056_001 */
+const LIBRARY_ICONS: readonly PanelIconEntry[] = REGISTRY.libraryIcons.map(({ id, title, name }) => ({
+  id,
+  title,
+  name,
+}));
+/** The library's icons in the reader's order. CA_0068_001 */
+const libraryIcons = (layout: Layout): PanelIconEntry[] => orderedIcons(LIBRARY_ICONS, layout.libraryOrder);
+const libraryIconIds = (layout: Layout): string[] => libraryIcons(layout).map((icon) => icon.id);
+const INSPECTOR_ICONS: readonly PanelIconEntry[] = [
+  { id: INSPECTOR_ICON, title: "Inspector", name: "info" },
+];
+const INSPECTOR_ICON_IDS: readonly string[] = INSPECTOR_ICONS.map((icon) => icon.id);
+
 const sectionElementId = (key: string): string =>
   `library-${key.replace(/[^a-zA-Z0-9]+/gu, "-")}`;
 import {
@@ -119,26 +147,47 @@ import {
   type ViewBridge,
   type ViewDrop,
   type ViewInspector,
-  type ViewDock,
+  type ViewComposeBlock,
+  type ViewCommand,
+  type SentCommand,
+  type ViewGesture,
+  type ViewBar,
   type ViewSave,
   type SaveState,
   type Message,
   type ViewMessage,
   type ViewProposed,
-  type ViewCompose,
+  type ViewActivity,
+  type ViewAnswerAll,
+  type ViewToggleRun,
+  type RunChip,
   type ViewFocus,
   type ViewReveal,
-  type UndoOffer,
 } from "./view-bridge";
+import { chipsFor } from "~/lib/run-chips";
+import {
+  activitiesOf,
+  followRun,
+  marked,
+  runEnded,
+  sameActivities,
+  unfinished,
+  withEvents,
+  type FollowedRun,
+} from "~/lib/followed-runs";
+import { documentOf } from "~/lib/command-target";
+import { RunChips } from "./run-chips";
 import "./shell.css";
 
 /** The registry is re-attached by identity; polling is the first transport. */
 export const PROCESS_POLL_INTERVAL_MS = 2000;
 
-/** The events that end a run. BO_0226_007 */
-const RUN_ENDS: readonly RunEvent["kind"][] = ["runCompleted", "runFailed", "runCancelled"];
+/** How often the reader's run is read while it is aimed at a document and
+ * still going, so what it does shows at the blocks within a second of the
+ * agent doing it. BO_0265_007 */
+export const ACTIVE_RUN_POLL_INTERVAL_MS = 750;
+
 /** A started document's tab until its view has read the title. BO_0251_007 */
-const STARTED_TITLE = "New document";
 
 interface DragState {
   candidate: DragPayload | null;
@@ -152,6 +201,9 @@ interface DragState {
    * the target. Kept across the idle reset, because it outlives the gesture. */
   drop: ViewDrop | null;
   drops: number;
+  /** When a drag that moved something last ended, so the click a pointer's
+   * lift may still send to a dragged icon does not also press it. CA_0068_002 */
+  settledAt: number;
 }
 
 /** The gesture's own fields, reset between drags. `drop` and `drops` are not
@@ -167,24 +219,50 @@ const idleDrag = () => ({
 });
 
 /** Targets the shell owns. Everything else belongs to the mounted view. */
-const shellTarget = (overId: string): boolean => overId.startsWith("tab:");
+const shellTarget = (overId: string): boolean =>
+  overId.startsWith("tab:") || overId.startsWith(PANEL_ICON_TARGET);
 
 /**
  * The pointer is not captured, so the element under it decides the target.
  * A target declares what it accepts; the payload decides what it offers.
  */
-function targetUnder(x: number, y: number): DropTarget | null {
+function targetUnder(x: number, y: number, iconIds: readonly string[] = []): DropTarget | null {
   const element = document
     .elementFromPoint(x, y)
     ?.closest("[data-drop-target]");
-  const id = element?.getAttribute("data-drop-target");
+  let id = element?.getAttribute("data-drop-target");
   if (!element || id === null || id === undefined) return null;
+  // Over a library icon the drop lands before it from its upper half and
+  // before the next from its lower, so the target names the icon the drop
+  // lands before, or the end. CA_0068_002
+  if (id.startsWith(PANEL_ICON_TARGET) && id !== `${PANEL_ICON_TARGET}end`) {
+    const box = element.getBoundingClientRect();
+    const before = iconDropBefore(iconIds, id.slice(PANEL_ICON_TARGET.length), y > box.top + box.height / 2);
+    id = `${PANEL_ICON_TARGET}${before ?? "end"}`;
+  }
   return {
     id,
     accepts: (element.getAttribute("data-accepts") ?? "")
       .split(" ")
       .filter(Boolean) as DragOperation[],
   };
+}
+
+/**
+ * The area a drag scrolls: the nearest ancestor of the point that scrolls
+ * vertically, or the page. Read where the drag began, so a pointer leaving
+ * the area for the header or the dock keeps scrolling it. BO_0263_017
+ */
+function scrollerAt(x: number, y: number): HTMLElement {
+  let element = document.elementFromPoint(x, y) as HTMLElement | null;
+  while (element !== null) {
+    const overflow = getComputedStyle(element).overflowY;
+    if ((overflow === "auto" || overflow === "scroll") && element.scrollHeight > element.clientHeight) {
+      return element;
+    }
+    element = element.parentElement;
+  }
+  return (document.scrollingElement as HTMLElement | null) ?? document.documentElement;
 }
 
 export const Shell = component$<{
@@ -198,18 +276,16 @@ export const Shell = component$<{
   licenceWarning: string | null;
 }>(({ workspace, processes, library: served, person, licenceWarning }) => {
   const layout = useStore<Layout>({ ...workspace.layout });
+  /** The two panels' content widths, the browser's rather than the
+   * workspace's: `null` is the default, and only the handle reads them, so a
+   * drag re-renders nothing here. CA_0066_002 CA_0066_004 */
+  const widths = useStore<PanelWidths>({ left: null, right: null });
   const registry = useStore<ProcessRegistry>({
     items: [...processes],
     selection: NO_SELECTION,
   });
-  const mobile = useStore({
-    sheet: null as "left" | "right" | null,
-    // Where the dock handle was pressed, or `null` when it saw no press. The
-    // press is recorded rather than assumed, because a coordinate has no value
-    // that means "no press".
-    dockPressY: null as number | null,
-  });
-  const drag = useStore<DragState>({ ...idleDrag(), drop: null, drops: 0 });
+  const mobile = useStore({ sheet: null as Sheet });
+  const drag = useStore<DragState>({ ...idleDrag(), drop: null, drops: 0, settledAt: 0 });
   // The library is rendered from what the page was served with, section by
   // section as the registry names them, and a section is re-read whenever
   // this session changes what it holds. BO_0202_003
@@ -224,18 +300,19 @@ export const Shell = component$<{
     reads: 0,
   });
   /**
-   * The agent run this session started, the events it has reported, and
-   * whatever the dock has to say about the last goal. The notice lives here
-   * rather than on the message surface: a refusal belongs beside the control
-   * that was pressed, and a message would take the whole frame to say the
-   * agent is busy.
+   * The agent run this session started last, and the agents a command can go
+   * to. Every run the session started is followed side by side in `followed`
+   * (BO_0269_014), and what each has done is read back in the panel, where a
+   * run's events stand in its detail (`CA_0058_006`).
    */
   const run = useStore<{
     id: string | null;
     processId: string | null;
-    events: RunEvent[];
-    notice: string | null;
     sending: boolean;
+    /** What the agent dropdown has to say about the choice — a choice the
+     * instance would not remember, or the agent the page opened away from —
+     * shown beside the control a command is sent from. CA_0052_002 */
+    notice: string | null;
     /**
      * The agent the next command goes to, and what there is to choose from.
      * The dropdown opens on the instance's last choice (`openingAgent`), so
@@ -244,88 +321,141 @@ export const Shell = component$<{
      * running. BO_0225_004 BO_0228_011
      */
     agent: string | null;
-    runtimes: SelectableRuntime[];
+    /** What the reader chose on the chosen sender's axes. BO_0279_007 */
+    options: Record<string, string>;
     /**
-     * The document the run was aimed at, and the run whose end has already
-     * been told to the view showing it — once per run, however many polls
-     * read the end. BO_0226_007
+     * What the next press would cost, in the offering extension's own words,
+     * or "" when nothing can say. It is asked as the reader turns a control
+     * and shown on *Send*, which is the thing that spends. BO_0279_009
      */
-    artifact: string | null;
-    announced: string | null;
-    /** The system processes whose end this shell has told the open views
-     * about, so each raises the proposed signal once. BO_0245_009 */
-    announcedSystem: string[];
-    /** The run whose started document this shell has opened, once per run.
-     * BO_0251_007 */
-    opened: string | null;
-    /** The files the next command carries, and a file refused before its
-     * upload. BO_0229_010 */
-    attachments: AttachmentChip[];
-    attachNotice: string | null;
+    cost: string;
+    /** The next command's speed, opened on the person's last. BO_0269_015 */
+    speed: Speed;
+    runtimes: SelectableRuntime[];
+    /** The remembered agent the page opened away from, and the notice that
+     * said so, until a later read finds it able to run or the reader
+     * chooses (`rereadAgent`). CA_0052_002 */
+    awaiting: string | null;
+    openingNotice: string | null;
+    /**
+     * Every run this session started, each with the document it was aimed at
+     * and whether its end has been told to the view showing it — once per
+     * run, however many polls read the end. BO_0226_007 BO_0269_014
+     */
+    followed: FollowedRun[];
+    /** The processes whose end this shell has told the open views about,
+     * so each raises the proposed signal once. BO_0245_009 CA_0063_002 */
+    announced: string[];
   }>({
     id: null,
     processId: null,
-    events: [],
-    notice: null,
     sending: false,
+    notice: null,
     agent: null,
+    options: {} as Record<string, string>,
+    cost: "",
+    speed: "fast" as Speed,
     runtimes: [],
-    artifact: null,
-    announced: null,
-    announcedSystem: [] as string[],
-    opened: null,
-    attachments: [],
-    attachNotice: null,
+    awaiting: null,
+    openingNotice: null,
+    followed: [] as FollowedRun[],
+    announced: [] as string[],
   });
   /**
    * What the reader has marked in each document, as its view last reported,
-   * and where they asked the next command's work to go. Keyed by document
-   * rather than tab, as the marks themselves are (`markingKey`).
-   * BO_0226_005 BO_0226_006
+   * and the branch each document's tab works in. Keyed by document rather
+   * than tab, as the marks themselves are (`markingKey`). BO_0226_005
    */
-  const aim = useStore<ComposerAim>({ pointing: {}, choice: NO_CHOICE, unaimed: NO_UNAIMED });
+  const aim = useStore<CommandAim>({ pointing: {} });
   /** The last run aimed at a document that ended, for the view showing it. */
   const runProposed = useStore<ViewProposed>({ itemId: null, seq: 0 });
   /** The last chip the reader pressed, for the view showing its document. CA_0039_004 */
   const reveal = useStore<ViewReveal>({ itemId: null, target: null, seq: 0 });
-  const compose = useStore<ViewCompose>({ text: "", seq: 0 });
+  /** The reader's runs aimed at documents, as they go. BO_0265_007
+   * BO_0269_014 */
+  const activity = useStore<ViewActivity>({ runs: [], seq: 0 });
+  /** The open run groups each document's view reported, for the chips above
+   * the command field, and the last answer pressed on one. BO_0265_008 */
+  const runChips = useStore<{ byItem: Record<string, readonly RunChip[]> }>({ byItem: {} });
+  const answerAll = useStore<ViewAnswerAll>({ itemId: null, group: null, answer: null, seq: 0 });
+  const toggleRun = useStore<ViewToggleRun>({ itemId: null, key: null, seq: 0 });
+  /** Words asked for a document tab's next command, which its view writes
+   * into a new block. BO_0267_016 */
+  const composeBlock = useStore<ViewComposeBlock>({ itemId: null, text: "", seq: 0 });
   const focus = useStore<ViewFocus>({ itemId: null, blockId: null, seq: 0 });
-  useVisibleTask$(async () => {
-    const response = await fetch("/api/agent/runtimes");
-    if (!response.ok) return;
-    const answered = (await response.json()) as {
-      runtimes: SelectableRuntime[];
-      chosen: string | null;
-      active: string | null;
-    };
-    run.runtimes = answered.runtimes;
-    // The instance's last choice when it can run; otherwise what the gateway
-    // runs, and a notice saying the choice was not honoured and why.
-    // BO_0228_011
-    const opening = openingAgent(answered.runtimes, answered.chosen, answered.active);
-    run.agent = opening.agent;
-    if (opening.notice !== null) run.notice = opening.notice;
-  });
+  /** The focused work a view has read, by target: what `blockControls$` reads
+   * to say whether a block already has a child, without a read per block.
+   * CA_0065_004 */
+  const faces = useStore<{ byItem: Record<string, FocusedWork> }>({ byItem: {} });
+  // The instance's last choice when it can run; otherwise what the gateway
+  // runs, and a notice saying the choice was not honoured and why.
+  // BO_0228_011
+  useVisibleTask$(() => loadAgents(run));
+  /** Every later read of the agents: the dropdown opening, and a view saying
+   * they changed (`agentsChanged$`). CA_0052_001 CA_0052_002 */
+  const refreshAgents$ = $(() => refreshAgents(run));
   /**
    * What the selected process's run proposed, read when the selection changes.
    * A process that is not a run answers an empty list, which is why this is
    * asked of whatever is selected rather than only of runs.
    */
-  const proposed = useStore<ProposedRead>({ processId: null, documents: [], attachments: [] });
   /**
-   * The one thing the dock can take back: a tab move, which carries the tabs
-   * to restore, or what a view just did, which carries its own inverse
-   * (`offerUndo$`). One line for both, so a thing is taken back the same way
-   * wherever it was done. BO_0227_013
+   * The open tabs and which one is active. Declared before the tasks that
+   * track it: Qwik lifts a task into its own chunk, and a store declared
+   * below one it uses is not captured — the built chunk then carries a free
+   * name and the task throws `tabs is not defined` in the browser, taking
+   * the shell's state with it. Found on the served build 2026-09-22.
    */
-  const undo = useSignal<
-    | { readonly kind: "tabs"; readonly label: string; readonly tabs: TabsState }
-    | { readonly kind: "view"; readonly label: string; readonly undo$: QRL<() => void> }
-    | null
-  >(null);
   const tabs = useStore<TabsState>({
     tabs: workspace.tabs,
     activeTabId: workspace.activeTabId,
+  });
+  const proposed = useStore<ProposedRead>({ processId: null, documents: [], attachments: [], events: [] });
+  /**
+   * The runs of the document in the active tab, for the inspector's
+   * *Execution* section: read when the tab changes, when a run this shell
+   * started opens or ends, and on the poll while one of them is running.
+   * BO_0267_010
+   */
+  const execution = useStore<ExecutionRead>({ itemId: null, runs: [], error: null });
+  useVisibleTask$(({ track, cleanup }) => {
+    const itemId = track(() => documentOf(activeTab(tabs)));
+    track(() => run.id);
+    track(() => runProposed.seq);
+    if (itemId === null) {
+      execution.itemId = null;
+      execution.runs = [];
+      execution.error = null;
+      return;
+    }
+    let stopped = false;
+    const read = async () => {
+      try {
+        const response = await fetch(`/api/runs?artifact=${encodeURIComponent(itemId)}`);
+        if (stopped) return;
+        if (!response.ok) {
+          const refused = (await response.json().catch(() => ({}))) as { error?: string };
+          execution.itemId = itemId;
+          execution.error = refused.error ?? "The runs of this document could not be read.";
+          return;
+        }
+        const body = (await response.json()) as { runs: ExecutionRun[] };
+        if (stopped) return;
+        execution.itemId = itemId;
+        execution.runs = body.runs;
+        execution.error = null;
+      } catch {
+        if (!stopped) execution.error = "The runs of this document could not be read.";
+      }
+    };
+    void read();
+    const timer = setInterval(() => {
+      if (execution.itemId === itemId && execution.runs.some(isRunning)) void read();
+    }, ACTIVE_RUN_POLL_INTERVAL_MS);
+    cleanup(() => {
+      stopped = true;
+      clearInterval(timer);
+    });
   });
   const preferred = useSignal<Record<string, string>>({
     ...workspace.preferredViews,
@@ -356,9 +486,56 @@ export const Shell = component$<{
     tabs.activeTabId = next.activeTabId;
     await save$(next, layout);
   });
-  const setDock$ = $(async (dock: Layout["dock"]) => {
-    layout.dock = dock;
-    await save$(tabs, { ...layout, dock });
+  // One press, one save: the strip empties and the workspace draws its empty
+  // line; the panels keep their state, which is theirs. CA_0067_002
+  const closeAll$ = $(() => applyTabs$(closeAllTabs(tabs)));
+  /**
+   * A swipe across the phone's *Minimum* header makes the neighbouring tab
+   * active. Only where *Minimum* is in force, and never from the menu, which
+   * keeps its taps; the reading of the travel is `tabSwipeStep`'s. A touch
+   * pointer is captured by its target, so the lift reaches the header
+   * wherever the finger went. CA_0054_008
+   */
+  const lineSwipe = useStore({ pointerId: -1, x: 0, y: 0 });
+  const startLineSwipe$ = $((event: PointerEvent) => {
+    lineSwipe.pointerId = -1;
+    const minimum =
+      document.documentElement.getAttribute("data-header-mode") === "minimum" &&
+      window.matchMedia("(max-width: 640px)").matches;
+    if (!minimum || event.pointerType === "mouse") return;
+    if (
+      (event.target as Element).closest(
+        ".header-menu__button, .header-menu__panel",
+      )
+    )
+      return;
+    lineSwipe.pointerId = event.pointerId;
+    lineSwipe.x = event.clientX;
+    lineSwipe.y = event.clientY;
+  });
+  const endLineSwipe$ = $(async (event: PointerEvent) => {
+    if (event.pointerId !== lineSwipe.pointerId) return;
+    lineSwipe.pointerId = -1;
+    const step = tabSwipeStep({
+      pointerType: event.pointerType,
+      from: { x: lineSwipe.x, y: lineSwipe.y },
+      to: { x: event.clientX, y: event.clientY },
+      width: window.innerWidth,
+    });
+    if (step !== 0) await applyTabs$(neighbourTab(tabs, step));
+  });
+  /**
+   * The header is outside the sheet, so a press there closes it — and unlike a
+   * press in the workspace it still does its own work, because the shield that
+   * swallows a press never covers the header: what the reader pressed is what
+   * they saw. The line's swipe follows the same press. CA_0059_002
+   */
+  const pressHeader$ = $(async (event: PointerEvent) => {
+    mobile.sheet = null;
+    await startLineSwipe$(event);
+  });
+  const stepTab$ = $(async (step: -1 | 1) => {
+    await applyTabs$(neighbourTab(tabs, step));
   });
   /**
    * Choosing another view never rewrites this tab: it opens the target again
@@ -396,185 +573,248 @@ export const Shell = component$<{
       const response = await fetch(`/api/workspaces/${workspace.id}/processes`);
       if (!stopped && response.ok) {
         registry.items = (await response.json()) as ProcessRecord[];
-        // A system run nobody followed has ended for a document: the view
-        // showing it reads what the run proposed, as it does for a person's
-        // run. The first poll only remembers what had already ended, so a
-        // reload does not re-announce every past refinement. BO_0245_009
-        for (const item of registry.items) {
-          if (item.trigger !== "system" || !isTerminal(item.state) || item.refined === undefined) continue;
-          if (run.announcedSystem.includes(item.id)) continue;
-          run.announcedSystem = [...run.announcedSystem, item.id];
-          if (!primed) continue;
-          runProposed.itemId = item.refined.documentId;
-          runProposed.seq += 1;
+        // A process aimed at a document has ended — a sender's, a system
+        // run's, a run started in another session — and no run this session
+        // follows is telling it: the view showing that document reads what
+        // it proposed. The first poll only remembers what had already ended,
+        // so a reload does not re-announce every past process. BO_0245_009
+        // CA_0063_002
+        const ended = endedForDocuments(registry.items, run.announced, run.followed);
+        run.announced = [...ended.announced];
+        if (primed) {
+          for (const itemId of ended.itemIds) {
+            runProposed.itemId = itemId;
+            runProposed.seq += 1;
+          }
         }
         primed = true;
       }
-      // The run's events ride the registry's clock rather than opening a
-      // second transport. A run the reader started in an earlier session is
-      // not followed here, because the console reports it as a process either
-      // way and its events are read back when it is selected.
-      if (!stopped && run.id !== null) {
-        const events = await fetch(`/api/runs/${run.id}/events`);
-        if (!stopped && events.ok) {
-          run.events = (await events.json()) as RunEvent[];
-          // A run aimed at a document has ended — completed, failed or
-          // cancelled, since a run that failed may already have staged — so
-          // the view showing that document reads what it proposed. Once per
-          // run: the poll keeps reading the same end. BO_0226_007
-          if (
-            run.artifact !== null &&
-            run.announced !== run.id &&
-            run.events.some((event) => RUN_ENDS.includes(event.kind))
-          ) {
-            run.announced = run.id;
-            runProposed.itemId = run.artifact;
-            runProposed.seq += 1;
-          }
-          // A run started from a command has ended naming the document it
-          // created: it opens in a tab — the one already showing it, if any —
-          // and the view and the library read what the run proposed. Once per
-          // run. BO_0251_007
-          const started = run.opened === run.id ? null : startedDocument(run.events);
-          if (started !== null) {
-            run.opened = run.id;
-            await applyTabs$(
-              openTab(tabs, {
-                id: `${DOCUMENT_KIND}-${started}`,
-                kind: DOCUMENT_KIND,
-                // The view names the tab by the document's title once it has
-                // read it, as it does for every tab it shows.
-                title: STARTED_TITLE,
-                itemId: started,
-                viewType: preferredView(REGISTRY, preferred.value, started, DOCUMENT_KIND).id,
-                selection: null,
-                drawerContext: DOCUMENT_KIND,
-                unsaved: false,
-              }),
-            );
-            runProposed.itemId = started;
-            runProposed.seq += 1;
-          }
+      // A run still going aimed at a document is read on its own, faster
+      // clock (`followRun`); every other run's events ride the registry's.
+      if (!running()) await followRuns();
+    };
+    // Whether one of the reader's runs is aimed at a document and has not
+    // been seen to end: what it does there is drawn as it does it.
+    // BO_0265_007 BO_0269_014
+    const running = () => unfinished(run.followed).some((followed) => followed.artifact !== null);
+    let following = false;
+    // The runs' events ride the registry's clock rather than opening a
+    // second transport. A run the reader started in an earlier session is
+    // not followed here, because the console reports it as a process either
+    // way and its events are read back when it is selected.
+    const followRuns = async () => {
+      if (following) return;
+      following = true;
+      try {
+        await readRuns();
+      } finally {
+        following = false;
+      }
+    };
+    const readRuns = async () => {
+      // Every run this session started and has not seen end, side by side.
+      // BO_0269_014
+      for (const followed of unfinished(run.followed)) {
+        if (stopped) return;
+        const events = await fetch(`/api/runs/${followed.id}/events`);
+        if (stopped || !events.ok) continue;
+        const read = (await events.json()) as RunEvent[];
+        run.followed = withEvents(run.followed, followed.id, read);
+      }
+      // What each run has done in the document it is aimed at, for the view
+      // showing that document to draw at its blocks. BO_0265_007
+      const next = activitiesOf(run.followed);
+      if (!sameActivities(activity.runs, next)) {
+        activity.runs = next;
+        activity.seq += 1;
+      }
+      for (const followed of run.followed) {
+        if (stopped || !runEnded(followed.events)) continue;
+        // A run aimed at a document has ended — completed, failed or
+        // cancelled, since a run that failed may already have staged — so
+        // the view showing that document reads what it proposed. Once per
+        // run, and one run per read: the signal carries one document, and
+        // the next read tells the next. BO_0226_007
+        if (followed.artifact !== null && !followed.announced) {
+          run.followed = marked(run.followed, followed.id, "announced");
+          runProposed.itemId = followed.artifact;
+          runProposed.seq += 1;
+          return;
         }
       }
     };
     void poll();
     const timer = setInterval(() => void poll(), PROCESS_POLL_INTERVAL_MS);
+    const fast = setInterval(() => {
+      if (running()) void followRuns();
+    }, ACTIVE_RUN_POLL_INTERVAL_MS);
     cleanup(() => {
       stopped = true;
       clearInterval(timer);
+      clearInterval(fast);
     });
   });
   /**
-   * Sends the composer's text to the agent.
-   *
-   * A refusal is shown where it was asked for, in the agent's own words when
-   * they are what came back: the reader pressed a button in the dock, and the
-   * dock is where they should learn why nothing happened.
+   * Starts a run for a command body and follows it as the dock follows every
+   * run it started: the console, the activity the view hears, the end told
+   * once. Answers the run's id, or the refusal in words. Shared by the
+   * composer's field and a command sent from a block. BO_0267_008
    */
-  const sendGoal$ = $(async () => {
-    const field = document.querySelector<HTMLTextAreaElement>("#command");
-    const goal = field?.value.trim() ?? "";
-    if (goal === "" || run.sending) return;
-
-    // A file still uploading holds the command: sent now, it would go without
-    // the file the reader sees in the bar. BO_0229_010
-    const uploading = uploadingNames(run.attachments);
-    if (uploading.length > 0) {
-      run.notice = stillUploading(uploading);
-      return;
-    }
-
-    run.sending = true;
-    run.notice = null;
-    // What the command is aimed at, read from the stores at the press: the
-    // active tab, the delivery chosen for its document, and its marks. Not the
-    // tab's selection, which leaving the editor for the composer has already
-    // cleared. BO_0226_005
-    const target = commandTarget(activeTab(tabs), aim.choice, aim.pointing, aim.unaimed);
-    const artifact = artifactOf(target);
-    // A passage whose words are gone stops the command where the reader can
-    // see why: its number may already be in the words, and sending it would
-    // name a reference with nothing behind it. BO_0227_015
-    const stale =
-      artifact === null ? [] : staleIn(aim.pointing[artifact] ?? NO_POINTING);
-    if (stale.length > 0) {
-      run.sending = false;
-      run.notice = `${stale.map((number) => `#${number}`).join(", ")} no longer ${stale.length === 1 ? "matches its" : "match their"} words. Re-point or take back before running.`;
-      return;
-    }
-    // A number written into the command whose mark has since been taken back
-    // names a reference with nothing behind it, for the same reason.
-    const dangling =
-      artifact === null
-        ? []
-        : danglingNumbers(goal, (aim.pointing[artifact] ?? NO_POINTING).references);
-    if (dangling.length > 0) {
-      run.sending = false;
-      run.notice = `${dangling.map((number) => `#${number}`).join(", ")} ${dangling.length === 1 ? "names" : "name"} nothing marked. Mark it again, or take it out of the command.`;
-      return;
-    }
-    const sentAttachments = readyDescriptors(run.attachments);
+  const startRun$ = $(async (body: Record<string, unknown>, artifact: string | null): Promise<{ ok: true; runId: string } | { ok: false; error: string }> => {
     try {
       const response = await fetch(`/api/workspaces/${workspace.id}/runs`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          goal,
-          ...(run.agent === null ? {} : { agent: run.agent }),
-          ...(target === null ? {} : target),
-          // A command issued in a branch proposes into it: the run's group
-          // is the person's branch, not one of its own. BO_0250_010
-          ...(artifact === null || aim.branch?.[artifact] === undefined ? {} : { branch: aim.branch[artifact] }),
-          // The files the bar shows as ready, read at the press. BO_0229_010
-          ...(sentAttachments.length === 0 ? {} : { attachments: sentAttachments }),
-        }),
+        body: JSON.stringify(body),
       });
-      if (response.ok) {
-        const started = (await response.json()) as {
-          runId: string;
-          processId: string;
-        };
-        run.id = started.runId;
-        run.processId = started.processId;
-        run.events = [];
-        run.artifact = artifact;
-        run.announced = null;
-        run.opened = null;
-        // Sent with the run; a refused run keeps them for the next press.
-        run.attachments = [];
-        run.attachNotice = null;
-        if (field) {
-          field.value = "";
-          fitField(field);
-        }
-        // The run has already recorded its start; reading it now means the
-        // console shows the run rather than nothing until the next poll.
-        const events = await fetch(`/api/runs/${started.runId}/events`);
-        if (events.ok) {
-          run.events = (await events.json()) as RunEvent[];
-        }
-        return;
+      if (!response.ok) {
+        const refused = (await response.json()) as { error?: string };
+        return { ok: false, error: refused.error ?? "The agent did not take the goal." };
       }
-      const refused = (await response.json()) as { error?: string };
-      run.notice = refused.error ?? "The agent did not take the goal.";
+      const started = (await response.json()) as {
+        runId?: string;
+        processId: string;
+      };
+      run.processId = started.processId;
+      // A sender answered a process and no run: there is nothing to follow,
+      // and following `undefined` left a chip saying *Starting* for ever.
+      // The process is on the Execution list like any other. BO_0273_039
+      // What the sender staged before answering — the pending block — is
+      // read by the view showing the document at once; the process's end is
+      // the poll's (CA_0063_002). CA_0063_003
+      if (typeof started.runId !== "string" || started.runId === "") {
+        if (artifact !== null) {
+          runProposed.itemId = artifact;
+          runProposed.seq += 1;
+        }
+        return { ok: true, runId: "" };
+      }
+      run.id = started.runId;
+      // Followed beside every run already going. BO_0269_014
+      run.followed = followRun(run.followed, started.runId, artifact, typeof body.agent === "string" ? body.agent : run.agent);
+      return { ok: true, runId: started.runId };
     } catch {
-      run.notice = "The agent could not be reached.";
-    } finally {
-      run.sending = false;
+      return { ok: false, error: "The agent could not be reached." };
     }
   });
 
-  const chooseAgent$ = $(async (agent: string) => {
-    run.agent = agent;
-    // Said when it could not be remembered, since the next reload would open
-    // elsewhere.
-    if (!(await rememberAgent(agent))) run.notice = CHOICE_NOT_REMEMBERED;
+  /**
+   * Sends a command written in a block of a document. The marks it carries
+   * are the ones the view last reported for the document, copied at the
+   * press, and a passage whose words are gone or a `#n` no mark stands under
+   * stops it where the reader can see why — its number may already be in the
+   * words, and sending it would name a reference with nothing behind it.
+   * BO_0227_015 BO_0267_008
+   */
+  const sendCommand$ = $(async (command: ViewCommand): Promise<SentCommand> => {
+    if (run.sending) return { ok: false, error: "A command is already being sent." };
+    const pointing = aim.pointing[command.itemId] ?? NO_POINTING;
+    const stale = staleIn(pointing);
+    if (stale.length > 0) {
+      return {
+        ok: false,
+        error: `${stale.map((number) => `#${number}`).join(", ")} no longer ${stale.length === 1 ? "matches its" : "match their"} words. Re-point or take back before sending.`,
+      };
+    }
+    const dangling = danglingNumbers(command.words, pointing.references);
+    if (dangling.length > 0) {
+      return {
+        ok: false,
+        error: `${dangling.map((number) => `#${number}`).join(", ")} ${dangling.length === 1 ? "names" : "name"} nothing marked. Mark it again, or take it out of the command.`,
+      };
+    }
+    run.sending = true;
+    const branch = aim.branch?.[command.itemId];
+    const started = await startRun$(
+      {
+        ...(run.agent === null ? {} : { agent: run.agent }),
+        // What the reader chose on the sender's axes, when it has any. An
+        // agent has none and sends none. BO_0279_007
+        ...(Object.keys(run.options).length === 0 ? {} : { options: run.options }),
+        speed: run.speed,
+        ...blockCommand(command.itemId, command.source, pointing.references),
+        // A command issued in a branch proposes into it: the run's group
+        // is the person's branch, not one of its own. BO_0250_010
+        ...(branch === undefined ? {} : { branch }),
+        ...(command.attachments.length === 0 ? {} : { attachments: command.attachments }),
+      },
+      command.itemId,
+    );
+    run.sending = false;
+    return started;
   });
 
-  const cancelRun$ = $(async () => {
-    if (run.id === null) return;
-    await fetch(`/api/runs/${run.id}/cancel`, {
+  /**
+   * Asks a gesture's question (`BO_0258_006`): a run for the goal under the
+   * named intention, on the chosen agent, proposing into the target and
+   * followed like every other, so its chip and its proposals arrive where the
+   * reader already looks for them. A gesture carries no marks and no
+   * attachments: it asks about the subject it was made on, not about what the
+   * reader pointed at.
+   */
+  const sendGesture$ = $(async (gesture: ViewGesture): Promise<SentCommand> => {
+    if (run.sending) return { ok: false, error: "A command is already being sent." };
+    run.sending = true;
+    const branch = aim.branch?.[gesture.itemId];
+    const started = await startRun$(
+      {
+        ...(run.agent === null ? {} : { agent: run.agent }),
+        speed: run.speed,
+        goal: gesture.goal,
+        intention: gesture.intention,
+        ...(gesture.context === undefined || gesture.context === "" ? {} : { context: gesture.context }),
+        artifact: gesture.itemId,
+        ...(branch === undefined ? {} : { branch }),
+      },
+      gesture.itemId,
+    );
+    run.sending = false;
+    return started;
+  });
+
+  const chooseAgent$ = $((agent: string) => chooseAgent(run, agent));
+  /** One axis of the chosen sender, as the reader turns it. BO_0279_007 */
+  const chooseOption$ = $((axis: string, value: string) => {
+    run.options = { ...run.options, [axis]: value };
+  });
+
+  /**
+   * What the next press would cost (`BO_0279_009`). Free — a quote is the
+   * generator's own dry run — and asked as the reader turns a control, so the
+   * number on *Send* is current the moment they look at it rather than after a
+   * wait. An agent, or an extension that cannot say, leaves it empty and
+   * nothing is shown: no number is better than a wrong one.
+   */
+  const quoteSend$ = $(async (documentId: string, blockId: string) => {
+    const sender = run.agent;
+    if (sender === null || workspace.id === "") {
+      run.cost = "";
+      return;
+    }
+    const asked = { sender, options: run.options };
+    const response = await fetch(`/api/workspaces/${workspace.id}/runs/quote`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...asked, documentId, blockId }),
+    });
+    if (!response.ok) {
+      run.cost = "";
+      return;
+    }
+    const answered = (await response.json()) as { ok?: boolean; cost?: string };
+    // A later turn of a control has its own answer; this one is stale.
+    if (run.agent !== sender) return;
+    run.cost = answered.ok === true && typeof answered.cost === "string" ? answered.cost : "";
+  });
+  /** The next command's speed; the kernel remembers it for the person when a
+   * run starts with it. BO_0269_015 */
+  const chooseSpeed$ = $((speed: Speed) => {
+    run.speed = speed;
+  });
+
+  /** Cancels a run from its *Execution* entry. BO_0267_010 */
+  const cancelExecutionRun$ = $(async (runId: string) => {
+    await fetch(`/api/runs/${runId}/cancel`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "{}",
@@ -595,6 +835,7 @@ export const Shell = component$<{
     proposed.processId = selected;
     proposed.documents = [];
     proposed.attachments = [];
+    proposed.events = [];
     if (selected === null) return;
 
     const [response, attached] = await Promise.all([
@@ -608,6 +849,26 @@ export const Shell = component$<{
     if (attached.ok && selectedProcess(registry.selection, tabs.activeTabId) === selected) {
       proposed.attachments = (await attached.json()) as BridgeAttachment[];
     }
+  });
+  /**
+   * What the selected run has done, for its detail. The registry's poll is
+   * the clock: a run still going is read again with every poll, and one that
+   * has ended is read once, since what it did does not change while a reader
+   * looks at it. A process that is not a run has no events to read.
+   * CA_0058_006
+   */
+  useVisibleTask$(async ({ track }) => {
+    const selected = track(() => selectedProcess(registry.selection, tabs.activeTabId));
+    const items = track(() => registry.items);
+    const record = items.find((process) => process.id === selected);
+    if (selected === null || record?.runId === undefined) return;
+    const read = proposed.processId === selected && proposed.events.length > 0;
+    const going = record.state === "queued" || record.state === "running";
+    if (read && !going) return;
+    const response = await fetch(`/api/runs/${record.runId}/events`);
+    if (!response.ok) return;
+    if (selectedProcess(registry.selection, tabs.activeTabId) !== selected) return;
+    proposed.events = (await response.json()) as RunEvent[];
   });
   // A closed tab takes its selection with it, so a tab opened again on the
   // same target starts with nothing selected. CA_0040_001
@@ -660,15 +921,58 @@ export const Shell = component$<{
       if (intent !== "drag") return;
       drag.payload = drag.candidate;
     }
-    const target = targetUnder(event.clientX, event.clientY);
+    const target = targetUnder(event.clientX, event.clientY, libraryIconIds(layout));
     drag.overId = target?.id ?? null;
     drag.operation =
-      target === null ? null : resolveOperation(drag.payload, target);
+      target === null ? null : resolveDrop(drag.payload, target);
+  });
+  // While a drag is under way, a pointer held near the top or the bottom of
+  // the area the drag began in scrolls it, and the target under the pointer
+  // is read again as the content moves beneath it. BO_0263_017
+  useVisibleTask$(({ track, cleanup }) => {
+    const payload = track(() => drag.payload);
+    if (payload === null) return;
+    const scroller = scrollerAt(drag.origin.x, drag.origin.y);
+    const page = scroller === document.scrollingElement || scroller === document.documentElement;
+    let frame = 0;
+    const tick = () => {
+      const box = page ? { top: 0, bottom: window.innerHeight } : scroller.getBoundingClientRect();
+      const top = Math.max(box.top, 0);
+      const bottom = Math.min(box.bottom, window.innerHeight);
+      const dy = edgeScroll(drag.position.y, top, bottom);
+      if (dy !== 0) {
+        const before = scroller.scrollTop;
+        scroller.scrollTop = before + dy;
+        if (scroller.scrollTop !== before && drag.payload !== null) {
+          const target = targetUnder(drag.position.x, drag.position.y, libraryIconIds(layout));
+          drag.overId = target?.id ?? null;
+          drag.operation = target === null ? null : resolveDrop(drag.payload, target);
+        }
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    cleanup(() => cancelAnimationFrame(frame));
   });
   const dropDrag$ = $(async () => {
     const { payload, operation, overId } = drag;
     Object.assign(drag, idleDrag());
+    if (payload !== null) drag.settledAt = Date.now();
     if (payload === null || operation === null || overId === null) return;
+
+    // A library icon dropped in its column: the column takes the new order,
+    // which the workspace stores. CA_0068_002 CA_0068_003
+    if (operation === "move" && overId.startsWith(PANEL_ICON_TARGET)) {
+      const before = overId.slice(PANEL_ICON_TARGET.length);
+      const libraryOrder = movedIconOrder(
+        libraryIconIds(layout),
+        payload.itemId,
+        before === "end" ? null : before,
+      );
+      layout.libraryOrder = libraryOrder;
+      await save$(tabs, { ...layout, libraryOrder });
+      return;
+    }
 
     if (operation === "move" && overId.startsWith("tab:")) {
       const moving = tabs.tabs.find(
@@ -676,14 +980,9 @@ export const Shell = component$<{
       );
       if (!moving) return;
       const before = overId.slice("tab:".length);
-      const previous: TabsState = {
-        tabs: [...tabs.tabs],
-        activeTabId: tabs.activeTabId,
-      };
       const next = moveTab(tabs, moving.id, before === "end" ? null : before);
       tabs.tabs = next.tabs;
       tabs.activeTabId = next.activeTabId;
-      undo.value = { kind: "tabs", label: `Moved ${moving.title}`, tabs: previous };
       await save$(next, layout);
       return;
     }
@@ -697,18 +996,6 @@ export const Shell = component$<{
     }
   });
   const cancelDrag$ = $(() => Object.assign(drag, idleDrag()));
-  const takeBack$ = $(async () => {
-    const entry = undo.value;
-    undo.value = null;
-    if (entry === null) return;
-    if (entry.kind === "view") {
-      await entry.undo$();
-      return;
-    }
-    tabs.tabs = entry.tabs.tabs;
-    tabs.activeTabId = entry.tabs.activeTabId;
-    await save$(entry.tabs, layout);
-  });
   /**
    * Opens a target in a tab, in the view remembered for it. `openTab` reveals
    * a tab already showing this target rather than opening a second one, so
@@ -726,6 +1013,16 @@ export const Shell = component$<{
       drawerContext: target.kind,
       unsaved: false,
     };
+    // A panel is a place to reach for something, not a place to stay. On a
+    // phone the sheet lies over the workspace it has just opened, so it has
+    // done its job the moment it lands the reader on a tab — whether the tab
+    // was made here, opened, or only revealed. Every path a panel opens a tab
+    // by comes through here, the library's rows and create controls and the
+    // Extensions section and the inspector alike, so this is the one place it
+    // is said. The panel itself is untouched: what it shows and whether it is
+    // shown are the workspace record's, so the next press on the handle brings
+    // back the list where it was. CA_0059_001
+    mobile.sheet = null;
     await applyTabs$(openTab(tabs, tab));
   });
   /** Re-reads one section through the host's library route. BO_0202_005 */
@@ -813,7 +1110,10 @@ export const Shell = component$<{
     facts: [],
     actions: [],
   });
-  const dock = useStore<ViewDock>({ action: null });
+  const bar = useStore<ViewBar>({ groups: [] });
+  // What a decorating extension adds to that bar, kept apart from the view's
+  // own groups so neither writer drops the other's. BO_0274_004
+  const decorationBar = useStore<ViewBar>({ groups: [] });
   const save = useStore<ViewSave>({ state: null });
   const message = useStore<ViewMessage>({ current: null });
   // A tab switch mounts a different view, and the state the old one reported
@@ -828,13 +1128,10 @@ export const Shell = component$<{
     inspector.text = null;
     inspector.facts = [];
     inspector.actions = [];
-    // The dock's action is the old view's too, and it acts on that view's own
-    // content. Offering it over a different tab would put a control in the dock
-    // for a surface the reader has left.
-    dock.action = null;
-    // So is what it offered to take back, for the same reason. A tab move's
-    // undo is the shell's own and stays.
-    if (undo.value?.kind === "view") undo.value = null;
+    // And so is its bar: its controls act on the view the reader left.
+    // CA_0053_001
+    bar.groups = [];
+    decorationBar.groups = [];
     // A message belongs to the view that raised it. Leaving it up over a
     // different tab would ask about a document the reader is no longer looking
     // at, and answering it would act on that one.
@@ -844,7 +1141,8 @@ export const Shell = component$<{
     workspaceId: workspace.id,
     drag,
     inspector,
-    dock,
+    bar,
+    decorationBar,
     save,
     startDrag$,
     setSelection$: $(async (selection: string | null) => {
@@ -865,9 +1163,88 @@ export const Shell = component$<{
     }),
     proposed: runProposed,
     reveal,
+    activity,
+    answerAll,
+    toggleRun,
+    setRunChips$: $((itemId: string, chips: readonly RunChip[]) => {
+      runChips.byItem = { ...runChips.byItem, [itemId]: chips };
+    }),
+    // The words become a new block of the document, which its view writes;
+    // a tab that is no document has nothing to write them into. BO_0267_008
     composeCommand$: $((text: string) => {
-      compose.text = text;
-      compose.seq += 1;
+      const itemId = documentOf(activeTab(tabs));
+      if (itemId === null) return;
+      composeBlock.itemId = itemId;
+      composeBlock.text = text;
+      composeBlock.seq += 1;
+    }),
+    composeBlock,
+    agents: run,
+    chooseAgent$,
+    chooseOption$,
+    quoteSend$,
+    chooseSpeed$,
+    refreshAgents$,
+    sendCommand$,
+    sendGesture$,
+    // Focused work: the shell's own capability, offered to every view.
+    // The kind comes from the tab the target is open in, so a view never
+    // names a vocabulary, and the faces a view read are kept so a control's
+    // words can say whether the block already has a child. CA_0065_003
+    // CA_0065_004 CA_0065_005
+    faces$: $(async (itemId: string) => {
+      const kind = kindOf(tabs, itemId);
+      if (kind === null) return {};
+      const answer = await fetch(`/api/focused-work/${itemId}?kind=${encodeURIComponent(kind)}`);
+      const outcome = (await answer.json()) as { outcome: string; result?: FocusedWork };
+      const work = outcome.outcome === "success" && outcome.result !== undefined ? outcome.result : {};
+      faces.byItem = { ...faces.byItem, [itemId]: work };
+      return work;
+    }),
+    blockControls$: $(async (itemId: string, blockId: string) => {
+      if (kindOf(tabs, itemId) === null) return [];
+      const held = faces.byItem[itemId]?.[blockId] !== undefined;
+      return [
+        {
+          id: "focused-work",
+          label: held ? "Focused work" : "Open as focused work",
+          icon: "crosshair-simple",
+        },
+      ] as const;
+    }),
+    pressBlockControl$: $(async (control, target) => {
+      if (control !== "focused-work") return `The shell has no control ${control}.`;
+      const kind = kindOf(tabs, target.itemId);
+      if (kind === null) return "This tab opens no focused work.";
+      const answer = await fetch(`/api/focused-work/${target.itemId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind, blockId: target.blockId }),
+      });
+      const outcome = (await answer.json()) as
+        | { outcome: "success"; result: { itemId: string; title: string } }
+        | { outcome: string; failures?: readonly { detail?: string }[]; error?: string };
+      if (outcome.outcome !== "success") {
+        const failures = (outcome as { failures?: readonly { detail?: string }[] }).failures ?? [];
+        return failures[0]?.detail ?? (outcome as { error?: string }).error ?? "That block does not open as focused work.";
+      }
+      const child = (outcome as { result: { itemId: string; title: string } }).result;
+      // The parent is pushed onto the route with the block it was opened
+      // from, so Back returns to it and lands there. CA_0047_003
+      const route = [...target.route];
+      const parent = route[route.length - 1];
+      if (parent !== undefined) route[route.length - 1] = { ...parent, blockId: target.blockId };
+      route.push({ itemId: child.itemId, title: child.title });
+      const id = tabs.activeTabId;
+      if (id !== null) {
+        const next = retargetTab(tabs, id, { itemId: child.itemId, title: child.title, route });
+        tabs.tabs = next.tabs;
+        focus.itemId = child.itemId;
+        focus.blockId = null;
+        focus.seq += 1;
+        await save$(next, layout);
+      }
+      return null;
     }),
     retarget$: $(async (target: { itemId: string; title: string; route: readonly RouteEntry[]; focus?: string }) => {
       const id = tabs.activeTabId;
@@ -880,9 +1257,6 @@ export const Shell = component$<{
       await save$(next, layout);
     }),
     focus,
-    offerUndo$: $((offer: UndoOffer) => {
-      undo.value = { kind: "view", label: offer.label, undo$: offer.undo$ };
-    }),
     raiseMessage$: $((next: Message) => {
       message.current = next;
     }),
@@ -898,6 +1272,9 @@ export const Shell = component$<{
       if (gone !== undefined) await refreshKind$(gone.kind);
     }),
     openTarget$,
+    agentsChanged$: $(async () => {
+      await refreshAgents$();
+    }),
     targetChanged$: $(async () => {
       const id = tabs.activeTabId;
       if (id === null) return;
@@ -935,13 +1312,57 @@ export const Shell = component$<{
   };
   useContextProvider(ViewBridgeContext, bridge);
 
-  const cycleDrawer$ = $((side: "left" | "right") => {
-    const next = { ...layout, [side]: nextDrawerState(layout[side]) };
+  /** The header's panel control hides or shows the whole panel, keeping what
+   * it showed. CA_0056_003 */
+  /**
+   * The header's count pill: the right panel shown on the run list, or hidden
+   * again. At zero too, so the list is always one press from the header, and
+   * on a phone it opens the inspector's sheet on it. CA_0058_007
+   */
+  const showExecution$ = $(async (shown: boolean) => {
+    const right = shown ? { ...layout.right, shown: false } : { shown: true, icon: INSPECTOR_ICON };
+    layout.right = right;
+    mobile.sheet = shown ? null : "right";
+    await save$(tabs, { ...layout, right });
+  });
+  /** A press on an entry of the run list: it opens that process's detail for
+   * the tab, and a second press on the one already open lets it go.
+   * CA_0040_003 CA_0058_005 */
+  const selectProcess$ = $((processId: string) => {
+    registry.selection = pressProcess(registry.selection, tabs.activeTabId, processId);
+  });
+  const togglePanel$ = $((side: "left" | "right") => {
+    const next = { ...layout, [side]: togglePanel(layout[side]) };
+    layout[side] = next[side];
+    save$(tabs, next);
+  });
+  /** A press on a panel's icon: its content alone, or on a desktop the icon
+   * column alone when it was already shown; on a phone a press on the shown
+   * icon closes the sheet. CA_0056_002 CA_0056_006 CA_0056_013 */
+  const pressPanelIcon$ = $((side: "left" | "right", id: string) => {
+    // The lift that ends a drag is not a press. CA_0068_002
+    if (Date.now() - drag.settledAt < LONG_PRESS_MS) return;
+    const phone = window.matchMedia("(max-width: 640px)").matches;
+    const ids = side === "left" ? libraryIconIds(layout) : [INSPECTOR_ICON];
+    if (pressClosesSheet(layout[side], ids, id, phone)) {
+      mobile.sheet = null;
+      return;
+    }
+    const next = { ...layout, [side]: pressIcon(layout[side], ids, id, phone) };
     layout[side] = next[side];
     save$(tabs, next);
   });
 
   const active = activeTab(tabs);
+  // The library's content is the shown icon's sections, or in the small mode
+  // the first icon's, which only a phone's sheet draws. CA_0056_002
+  const libraryIconId = contentIcon(layout.left, libraryIconIds(layout));
+  const libraryIcon = REGISTRY.libraryIcons.find((icon) => icon.id === libraryIconId);
+  const libraryContent = {
+    id: libraryIcon?.id ?? null,
+    title: libraryIcon?.title ?? "",
+    sections: REGISTRY.sections.filter((section) => libraryIcon?.sections.includes(section.key)),
+  };
   const activeView = active
     ? resolveView(REGISTRY, active.kind, active.viewType).view
     : undefined;
@@ -950,9 +1371,8 @@ export const Shell = component$<{
     <>
       <main
         class="shell"
-        data-left={layout.left}
-        data-right={layout.right}
-        data-dock={layout.dock}
+        data-left={panelDraw(layout.left)}
+        data-right={panelDraw(layout.right)}
         data-sheet={mobile.sheet ?? undefined}
         data-workspace-id={workspace.id}
         data-dragging={
@@ -962,7 +1382,12 @@ export const Shell = component$<{
         onPointerUp$={dropDrag$}
         onPointerCancel$={cancelDrag$}
       >
-        <header class="shell-header">
+        <header
+          class="shell-header"
+          onPointerDown$={pressHeader$}
+          onPointerUp$={endLineSwipe$}
+          onPointerCancel$={() => (lineSwipe.pointerId = -1)}
+        >
           <h1 class="visually-hidden">Calliopa</h1>
           <Wordmark />
           <nav
@@ -971,6 +1396,11 @@ export const Shell = component$<{
             data-drop-target="tab:end"
             data-accepts="move open-in-tab"
           >
+            <TabEdge
+              side="before"
+              tabs={tabs}
+              onStep$={stepTab$}
+            />
             {tabs.tabs.map((tab) => (
               <span
                 class="tab-wrap"
@@ -1010,7 +1440,17 @@ export const Shell = component$<{
                   }
                   onClick$={() => applyTabs$(selectTab(tabs, tab.id))}
                 >
-                  <span class="tab__label">{tab.title}</span>
+                  {/* A tab holding a document nobody has named draws the
+                      minted name muted, the way its row in the drawer does.
+                      The listing is what says so. DO_0012_008 */}
+                  <span
+                    class="tab__label"
+                    data-unnamed={
+                      tabUnnamed(REGISTRY.sections, library.data, tab) ? "true" : "false"
+                    }
+                  >
+                    {tab.title}
+                  </span>
                   {tab.unsaved && (
                     <span
                       class="tab__unsaved"
@@ -1043,71 +1483,98 @@ export const Shell = component$<{
                 </button>
               </span>
             ))}
+            <CloseAllTabs place="strip" tabs={tabs} onClose$={closeAll$} />
+            <TabEdge
+              side="after"
+              tabs={tabs}
+              onStep$={stepTab$}
+            />
           </nav>
-          <SaveStatus save={save} />
-          <button
-            type="button"
-            class="process-indicator"
-            data-running={activeProcessCount(registry.items)}
-            aria-pressed={layout.dock === "console"}
-            aria-label={`${activeProcessCount(registry.items)} active processes. Process console`}
-            onClick$={() =>
-              setDock$(layout.dock === "console" ? "composer" : "console")
-            }
+          <HeaderMenu
+            save={save}
+            processes={activeProcessCount(registry.items)}
+            update={updateAvailable.value}
+            licence={licenceWarning}
           >
-            <span class="process-indicator__count">
-              {activeProcessCount(registry.items)}
-            </span>
-          </button>
-          {(["left", "right"] as const).map((side) => (
-            <button
-              key={side}
-              type="button"
-              class="layout-control"
-              data-side={side}
-              aria-label={`${side} drawer: ${layout[side]}. Change`}
-              onClick$={() => cycleDrawer$(side)}
-            >
-              <Icon name="sidebar-simple" />
-            </button>
-          ))}
-          {licenceWarning !== null && <LicenceWarning text={licenceWarning} />}
-          {updateAvailable.value !== null && (
-            // The owner's hint that a newer release exists, in the chrome
-            // idiom; it opens the Update tab. A phone shows the icon, the
-            // desktop the words. BO_0223_013 CA_0041_005
+            <SaveStatus save={save} />
             <button
               type="button"
-              class="update-hint"
-              data-update-available={updateAvailable.value}
-              aria-label={`Update available: ${updateAvailable.value}. Open the Update tab`}
-              onClick$={() => openUpdate$()}
+              class="process-indicator"
+              data-running={activeProcessCount(registry.items)}
+              // The list lives in the right panel, so the pill says whether
+              // the panel is showing it and a press shows or hides it, at
+              // zero as well. CA_0058_007
+              aria-pressed={layout.right.shown && shownIcon(layout.right, INSPECTOR_ICON_IDS) === INSPECTOR_ICON}
+              aria-label={`${activeProcessCount(registry.items)} active processes. Execution`}
+              onClick$={() =>
+                showExecution$(layout.right.shown && shownIcon(layout.right, INSPECTOR_ICON_IDS) === INSPECTOR_ICON)
+              }
             >
-              <Icon name="arrow-circle-up" />
-              <span class="update-hint__words">
-                Update available: {updateAvailable.value}
+              <span class="menu-label">Execution</span>
+              <span class="process-indicator__count">
+                {activeProcessCount(registry.items)}
               </span>
             </button>
-          )}
-          {REGISTRY.kinds[SETTINGS_KIND] !== undefined && (
-            <button
-              type="button"
-              class="settings-control"
-              aria-label="Settings"
-              onClick$={() => openSettings$()}
-            >
-              <Icon name="gear" />
-            </button>
-          )}
-          <ThemeToggle />
-          {person !== null && <PersonMenu person={person} />}
+            {(["left", "right"] as const).map((side) => (
+              <button
+                key={side}
+                type="button"
+                class="layout-control"
+                data-side={side}
+                aria-label={side === "left" ? "Library" : "Inspector"}
+                aria-pressed={layout[side].shown}
+                onClick$={() => togglePanel$(side)}
+              >
+                <Icon name="sidebar-simple" />
+                <span class="menu-label">
+                  {side === "left" ? "Library" : "Inspector"}
+                </span>
+              </button>
+            ))}
+            <CloseAllTabs place="menu" tabs={tabs} onClose$={closeAll$} />
+            {licenceWarning !== null && <LicenceWarning text={licenceWarning} />}
+            {updateAvailable.value !== null && (
+              // The owner's hint that a newer release exists, in the chrome
+              // idiom; it opens the Update tab. A phone shows the icon, the
+              // desktop the words. BO_0223_013 CA_0041_005
+              <button
+                type="button"
+                class="update-hint"
+                data-update-available={updateAvailable.value}
+                aria-label={`Update available: ${updateAvailable.value}. Open the Update tab`}
+                onClick$={() => openUpdate$()}
+              >
+                <Icon name="arrow-circle-up" />
+                <span class="update-hint__words">
+                  Update available: {updateAvailable.value}
+                </span>
+              </button>
+            )}
+            <HeaderModeToggle />
+            {REGISTRY.kinds[SETTINGS_KIND] !== undefined && (
+              <button
+                type="button"
+                class="settings-control"
+                aria-label="Settings"
+                onClick$={() => openSettings$()}
+              >
+                <Icon name="gear" />
+                <span class="menu-label">Settings</span>
+              </button>
+            )}
+            <ThemeToggle />
+            {person !== null && <PersonMenu person={person} />}
+          </HeaderMenu>
         </header>
 
         <button
           type="button"
           class="sheet-handle sheet-handle--left"
           aria-label="Open library"
-          onClick$={() => (mobile.sheet = "left")}
+          // The gesture that opened the sheet closes it: a handle that only
+          // ever opened would reopen what the reader meant to put away.
+          // CA_0059_002
+          onClick$={() => (mobile.sheet = pressHandle(mobile.sheet, "left"))}
         >
           ›
         </button>
@@ -1115,104 +1582,120 @@ export const Shell = component$<{
           type="button"
           class="sheet-handle sheet-handle--right"
           aria-label="Open inspector"
-          onClick$={() => (mobile.sheet = "right")}
+          onClick$={() => (mobile.sheet = pressHandle(mobile.sheet, "right"))}
         >
           ‹
         </button>
 
-        <aside class="drawer drawer--left" aria-label="Library" tabIndex={0}>
-          <button
-            type="button"
-            class="sheet-close"
-            aria-label="Close library"
+        {/* A press outside an open sheet closes it and does nothing else. The
+            shield is a transparent surface over the workspace alone, so the
+            press lands on nothing the reader can see and the block beneath is
+            left for the next press. The header is never covered, which is why
+            a control there both closes the sheet and acts. CA_0059_002 */}
+        {mobile.sheet !== null && (
+          <div
+            class="sheet-shield"
+            aria-hidden="true"
             onClick$={() => (mobile.sheet = null)}
-          >
-            ×
-          </button>
-          {REGISTRY.sections.map((section) => {
-            // The closures below capture strings, never the section itself:
-            // a contribution carries a component and a QRL, and the shell
-            // reaches both through the registry module rather than by
-            // serializing them into a listener.
-            const key = section.key;
-            const name = section.name;
-            const state = sectionState(layout, key);
-            const elementId = sectionElementId(key);
-            const Body = section.component;
-            const items = Body === undefined
-              ? ((library.data[key] as readonly LibraryItem[] | undefined) ?? [])
-              : [];
-            return (
-              <section
-                class="library-category"
-                aria-labelledby={elementId}
-                data-library={name}
-                data-section={key}
-                data-state={state}
-                key={key}
-              >
-                <div class="library-category__header">
-                  <h2 class="library-category__heading">
-                    <button
-                      type="button"
-                      class="library-category__toggle"
-                      id={elementId}
-                      aria-expanded={state === "expanded"}
-                      aria-controls={`${elementId}-list`}
-                      onClick$={() => toggleSection$(key)}
-                    >
-                      <span class="library-category__caret">
-                        <Icon name="caret-right" />
-                      </span>
-                      {section.title}
-                    </button>
-                  </h2>
-                  {section.createLabel !== undefined && (
-                    <button
-                      type="button"
-                      class="library-action library-action--icon"
-                      aria-label={section.createLabel}
-                      data-new={name}
-                      onClick$={() => createIn$(key)}
-                    >
-                      <Icon name="plus" />
-                    </button>
-                  )}
-                </div>
-                <div
-                  id={`${elementId}-list`}
-                  class="library-category__body"
-                  hidden={state === "collapsed"}
+          />
+        )}
+
+        <aside class="drawer drawer--left" aria-label="Library">
+          <PanelIcons
+            side="left"
+            label="Library sections"
+            layout={layout}
+            icons={libraryIcons(layout)}
+            startDrag$={startDrag$}
+            drag={drag}
+            onPress$={(id) => pressPanelIcon$("left", id)}
+          />
+          {/* The content scrolls, so the tab stop is its. CA_0056_001 */}
+          <div class="panel-content" tabIndex={0} data-panel-content={libraryContent.id ?? ""}>
+            <button
+              type="button"
+              class="sheet-close"
+              aria-label="Close library"
+              onClick$={() => (mobile.sheet = null)}
+            >
+              ×
+            </button>
+            {libraryContent.sections.length > 1 && (
+              <h2 class="panel-title">{libraryContent.title}</h2>
+            )}
+            {libraryContent.sections.map((section) => {
+              // The closures below capture strings, never the section itself:
+              // a contribution carries a component and a QRL, and the shell
+              // reaches both through the registry module rather than by
+              // serializing them into a listener.
+              const key = section.key;
+              const name = section.name;
+              // One section under its icon has no caret and is never collapsed;
+              // several are bands, each with its own. CA_0056_002
+              const collapsible = libraryContent.sections.length > 1;
+              const state = collapsible ? sectionState(layout, key) : "expanded";
+              const elementId = sectionElementId(key);
+              const Body = section.component;
+              const items = Body === undefined
+                ? ((library.data[key] as readonly LibraryItem[] | undefined) ?? [])
+                : [];
+              return (
+                <section
+                  class="library-category"
+                  aria-labelledby={elementId}
+                  data-library={name}
+                  data-section={key}
+                  data-state={state}
+                  key={key}
                 >
-                  {Body !== undefined ? (
-                    <Body
-                      data={library.data[key] ?? null}
-                      activeItemId={active?.itemId ?? null}
-                      sectionKey={key}
-                      filter={layout.filters[key] ?? null}
-                      setFilter$={$((values: readonly string[]) => setSectionFilter$(key, values))}
-                    />
-                  ) : items.length === 0 ? (
-                    <p class="library-empty" data-library-empty={name}>
-                      {section.empty}
-                    </p>
-                  ) : (
-                    <ul class="library-list" key={library.reads}>
-                      {items.map((item) => {
-                        const current = item.open !== undefined && active?.itemId === item.open.itemId;
-                        return (
-                          <li key={item.id}>
-                            <LibraryRow item={item} current={current} onOpen$={openTarget$} />
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </div>
-              </section>
-            );
-          })}
+                  <SectionHeader
+                    layout={layout}
+                    sectionKey={key}
+                    name={name}
+                    elementId={elementId}
+                    title={section.title}
+                    collapsible={collapsible}
+                    createLabel={section.createLabel}
+                    onToggle$={() => toggleSection$(key)}
+                    onCreate$={() => createIn$(key)}
+                  />
+                  <div
+                    id={`${elementId}-list`}
+                    class="library-category__body"
+                    hidden={state === "collapsed"}
+                  >
+                    {Body !== undefined ? (
+                      <Body
+                        data={library.data[key] ?? null}
+                        activeItemId={active?.itemId ?? null}
+                        sectionKey={key}
+                        filter={layout.filters[key] ?? null}
+                        setFilter$={$((values: readonly string[]) => setSectionFilter$(key, values))}
+                      />
+                    ) : items.length === 0 ? (
+                      <p class="library-empty" data-library-empty={name}>
+                        {section.empty}
+                      </p>
+                    ) : (
+                      <ul class="library-list" key={library.reads}>
+                        {items.map((item) => {
+                          const current = item.open !== undefined && active?.itemId === item.open.itemId;
+                          return (
+                            <li key={item.id}>
+                              <LibraryRow item={item} current={current} onOpen$={openTarget$} />
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
         </aside>
+        {/* The library's inner border, dragged to resize it. CA_0066_002 */}
+        <PanelResizeHandle side="left" layout={layout} widths={widths} />
 
         <section
           class="workspace"
@@ -1227,6 +1710,19 @@ export const Shell = component$<{
           tabIndex={0}
           data-view={activeView?.id}
         >
+          {/* The active view's bar, drawn by the shell from what the view
+              contributes, and absent while it contributes nothing. CA_0053_003 */}
+          {active && <ViewBarPanel bar={bar} decorations={decorationBar} />}
+          {/* The open runs on the active tab's target, on a line right below
+              the bar, pushing the content down. CA_0055_001 */}
+          {active && documentOf(active) !== null && chipsFor(runChips.byItem, active).length > 0 && (
+            <RunChips
+              itemId={documentOf(active) as string}
+              chips={chipsFor(runChips.byItem, active)}
+              answerAll={answerAll}
+              toggleRun={toggleRun}
+            />
+          )}
           {active ? (
             // Keyed by tab: switching tabs must unmount the view, not hand it a
             // different target. A surface holding unsaved input has to be told it
@@ -1262,106 +1758,58 @@ export const Shell = component$<{
           )}
         </section>
 
-        <aside class="drawer drawer--right" aria-label="Inspector" tabIndex={0}>
-          <button
-            type="button"
-            class="sheet-close"
-            aria-label="Close inspector"
-            onClick$={() => (mobile.sheet = null)}
-          >
-            ×
-          </button>
-          <h2>Inspector</h2>
-          <InspectorPanel
-            registry={registry}
-            tabs={tabs}
-            proposed={proposed}
-            inspector={inspector}
-            declared={activeView?.inspector ?? "Workspace context"}
-            viewId={activeView?.id}
-            openTarget$={openTarget$}
-            acknowledge$={acknowledge$}
+        <aside class="drawer drawer--right" aria-label="Inspector">
+          <div class="panel-content" tabIndex={0} data-panel-content={INSPECTOR_ICON}>
+            <button
+              type="button"
+              class="sheet-close"
+              aria-label="Close inspector"
+              onClick$={() => (mobile.sheet = null)}
+            >
+              ×
+            </button>
+            <h2>Inspector</h2>
+            <InspectorPanel
+              registry={registry}
+              tabs={tabs}
+              proposed={proposed}
+              inspector={inspector}
+              declared={activeView?.inspector ?? "Workspace context"}
+              viewId={activeView?.id}
+              openTarget$={openTarget$}
+              acknowledge$={acknowledge$}
+            />
+            {/* The one list of what is running and what has run, under the
+                view's facts on every tab. A selected process's detail takes
+                the contribution's place above it rather than the list's, so
+                the reader can move from one entry to the next.
+                BO_0267_010 CA_0058_005 CA_0058_010 */}
+            <ExecutionSection
+              itemId={documentOf(active)}
+              selection={active?.selection ?? null}
+              read={execution}
+              processes={registry.items.map(executionProcess)}
+              selected={selectedProcess(registry.selection, tabs.activeTabId)}
+              chips={runChips.byItem[documentOf(active) ?? ""] ?? []}
+              answerAll={answerAll}
+              toggleRun={toggleRun}
+              layout={layout}
+              onToggle$={() => toggleSection$(EXECUTION_SECTION)}
+              onCancel$={cancelExecutionRun$}
+              onSelect$={selectProcess$}
+              startDrag$={startDrag$}
+            />
+          </div>
+          <PanelIcons
+            side="right"
+            label="Inspector sections"
+            layout={layout}
+            icons={INSPECTOR_ICONS}
+            onPress$={(id) => pressPanelIcon$("right", id)}
           />
         </aside>
-
-        <section class="dock" aria-label="Command dock">
-          <button
-            type="button"
-            class="dock__handle"
-            aria-label={`Command dock: ${layout.dock}`}
-            // A pointer gesture is decided on release, where the tap and
-            // the swipe are one decision applying one transition. The click a
-            // pointer leaves behind is left alone: acting on it as well would
-            // apply a second transition to the same interaction, and which one
-            // landed would be decided by whichever handler resolved first.
-            // Keyboard and assistive activation arrive as a click with no
-            // pointer behind it, which `detail` of `0` is what says.
-            onClick$={(event) => {
-              if (event.detail === 0) setDock$(dockAfterTap(layout.dock));
-            }}
-            onPointerDown$={(event) => (mobile.dockPressY = event.clientY)}
-            onPointerUp$={(event) => {
-              const next = dockAfterRelease(
-                layout.dock,
-                mobile.dockPressY,
-                event.clientY,
-              );
-              mobile.dockPressY = null;
-              setDock$(next);
-            }}
-          >
-            <span />
-          </button>
-          <Composer
-            dock={dock}
-            tabs={tabs}
-            aim={aim}
-            run={run}
-            reveal={reveal}
-            compose={compose}
-            onRun$={sendGoal$}
-            onChooseAgent$={chooseAgent$}
-          />
-          {undo.value && (
-            <p class="undo" data-undo>
-              {undo.value.label}
-              <button type="button" onClick$={takeBack$}>
-                Undo
-              </button>
-            </p>
-          )}
-          <div class="console" aria-label="Process console">
-            {run.events.length > 0 && (
-              <div class="run-activity" aria-label="Agent activity">
-                <ol class="run-activity__list">
-                  {run.events.map((event, index) => (
-                    <li
-                      key={`${event.kind}-${index}`}
-                      data-run-event={event.kind}
-                    >
-                      {describeRunEvent(event)}
-                    </li>
-                  ))}
-                </ol>
-                {registry.items.some(
-                  (process) =>
-                    process.id === run.processId &&
-                    (process.state === "queued" || process.state === "running"),
-                ) && (
-                  <button
-                    type="button"
-                    class="run-activity__cancel"
-                    onClick$={cancelRun$}
-                    data-cancel-run
-                  >
-                    Cancel run
-                  </button>
-                )}
-              </div>
-            )}
-            <ProcessList registry={registry} tabs={tabs} startDrag$={startDrag$} />
-          </div>
-        </section>
+        {/* The inspector's inner border, dragged to resize it. CA_0066_002 */}
+        <PanelResizeHandle side="right" layout={layout} widths={widths} />
 
         {drag.payload && (
           <div

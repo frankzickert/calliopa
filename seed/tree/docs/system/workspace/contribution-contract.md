@@ -15,15 +15,19 @@
 ## Shape
 
 - `src/contract.ts` declares the shape. The client half (`ClientContributions`) carries `sections` — each a name, a title, the empty-body line, optionally the bare kind its rows open, an optional create control (`createLabel` and a `create$` QRL answering what to open) and optionally a component, in which case the component is the body — `kinds`, a record from bare kind to the `ViewContribution` it opens with (id, name, further bare `targetKinds`, inspector line, drag operations, component), and `views` for a kind that offers several. The server half (`ServerContributions`) carries `readers` by section name (an item section's reader answers `LibraryItem[]` — id, label, optional badge, optional open target with a bare kind; a component section's reader answers what its component takes), `routes` (method, path with `[name]` and `[...rest]` segments, and a handler over the request event), and `parties` (id, kind `service` or `channel`, how the credential works, label, purpose, configuration fields with their checks, and the probe the kernel runs). `BO_0202_001` `BO_0202_002`
-- The view bridge a contributed view is handed carries the workspace it is mounted in (`workspaceId`, read-only, `CA_0050_001`) beside the inspector, the dock and the save state; and the shell's process registry is a surface a contributed route may produce into through `createProcess` and `moveProcess` in `src/server/processes.ts`, its affected item a kind the registry knows qualified by the extension, shown on the four surfaces with no further contract ([Processes](./processes.md), `CA_0050_002`, `CA_0050_003`).
+* An extension that contributes sections contributes one icon for them: a title and a Phosphor name from the shell's icon table (`ClientContributions.icon`, `LibraryIcon` in `src/contract.ts`), under which the library's icon column groups its sections ([Layout](./layout.md#panels-as-activity-bars)). The icon is required: `buildRegistry` refuses by name an extension contributing sections without one (`section_icon_missing`) and an icon name the table does not hold (`icon_unknown`, `isIconName` in `icons.tsx`), as it refuses a collision, so the column never shows a blank button; `REGISTRY.libraryIcons` is the column, one entry per extension in contribution order with its section keys. `ui.shell`'s Extensions section stands under *Extensions*, Phosphor `puzzle-piece`. User decision, 2026-09-18 (`CA_0056_008`).
+- The view bridge a contributed view is handed carries the workspace it is mounted in (`workspaceId`, read-only, `CA_0050_001`) beside the inspector and the save state; and the shell's process registry is a surface a contributed route may produce into through `createProcess` and `moveProcess` in `src/server/processes.ts`, its affected item a kind the registry knows qualified by the extension, shown on the three surfaces with no further contract ([Processes](./processes.md), `CA_0050_002`, `CA_0050_003`).
 - An extension that declares another extension as a dependency may import that extension's server modules directly — `calliopa-show` builds on `publishing`'s `createShape`, `addPart`, `retitleShape`, `listShapes` and its graph helpers — one process, no HTTP hop; the dependency is what allows the import, and the registry's `dependency_missing` refusal is what keeps a tree honest about it. User decision, 2026-09-15 (`CS_0001_005`).
 - `src/server/kernel/client.ts`: `kernelSecrets.request` takes `headers` (forwarded by the broker, the kernel's own refused) and `blob` with an optional `range` — a body the kernel streams from CCGW — and answers `location` and `range` beside the status and text; `kernelSecrets.signIn(party)` starts the kernel's device flow and answers the code and URL; `PartyView` carries an oauth party's `provider`, `flow` and `paths`, and a `PartyDescriptor` may declare `credential: "oauth"` with its `provider`, its `paths` and a `fixed` configuration the kind writes rather than the reader types. `tests/behavior/kernel-surfaces.test.ts` proves the client half over the kernel harness against a stub provider and a stub destination: the sign-in, the flow verifying, the token never answered, the headers and `Location` and `Range` through, a blob slice with its length, a path outside the prefixes refused (`BO_0252_006`, the shell half of `BO_0252` in `calliopa-bootstrap`).
 - A party roster is read at runtime, for parties that are data rather than source — a channel the publishing extension holds as a node: `ServerContributions` carries `partyRoster?: () => Promise<readonly PartyDescriptor[]>`, `buildServerRegistry` keeps each roster by extension (`rosters`), and `parties()`, `partyOf()` and `isChannelParty()` in `src/server/registry.ts` are async, answering the static descriptors first and then each roster's in extension order through `mergeRoster`. A roster's ids are namespaced by the contributing extension — `<ext>-…` — and an id outside its namespace, or one already held, is dropped from the merge rather than shadowing anything; a roster that throws contributes nothing for that read, the way a section reader that throws renders its section empty. `src/registry.test.ts` proves the merge over fixture rosters. The settings extension's store and `calliopa-video`'s channel checks await the roster; nothing else consults it (`CA_0049_001`, a change of `settings` that touched the contract).
+- Two slots arrived with `BO_0264`. A route an extension marks `kernelCallback` — a trigger, a context, a tool the kernel calls — is answered only when the request carries the secret the kernel generated at its start and handed this process as `CALLIOPA_KERNEL_CALLBACK_SECRET`, in `X-Calliopa-Kernel-Callback`; `dispatch` refuses anything else `403`, and the kernel strips the header from every browser request it forwards (`src/server/kernel-callback.ts`, `BO_0264_002`). `settingsSections` on the client half — a name, a title and a component — are drawn below the settings tab's own sections while their extension is active, keyed `<ext>:<name>` and refused twice as `settings_section_collision` (`BO_0264_016`). Reads at an earlier data revision run inside `atDataRevision` (`src/server/ccgw/branch-scope.ts`), which the CCGW client honours for every read that names none, against truth.
 - `src/registry.ts` is the merge: `buildRegistry(host, entries)` qualifies sections and kinds, gives a kind's default view that kind and a further view the kinds it names, and refuses by name a section key contributed twice (`section_collision`), a kind contributed twice (`kind_collision`), a view id from two extensions (`view_collision`) and a view presenting a kind nothing contributes (`target_kind_unknown`); `buildServerRegistry(entries)` keys readers by section and tables by extension, and refuses a table naming one method and path twice (`route_collision`), a rest segment that is not last (`route_shape`) and a party from two extensions (`party_collision`). `matchRoute` walks a table in the order the extension listed it. The merge runs where the generated module is evaluated — the server at startup, the unit project, the promotion gate's serve probe — so a collision is refused before a pin serves it. `BO_0202_001` `BO_0202_004`
 - `scripts/registry.mjs` is the scan, plain JavaScript so node runs it without a build: `scanExtensions` reads every directory under `src/extensions/` in name order and fails by name a directory without a manifest (`manifest_missing`), a manifest that is not JSON (`manifest_unreadable`), an id not matching its directory (`id_mismatch`), an entrypoint that names no module or is not a module name beside the manifest (`entrypoint_missing`, `entrypoint_shape`), a half that does not export `contributions` (`entrypoint_shape`), a declared dependency the tree does not hold (`dependency_missing`) and a declared range the version present does not satisfy (`dependency_out_of_range`, `BO_0219_007` — the grammar `satisfies` reads is the kernel's: comparator sets joined by `||`, `^`, `~`, the six comparators, bare and partial versions, `*`); `emitClient` and `emitServer` write the two modules; `writeRegistry` touches a file only when its text changed. `scripts/registry-plugin.mjs` runs it at `configResolved` and again in watch mode when a manifest or an entrypoint changes; `scripts/gen-registry.mjs` is `pnpm gen`, which `prebuild`, `pretypecheck`, `precheck` and `pretest:*` run, so a fresh checkout typechecks before Vite starts. Both are unit-tested over fixture trees (`src/registry-scan.test.ts`, `src/registry.test.ts`), including every named error. `BO_0202_001` `BO_0202_011`
 - The host's own contributions are `src/components/shell/host-contributions.tsx`, merged first with bare names: the `context` placeholder for every host kind and the `outline` placeholder for the structural ones. `context` presents anything, which is what makes view resolution total: a tab whose kind nothing contributes any more — an extension that left the tree — opens there and says so, rather than being refused with the workspace. `BO_0202_004`
-- The frame is `src/` root source and not a contribution: the workspace, tabs, dock, drawers, the process registry, the CCGW and kernel clients, and the host's own endpoints — `/api/workspaces/**`, `/api/processes/**`, `/api/runs/**`, `/api/library/<ext>/<section>` (one section re-read through its contributed reader) and `/health`. `BO_0202_005` `BO_0202_006`
+- The frame is `src/` root source and not a contribution: the workspace, tabs, drawers, the process registry, the CCGW and kernel clients, and the host's own endpoints — `/api/workspaces/**`, `/api/processes/**`, `/api/runs/**`, `/api/library/<ext>/<section>` (one section re-read through its contributed reader) and `/health`. `BO_0202_005` `BO_0202_006`
 
+- A citation resolver is a server contribution (`BO_0291_030`, landed 2026-09-24, under `calliopa-bootstrap`'s `BO_0291`): `ServerContributions.citations?: (request: CitationRequest) => Promise<CitationAnswer>`, handed the document, its cited works in their numbered order and each citation's work and locator, and answering an in-text label per citation keyed by `citationKey` of `~/lib/runs`, and — as `CitationStyles` — the style applied, the instance's default and the styles a document may choose, by id and name (`BO_0291_037`). `buildServerRegistry` keeps at most one, refusing a second by name (`citation_resolver_collision`), and `resolveCitations` of `~/server/registry` asks it — `null` when none is offered. `documents`' read asks it for a document that cites anything, so the labels arrive with the document as `citationLabels` and nothing re-flows once it is drawn; with no resolver, or one that answers nothing, the bare number is the label (`documents`' `BO_0291_025`). The `bibliography` extension is its first and only provider (`BO_0291_020`). Proven in `src/registry.test.ts`.
+- A document place (`BO_0291_031`, landed 2026-09-23, under `calliopa-bootstrap`'s `BO_0291`): `DocumentPlace` = `end` in `src/contract.ts`, and `Decorations.documentPlaces`, a component per place handed `DocumentPlaceProps` — the document's identity and the data revision it was read at, so a place that reads for itself reads again when the document changes. An extension contributes it beside its block places without being the kind's provider, and places from several extensions are drawn in extension order, as block places are. `documents` draws `end` once after a document's last block (`views/decorations.tsx`, `DocumentDecorations`) and knows nothing of what fills it; the bibliography's reference list is its first (`documents`' `BO_0291_027`).
 ## Consumers
 
 - The library renders `REGISTRY.sections` in contribution order: each section's header with its toggle keyed `<ext>:<section>` in the layout and its create control when contributed, and a body that is the uniform row — label, badge, the current marker, opening the row's target in the view remembered for it — or the contributed component mounted with the reader's answer. The shell's listeners capture the section's key, never the section: a contribution carries a QRL and a component, and the shell reaches both through the registry module rather than serializing them into a listener. After a create, a rename or a target gone, the sections whose rows open that kind are re-read through `/api/library/…` ([Tabs](./tabs.md), `BO_0202_003`, `BO_0202_005`).
@@ -32,11 +36,11 @@
 - `ui.shell` contributes the Extensions section alone (`BO_0255_006`): the Documents section, the `document` kind and the block editor are `documents`', and its table is `/api/x/documents/`, where the route names are the extension's own — a document is `d/[id]`. The tab kind is `documents:document` and the section key `documents:documents`; `LEGACY_TAB_KINDS` rewrites the `ui.shell:document` a workspace remembers, as it rewrote the bare kinds `BO_0202_004` qualified, so a remembered document tab opens rather than falling to the `context` placeholder.
 - The source moved to `src/extensions/documents/` (`BO_0255_007`): `views/` — the block editor and its reading surfaces, `marking/`, `passages/`, `proposals/`, and for now `depth/`, `phase/`, `standing/` — `server/`, and the `lib/` modules that are document work: `pointing`, `proposals`, `references`, `disposition`, `depth`, `judgements`, `phase`, `branch` and `swipe`. Four things stayed, each because its consumers put it there:
   - `order`, `runs` and `library` are primitives `publishing` and `calliopa-video` read too, so they stay in `src/lib/` and no extension needs a dependency for them.
-  - `passage` stays because `src/lib/command-target.ts` validates a stored passage reference with its `quotable`, and `pointing`'s `chipName` and `pinnedChipName` moved beside it, where `PointedReference` and `PinnedBlock` are already declared — so `reference-chips.tsx` keeps its place and no chip is contributed as a component.
+  - `passage` stays because `src/lib/command-target.ts` validates a stored passage reference with its `quotable`, and `pointing`'s `chipName` and `fixatedChipName` moved beside it, where `PointedReference` and `FixatedBlock` are already declared — so `reference-chips.tsx` keeps its place and no chip is contributed as a component.
   - `refinement` stays: it parses the agent's refinement settings, which the settings extension and the frame's `/api/agent/refinement` read, and is not the document model.
   - `bareId`, `contentOf`, `nodeRef`, `typeOf` and `asRecord` left `server/documents/` for `src/server/ccgw/nodes.ts`: reading a CCGW node is not a document's question, and `publishing` and `calliopa-video` read nodes of their own kinds with them.
 - The contract grew one reader, `proposedTargets`, for what the frame could no longer read itself (`BO_0255_007`): the run detail names what a run staged, and what a proposal group touched is the extension's to say. An extension answers, for one group, the items it proposed into with their bare kinds; `src/server/agent/proposed.ts` keeps the run-to-group step and merges the answers in extension order with each kind qualified, an extension that throws contributing nothing. `src/server/registry.ts`'s `labelOf` is the same posture for one name: the frame asks the sections that list a kind what an item is called, so a refinement process names the document it refined and falls back to the identity when nothing lists it.
-- The tests moved with the code (`BO_0255_008`): the unit tests beside their modules, and the eight behaviour suites that exercise documents — `documents`, `work`, `focus`, `phase`, `pressure`, `derived`, `relations-provenance`, `branch` — to `src/extensions/documents/tests/behavior/`. `dock-layer`, `extensions`, `kernel-surfaces` and `theme-tokens` stay the frame's. The kernel harness runs the whole behaviour project, so it reaches them where they now are: 22 files, 106 tests.
+- The tests moved with the code (`BO_0255_008`): the unit tests beside their modules, and the eight behaviour suites that exercise documents — `documents`, `work`, `focus`, `phase`, `pressure`, `derived`, `relations-provenance`, `branch` — to `src/extensions/documents/tests/behavior/`. `extensions`, `kernel-surfaces` and `theme-tokens` stay the frame's. The kernel harness runs the whole behaviour project, so it reaches them where they now are: 22 files, 106 tests.
 - A component body that starts with `.library-section-actions` has those controls drawn on its section header's line, at the right, as a VS Code view's title actions are. They are sticky in the body and pulled up by the header's height, so they take no row of their own, follow the sticky header, and go with the body when the section collapses. The contract's shape stays as it is: the rule is the shell's stylesheet, and a section that wants controls on its line renders them first in its body. The Extensions section is the one that does ([Layout](./layout.md#the-library-as-a-side-bar), `CA_0044_006`).
 - The page loaders call `readLibrary()`, every contributed reader by section key, and a reader that throws renders its section empty — `[]` for an item section, `null` for a component's — the way a refused listing did: the library is one region of a shell that still works without it. `BO_0202_005`
 - One catch-all, `src/routes/api/x/[ext]/[...path]`, dispatches by extension id into the contributed table and answers 404 in words for an extension that contributes no API and for a path the table does not name. `ui.shell`'s table serves documents, episodes, standing assets, fronts and extensions under `/api/x/ui.shell/`, the settings extension's connections and agent sign-in under `/api/x/settings/`; the route files those replaced are gone. `BO_0202_006`
@@ -47,5 +51,101 @@
 ## Not Here
 
 - Runtime loading of extension code, in any form: the contract resolves at build time, the pin promotes a build, and `BO_0200`'s fixed constraint stands. Switching an extension off or serving it at an older version (`BO_0218`, `BO_0219`) is the kernel materializing a different tree and promoting it, not the application loading or unloading anything.
-- A review of code in the shell. An import's diff is the kernel's summary and its acceptance is the kernel's confirmation page, the way every group holding an extension member is established but the release's update, which the owner's press in the Update tab accepts (`BO_0241`); the shell never shows a staged diff of code and never accepts one itself (`BO_0224_008`).
+- A review of code in the shell. A person does not read code to judge a change: what the shell shows of a staged group is the kernel's evidence — the change document, the counts, the runs' accounts, the gate results and the candidate they can try — and never a diff (`BO_0282`, user decision 2026-09-23). An import's diff is the kernel's summary and its acceptance is the kernel's confirmation page, the way every group holding an extension member is established but the release's update, which the owner's press in the Update tab accepts (`BO_0241`); the shell never shows a staged diff of code and never accepts one itself (`BO_0224_008`).
 - The carve-out of episodes, standing assets, destinations and their channels into `calliopa-video` (`BO_0203`), which is the contract's first consumer beyond the shell itself.
+
+## A Control In The Command Chip
+
+- Under `calliopa-bootstrap`'s `BO_0273`, an extension may put a control in the command chip of the
+  block being edited. The change is image and video creation in a document
+  ([Media Service](../../../../../../docs/system/media-service.md) in `calliopa-bootstrap`); this
+  is the slot it needed, and the slot names no extension.
+- It is one more `BlockPlace`, not a contract of its own (`BO_0273_007`). `decorations` already
+  lets an extension draw components on another extension's blocks — `headline`, `depth`, `below` —
+  each handed `{documentId, blockId, revisionId, active}` and mounted inside the contributed
+  provider, in extension order. `command` joins them: drawn in the command chip, where `active`
+  already means the block being edited. So the merge, the ordering, the provider and the props are
+  the ones that were there; the contract grew one value of one union and nothing else. An
+  extension contributing no `command` place draws nothing, and an inactive extension contributes
+  none, as with every decoration.
+- What draws it is `documents`'
+  ([Command Mode](../../../src/extensions/documents/docs/system/documents/command-mode.md#a-contributed-control-in-the-chip)).
+
+## Senders Beside The Agents
+
+- Under `calliopa-bootstrap`'s `BO_0273`, an extension may offer **senders**: entries that stand in
+  the agent menu, are chosen as an agent is, and receive a block when *Send* is pressed. The first
+  are the `media` extension's models, one per picture or moving picture it can make.
+* A sender is sent to the way an agent is. The press on *Send* is the whole gesture, and what the
+  sender does with the block is its own business — it answers a process to watch, as a run answers
+  one. User decision, 2026-09-22.
+- The contract carries two halves and refuses one without the other (`BO_0273_035`).
+  `ServerContributions.senders` is a roster read at runtime, like `partyRoster`, because which
+  senders exist depends on what is signed in and what the owner offers; `send` is what a command
+  addressed to one does. An extension offering a roster and no `send` is refused by name
+  (`sender_unanswered`), because a sender nothing answers for would stand in the menu and refuse
+  every send.
+- Ids are namespaced by the contributing extension, as every contributed name is; one outside its
+  namespace is dropped rather than shadowing an agent, and a roster that throws contributes none —
+  the menu is one region of a shell that still works without it.
+- A sender carries an icon from the shell's table where an agent carries its own face, because a
+  model has no face and a borrowed one would say it was an agent. `SelectableRuntime` gains an
+  optional `icon`, and `image` joins the icon table beside `film-strip`.
+- The frame merges them: `GET /api/agent/runtimes` answers the agents and then the senders, and
+  `POST /api/workspaces/:id/runs` hands a command addressed to a sender to the extension that
+  offered it rather than starting a run. A sender that is not selectable is listed with the reason,
+  as an unconfigured runtime is.
+- Proven in `src/registry.test.ts` over fixture contributions: both halves kept together, a roster
+  without a `send` refused, and neither contributed when neither is offered.
+- Under `calliopa-bootstrap`'s `BO_0279`, drafted by the user on 2026-09-22, a sender may have
+  **options**: what it makes is not only who makes it, and a model that takes a ratio and a quality
+  should be asked before it is sent to rather than after it has spent.
+- **A sender declares its options and the chip draws them** (`BO_0279_007`, walked 2026-09-22).
+  `SenderDescriptor` carries an optional `options`: an ordered list of axes, each with its name,
+  the values it takes, the value to start from and a label. A sender with none draws as it always
+  did, which is every sender that is not a model.
+- **The controls stand in the chip beside the model, not inside the list.** Drawn in the list they
+  could only ever be seen before a model was chosen — which is to say never, because `pick` closes
+  the list on a choice. Found by the user on the served build after the first attempt shipped with
+  them inside; the test that missed it opened the list and asserted they were there, which was true
+  and useless. The test that holds now chooses a model from the open list and asserts the list
+  closed and the controls remain.
+- The value is what shows — `1:1`, `2k` — and the axis is the control's accessible name, because
+  the chip is one line of 24px controls and a visible label would crowd it out.
+- **A choice is not remembered; every press starts where the model says** (`BO_0279_008`, user
+  decision 2026-09-22, reversing the earlier one). It was to have been kept per person in the
+  kernel's state record, and the record has no per-person place: `settings` is owner-write-only
+  (`BO_0264_015`), so a person who is not the owner could never save their own, and the browser
+  would have made it per device rather than per person — a weaker promise than the one made.
+  Rather than build a collection for it, the choice starts from the vendor's default each time,
+  which the controls show, and the reader changes it when they mean to.
+- **The cost stands on *Send*, which is the thing that spends** (`BO_0279_009`, user decision
+  2026-09-22). An extension may answer `quote` beside `send`: what a command to one of its senders
+  would cost, asked as the reader turns a control and never as part of a press. It is free by
+  construction — the generator's own dry run — which is why it may be asked again on every change.
+- The number is shown as *Send*'s own words, not as a control of its own. The controls had moved
+  into the chip by then, and the chip is one scrolling line; a reading beside them would have cost
+  the space the controls need. Hovering *Send* says *Send as prompt · about 11 credits*.
+- It is asked again whenever the sender or an axis changes, held back a moment because turning a
+  control is a stream of changes and only the last matters, so the number is current when the
+  reader looks rather than after a wait. An answer for a sender no longer chosen is dropped.
+- **Nothing said is better than something wrong.** An extension that offers no quote, one whose
+  quote throws, a block with no words, a model nothing can price: each leaves the cost empty and
+  *Send* says only what it does. A quote never blocks or delays a press.
+- **A sender may be addressed with values already chosen** (`BO_0279_010`).
+  `POST /api/workspaces/:id/runs` carries the axes a command names to the extension that offered
+  the sender, so an agent that suggested a ratio and a quality (`BO_0273_038`) opens the chip
+  pre-set to them. The press stays the person's: a suggestion selects, it does not send.
+
+## The Run Place And Nested Providers
+
+- `run` is one more `BlockPlace` (`BO_0289_019`): drawn by `documents` beneath a code block's
+  source while reading, handed `{documentId, blockId, revisionId, active}` like every place, so
+  the extension that runs code offers its send there without the editor knowing what a runtime
+  is. An extension contributing no `run` place draws nothing there.
+- Several extensions may provide for one kind. The registry keeps every provider it is handed,
+  in extension order, and the presenting view nests them — `documents`' `DecorationProvider`
+  composes them from the inside out around the projected blocks — where it had refused a second
+  by name (`decoration_provider_collision`, gone). The decoration bar is one store per shell, so a
+  provider writing a group to it replaces its own group alone and keeps the others', as
+  `calliopa-refine`'s *Work* and `code`'s *Code* now do.

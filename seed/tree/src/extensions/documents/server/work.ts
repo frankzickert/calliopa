@@ -6,6 +6,7 @@ import type { GraphOutcome } from "~/server/outcome";
 import { CONTAINS, type BlockView, type DocumentView } from "./assemble";
 import { bareId, contentOf, nodeRef, typeOf } from "~/server/ccgw/nodes";
 import { DOCUMENT_TYPE } from "./vocabulary";
+import { isAgentPrincipal } from "../lib/agent-at-work";
 
 /**
  * The work vocabulary over documents (`BO_0244`): a block's kind, the claims
@@ -91,6 +92,9 @@ export interface ClaimView {
   /** `established`, or `candidate` when read through a proposal's overlay. */
   readonly status: string;
   readonly text: readonly Run[];
+  /** The dataRevision the claim's current revision was written at, which an
+   * acceptance's stamp is compared against (`BO_0274_006`). */
+  readonly revisedAt?: number;
 }
 
 /** One end of a relation: the claim, the block asserting it, and that block's
@@ -156,10 +160,17 @@ export interface BlockProvenance {
   readonly provenance: Provenance | "";
   /** The blocks it was derived from, when a run maintains it. */
   readonly derivedFrom: readonly string[];
+  /** Who made the block's newest established revision, when a person did;
+   * empty when a run did, or when it has no established revision. A derived
+   * block whose newest revision is a person's is governed by them
+   * (`BO_0258_008`): it is theirs to keep, and a refinement challenges it
+   * beside rather than rewriting it. */
+  readonly editedBy: string;
 }
 
-/** A revision was a run's when the agent principal wrote it (`BO_0206`). */
-export const isAgentPrincipal = (createdBy: string): boolean => createdBy.startsWith("agent:");
+/** A revision was a run's when the agent principal wrote it (`BO_0206`), from
+ * the client-safe library so the editor can ask it too. */
+export { isAgentPrincipal } from "../lib/agent-at-work";
 
 /**
  * A block's established history — current revision first — read into one of
@@ -178,6 +189,15 @@ export function provenanceOf(
   if (allAgent && derived) return PROVENANCE.maintained;
   if (isAgentPrincipal(established[0]?.createdBy ?? "")) return PROVENANCE.drafted;
   return PROVENANCE.edited;
+}
+
+/** Who made the newest established revision, when that was not a run. */
+export function editedByOf(
+  revisions: readonly { readonly status: string; readonly createdBy: string }[],
+): string {
+  const newest = revisions.find((revision) => revision.status === "established" || revision.status === "archived");
+  if (newest === undefined || isAgentPrincipal(newest.createdBy)) return "";
+  return newest.createdBy;
 }
 
 const runsOf = (value: unknown): readonly Run[] =>
@@ -213,6 +233,7 @@ const claimOf = (node: ReadNode): ClaimView => ({
   revisionId: node.revision.id,
   status: node.revision.status,
   text: runsOf(contentOf(node)["text"]),
+  ...(typeof node.revision.dataRevision === "number" ? { revisedAt: node.revision.dataRevision } : {}),
 });
 
 /**
@@ -549,7 +570,7 @@ export async function provenanceRead(blockId: string): Promise<GraphOutcome<Bloc
   const revisions = node === undefined ? [] : [node.revision, ...(node.history ?? [])];
   return {
     outcome: "success",
-    result: { blockId, provenance: provenanceOf(revisions, derivedFrom.length > 0), derivedFrom },
+    result: { blockId, provenance: provenanceOf(revisions, derivedFrom.length > 0), derivedFrom, editedBy: editedByOf(revisions) },
   };
 }
 
@@ -615,7 +636,7 @@ export async function historyRead(blockId: string): Promise<GraphOutcome<BlockHi
 /** The words a block's previous established revision held, from its history:
  * the newest revision before the current one that was established, or null
  * when there is none. BO_0246_009 */
-async function previousWords(blockId: string): Promise<readonly Run[] | null> {
+export async function previousWords(blockId: string): Promise<readonly Run[] | null> {
   const read = await query({
     statement: "MATCH (b) RETURN GRAPH b INCLUDE HISTORY",
     roots: [nodeRef(blockId)],

@@ -7,8 +7,8 @@ agent nobody can configure from the product is an agent nobody configures.
 
 The settings surface and this broker talk through files on the shared volume:
 
-  login/request.json  {"runtime": "codex" | "claude-code"}   written by the app
-  login/state.json    {runtime, status, url?, userCode?, awaiting?, output}
+  login/request.json  {"runtime": "codex" | "claude-code", "id"?}   written by the app
+  login/state.json    {runtime, id?, status, url?, userCode?, awaiting?, output}
   login/code          the paste-back code for Claude's flow, written by the app
   adapters.json       what each runtime is: installed, version, authenticated
   runtime.env         the runtime a completed Codex sign-in selects, which is
@@ -263,19 +263,28 @@ def start_login(runtime):
     return None, None, None
 
 
-def run_login(runtime):
+def run_login(runtime, request_id=None):
+    """Runs one flow, every state of which carries the id of its request.
+
+    The surface follows the flow its own request started. A state left by an
+    earlier flow, or written for one this request superseded, carries another
+    id, so it is never read as this flow's. BO_0261_001
+    """
+    stamp = {"runtime": runtime}
+    if request_id is not None:
+        stamp["id"] = request_id
     command, awaiting, use_pty = start_login(runtime)
     if command is None:
         write_state(
             {
-                "runtime": runtime,
+                **stamp,
                 "status": "failed",
                 "output": f"There is no {runtime!r} runtime to sign in to.",
             }
         )
         return
 
-    state = {"runtime": runtime, "status": "running", "awaiting": awaiting, "output": ""}
+    state = {**stamp, "status": "running", "awaiting": awaiting, "output": ""}
     write_state(state)
     master_fd = None
     secrets = {}
@@ -314,12 +323,13 @@ def run_login(runtime):
             )
             reader = threading.Thread(target=pump, args=(process, state), daemon=True)
     except Exception as error:
-        write_state({"runtime": runtime, "status": "failed", "output": str(error)})
+        write_state({**stamp, "status": "failed", "output": str(error)})
         return
     reader.start()
 
     deadline = time.time() + LOGIN_TIMEOUT_SECONDS
     code_sent = False
+    superseded = False
     heartbeat = 0.0
     while process.poll() is None and time.time() < deadline:
         # A quiet TUI produces no output, but the state must stay current for
@@ -329,10 +339,7 @@ def run_login(runtime):
             heartbeat = time.time()
         # A new request abandons the one in flight: the human asked again.
         if os.path.exists(REQUEST):
-            process.kill()
-            state.update({"status": "failed", "awaiting": None})
-            state["output"] = (state.get("output") or "") + "\nsuperseded by a new request"
-            write_state(state)
+            superseded = True
             break
         if runtime == "claude-code" and not code_sent and os.path.exists(CODE):
             with open(CODE) as handle:
@@ -355,21 +362,31 @@ def run_login(runtime):
                 pass
         time.sleep(1)
 
-    if process.poll() is None:
+    ended = None
+    if superseded:
+        ended = "superseded by a new request"
+    elif process.poll() is None:
+        ended = "the login timed out"
+    if ended is not None:
         process.kill()
-        state.update({"status": "failed", "awaiting": None})
-        state["output"] = (state.get("output") or "") + "\nthe login timed out"
-        write_state(state)
-        if master_fd is not None:
-            os.close(master_fd)
-        return
-
+    # The flow is reaped and its reader drained before the pty closes. A reader
+    # still running would otherwise write this flow's state after the next
+    # flow's, and read from whatever the next pty reuses this descriptor for.
+    try:
+        process.wait(timeout=10)
+    except Exception:
+        pass
     reader.join(timeout=5)
     if master_fd is not None:
         try:
             os.close(master_fd)
         except OSError:
             pass
+    if ended is not None:
+        state.update({"status": "failed", "awaiting": None})
+        state["output"] = (state.get("output") or "") + "\n" + ended
+        write_state(state)
+        return
 
     succeeded = process.returncode == 0
     if succeeded and runtime == "claude-code" and secrets.get("token"):
@@ -493,7 +510,11 @@ def main():
                 os.remove(REQUEST)
             except FileNotFoundError:
                 pass
-            run_login(str(request.get("runtime", "")))
+            request_id = request.get("id")
+            run_login(
+                str(request.get("runtime", "")),
+                str(request_id) if request_id is not None else None,
+            )
             probed = time.time()
         elif time.time() - probed > PROBE_INTERVAL_SECONDS:
             probe_adapters()

@@ -110,16 +110,16 @@ describe("assembling a document", () => {
     expect(document?.blocks[0]).toMatchObject({ role: "h2" });
   });
 
-  it("Given a text block with a disposition, Then its standing comes back, and none or an unknown value reads neutral", () => {
+  it("Given a text block with a disposition, Then its standing comes back, and none or an unknown value reads keep", () => {
     const document = assembleDocument(
       graphOf([
-        text("a", "i", { disposition: "pin" }),
+        text("a", "i", { disposition: "fixate" }),
         text("b", "u"),
         text("c", "x", { disposition: "banana" }),
       ]),
       DOCUMENT,
     );
-    expect(document?.blocks.map((block) => (block.kind === "text" ? block.standing : null))).toEqual(["pin", "neutral", "neutral"]);
+    expect(document?.blocks.map((block) => (block.kind === "text" ? block.standing : null))).toEqual(["fixate", "keep", "keep"]);
   });
 
   it("Given a divider, Then it comes back as a divider", () => {

@@ -82,7 +82,7 @@ describe.skipIf(!configured)("proposal branches over CCGW", () => {
 
   it("Given a person in a branch, When they revise and insert, Then truth stands and the branch reads the change; others see it as the person's proposal", async () => {
     const { documentId, blockId, branch } = await root("Branch root");
-    expect(ok<{ branch: string; status: string }>(await branchOf(documentId))).toEqual({ branch, status: "none" });
+    expect(ok<{ branch: string; sessions: readonly unknown[] }>(await branchOf(documentId))).toEqual({ branch, sessions: [] });
     // Nothing staged yet: the standing has no members rather than a missing
     // proposal. Found on the served build in the walk, 2026-09-16.
     expect(ok<{ members: readonly unknown[] }>(await readStanding(branch)).members).toEqual([]);
@@ -106,7 +106,12 @@ describe.skipIf(!configured)("proposal branches over CCGW", () => {
     const inBranch = ok<Doc>(await withBranch(branch, () => readDocument(documentId)));
     expect(textOf(inBranch, blockId)).toBe("Revised in branch");
     expect(textOf(inBranch, added.blockId)).toBe("Added in branch");
-    expect(ok<{ status: string }>(await branchOf(documentId)).status).toBe("open");
+    // The branch is an open session now, and the next session takes the next
+    // name beside it. CA_0057_007 CA_0057_009
+    const open = ok<{ branch: string; sessions: readonly { branch: string; since: number }[] }>(await branchOf(documentId));
+    expect(open.sessions.map((session) => session.branch)).toEqual([branch]);
+    expect(open.sessions[0]?.since).toBeGreaterThan(0);
+    expect(open.branch).toBe(branchGroupId(documentId, account, 2));
 
     // For everyone else the branch is the person's proposal, item by item.
     const proposals = ok<{ groups: readonly { groupId: string; proposer: { kind: string; name?: string }; items: readonly { kind: string; blockId: string }[] }[] }>(
@@ -133,8 +138,8 @@ describe.skipIf(!configured)("proposal branches over CCGW", () => {
     for (const item of proposals.groups.find((candidate) => candidate.groupId === branch)?.items ?? []) {
       ok(await answerDocumentProposal({ documentId, itemId: item.itemId, answer: "accepted" }));
     }
-    const next = ok<{ branch: string; status: string; previous?: { branch: string; status: string } }>(await branchOf(documentId));
-    expect(next.status).toBe("none");
+    const next = ok<{ branch: string; sessions: readonly unknown[]; previous?: { branch: string; status: string } }>(await branchOf(documentId));
+    expect(next.sessions).toEqual([]);
     expect(next.previous).toEqual({ branch, status: "accepted" });
     expect(next.branch).toBe(branchGroupId(documentId, account, 2));
     const after = ok<Doc>(await withBranch(branch, () => readDocument(documentId)));
@@ -142,7 +147,7 @@ describe.skipIf(!configured)("proposal branches over CCGW", () => {
     // A second branch stages under the next name.
     ok(await withBranch(next.branch, () => reviseTextBlock({ documentId, blockId, baseRevisionId: after.blocks[0]?.revisionId ?? "", runs: words("Second branch") })));
     await settle();
-    expect(ok<{ branch: string; status: string }>(await branchOf(documentId))).toMatchObject({ branch: next.branch, status: "open" });
+    expect(ok<{ sessions: readonly { branch: string }[] }>(await branchOf(documentId)).sessions.map((session) => session.branch)).toEqual([next.branch]);
   });
 
   it("Given a branch, When truth moves under one member and not the other, Then the standing says which", async () => {
@@ -179,7 +184,7 @@ describe.skipIf(!configured)("proposal branches over CCGW", () => {
     for (const item of proposals.groups.find((group) => group.groupId === branch)?.items ?? []) {
       ok(await answerDocumentProposal({ documentId, itemId: item.itemId, answer: "rejected" }));
     }
-    expect(ok<{ status: string; previous?: { status: string } }>(await branchOf(documentId)).previous?.status).toBe("rejected");
+    expect(ok<{ previous?: { status: string } }>(await branchOf(documentId)).previous?.status).toBe("rejected");
     const truth = ok<Doc>(await readDocument(documentId));
     expect(textOf(truth, blockId)).toBe("In truth");
     expect(truth.blocks.map((block) => block.blockId)).not.toContain(added.blockId);
@@ -216,6 +221,37 @@ describe.skipIf(!configured)("proposal branches over CCGW", () => {
     const truth = ok<Doc>(await readDocument(documentId));
     expect(textOf(truth, blockId)).toBe("Accepted words");
     expect(textOf(truth, added.blockId)).toBe("Accepted block");
-    expect(ok<{ status: string; previous?: { status: string } }>(await branchOf(documentId)).previous?.status).toBe("accepted");
+    expect(ok<{ previous?: { status: string } }>(await branchOf(documentId)).previous?.status).toBe("accepted");
+  });
+
+  it("Given two proposal sessions of one person, Then both stand open, newest first, each read through its own overlay, and the next takes a third name", async () => {
+    // Each session is its own proposal while earlier ones stand open.
+    // CA_0057_007 CA_0057_009 CA_0057_011
+    const { documentId, blockId, branch } = await root("Two sessions root");
+    const before = ok<Doc>(await readDocument(documentId));
+    ok(await withBranch(branch, () => reviseTextBlock({ documentId, blockId, baseRevisionId: before.blocks[0]?.revisionId ?? "", runs: words("First session") })));
+    await settle();
+    const second = ok<{ branch: string }>(await branchOf(documentId)).branch;
+    expect(second).toBe(branchGroupId(documentId, account, 2));
+    // A block holds one open candidate at a time: the second session cannot
+    // rewrite the block the first one holds, and adds one of its own.
+    const refused = await withBranch(second, () => reviseTextBlock({ documentId, blockId, baseRevisionId: before.blocks[0]?.revisionId ?? "", runs: words("Second session") }));
+    expect(refused.outcome).toBe("validationFailure");
+    const added = ok<{ blockId: string }>(
+      await withBranch(second, () => insertBlock({ documentId, block: { kind: "text", runs: words("Second session") }, placement: { at: "end" } })),
+    );
+    await settle();
+
+    const read = ok<{ branch: string; sessions: readonly { branch: string; since: number }[] }>(await branchOf(documentId));
+    expect(read.sessions.map((session) => session.branch)).toEqual([second, branch]);
+    expect(read.sessions[0]?.since ?? 0).toBeGreaterThanOrEqual(read.sessions[1]?.since ?? 0);
+    expect(read.branch).toBe(branchGroupId(documentId, account, 3));
+    expect(textOf(ok<Doc>(await withBranch(branch, () => readDocument(documentId))), blockId)).toBe("First session");
+    const inSecond = ok<Doc>(await withBranch(second, () => readDocument(documentId)));
+    expect(textOf(inSecond, blockId)).toBe("In truth");
+    expect(textOf(inSecond, added.blockId)).toBe("Second session");
+    const truth = ok<Doc>(await readDocument(documentId));
+    expect(textOf(truth, blockId)).toBe("In truth");
+    expect(truth.blocks.map((block) => block.blockId)).not.toContain(added.blockId);
   });
 });

@@ -1,5 +1,5 @@
 import type { GraphOutcome } from "../outcome";
-import { currentBranch, outsideBranch } from "./branch-scope";
+import { currentBranch, currentDataRevision, outsideBranch } from "./branch-scope";
 import { graphEnv } from "./env";
 import { forwardedHeaders } from "../request-context";
 
@@ -139,7 +139,7 @@ export async function query(read: GraphRead): Promise<GraphOutcome<ReadResult>> 
       statement: read.statement,
       parameters: read.parameters ?? {},
       ...(read.roots === undefined ? {} : { roots: read.roots }),
-      ...(read.dataRevision === undefined ? {} : { dataRevision: read.dataRevision }),
+      ...((read.dataRevision ?? currentDataRevision()) === undefined ? {} : { dataRevision: read.dataRevision ?? currentDataRevision() }),
       ...(overlay === undefined ? {} : { proposalOverlay: overlay }),
       ...(read.unbounded === true ? { unbounded: true } : {}),
       ...(read.metadataOnly === true ? { metadataOnly: true } : {}),

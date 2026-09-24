@@ -92,12 +92,12 @@ describe("the kernel's refusals keep what they are", () => {
     expect((refused as HttpError).code).toBe("forbidden");
   });
 
-  it("Given the intake refusing as forbidden or busy with another person's run, Then the run answers that, in the kernel's words", async () => {
+  it("Given the intake refusing as forbidden or as a conflict, Then the run answers that, in the kernel's words", async () => {
     kernel((url) => (url === "http://kernel.test/__kernel/agent/runs" ? json(403, { error: "not yours" }) : undefined));
     expect(await conductRun({ workspaceId: workspace, goal: "g", agent: "codex" })).toEqual({ ok: false, reason: "forbidden", detail: "not yours" });
-    const busy = "The agent is busy with another person's run, running for 3 minutes. Try again when it ends.";
-    kernel((url) => (url === "http://kernel.test/__kernel/agent/runs" ? json(409, { error: busy }) : undefined));
-    expect(await conductRun({ workspaceId: workspace, goal: "g", agent: "codex" })).toEqual({ ok: false, reason: "busy", detail: busy });
+    const inactive = "the intention refine belongs to calliopa-refine, which is switched off";
+    kernel((url) => (url === "http://kernel.test/__kernel/agent/runs" ? json(409, { error: inactive }) : undefined));
+    expect(await conductRun({ workspaceId: workspace, goal: "g", agent: "codex" })).toEqual({ ok: false, reason: "conflict", detail: inactive });
   });
 
   it("Given events of a run the kernel does not serve this person, Then they are unknown, not an empty list", async () => {

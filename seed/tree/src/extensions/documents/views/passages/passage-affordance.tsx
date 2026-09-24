@@ -4,6 +4,7 @@ import { anchorAt, quotable } from "~/lib/passage";
 import { passagesIn, passageState } from "../../lib/references";
 import { runsText } from "~/lib/runs";
 import type { BlockView } from "../../server/assemble";
+import { rowOfMarked } from "../marking/row-marks";
 import { MarkingContext } from "../marking/use-marking";
 import { PassagesContext } from "./use-passages";
 
@@ -34,17 +35,23 @@ export const PassageAffordance = component$<{
   } = useContext(MarkingContext);
   const selected = passages.selected;
   if (selected === null || marking.marking.mode !== "command") return null;
+  // A proposal's, a retired or a discarded row's words are the row's own,
+  // and the passage stands on that row. BO_0263_005
+  const marked = selected.marked ?? {};
   const block = surface.document?.blocks.find(
     (candidate) => candidate.blockId === selected.blockId,
   );
-  if (block === undefined || block.kind !== "text") return null;
-  const text = runsText(block.runs);
+  const text =
+    selected.text ??
+    (block !== undefined && block.kind === "text" ? runsText(block.runs) : null);
+  if (text === null) return null;
+  const blockId = selected.blockId;
   const anchor = anchorAt(text, selected.start, selected.end);
-  const inBlock = passagesIn(marking.marking, block.blockId);
+  const inBlock = passagesIn(marking.marking, blockId, rowOfMarked(marked));
   const stale = inBlock.filter((passage) => passageState(passage, text).stale);
   // Words already marked as a passage are taken back by selecting them again,
   // as a marked block is by pressing it again.
-  const marked = inBlock.find(
+  const already = inBlock.find(
     (passage) => passage.anchor.quote === anchor.quote,
   );
   // The words were taken; the selection they were taken from goes with the
@@ -61,18 +68,18 @@ export const PassageAffordance = component$<{
       data-passage-affordance
       style={{ top: `${selected.bottom + 6}px`, left: `${selected.left}px` }}
     >
-      {marked !== undefined ? (
+      {already !== undefined ? (
         <button
           type="button"
-          data-passage-take-back={marked.number}
+          data-passage-take-back={already.number}
           preventdefault:pointerdown
           preventdefault:mousedown
           onPointerDown$={async (_, control) => {
-            await removeReference$(marked.number);
+            await removeReference$(already.number);
             await done$(control);
           }}
         >
-          {`Take back #${marked.number}`}
+          {`Take back #${already.number}`}
         </button>
       ) : quotable(anchor.quote) ? (
         <button
@@ -81,7 +88,7 @@ export const PassageAffordance = component$<{
           preventdefault:pointerdown
           preventdefault:mousedown
           onPointerDown$={async (_, control) => {
-            await addPassage$(block.blockId, anchor);
+            await addPassage$(blockId, anchor, marked);
             await done$(control);
           }}
         >

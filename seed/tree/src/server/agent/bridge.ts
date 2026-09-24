@@ -1,4 +1,5 @@
 import type { CommandTarget } from "~/lib/command-target";
+import type { SentMark } from "~/lib/execution";
 import type { HermesModel } from "~/lib/connections";
 import { graphEnv } from "../ccgw/env";
 import { forwardedCookie } from "../request-context";
@@ -31,18 +32,34 @@ export interface BridgeRun {
   readonly pin: number;
   readonly status: string;
   readonly agent?: string;
-  /** Whose run it was: a person's command, or the kernel's own refinement
-   * (`BO_0245`). Absent on a record from before system runs: a person's. */
+  /** The document the run proposes into, when it names one. */
+  readonly artifact?: string;
+  /** Whose run it was: a person's command, or one an extension's trigger
+   * started (`BO_0264`). Absent on a record from before system runs: a
+   * person's. */
   readonly trigger?: "person" | "system";
-  /** The document a refinement was about — set on a system run, and on a
-   * person's run that carried a queued refinement with it. */
-  readonly refined?: string;
-  readonly refinedFrom?: number;
-  readonly refinedAt?: number;
-  /** The newest judgement the run recorded: what it concluded. */
+  /** The declared intention the run is under, when it names one: what tells
+   * a refinement's run from a command's on the same document. BO_0258_006 */
+  readonly intention?: string;
+  /** The extension whose trigger started a system run, what it ran about,
+   * and the pin that subject was last handled at. BO_0264_017 */
+  readonly extension?: string;
+  readonly subject?: string;
+  readonly since?: number;
+  /** What the run concluded without proposing it — a silence. BO_0264_017 */
+  readonly conclusion?: string;
+  /** The newest judgement the run recorded as truth, on a record from before
+   * judgements were staged. */
   readonly judgement?: BridgeJudgement;
   /** The files the command carried and what the run was given of each. BO_0229_003 */
   readonly attachments?: readonly BridgeAttachment[];
+  /** The block the command was sent from and the revision sent, the blocks
+   * the run staged against, and what the reader marked. BO_0267_010 */
+  readonly source?: { readonly block: string; readonly revisionId: string };
+  readonly touched?: readonly string[];
+  readonly references?: readonly SentMark[];
+  readonly archived?: boolean;
+  readonly startedAt?: number;
 }
 
 /** An attachment as the run's record names it (`BO_0229_003`). */
@@ -63,18 +80,16 @@ export interface BridgeJudgement {
   readonly subject?: string;
 }
 
-/** Whether the kernel refines on its own, and after how long a quiet. BO_0245_006 */
-export interface RefinementSettings {
-  readonly enabled: boolean;
-  readonly settleSeconds: number;
-}
-
 /** A system run's trigger, in words for the process. */
 export const triggerOf = (run: BridgeRun): "person" | "system" => (run.trigger === "system" ? "system" : "person");
 
 /** The words a judgement's explanation holds, joined. */
 export const judgementWords = (judgement: BridgeJudgement | undefined): string =>
   judgement === undefined ? "" : (judgement.explanation ?? []).map((run) => run.text).join("").trim() || judgement.outcome;
+
+/** What a run concluded: its conclusion, or on an older record the words of
+ * the judgement it recorded. BO_0264_017 */
+export const conclusionOf = (run: BridgeRun): string => run.conclusion?.trim() || judgementWords(run.judgement);
 
 /** One normalized event on the bridge's stream. */
 interface BridgeEvent {
@@ -86,6 +101,14 @@ interface BridgeEvent {
   readonly error?: string;
   /** On a terminal event: the document a run started from a command created. BO_0251_004 */
   readonly document?: string;
+  /** On `document.activity`: what the run did in `document`. BO_0265_006 */
+  readonly activity?: {
+    readonly scope?: string;
+    readonly action?: string;
+    readonly blocks?: readonly string[];
+    readonly member?: string;
+    readonly note?: string;
+  };
   readonly at: number;
 }
 
@@ -128,17 +151,25 @@ async function ask<T>(path: string, init: RequestInit, read: (body: unknown) => 
  * is named; the context tells the run where it was asked from, and a target
  * what it was aimed at — the document, where its work goes, and what the
  * reader marked, which the intake has taken as fields since `BO_0173` and
- * `BO_0226_001`. A command aimed at nothing sends none of them.
+ * `BO_0226_001`. A run with no target of its own sends none of them.
  */
 export function startBridgeRun(input: {
   readonly goal: string;
   readonly context?: string;
   readonly agent?: string;
+  /** Fast or thorough, as the reader chose it. BO_0269_015 */
+  readonly speed?: "fast" | "thorough";
   readonly target?: CommandTarget | null;
   /** The person's branch the run proposes into, when the command came from a tab in one. BO_0250_005 */
   readonly group?: string;
   /** The attachment nodes written for the files the command carries. BO_0229_009 */
   readonly attachments?: readonly string[];
+  /** The intention the run carries, as a declared `ext.intention` id. A
+   * gesture names one — it asks a specific question of a specific extension —
+   * where a command carries none and takes the intention of the blocks it
+   * points at. The kernel has taken the field since `BO_0142_006` and refuses
+   * an intention whose extension is switched off. BO_0258_006 */
+  readonly intention?: string;
 }): Promise<BridgeReply<BridgeRun>> {
   const target = input.target ?? null;
   return ask(
@@ -147,22 +178,25 @@ export function startBridgeRun(input: {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        goal: input.goal,
+        ...(input.goal === "" ? {} : { goal: input.goal }),
+        ...(input.intention === undefined || input.intention === "" ? {} : { intention: input.intention }),
         context: input.context ?? "",
         agent: input.agent ?? "",
+        ...(input.speed === undefined ? {} : { speed: input.speed }),
         ...(input.group === undefined || input.group === "" ? {} : { group: input.group }),
         ...(input.attachments === undefined || input.attachments.length === 0 ? {} : { attachments: input.attachments }),
         ...(target === null
           ? {}
-          : !("artifact" in target)
-            ? { delivery: target.delivery }
-            : {
-                artifact: target.artifact,
-                delivery: target.delivery,
-                // A passage travels with its words; a block with its identity
-                // alone. BO_0227_015
-                references: target.references,
-              }),
+          : {
+              artifact: target.artifact,
+              delivery: target.delivery,
+              // A passage travels with its words; a block with its identity
+              // alone. BO_0227_015
+              references: target.references,
+              // The block the command was sent from; its words are read
+              // there, so no goal goes with it. BO_0267_009
+              ...(target.source === undefined ? {} : { source: target.source }),
+            }),
       }),
     },
     (body) => (body as { run: BridgeRun }).run,
@@ -181,6 +215,17 @@ export async function claudeRunnerHealth(): Promise<string | null> {
     return typeof claude === "string" ? claude : null;
   });
   return reply.ok ? reply.value : null;
+}
+
+/**
+ * The signed-in person's last speed, which the kernel keeps when a run starts
+ * with one, or fast when it answers none. BO_0269_015
+ */
+export async function rememberedSpeed(): Promise<"fast" | "thorough"> {
+  const reply = await ask("/config", { method: "GET" }, (body) =>
+    (body as { speed?: unknown } | null)?.speed === "thorough" ? ("thorough" as const) : ("fast" as const),
+  );
+  return reply.ok ? reply.value : "fast";
 }
 
 /**
@@ -209,26 +254,13 @@ export function listBridgeRuns(): Promise<BridgeReply<readonly BridgeRun[]>> {
   });
 }
 
-/** Whether refinement is on and its settle time, as the kernel keeps it. BO_0245_011 */
-export function readRefinement(): Promise<BridgeReply<RefinementSettings>> {
-  return ask("/refinement", { method: "GET" }, (body) => refinementOf(body));
-}
-
-/** Sets the switch and the settle time; the kernel refuses anyone but the owner. */
-export function configureRefinement(settings: RefinementSettings): Promise<BridgeReply<RefinementSettings>> {
-  return ask(
-    "/refinement",
-    { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(settings) },
-    (body) => refinementOf(body),
-  );
-}
-
-function refinementOf(body: unknown): RefinementSettings {
-  const record = (body ?? {}) as { enabled?: unknown; settleSeconds?: unknown };
-  return {
-    enabled: record.enabled !== false,
-    settleSeconds: typeof record.settleSeconds === "number" && record.settleSeconds >= 0 ? record.settleSeconds : 30,
-  };
+/** Every run aimed at one document that the person may see, newest first,
+ * archived ones included. BO_0267_010 */
+export function listDocumentRuns(artifact: string): Promise<BridgeReply<readonly BridgeRun[]>> {
+  return ask(`/runs?artifact=${encodeURIComponent(artifact)}`, { method: "GET" }, (body) => {
+    const runs = (body as { runs?: BridgeRun[] } | null)?.runs;
+    return Array.isArray(runs) ? runs : [];
+  });
 }
 
 export function cancelBridgeRun(runId: string): Promise<BridgeReply<string>> {
@@ -257,6 +289,8 @@ export function translateBridgeEvent(runId: string, event: BridgeEvent): RunEven
       return { kind: "toolCompleted", runId, at, tool: event.tool ?? "", failed: event.ok === false, seconds: null };
     case "proposal.staged":
       return { kind: "assistantDelta", runId, at, text: `Staged into proposal ${event.group ?? ""}` };
+    case "document.activity":
+      return documentActivity(runId, at, event);
     // A run started from a command names the document it created on its
     // end, whatever the end, so the shell can open it. BO_0251_007
     case "run.completed":
@@ -268,6 +302,28 @@ export function translateBridgeEvent(runId: string, event: BridgeEvent): RunEven
     default:
       return null;
   }
+}
+
+/** A `document.activity` event, or nothing when it names no document or
+ * action to show. BO_0265_006 */
+function documentActivity(runId: string, at: number, event: BridgeEvent): RunEvent | null {
+  const activity = event.activity;
+  if (typeof event.document !== "string" || event.document === "" || typeof activity?.action !== "string" || activity.action === "") return null;
+  const blocks = Array.isArray(activity.blocks) ? activity.blocks.filter((block): block is string => typeof block === "string") : [];
+  return {
+    kind: "documentActivity",
+    runId,
+    at,
+    activity: {
+      document: event.document,
+      scope: activity.scope === "blocks" && blocks.length > 0 ? "blocks" : "document",
+      action: activity.action,
+      blocks,
+      ...(typeof event.group === "string" && event.group !== "" ? { group: event.group } : {}),
+      ...(typeof activity.member === "string" && activity.member !== "" ? { member: activity.member } : {}),
+      ...(typeof activity.note === "string" && activity.note !== "" ? { note: activity.note } : {}),
+    },
+  };
 }
 
 const started = (event: BridgeEvent): { readonly document?: string } =>

@@ -1,4 +1,4 @@
-import type { Consequences } from "~/extensions/documents/lib/phase";
+import type { Acceptance, Consequences } from "~/extensions/documents/lib/phase";
 import type { BranchRead, Standing as BranchStanding } from "~/extensions/documents/lib/branch";
 import {
   $,
@@ -12,20 +12,31 @@ import { createDOM } from "@builder.io/qwik/testing";
 import {
   ViewBridgeContext,
   type ViewBridge,
-  type ViewDock,
+  type ViewBar,
   type ViewInspector,
+  type ViewCommand,
+  type ViewGesture,
+  type SentCommand as ViewSent,
+  type ViewComposeBlock,
+  type ViewAgents,
   type ViewProposed,
   type ViewFocus,
   type ViewReveal,
-  type UndoOffer,
+  type ViewDrop,
+  type ViewActivity,
+  type ViewAnswerAll,
+  type ViewToggleRun,
+  type RunChip,
 } from "~/components/shell/view-bridge";
+import type { DocumentActivity } from "~/server/agent/run-events";
+import { ViewBarPanel } from "~/components/shell/view-bar";
 import type { Tab } from "~/lib/tabs";
 import type { Pointing, RevealTarget } from "~/lib/command-target";
 import type { Standing } from "../../lib/disposition";
 import type { BlockHistory, BlockProvenance, DocumentRelations } from "../../server/work";
-import type { FocusedWork } from "../../server/focus";
+import type { FocusedWork } from "~/server/focused-work";
 import type { DocumentJudgements } from "../../server/judgements";
-import type { DocumentView } from "../../server/assemble";
+import type { BlockView, DocumentView } from "../../server/assemble";
 import type { DocumentProposals } from "../../server/documents";
 import { orderBetween } from "~/lib/order";
 import { splitRuns, type Run } from "~/lib/runs";
@@ -47,11 +58,19 @@ export interface SentCommand {
 }
 
 /** What the harness records of the bridge, for a test to read. */
+/** One of the reader's runs as the harness hands it to the view. */
+export interface HarnessActivity {
+  readonly runId: string;
+  readonly agent?: string;
+  readonly running: boolean;
+  readonly events: readonly DocumentActivity[];
+}
+
 export interface BridgeRecord {
+  /** The targets a view asked the shell to open, in order. BO_0291_026 */
+  opened?: { kind: string; itemId: string; title: string }[];
   pointing: Pointing | null;
   selection: string | null | undefined;
-  /** The undo the view last offered, for a test to take back. */
-  undo: UndoOffer | null;
   /** What the next press on `[data-harness-reveal]` asks the view to show,
    * as a chip in the composer asks it. CA_0039_005 */
   reveal: RevealTarget | null;
@@ -62,10 +81,42 @@ export interface BridgeRecord {
   focusOn?: string;
   /** The retargets a view asked for, in order. CA_0047_004 */
   retargets: { itemId: string; title: string; route: readonly { itemId: string; title: string; blockId?: string }[]; focus?: string }[];
+  /** The shell's block controls a press reached, in press order. CA_0065_004 */
+  blockControls: { control: string; blockId: string }[];
   /** The drags the view asked the shell to start, by item. BO_0233_012 */
   drags: string[];
   /** The branch the view last said the tab works in. BO_0250 */
   branch?: string | null;
+  /** The headlines of the messages the view raised, in order. CA_0053_007 */
+  messages?: string[];
+  /** What the next press on `[data-harness-drop]` drops, and where, as the
+   * shell's drag model hands a view a drop. BO_0263_002 */
+  drop?: { readonly itemId: string; readonly overId: string };
+  /** The run chips the view last reported. BO_0265_014 */
+  chips?: readonly RunChip[];
+  /** What the next press on `[data-harness-activity]` hands the view as the
+   * reader's run, or runs side by side, as the shell's poll does; a run the
+   * harness handed before and names again is replaced. BO_0265_012
+   * BO_0269_018 */
+  activity?: HarnessActivity | readonly HarnessActivity[];
+  /** What the next press on `[data-harness-answer-all]` answers, as a run
+   * chip's press does. BO_0265_014 */
+  answerAll?: { readonly group: string; readonly answer: "accepted" | "rejected" };
+  /** The chip the next press on `[data-harness-toggle-run]` presses, as the
+   * shell hands a chip's own press over. CA_0055_006 */
+  toggleRun?: string;
+  /** Whether that press is a session chip's pencil. CA_0057_014 */
+  toggleWork?: boolean;
+  /** The commands the view sent from its blocks, and what the next send
+   * answers — a run, or a refusal in words. BO_0267_018 */
+  commands?: ViewCommand[];
+  /** The gestures a view asked, in press order. BO_0258_006 */
+  gestures?: ViewGesture[];
+  sendAnswer?: ViewSent;
+  /** What the next press on `[data-harness-compose]` asks the view to write
+   * into a new block, as the shell hands over `composeCommand$` on a
+   * document tab. BO_0267_018 */
+  composeBlock?: string;
 }
 
 type Fetch = (
@@ -99,6 +150,9 @@ export function documentsApi(
      * It answers with the list as it stood then, as a slow read does.
      * BO_0233_013 */
     readonly proposalsDelayMs?: () => number;
+    /** What a read of the proposals answers once this says something: a
+     * process that filled a proposed block after the view read it. CA_0063_005 */
+    readonly proposalsRead?: () => DocumentProposals | undefined;
     /** The document follows the revises and splits it answers, as the graph
      * does: a stale base is a conflict, a revise lands its runs and a split
      * its tail, under the identity the command names. CA_0045_005 */
@@ -108,6 +162,9 @@ export function documentsApi(
     readonly writeDelayMs?: number;
     /** Refuses every split as a conflict. CA_0045_005 */
     readonly refuseSplits?: boolean;
+    /** Refuses the first `times` of a command as the kernel's per-node floor
+     * does, `write_too_frequent`, and lands the ones after. DO_0015_002 */
+    readonly refuseByFloor?: { readonly command: string; readonly times: number };
     /** Every read of the document itself, recorded. CA_0045_003 */
     readonly reads?: string[];
     /** How long a read of the document takes to answer. CA_0045_003 */
@@ -122,21 +179,32 @@ export function documentsApi(
     /** The reader's mark on the document, as the read-mark route answers it;
      * every mark written is recorded in `marks`. BO_0246_007 */
     readonly readMark?: number | null;
+    /** The runs the document's run list answers, newest first. BO_0267_018 */
+    readonly runs?: readonly { readonly id: string; readonly goal: string; readonly status: string; readonly source: string | null; readonly references: readonly unknown[]; readonly touched: readonly string[]; readonly agent: string | null; readonly group: string | null; readonly startedAt: number }[];
     readonly marks?: number[];
     /** The focused work the document's blocks have, as the focused read
      * answers it; an open of a block not there is answered as created, with
      * the child's id `child-<blockId>`. CA_0047 */
     readonly focused?: FocusedWork;
+    /** The judgements runs proposed and nobody has answered, as
+     * `calliopa-refine` reads them. The fourth depth category draws them, so a
+     * suite that wants it supplies them here. RF_0001_003 */
+    readonly proposedJudgements?: readonly unknown[];
     /** The document's judgements, as the judgements read answers them; a
      * *Seen* resolves its judgement here, so the re-read shows it gone, and
      * a classification lands as the block's newest. BO_0248 */
     readonly judgements?: DocumentJudgements;
     /** The consequences read the transition card fetches when it opens. BO_0249 */
     readonly consequences?: Consequences;
+    /** What the root's acceptance accepted, per claim, read with the
+     * judgements: the line counts it and the card reports it. BO_0274_006 */
+    readonly acceptance?: Acceptance;
     /** Refuse the phase write with this detail, so the card names it. */
     readonly refusePhase?: string;
     /** The person's branch on the document, as `GET documents/[id]/branch` answers. BO_0250 */
     readonly branch?: BranchRead;
+    /** The document's retired blocks, as the retired read answers them. BO_0263_002 */
+    readonly retired?: readonly BlockView[];
     /** Documents under separation of duties, as `GET d/[id]/policy` answers. BO_0212_011 */
     readonly required?: boolean;
     /** Refuse a save into truth — a command with no branch — as the core does
@@ -149,10 +217,19 @@ export function documentsApi(
     readonly overlays?: string[];
     /** The document a named group holds, for a read with that overlay. BO_0250 */
     readonly overlayDocuments?: Readonly<Record<string, DocumentView>>;
+    /** Refuses every gesture with these words, as a document already being
+     * looked at does. BO_0258_006 */
+    readonly refuseGesture?: string;
+    /** The workspace's processes, for a view following a run it started: a
+     * function so a later poll can answer a finished run. BO_0258_006c */
+    readonly processes?: () => readonly Record<string, unknown>[];
   } = {},
 ): Fetch {
   let judgements: DocumentJudgements | null = options.judgements ?? null;
   let current = document;
+  /** The document's retired blocks: what the retired read answers, which a
+   * retire adds to. DO_0017_002 */
+  let retired: readonly BlockView[] = options.retired ?? [];
   let revisions = 0;
   let proposals: DocumentProposals = options.proposals ?? {
     documentId: document.documentId,
@@ -170,6 +247,7 @@ export function documentsApi(
     };
   };
   let gone = false;
+  let floorRefusalsLeft = options.refuseByFloor?.times ?? 0;
   return async (input, init) => {
     const full =
       typeof input === "string"
@@ -183,12 +261,44 @@ export function documentsApi(
     const overlay = query.get("branch") ?? "";
     if (init?.method !== "POST" && init?.method !== "PUT") options.overlays?.push(overlay);
     const base = `/api/x/documents/d/${document.documentId}`;
+    // The depth's reads are calliopa-refine's routes since BO_0256. BO_0264
+    const refine = `/api/x/calliopa-refine/documents/${document.documentId}`;
     if (init?.method === "POST") {
       const body = JSON.parse(String(init.body ?? "{}")) as Record<
         string,
         unknown
       >;
+      // Opening a block as focused work is the shell's own endpoint since
+      // `CA_0065`, not a command of this extension's.
+      if (url === `/api/focused-work/${document.documentId}`) {
+        const blockId = String(body["blockId"] ?? "");
+        const child = options.focused?.[blockId];
+        return answer(
+          child === undefined
+            ? { blockId, itemId: `child-${blockId}`, title: `Focused ${blockId}`, created: true, dataRevision: "1" }
+            : { blockId, itemId: child.itemId, title: child.title, created: false, dataRevision: "" },
+        );
+      }
       sent.push({ url, body });
+      if (options.refuseByFloor !== undefined && body["command"] === options.refuseByFloor.command && floorRefusalsLeft > 0) {
+        floorRefusalsLeft -= 1;
+        return new Response(
+          JSON.stringify({ outcome: "validationFailure", failures: [{ operation: null, rule: "write_too_frequent", detail: `node:${String(body["blockId"])} was written less than 250ms ago; coalesce edits in the editor — every save archives a revision into permanent history` }] }),
+          { status: 429, headers: { "content-type": "application/json" } },
+        );
+      }
+      // What a gesture's run is started with, and where a gesture is refused
+      // in words: `calliopa-refine` reads it at the pin. BO_0258_006
+      if (url === `${refine}/gesture`) {
+        if (options.refuseGesture !== undefined) {
+          return new Response(JSON.stringify({ error: options.refuseGesture }), { status: 409, headers: { "content-type": "application/json" } });
+        }
+        return answer({
+          goal: `${String(body["gesture"])} about ${String(body["blockId"] ?? document.documentId)}`,
+          context: "the document as it stands",
+          intention: "calliopa-refine.intention",
+        });
+      }
       if (options.refuseTruthSaves === true && body["command"] === "revise" && (body["branch"] === undefined || body["branch"] === null)) {
         return new Response(
           JSON.stringify({ outcome: "validationFailure", failures: [{ operation: null, rule: "write_refused", detail: "separation_of_duties_requires_proposal: node:x is content of \"documents\" under separation of duties: it changes only through a proposal someone else accepts" }] }),
@@ -235,6 +345,16 @@ export function documentsApi(
         };
         return answer({ judgementId, blockId: String(body["blockId"]), dataRevision: "1" });
       }
+      // A retired block leaves the document and stands in the retired read,
+      // as the graph leaves it: the containment is closed and nothing else is
+      // written. DO_0017_002
+      if (options.follow === true && body["command"] === "retire") {
+        const going = current.blocks.find((block) => block.blockId === body["blockId"]);
+        if (going === undefined) return new Response("{}", { status: 404 });
+        current = { ...current, blocks: current.blocks.filter((block) => block !== going) };
+        retired = [...retired, going];
+        return answer({ blockId: going.blockId, revisionId: going.revisionId });
+      }
       if (options.follow === true && body["command"] === "merge") {
         const into = current.blocks.find((block) => block.blockId === body["intoBlockId"]);
         const from = current.blocks.find((block) => block.blockId === body["blockId"]);
@@ -274,7 +394,10 @@ export function documentsApi(
           return answer({ blockId: block.blockId, revisionId });
         }
         if (options.refuseSplits === true) return conflict();
-        const [head, tail] = splitRuns(block.runs, Number(body["at"]));
+        // The head's words travel with the split, as the graph splits them.
+        // DO_0015_001
+        const source = Array.isArray(body["runs"]) ? (body["runs"] as Run[]) : block.runs;
+        const [head, tail] = splitRuns(source, Number(body["at"]));
         const tailBlockId = typeof body["tailBlockId"] === "string" ? body["tailBlockId"] : `blk-tail-${revisions}`;
         const tailRevisionId = `rev-next-${++revisions}`;
         const order = orderBetween(block.order, current.blocks[index + 1]?.order ?? "");
@@ -303,7 +426,9 @@ export function documentsApi(
           .flatMap((group) => group.items)
           .find((candidate) => candidate.itemId === body["itemId"]);
         if (item !== undefined && body["answer"] === "accepted" && item.block !== null) {
-          const proposed = { ...item.block, revisionId };
+          // An accepted candidate becomes the block's revision under its own
+          // identity, as CCGW establishes it (BO_0263_004).
+          const proposed = { ...item.block };
           current = {
             ...current,
             blocks:
@@ -335,7 +460,13 @@ export function documentsApi(
         if (options.refusePhase !== undefined) {
           return new Response(JSON.stringify({ outcome: "refused", detail: options.refusePhase }), { status: 403, headers: { "content-type": "application/json" } });
         }
-        current = { ...current, revisionId, phase: String(body["phase"]) } as DocumentView;
+        current = {
+          ...current,
+          revisionId,
+          phase: String(body["phase"]),
+          // The stamp the write leaves, as the server writes it. BO_0274_005
+          ...(String(body["phase"]) === "accepted" ? { acceptedAt: 100 } : {}),
+        } as DocumentView;
         return answer({ documentId: document.documentId, revisionId, dataRevision: "1" });
       }
       if (body["command"] === "placeProposal") {
@@ -343,15 +474,6 @@ export function documentsApi(
       }
       if (body["command"] === "promoteBlock") {
         return answer({ group: `node:promote-${String(body["blockId"])}-harness-1` });
-      }
-      if (body["command"] === "openFocusedWork") {
-        const blockId = String(body["blockId"]);
-        const child = options.focused?.[blockId];
-        return answer(
-          child === undefined
-            ? { blockId, documentId: `child-${blockId}`, title: `Focused ${blockId}`, created: true, dataRevision: "1" }
-            : { blockId, documentId: child.documentId, title: child.title, created: false, dataRevision: "" },
-        );
       }
       if (body["command"] === "setDisposition") {
         current = {
@@ -380,7 +502,7 @@ export function documentsApi(
       return answer({ required: options.required === true });
     }
     if (url === `${base}/branch`) {
-      return answer(options.branch ?? { branch: `node:branch-${document.documentId}-harness`, status: "none" });
+      return answer(options.branch ?? { branch: `node:branch-${document.documentId}-harness`, sessions: [] });
     }
     if (url === `${base}/standing`) {
       options.depthReads?.push(url);
@@ -390,27 +512,51 @@ export function documentsApi(
     if (url === `${base}/changes`)
       return answer({ changeCount: 1, lastWrittenAt: null });
     if (url === `${base}/proposals`) {
-      const asBegun = proposals;
+      const asBegun = options.proposalsRead?.() ?? proposals;
       const delay = options.proposalsDelayMs?.() ?? 0;
       if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
       return answer(asBegun);
     }
-    if (url === `${base}/retired`) return answer([]);
-    if (url === `${base}/focused`) {
+    if (url === `${base}/retired`) return answer(retired);
+    if (url === "/api/workspaces/harness-workspace/processes") {
+      // The workspace's processes, where a run's conclusion lands. BO_0258_006c
+      return new Response(JSON.stringify(options.processes?.() ?? []), { headers: { "content-type": "application/json" } });
+    }
+    // Focused work is the shell's own endpoint since `CA_0065`, not an
+    // extension's: the frame asks the kind's contribution for the child.
+    if (url === `/api/focused-work/${document.documentId}` && init?.method !== "POST") {
       options.depthReads?.push(url);
       return answer(options.focused ?? {});
     }
-    if (url === `${base}/judgements`) {
+    // The bare array the route answers, not the `outcome`/`result` envelope
+    // the rest carry: `fetchProposedJudgements` reads the body as the list.
+    // RF_0001_003
+    if (url === `${refine}/proposed-judgements`) {
+      return new Response(JSON.stringify(options.proposedJudgements ?? []), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (url === `${refine}/judgements`) {
       // Read with the document, as the read mark is, never on focus: the
       // marker at rest and the root's state need it before any focus.
       options.reads?.push(url);
       return answer(judgements ?? { documentId: document.documentId, judgements: [], pressure: {}, state: null });
     }
-    if (url === `${base}/consequences`) {
+    if (url === `${refine}/consequences`) {
       options.depthReads?.push(url);
       return answer(options.consequences ?? { documentId: document.documentId, phase: "proposed", permitted: true, policy: "owner", conflicts: [], items: [] });
     }
-    if (url === `${base}/relations`) {
+    if (url === `${refine}/acceptance`) {
+      options.reads?.push(url);
+      return answer(
+        options.acceptance ?? {
+          documentId: document.documentId,
+          phase: (current as { phase?: string }).phase ?? "proposed",
+          items: [],
+        },
+      );
+    }
+    if (url === `${refine}/relations`) {
       options.depthReads?.push(url);
       return answer(options.relations ?? { documentId: document.documentId, claims: {}, relations: [] });
     }
@@ -433,6 +579,13 @@ export function documentsApi(
       }
       return answer({ documentId: document.documentId, dataRevision: options.readMark ?? null });
     }
+    // The runs of the document the person may see, for *Show prompts* and a
+    // prompt's marks. BO_0267_018
+    if (url === "/api/runs" && query.get("artifact") === document.documentId) {
+      // The shell's own route, which answers the list bare, not in the
+      // documents API's envelope.
+      return new Response(JSON.stringify({ runs: options.runs ?? [] }), { headers: { "content-type": "application/json" } });
+    }
     return new Response("{}", { status: 404 });
   };
 }
@@ -449,10 +602,9 @@ export const tabFor = (document: DocumentView): Tab => ({
 });
 
 /**
- * The editor for `tab` inside a bridge, with the dock's action rendered as
- * the shell renders it: a button that runs it with the pressed state flipped.
- * The editor is rendered here rather than handed in, because a component may
- * not capture a function (`BO_0138`).
+ * The editor for `tab` inside a bridge standing in for the shell's. The editor
+ * is rendered here rather than handed in, because a component may not
+ * capture a function (`BO_0138`).
  */
 export const editorHarness = (tab: Tab, record: BridgeRecord) =>
   component$(() => {
@@ -462,10 +614,30 @@ export const editorHarness = (tab: Tab, record: BridgeRecord) =>
       facts: [],
       actions: [],
     });
-    const dock = useStore<ViewDock>({ action: null });
+    const agents = useStore<ViewAgents>({
+      runtimes: [
+        { id: "claude-code", label: "Claude Code", selectable: true, reason: null },
+        { id: "codex", label: "Codex", selectable: true, reason: null },
+      ] as ViewAgents["runtimes"],
+      options: {},
+      cost: "",
+      agent: "claude-code",
+      speed: "fast",
+      sending: false,
+    });
+    const composeBlock = useStore<ViewComposeBlock>({ itemId: null, text: "", seq: 0 });
+    /** The focused work a read answered, as the shell keeps it. CA_0065_004 */
+    const faces = useStore<{ byItem: Record<string, FocusedWork> }>({ byItem: {} });
+    const bar = useStore<ViewBar>({ groups: [] });
+    // What a decorating extension adds to it, drawn as the shell draws it.
+    // BO_0274_004
+    const decorationBar = useStore<ViewBar>({ groups: [] });
     const save = useStore<{ state: null }>({ state: null });
     const proposed = useStore<ViewProposed>({ itemId: null, seq: 0 });
     const reveal = useStore<ViewReveal>({ itemId: null, target: null, seq: 0 });
+    const activity = useStore<ViewActivity>({ runs: [], seq: 0 });
+    const answerAll = useStore<ViewAnswerAll>({ itemId: null, group: null, answer: null, seq: 0 });
+    const toggleRun = useStore<ViewToggleRun>({ itemId: null, key: null, seq: 0 });
     const focus = useStore<ViewFocus>(
       record.focusOn === undefined
         ? { itemId: null, blockId: null, seq: 0 }
@@ -476,10 +648,17 @@ export const editorHarness = (tab: Tab, record: BridgeRecord) =>
       workspaceId: "harness-workspace",
       drag,
       inspector,
-      dock,
+      bar,
+      decorationBar,
       save,
       proposed,
       reveal,
+      activity,
+      answerAll,
+      toggleRun,
+      setRunChips$: $((_itemId: string, chips: readonly RunChip[]) => {
+        record.chips = chips;
+      }),
       startDrag$: $((payload: { itemId: string }) => {
         record.drags.push(payload.itemId);
       }),
@@ -495,22 +674,84 @@ export const editorHarness = (tab: Tab, record: BridgeRecord) =>
       setTitle$: noop,
       setSaveState$: noop,
       targetGone$: noop,
-      raiseMessage$: noop,
-      offerUndo$: $((offer: UndoOffer) => {
-        record.undo = offer;
+      raiseMessage$: $((message: { headline: string }) => {
+        (record.messages ??= []).push(message.headline);
       }),
-      openTarget$: noop,
+      openTarget$: $((target: { kind: string; itemId: string; title: string }) => {
+        (record.opened ??= []).push({ kind: target.kind, itemId: target.itemId, title: target.title });
+      }),
       targetChanged$: noop,
+      agentsChanged$: noop,
       composeCommand$: $((text: string) => {
         record.compose = text;
+      }),
+      composeBlock,
+      agents,
+      chooseAgent$: $((agent: string) => {
+        agents.agent = agent;
+      }),
+      chooseOption$: $((axis: string, value: string) => {
+        agents.options = { ...agents.options, [axis]: value };
+      }),
+      quoteSend$: $(async () => undefined),
+      chooseSpeed$: $((speed: "fast" | "thorough") => {
+        agents.speed = speed;
+      }),
+      refreshAgents$: $(async () => agents.runtimes),
+      sendCommand$: $(async (command: ViewCommand): Promise<ViewSent> => {
+        (record.commands ??= []).push(command);
+        return record.sendAnswer ?? { ok: true, runId: `arun-${record.commands.length}` };
+      }),
+      // A gesture the harness records like a command, so a view's gestures
+      // can be pressed and read back. BO_0258_006
+      sendGesture$: $(async (gesture: ViewGesture): Promise<ViewSent> => {
+        (record.gestures ??= []).push(gesture);
+        return record.sendAnswer ?? { ok: true, runId: `arun-g${record.gestures.length}` };
       }),
       retarget$: $((target: { itemId: string; title: string; route: readonly { itemId: string; title: string; blockId?: string }[]; focus?: string }) => {
         record.retargets.push(target);
       }),
       focus,
+      // The shell's focused-work capability, over the same routes the frame
+      // uses, so the editor is proven against what the shell really answers.
+      // CA_0065_003 CA_0065_004 CA_0065_005
+      faces$: $(async (itemId: string) => {
+        const answered = await fetch(`/api/focused-work/${itemId}`);
+        const outcome = (await answered.json()) as { outcome: string; result?: FocusedWork };
+        const work = outcome.outcome === "success" && outcome.result !== undefined ? outcome.result : {};
+        faces.byItem = { ...faces.byItem, [itemId]: work };
+        return work;
+      }),
+      blockControls$: $(async (itemId: string, blockId: string) => [
+        {
+          id: "focused-work",
+          label: faces.byItem[itemId]?.[blockId] === undefined ? "Open as focused work" : "Focused work",
+          icon: "crosshair-simple" as const,
+        },
+      ]),
+      pressBlockControl$: $(async (control: string, target: { itemId: string; blockId: string; title: string; route: readonly { itemId: string; title: string; blockId?: string }[] }) => {
+        record.blockControls.push({ control, blockId: target.blockId });
+        const answered = await fetch(`/api/focused-work/${target.itemId}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind: "documents:document", blockId: target.blockId }),
+        });
+        const outcome = (await answered.json()) as
+          | { outcome: "success"; result: { itemId: string; title: string } }
+          | { outcome: string; failures?: readonly { detail?: string }[] };
+        if (outcome.outcome !== "success") {
+          return (outcome as { failures?: readonly { detail?: string }[] }).failures?.[0]?.detail ?? "refused";
+        }
+        const child = (outcome as { result: { itemId: string; title: string } }).result;
+        const route = [...target.route];
+        const parent = route[route.length - 1];
+        if (parent !== undefined) route[route.length - 1] = { ...parent, blockId: target.blockId };
+        route.push({ itemId: child.itemId, title: child.title });
+        record.retargets.push({ itemId: child.itemId, title: child.title, route });
+        return null;
+      }),
     };
     useContextProvider(ViewBridgeContext, bridge);
-    const action = dock.action;
     return jsx("div", {
       children: [
         jsx(BlockEditorView, { tab }),
@@ -525,37 +766,92 @@ export const editorHarness = (tab: Tab, record: BridgeRecord) =>
           }),
           children: "reveal",
         }),
-        // The panel's toggles, rendered as the inspector renders them.
-        ...inspector.actions.map((contributed) =>
-          contributed.kind === "toggle"
-            ? jsx("button", {
-                type: "button",
-                "data-inspector-action": contributed.id,
-                "aria-pressed": contributed.on,
-                onClick$: $(() => {
-                  const live = inspector.actions.find(
-                    (candidate) => candidate.id === contributed.id,
-                  );
-                  if (live !== undefined && live.kind === "toggle")
-                    void live.run$(!live.on);
-                }),
-                children: contributed.label,
-              })
-            : null,
-        ),
-        action !== null && action.kind === "toggle"
-          ? jsx("button", {
-              type: "button",
-              "data-dock-action": action.id,
-              "aria-pressed": action.on,
-              onClick$: $(() => {
-                const current = dock.action;
-                if (current !== null && current.kind === "toggle")
-                  void current.run$(!current.on);
-              }),
-              children: action.label,
-            })
-          : null,
+        // A drop, as the shell hands one over when a drag is released over a
+        // target it does not own. BO_0263_002
+        jsx("button", {
+          type: "button",
+          "data-harness-drop": "",
+          onClick$: $(() => {
+            if (record.drop === undefined) return;
+            (drag as { drop: ViewDrop | null }).drop = {
+              payload: { itemId: record.drop.itemId, kind: "documents:document", source: "workspace", operations: ["move"], preview: null },
+              operation: "move",
+              overId: record.drop.overId,
+              seq: ((drag.drop as ViewDrop | null)?.seq ?? 0) + 1,
+            };
+          }),
+          children: "drop",
+        }),
+        // The reader's run, as the shell's poll hands it over. BO_0265_012
+        jsx("button", {
+          type: "button",
+          "data-harness-activity": "",
+          onClick$: $(() => {
+            if (record.activity === undefined || tab.itemId === null) return;
+            const itemId = tab.itemId;
+            const handed: readonly HarnessActivity[] = Array.isArray(record.activity) ? record.activity : [record.activity as HarnessActivity];
+            const names = new Set(handed.map((run) => run.runId));
+            activity.runs = [
+              ...activity.runs.filter((run) => !names.has(run.runId)),
+              ...handed.map((run) => ({ itemId, runId: run.runId, agent: run.agent ?? null, running: run.running, events: run.events })),
+            ];
+            activity.seq += 1;
+          }),
+          children: "activity",
+        }),
+        // A process that ended for this document, as the shell's poll says
+        // it: the view reads its proposals again. CA_0063_005
+        jsx("button", {
+          type: "button",
+          "data-harness-proposed": "",
+          onClick$: $(() => {
+            proposed.itemId = tab.itemId;
+            proposed.seq += 1;
+          }),
+          children: "proposed",
+        }),
+        // A run chip's Reject all or Accept all, as the shell writes it.
+        // BO_0265_014
+        jsx("button", {
+          type: "button",
+          "data-harness-answer-all": "",
+          onClick$: $(() => {
+            if (record.answerAll === undefined) return;
+            answerAll.itemId = tab.itemId;
+            answerAll.group = record.answerAll.group;
+            answerAll.answer = record.answerAll.answer;
+            answerAll.seq += 1;
+          }),
+          children: "answer all",
+        }),
+        // A press on a run chip itself, as the shell writes it. CA_0055_006
+        jsx("button", {
+          type: "button",
+          "data-harness-toggle-run": "",
+          onClick$: $(() => {
+            if (record.toggleRun === undefined) return;
+            toggleRun.itemId = tab.itemId;
+            toggleRun.key = record.toggleRun;
+            toggleRun.work = record.toggleWork === true;
+            toggleRun.seq += 1;
+          }),
+          children: "toggle run",
+        }),
+        // Words for the document's next command, as the shell hands them
+        // over on a document tab. BO_0267_018
+        jsx("button", {
+          type: "button",
+          "data-harness-compose": "",
+          onClick$: $(() => {
+            if (record.composeBlock === undefined) return;
+            composeBlock.itemId = tab.itemId;
+            composeBlock.text = record.composeBlock;
+            composeBlock.seq += 1;
+          }),
+          children: "compose",
+        }),
+        // The view's bar, drawn by the shell's own component. CA_0053_007
+        jsx(ViewBarPanel, { bar, decorations: decorationBar }),
       ],
     });
   });
@@ -602,10 +898,10 @@ export async function mountEditor(
   const record: BridgeRecord = {
     pointing: null,
     selection: undefined,
-    undo: null,
     reveal: null,
     drags: [],
     retargets: [],
+    blockControls: [],
     ...(options.focusOn === undefined ? {} : { focusOn: options.focusOn }),
   };
   const dom = await createDOM();
@@ -633,4 +929,27 @@ export async function mountEditor(
   };
   if (options.awaitReads !== false) await idle();
   return { ...dom, root, record, settle, idle };
+}
+
+type MountedEditor = Awaited<ReturnType<typeof mountEditor>>;
+
+/** Edits a block as a reader does from the keyboard: focus, then Enter. */
+export async function activateBlock(view: MountedEditor, blockId: string): Promise<void> {
+  await view.userEvent(`[data-block-id="${blockId}"] [data-block-reading]`, "focus");
+  await view.userEvent(`[data-block-id="${blockId}"] [data-block-reading]`, "keydown", { key: "Enter" });
+  await view.settle(() => view.root.querySelector(`[data-block-command="${blockId}"]`) != null);
+}
+
+/** Points from a block, as the reader does: edits it, then presses *Point
+ * from this block* on its command control. BO_0267_018 */
+export async function pointFrom(view: MountedEditor, blockId: string): Promise<void> {
+  if (view.root.querySelector(`[data-block-command="${blockId}"]`) == null) await activateBlock(view, blockId);
+  await view.userEvent(`[data-block-command="${blockId}"] [data-block-point]`, "click");
+  await view.settle(() => view.root.querySelector("[data-view-body]")?.getAttribute("data-editor-mode") === "command");
+}
+
+/** Ends pointing from the prompt pointed from, by its control. */
+export async function stopPointing(view: MountedEditor): Promise<void> {
+  await view.userEvent("[data-pointing-from] [data-block-point]", "click");
+  await view.settle(() => view.root.querySelector("[data-view-body]")?.getAttribute("data-editor-mode") === "reading");
 }

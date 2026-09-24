@@ -1,0 +1,9 @@
+{
+  "name": "calliopa-bibliography",
+  "private": true,
+  "type": "module",
+  "description": "The bibliography service: the Zotero translation server behind a small front that holds the bearer and the address rule. docs/system/bibliography-service.md",
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

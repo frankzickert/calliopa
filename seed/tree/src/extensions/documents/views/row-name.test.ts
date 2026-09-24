@@ -7,7 +7,7 @@ const facts = (overrides: Partial<RowFacts>): RowFacts => ({
   mode: "command",
   reference: null,
   passages: [],
-  standing: "neutral",
+  standing: "keep",
   ...overrides,
 });
 
@@ -37,15 +37,17 @@ describe("a row's accessible name", () => {
     ).toBe("Mark block 3, passages 4 and 5, passage 6 stale");
   });
 
-  it("Given a standing, Then it is said in its word, in both modes", () => {
-    expect(markingName(facts({ standing: "pin" }))).toBe(
-      "Mark block 3, pinned",
+  it("Given a standing, Then it is said in its word, in both modes, and keep says nothing", () => {
+    expect(markingName(facts({ standing: "fixate" }))).toBe(
+      "Mark block 3, fixated",
     );
-    expect(readingName(facts({ mode: "reading", standing: "resolved" }))).toBe(
-      "Edit block 3, resolved",
+    expect(readingName(facts({ mode: "reading", standing: "discarded" }))).toBe(
+      "Edit block 3, discarded",
     );
+    // Keep is where a block stands unless someone says otherwise, so the row
+    // says nothing of it. BO_0272_006
     expect(readingName(facts({ mode: "reading", standing: "keep" }))).toBe(
-      "Edit block 3, kept",
+      "Edit block 3",
     );
   });
 });

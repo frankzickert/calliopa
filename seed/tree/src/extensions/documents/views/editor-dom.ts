@@ -1,4 +1,8 @@
-import { MARKS, normalizeRuns, type Mark, type Run } from "~/lib/runs";
+import { MARKS, isAtom, normalizeRuns, type Mark, type Run } from "~/lib/runs";
+
+import { citeLabel } from "../lib/citation-label";
+import { referenceLabel } from "../lib/figure-label";
+import { linePlace, type LinePlace } from "../lib/lines";
 
 /**
  * The crossing between a run list and a live `contenteditable`.
@@ -24,17 +28,125 @@ const TAG_MARK = new Map<string, Mark>(
   MARKS.map((mark) => [MARK_TAG[mark].toUpperCase(), mark]),
 );
 
+/**
+ * Mathematics and a reference to it inside the editing surface
+ * (`BO_0290_015`).
+ *
+ * **They stay typeset while the block is edited.** Were the source to take an
+ * equation's place the moment a reader put a caret in the sentence, the line
+ * would reflow on every entry and exit — which is what the retired shell did,
+ * forced there by Lexical, and what the popover exists to avoid.
+ *
+ * Each is painted as one element the browser must not edit, and the caret
+ * steps over it because it holds exactly **one character**: an invisible
+ * separator, which is what makes the DOM's own offsets agree with
+ * `runsLength`, where an atom is one character too. Without that character
+ * `range.toString()` would count an equation as nothing and every caret
+ * position after it would be wrong.
+ */
+const ATOM_CHAR = "\u2063";
+const MATH_ATTRIBUTE = "data-math";
+const REFERENCE_ATTRIBUTE = "data-equation-ref";
+const CITE_WORK_ATTRIBUTE = "data-cite-work";
+const CITE_LOCATOR_ATTRIBUTE = "data-cite-locator";
+const CITE_LABEL_ATTRIBUTE = "data-cite-label";
+const FIGURE_REF_ATTRIBUTE = "data-figure-ref";
+const TABLE_REF_ATTRIBUTE = "data-table-ref";
+const BLOCK_REF_LABEL_ATTRIBUTE = "data-block-ref-label";
+
+/** What an atom is drawn from: the markup its source was set as, and the
+ * number a reference resolves to. Both are the read's, since the browser does
+ * not typeset while it reads. */
+export interface AtomContent {
+  readonly svgOf?: (tex: string) => string | undefined;
+  readonly numberOf?: (blockId: string) => number | undefined;
+  /** What a citation of this work is drawn as: its number in the document,
+   * or that the work is gone (`BO_0291_025`). */
+  readonly citationOf?: (work: string, locator?: string) => { readonly number?: number; readonly missing?: boolean; readonly label?: string } | undefined;
+  /** The number a figure or a table reference resolves to (`BO_0295_012`). */
+  readonly figureNumberOf?: (blockId: string) => number | undefined;
+  readonly tableNumberOf?: (blockId: string) => number | undefined;
+}
+
+/** Paints one atom: the element the caret steps over, carrying what it stands
+ * for so `runsFrom` can read it back without looking inside. */
+function paintAtom(
+  document: Document,
+  entry: Run,
+  content: AtomContent,
+): HTMLElement {
+  const element = document.createElement("span");
+  element.setAttribute("contenteditable", "false");
+  if (entry.math === true) {
+    element.setAttribute(MATH_ATTRIBUTE, entry.text);
+    element.className = "run-math";
+    const markup = content.svgOf?.(entry.text);
+    if (markup === undefined || markup === "") {
+      // Unset mathematics reads as its source rather than as a gap, so a
+      // sentence never loses what was written in it.
+      element.setAttribute("data-math-unset", "");
+      element.appendChild(document.createTextNode(entry.text));
+    } else {
+      element.setAttribute("role", "math");
+      element.setAttribute("aria-label", entry.text);
+      const holder = document.createElement("span");
+      holder.innerHTML = markup;
+      element.appendChild(holder);
+    }
+  } else if (entry.cite !== undefined) {
+    element.setAttribute(CITE_WORK_ATTRIBUTE, entry.cite.work);
+    if (entry.cite.locator !== undefined) element.setAttribute(CITE_LOCATOR_ATTRIBUTE, entry.cite.locator);
+    const resolved = content.citationOf?.(entry.cite.work, entry.cite.locator);
+    const missing = resolved?.missing === true;
+    element.className = missing ? "run-cite run-cite--missing" : "run-cite";
+    // The label is drawn from an attribute by the stylesheet, not as text:
+    // text inside the atom would count towards the DOM's offsets, and every
+    // caret position after a citation would be off by the label's length.
+    element.setAttribute(CITE_LABEL_ATTRIBUTE, missing || resolved?.label === undefined ? citeLabel(entry.cite, resolved?.number, missing) : resolved.label);
+  } else if (entry.figureRef !== undefined || entry.tableRef !== undefined) {
+    // A figure or table reference (`BO_0295_012`), labelled from an attribute
+    // as a citation is, so its words add nothing to the caret's offsets.
+    const figure = entry.figureRef !== undefined;
+    const target = (figure ? entry.figureRef : entry.tableRef) as string;
+    element.setAttribute(figure ? FIGURE_REF_ATTRIBUTE : TABLE_REF_ATTRIBUTE, target);
+    const number = figure ? content.figureNumberOf?.(target) : content.tableNumberOf?.(target);
+    element.className = number === undefined ? "run-block-ref run-block-ref--missing" : "run-block-ref";
+    element.setAttribute(BLOCK_REF_LABEL_ATTRIBUTE, referenceLabel(figure ? "figure" : "table", number));
+  } else if (entry.equationRef !== undefined) {
+    element.setAttribute(REFERENCE_ATTRIBUTE, entry.equationRef);
+    element.className = "run-equation-ref";
+    const number = content.numberOf?.(entry.equationRef);
+    // A reference whose equation is gone says so in words. It is never a
+    // stale number and never nothing at all.
+    element.appendChild(
+      document.createTextNode(number === undefined ? "(equation gone)" : `(${number})`),
+    );
+  }
+  // The one character the caret counts. It goes last so a reader selecting
+  // the atom selects the whole of it.
+  element.appendChild(document.createTextNode(ATOM_CHAR));
+  return element;
+}
+
 /** Paints a run list into an element, replacing whatever was there.
  *
  * An empty block still needs a line box or the caret has nowhere to sit, which
  * is what the trailing `<br>` is for; `runsFrom` skips it, so it never becomes
  * content. */
-export function paintRuns(element: HTMLElement, runs: readonly Run[]): void {
+export function paintRuns(
+  element: HTMLElement,
+  runs: readonly Run[],
+  atoms: AtomContent = {},
+): void {
   // The element's own document: the page's in a browser, and the render
   // harness's where it has no global one (`BO_0233_009`).
   const document = element.ownerDocument;
   element.replaceChildren();
   for (const entry of runs) {
+    if (isAtom(entry)) {
+      element.appendChild(paintAtom(document, entry, atoms));
+      continue;
+    }
     let node: Node = document.createTextNode(entry.text);
     for (const mark of MARKS) {
       if (entry.marks?.includes(mark) === true) {
@@ -51,7 +163,17 @@ export function paintRuns(element: HTMLElement, runs: readonly Run[]): void {
     }
     element.appendChild(node);
   }
-  if (runs.length === 0) element.appendChild(document.createElement("br"));
+  // A line break at the very end draws no line of its own until something
+  // follows it, so a `<br>` holds the line the caret stands on. DO_0003_003
+  //
+  // An atom at the very end needs one for its own reason (`BO_0290_030`): it
+  // is not editable, so with nothing after it the caret has nowhere to land
+  // and a reader cannot type past a reference that ends a sentence. The
+  // `<br>` is read back as nothing, as it already is.
+  const last = runs[runs.length - 1];
+  if (runs.length === 0 || last?.text.endsWith("\n") === true || (last !== undefined && isAtom(last))) {
+    element.appendChild(document.createElement("br"));
+  }
 }
 
 const TEXT_NODE = 3;
@@ -83,6 +205,39 @@ export function runsFrom(element: HTMLElement): Run[] {
     if (node.nodeType !== ELEMENT_NODE || !("tagName" in node)) return;
     const element = node as HTMLElement;
     if (element.tagName === "BR") return;
+    // An atom is read back from what it says it is, never from what is drawn
+    // inside it: walking into one would read an equation's own markup as the
+    // sentence's words. `BO_0290_015`
+    const math = element.getAttribute(MATH_ATTRIBUTE);
+    if (math !== null) {
+      runs.push({
+        text: math,
+        math: true,
+        ...(marks.length > 0 ? { marks: [...marks] } : {}),
+      });
+      return;
+    }
+    const reference = element.getAttribute(REFERENCE_ATTRIBUTE);
+    if (reference !== null) {
+      runs.push({ text: "", equationRef: reference });
+      return;
+    }
+    const figureRef = element.getAttribute(FIGURE_REF_ATTRIBUTE);
+    if (figureRef !== null) {
+      runs.push({ text: "", figureRef });
+      return;
+    }
+    const tableRef = element.getAttribute(TABLE_REF_ATTRIBUTE);
+    if (tableRef !== null) {
+      runs.push({ text: "", tableRef });
+      return;
+    }
+    const citedWork = element.getAttribute(CITE_WORK_ATTRIBUTE);
+    if (citedWork !== null) {
+      const locator = element.getAttribute(CITE_LOCATOR_ATTRIBUTE);
+      runs.push({ text: "", cite: { work: citedWork, ...(locator === null ? {} : { locator }) } });
+      return;
+    }
     const mark = TAG_MARK.get(element.tagName);
     const href = element.tagName === "A" ? element.getAttribute("href") : null;
     const nextMarks = mark === undefined ? marks : [...marks, mark];
@@ -246,6 +401,65 @@ export function offsetFromPoint(
         })();
   if (found === null || !element.contains(found.node)) return null;
   return offsetOf(element, found.node, found.offset);
+}
+
+/** Where a caret at this offset is drawn, or null where nothing is measured:
+ * a render harness, or a position the browser gives no box. */
+function caretRect(element: HTMLElement, offset: number): DOMRect | null {
+  try {
+    const range = rangeAt(element, offset, offset);
+    const rect = range.getClientRects?.()[0] ?? range.getBoundingClientRect?.();
+    if (rect !== undefined && rect.height > 0) return rect;
+    // After a line break at the very end, Chromium gives the caret no box;
+    // the `<br>` holding that line stands where it is drawn.
+    const last = element.lastChild;
+    if (offset === textLength(element) && last !== null && last.nodeName === "BR") {
+      const line = (last as HTMLElement).getBoundingClientRect();
+      return line.height > 0 ? line : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Where the caret stands among the block's drawn lines: whether it is on the
+ * first, on the last, how many characters from its line's start, and where
+ * it is across the page. A line is one a line break ends or one the block's
+ * width wraps; a line break always ends one, so the measure only narrows what
+ * the text already says, and where nothing can be measured the text is all
+ * there is (`x` null). DO_0003_002
+ */
+export function caretLine(element: HTMLElement, offset: number): LinePlace & { readonly x: number | null } {
+  const text = element.textContent ?? "";
+  const place = linePlace(text, offset);
+  const caret = caretRect(element, offset);
+  const start = caretRect(element, 0);
+  const end = caretRect(element, [...text].length);
+  if (caret === null || start === null || end === null) return { ...place, x: null };
+  const same = (one: DOMRect, other: DOMRect) => Math.abs(one.top - other.top) < Math.min(one.height, other.height) / 2;
+  return {
+    first: place.first && same(caret, start),
+    last: place.last && same(caret, end),
+    column: place.column,
+    x: caret.left,
+  };
+}
+
+/**
+ * The offset a caret arriving from another block lands at: on this block's
+ * last drawn line coming up, its first coming down, at the same place across
+ * the page, or at that line's end when the line is shorter. Null when the
+ * browser cannot place it there — a block scrolled out of view — and the
+ * caller lands by characters instead. DO_0003_002
+ */
+export function arrivalOffset(element: HTMLElement, x: number, direction: -1 | 1): number | null {
+  const line = caretRect(element, direction === 1 ? 0 : [...(element.textContent ?? "")].length);
+  if (line === null) return null;
+  const box = element.getBoundingClientRect();
+  const across = Math.max(box.left + 1, Math.min(x, box.right - 1));
+  return offsetFromPoint(element, across, line.top + line.height / 2);
 }
 
 /** Whether a non-collapsed selection reaches outside this element.

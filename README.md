@@ -4,7 +4,7 @@ Calliopa is a local-first knowledge system you run on your own machine. Your
 knowledge lives in a versioned graph, and nothing in it changes without a
 proposal someone accepted. The application you work in is itself built from
 that graph — a frame, and extensions over it: documents to write in, settings,
-publishing. It grows with what you keep in it, and you can add extensions of
+and publishing. It grows with what you keep in it, and you can add extensions of
 your own. And Hermes — an agent that lives in the stack — extends the system
 for you, always through proposals you review and accept.
 
@@ -55,14 +55,18 @@ default was `127.0.0.1` stays local: change that line to `0.0.0.0` and run
 `./install.sh` to open it to your network.
 
 The installer asks you for your account name first (`owner` if you just
-press enter; it cannot be changed later). Then open that address right
-after the install: on your first visit Calliopa shows that name again and
-asks you to choose its password — once; from then on you sign in with the
-name and the password, and the sign-in page names the account while you are
-the only person on the instance. Until the password is set, whoever reaches
-the address first sets it. A lost password is set again with
-`app account set-password` inside the stack; the name is
-`CALLIOPA_OWNER_PRINCIPAL` in `.env`.
+press enter; it cannot be changed later). That is the one time it is shown to
+you: Calliopa never prints it again, on any page, so keep it. Then open that
+address right after the install: on your first visit Calliopa asks you to
+choose the password for that account — once; from then on you sign in with
+the name and the password. Until the password is set, whoever reaches the
+address first sets it.
+
+Both pages say where to look rather than naming the account: their help
+button gives `CALLIOPA_OWNER_PRINCIPAL` in this directory's `.env`, and the
+command that reads it from the running stack. The sign-in page's second help
+button gives the command that sets a forgotten password again, which is
+`app account set-password` inside the stack.
 
 Requirements: Docker Engine 25 or later with the Compose plugin 2.24 or later,
 and `git`. You supply no keys — the agent is signed in later from the settings
@@ -74,6 +78,26 @@ publishers, plus the Calliopa binaries downloaded from the release named in
 `.env` and checked against its pinned checksum. The object store is pulled
 from its publisher. `THIRD-PARTY.md` lists all of it. Nothing the stack runs
 ever contacts Calliopa.
+
+One service of the stack, `code`, holds the docker socket: it is what lets a
+document run code in containers of your choosing — any image that carries a
+Jupyter kernel — and the runtimes it starts appear in `docker ps` beside the
+stack, on a network of their own that reaches the internet and nothing of the
+install.
+
+Beside it, `code-format` holds four code formatters and nothing else — no socket, no
+credential, no way out. It is what lays out the code in a document when you finish an
+edit, and it exists as a container of its own so that the source you type is never
+parsed by the service that holds the docker socket.
+
+Another service, `bibliography`, is the Zotero translation server, built from its
+repository at a pinned commit: it is what fills in a source's record from a DOI, an
+ISBN or a link, fetching from the public web on your machine and from nowhere else.
+
+Another, `typeset`, is Pandoc with TeX Live from Debian: it is what turns a document into
+a manuscript, the LaTeX source with its references and the PDF typeset from them. It runs
+on your machine, reaches nothing outside the stack, and is the largest image the install
+builds, about 1.3 GB.
 
 Re-running the installer is always safe: it repairs what is missing and never
 overwrites your configuration, secrets, or data. From an existing checkout,

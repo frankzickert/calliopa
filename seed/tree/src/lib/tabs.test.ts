@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY_TABS, activeTab, closeTab, moveTab, openTab, retargetTab, routeOf, selectTab, type Tab, updateTab } from "./tabs";
+import { EMPTY_TABS, activeTab, closeAllTabs, closeTab, moveTab, neighbourTab, openTab, retargetTab, routeOf, selectTab, tabsBeside, type Tab, updateTab } from "./tabs";
 
 const tab = (
   id: string,
@@ -43,6 +43,12 @@ describe("tab operations", () => {
     expect(selectTab(three, "missing")).toBe(three);
     expect(closeTab(selectTab(three, "b"), "b").activeTabId).toBe("c");
     expect(closeTab(three, "c").activeTabId).toBe("b");
+  });
+
+  it("closes every tab at once, and leaves an empty strip as it is", () => {
+    expect(closeAllTabs(three)).toEqual({ tabs: [], activeTabId: null });
+    expect(closeAllTabs(openTab(EMPTY_TABS, tab("a")))).toEqual(EMPTY_TABS);
+    expect(closeAllTabs(EMPTY_TABS)).toBe(EMPTY_TABS);
   });
 
   it("reorders before a target or to the end", () => {
@@ -100,5 +106,34 @@ describe("a tab's route", () => {
     });
     expect(next.tabs[0]).toMatchObject({ id: "t1", itemId: "doc-2", title: "Focused", viewType: "block-editor", selection: null, unsaved: false });
     expect(next.tabs[0]?.route?.map((entry) => entry.itemId)).toEqual(["doc-1", "doc-2"]);
+  });
+});
+
+describe("the one tab on the phone's Minimum header", () => {
+  const make = (id: string) => ({
+    id,
+    kind: "documents:document" as const,
+    title: id,
+    itemId: id,
+    viewType: "block-editor",
+    selection: null,
+    drawerContext: null,
+    unsaved: false,
+  });
+  const three = (active: string | null) => ({ tabs: [make("a"), make("b"), make("c")], activeTabId: active });
+
+  it("counts the tabs before and after the active one", () => {
+    expect(tabsBeside(three("a"))).toEqual({ before: 0, after: 2 });
+    expect(tabsBeside(three("b"))).toEqual({ before: 1, after: 1 });
+    expect(tabsBeside(three("c"))).toEqual({ before: 2, after: 0 });
+    expect(tabsBeside(three(null))).toEqual({ before: 0, after: 0 });
+  });
+
+  it("steps to a neighbour and stops at either end without wrapping", () => {
+    expect(neighbourTab(three("b"), 1).activeTabId).toBe("c");
+    expect(neighbourTab(three("b"), -1).activeTabId).toBe("a");
+    expect(neighbourTab(three("c"), 1).activeTabId).toBe("c");
+    expect(neighbourTab(three("a"), -1).activeTabId).toBe("a");
+    expect(neighbourTab(three(null), 1).activeTabId).toBeNull();
   });
 });

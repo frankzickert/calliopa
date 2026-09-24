@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto";
 
 import {
-  DOCK_POSITIONS,
-  DRAWER_STATES,
   LEGACY_SECTION_KEYS,
   RENAMED_SECTION_KEYS,
+  readPanel,
   SECTION_STATES,
   type Layout,
   type SectionState,
@@ -116,13 +115,15 @@ function parsePreferredViews(value: unknown): Record<string, string> {
 
 function parseLayout(value: unknown): Layout {
   const layout = object(value);
-  if (
-    !DRAWER_STATES.includes(layout.left as Layout["left"]) ||
-    !DRAWER_STATES.includes(layout.right as Layout["right"]) ||
-    !DOCK_POSITIONS.includes(layout.dock as Layout["dock"])
-  ) {
+  // A panel stored before CA_0056 is a drawer state, read here as a panel and
+  // stored so on the next save. CA_0056_004
+  const left = readPanel(layout.left);
+  const right = readPanel(layout.right);
+  if (left === undefined || right === undefined) {
     throw new HttpError(400, "invalid workspace layout");
   }
+  // A layout stored with a dock position is read without it: the dock is
+  // gone and what it stored is no longer anyone's to refuse. CA_0058_004
   // The sections' states are a record keyed `<ext>:<section>`. A layout
   // stored before the record existed carries the five named fields instead,
   // rewritten here to their keys (the one migration `BO_0202_003` names,
@@ -152,12 +153,19 @@ function parseLayout(value: unknown): Layout {
       filters[RENAMED_SECTION_KEYS[key] ?? key] = stored as string[];
     }
   }
+  // The library's icon order, extension ids. An id nothing contributes is
+  // kept, and the column passes over it (`orderedIcons`). Absent before
+  // CA_0068, so a stored layout without it reads empty. CA_0068_003
+  const libraryOrder = layout.libraryOrder === undefined ? [] : layout.libraryOrder;
+  if (!Array.isArray(libraryOrder) || libraryOrder.some((id) => typeof id !== "string")) {
+    throw new HttpError(400, "invalid workspace layout");
+  }
   return {
-    left: layout.left as Layout["left"],
-    right: layout.right as Layout["right"],
-    dock: layout.dock as Layout["dock"],
+    left,
+    right,
     sections,
     filters,
+    libraryOrder: libraryOrder as string[],
   };
 }
 

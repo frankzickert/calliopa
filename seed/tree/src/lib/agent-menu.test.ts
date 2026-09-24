@@ -6,6 +6,7 @@ import {
   menuKey,
   openingAgent,
   pick,
+  rereadAgent,
   type MenuState,
 } from "./agent-menu";
 import type { SelectableRuntime } from "./connections";
@@ -84,6 +85,36 @@ describe("where the dropdown opens", () => {
     expect(openingAgent([], "codex", "codex")).toEqual({
       agent: null,
       notice: null,
+    });
+  });
+});
+
+describe("a later read of the list", () => {
+  it("Given the page opened away from the remembered agent and it can run now, Then it is the choice again", () => {
+    expect(rereadAgent(allRun, "codex", "claude-code")).toEqual({
+      agent: "claude-code",
+      restored: true,
+    });
+  });
+
+  it("Given the remembered agent still cannot run, Then the choice stands", () => {
+    expect(rereadAgent(agents, "codex", "claude-code")).toEqual({
+      agent: "codex",
+      restored: false,
+    });
+  });
+
+  it("Given nothing awaited — the page opened on its choice, or the reader chose since — Then the choice stands", () => {
+    expect(rereadAgent(allRun, "hermes", null)).toEqual({
+      agent: "hermes",
+      restored: false,
+    });
+  });
+
+  it("Given the remembered agent no longer listed, Then the choice stands", () => {
+    expect(rereadAgent(allRun, "codex", "provider")).toEqual({
+      agent: "codex",
+      restored: false,
     });
   });
 });

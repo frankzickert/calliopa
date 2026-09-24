@@ -1,4 +1,4 @@
-import type { Consequences } from "~/extensions/documents/lib/phase";
+import type { ProposalPlacement } from "../lib/proposals";
 import { type BranchRead, type Standing } from "~/extensions/documents/lib/branch";
 import { withBranch, withBranchBody } from "../lib/branch-scope";
 import type {
@@ -6,11 +6,9 @@ import type {
   DocumentProposals,
 } from "../server/documents";
 import type { DocumentView, BlockView } from "../server/assemble";
-import type { BlockHistory, BlockProvenance, DocumentRelations } from "../server/work";
-import type { FocusedWork, OpenedFocusedWork } from "../server/focus";
 import type { ReadMark } from "../server/read-mark";
-import type { DocumentJudgements } from "../server/judgements";
 import type { GraphOutcome } from "~/server/outcome";
+import type { BlobReference } from "~/server/ccgw/blobs";
 
 /**
  * The block editor's calls to the documents API, and what a failed one means
@@ -42,6 +40,25 @@ function describeRaw(outcome: GraphOutcome<unknown>): string {
       return "";
   }
 }
+
+/**
+ * The kernel's per-node write floor: a second write to one node inside 250ms
+ * of the first is refused as `write_too_frequent`, on the ground that
+ * coalescing edits is the editor's job (`calliopa-bootstrap`'s `ui-kernel.md`,
+ * `BO_0134_001`). A gesture that legitimately writes a node twice in a
+ * breath — a second Enter, a standing after a save — waits this long before
+ * its second write, the wait the server's `commitEach` takes for the same
+ * reason. DO_0015_002 DO_0015_003
+ */
+export const WRITE_FLOOR_MS = 300;
+
+/** Whether a refusal is the floor's: the write was sound and is sent again
+ * after the floor, never folded back or named on the block. */
+export const refusedByFloor = (outcome: GraphOutcome<unknown>): boolean =>
+  outcome.outcome === "validationFailure" && outcome.failures.some((failure) => failure.rule === "write_too_frequent");
+
+/** Waits the floor out. */
+export const afterFloor = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, WRITE_FLOOR_MS));
 
 export function describeOutcome(outcome: GraphOutcome<unknown>): string {
   // An acceptance by someone who staged or asked for the proposal is said as
@@ -89,35 +106,6 @@ export const fetchRetired = async (
     await fetch(`/api/x/documents/d/${id}/retired`),
   );
 
-/** The document's claims and relations, read when a block is first focused
- * and kept for the document as read. CA_0046_003 */
-export const fetchRelations = async (id: string): Promise<GraphOutcome<DocumentRelations>> =>
-  readOutcome<DocumentRelations>(await fetch(withBranch(`/api/x/documents/d/${id}/relations`, id)));
-
-/** The document's judgements: unresolved pressure per block and its derived
- * state, read with the document and again on focus when stale. BO_0248_010 */
-export const fetchJudgements = async (id: string): Promise<GraphOutcome<DocumentJudgements>> =>
-  readOutcome<DocumentJudgements>(await fetch(withBranch(`/api/x/documents/d/${id}/judgements`, id)));
-
-/** A block's provenance, read on focus. CA_0046_003 */
-export const fetchProvenance = async (id: string, blockId: string): Promise<GraphOutcome<BlockProvenance>> =>
-  readOutcome<BlockProvenance>(await fetch(withBranch(`/api/x/documents/d/${id}/blocks/${blockId}/provenance`, id)));
-
-/** The focused work of the document's blocks, read with the relations on
- * focus, for the parent's face. CA_0047_005 */
-export const fetchFocusedWork = async (id: string): Promise<GraphOutcome<FocusedWork>> =>
-  readOutcome<FocusedWork>(await fetch(`/api/x/documents/d/${id}/focused`));
-
-/** Opens a block as focused work, or is answered the child it has. CA_0047_005 */
-export const sendOpenFocusedWork = async (id: string, blockId: string): Promise<GraphOutcome<OpenedFocusedWork>> =>
-  readOutcome<OpenedFocusedWork>(
-    await fetch(`/api/x/documents/d/${id}/commands`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(withBranchBody({ command: "openFocusedWork", blockId }, id)),
-    }),
-  );
-
 /** The reader's mark on the document, read with it. BO_0246_007 */
 export const fetchReadMark = async (id: string): Promise<GraphOutcome<ReadMark>> =>
   readOutcome<ReadMark>(await fetch(`/api/x/documents/d/${id}/read`));
@@ -133,10 +121,6 @@ export const sendReadMark = async (id: string, dataRevision: number, keepalive =
       keepalive,
     }),
   );
-
-/** A block's claims' revisions, read when the reader asks for its history. CA_0046_003 */
-export const fetchHistory = async (id: string, blockId: string): Promise<GraphOutcome<BlockHistory>> =>
-  readOutcome<BlockHistory>(await fetch(withBranch(`/api/x/documents/d/${id}/blocks/${blockId}/history`, id)));
 
 export interface WriteResult {
   readonly blockId: string;
@@ -160,6 +144,23 @@ export const sendCommand = async (
     }),
   );
 
+/** The bytes of a `.csv` or `.tsv` a table stands behind, uploaded before the
+ * block that references them is written; the answer is the reference the
+ * insert carries. BO_0287_013 */
+export const uploadTableFile = async (
+  file: File,
+): Promise<GraphOutcome<{ readonly reference: BlobReference }>> =>
+  readOutcome<{ readonly reference: BlobReference }>(
+    await fetch(`/api/x/documents/blobs`, {
+      method: "POST",
+      headers: {
+        "content-type": file.type === "" ? "text/csv" : file.type,
+        "x-calliopa-filename": encodeURIComponent(file.name),
+      },
+      body: file,
+    }),
+  );
+
 export const sendRename = async (
   id: string,
   baseRevisionId: string,
@@ -172,11 +173,6 @@ export const sendRename = async (
       body: JSON.stringify(withBranchBody({ command: "rename", baseRevisionId, title }, id)),
     }),
   );
-
-/** The consequences of accepting the root, read when the transition card
- * opens and never with the document (`BO_0249_007`, `BO_0249_009`). */
-export const fetchConsequences = async (id: string): Promise<GraphOutcome<Consequences>> =>
-  readOutcome<Consequences>(await fetch(withBranch(`/api/x/documents/d/${id}/consequences`, id)));
 
 /** Sets the root's phase as the reader: the document node revised alone with
  * the base compared first, `supersede` naming the accepted root the press
@@ -213,7 +209,7 @@ export const fetchProposals = async (
 export const placeProposal = async (
   id: string,
   itemId: string,
-  placement: { readonly before: string } | { readonly at: "end" },
+  placement: ProposalPlacement,
 ): Promise<GraphOutcome<unknown>> =>
   readOutcome(
     await fetch(`/api/x/documents/d/${id}/commands`, {
@@ -230,8 +226,8 @@ export const answerProposal = async (
   itemId: string,
   answer: "accepted" | "rejected",
   edited = false,
-): Promise<GraphOutcome<unknown>> =>
-  readOutcome(
+): Promise<GraphOutcome<{ readonly withdrawn?: number; readonly notice?: string }>> =>
+  readOutcome<{ readonly withdrawn?: number; readonly notice?: string }>(
     await fetch(`/api/x/documents/d/${id}/commands`, {
       method: "POST",
       headers: { "content-type": "application/json" },

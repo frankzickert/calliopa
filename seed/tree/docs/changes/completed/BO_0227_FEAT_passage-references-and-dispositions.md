@@ -26,7 +26,7 @@ Requested: 2026-09-10, beside `BO_0226`, which gives command mode's marks their 
 
 - **A run could not see it.** `read_document` builds each block from `order`, `role` and `runs` alone (`internal/kernel/agenttools/documents.go:381`).
 
-- **Undo is the dock's, and a view cannot offer one.** `shell.tsx` keeps one `undo` signal for a tab move (*Moved «title» · Undo*), and `command-dock.md` keeps undo among the things a view never renders into.
+- **Undo is the dock's, and a view cannot offer one.** `shell.tsx` keeps one `undo` signal for a tab move (*Moved «title» · Undo*), and `commands-and-runs.md` keeps undo among the things a view never renders into.
 
 - **The component that would receive all this is already large.** `BlockEditorView` runs from `block-editor.tsx:380` to `:1761` in a 2,609-line file, and the marking state, its persistence task, the mode transition and the row's marking props all live inside it.
 
@@ -176,7 +176,7 @@ Decided by the user on 2026-09-10, on the five points this change could not sett
 
 ## Transfer
 
-Transferred on 2026-09-10 as `BO_0227_001`–`BO_0227_018`, each under a section *Passages And Dispositions*: the intake, the run start's read of the artifact, the instructions, `read_document`'s standing and the kernel verification in `docs/system/ui-kernel.md` (`_001`–`_005`); the groundwork, the arbiter, the passage models and page, the vocabulary member and write, the scale and swipe, the paths without a gesture, the offered undo, discarded blocks in place, the composer, the graph's docs, the tree tests and the on-instance verification in `docs/system/ui-shell.md` (`_006`–`_018`), the shell section repeating **Codebase Standards** as binding on every row. The graph-side docs the shell rows amend are `command-mode.md`, `block-editor.md`, `block-document-model.md`, `document-panel.md`, `command-dock.md`, `view-types.md` and `drag-and-drop.md`. This document travels into the graph as a `ui.shell` document through `kernel import-changes --file` when the work lands (`BO_0222_013`).
+Transferred on 2026-09-10 as `BO_0227_001`–`BO_0227_018`, each under a section *Passages And Dispositions*: the intake, the run start's read of the artifact, the instructions, `read_document`'s standing and the kernel verification in `docs/system/ui-kernel.md` (`_001`–`_005`); the groundwork, the arbiter, the passage models and page, the vocabulary member and write, the scale and swipe, the paths without a gesture, the offered undo, discarded blocks in place, the composer, the graph's docs, the tree tests and the on-instance verification in `docs/system/ui-shell.md` (`_006`–`_018`), the shell section repeating **Codebase Standards** as binding on every row. The graph-side docs the shell rows amend are `command-mode.md`, `block-editor.md`, `block-document-model.md`, `document-panel.md`, `commands-and-runs.md`, `view-types.md` and `drag-and-drop.md`. This document travels into the graph as a `ui.shell` document through `kernel import-changes --file` when the work lands (`BO_0222_013`).
 
 It follows `BO_0226` and starts from that change's accepted pin — its reference shape, `setPointing$`, `aim.pointing` and the composer's marks line are this change's base — never from `.local/tree-0226`, where that change was implemented.
 
@@ -188,7 +188,7 @@ It follows `BO_0226` and starts from that change's accepted pin — its referenc
 
 - **The run start already reads the graph** — for skill selection and intention resolution (`agentbridge/bridge.go:776`, `:907`) — and `agenttools`' `readDocument` is the read the tool makes. Exporting that one read for the bridge gives the pinned blocks, the reference check and the stale-passage check without a second way to read a document (`_002`). The same read makes a reference into a block the document does not hold refusable at the intake, which `BO_0226_001` could not check.
 
-- **`BO_0226` wrote an invariant this change's third decision supersedes**: *"The composer says how many blocks are marked and in which document, never an enumeration of them"* (`ui-shell.md`, *Commands From The Open Document*). `_015` says so where it builds the disclosure, and `_016` carries it into `command-dock.md`.
+- **`BO_0226` wrote an invariant this change's third decision supersedes**: *"The composer says how many blocks are marked and in which document, never an enumeration of them"* (`ui-shell.md`, *Commands From The Open Document*). `_015` says so where it builds the disclosure, and `_016` carries it into `commands-and-runs.md`.
 
 - **A split already copies the role to its tail** (`splitTextBlock`, `documents.ts`), so the disposition follows the same line rather than a rule of its own (`_010`).
 

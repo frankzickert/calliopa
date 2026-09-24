@@ -1,6 +1,7 @@
 import { serverContributions as declare, type ApiRoute } from "~/contract";
 import {
   declaresVocabulary,
+  isElevated,
   listExtensions,
   readExtensionDocument,
 } from "~/server/extensions";
@@ -87,6 +88,43 @@ const routes: readonly ApiRoute[] = [
       }),
   },
   {
+    /**
+     * The person's decision on any group touching an extension: accept
+     * parks behind the kernel's confirmation and answers its address;
+     * reject executes. The same posture as an import's decision — the shell
+     * never accepts a group itself. BO_0282_008
+     */
+    method: "POST",
+    path: "extensions/group/[group]/[verb]",
+    handle: (event, params) =>
+      kernelAnswer(event, async () => {
+        const verb = params["verb"];
+        if (verb !== "accept" && verb !== "reject") {
+          throw new HttpError(404, "a group is accepted or rejected", "not_found");
+        }
+        const group = params["group"] ?? "";
+        const body = (await event.request.json().catch(() => ({}))) as { rationale?: unknown };
+        const rationale =
+          typeof body.rationale === "string" && body.rationale !== ""
+            ? body.rationale
+            : `${verb === "accept" ? "accepted" : "rejected"} in the browser: ${group}`;
+        return kernelExtensions.decide(verb, group, rationale);
+      }),
+  },
+  {
+    /** Build and serve a staged group beside the instance, or stop it. BO_0282_010 */
+    method: "POST",
+    path: "extensions/candidate",
+    handle: (event) =>
+      kernelAnswer(event, async () => {
+        const body = (await event.request.json()) as { group?: unknown; stop?: unknown };
+        if (body.stop === true) return kernelExtensions.stopCandidate();
+        if (typeof body.group !== "string" || body.group === "")
+          throw new HttpError(400, 'the body must carry "group", or "stop": true', "bad_request");
+        return kernelExtensions.startCandidate(body.group);
+      }),
+  },
+  {
     /** Head promoted through the gate: an update's Serve now. BO_0224_011 */
     method: "POST",
     path: "extensions/promote",
@@ -146,10 +184,11 @@ const routes: readonly ApiRoute[] = [
         const id = params["id"] ?? "";
         // The kernel's one-extension read, never the listing: a person
         // looking at one extension waits on that extension alone. BO_0257_009
-        const [listing, health, vocabulary] = await Promise.all([
+        const [listing, health, vocabulary, elevated] = await Promise.all([
           kernelExtensions.one(id),
           kernelExtensions.health().catch(() => null),
           declaresVocabulary(id),
+          isElevated(id),
         ]);
         return {
           extension: listing.extension,
@@ -159,8 +198,24 @@ const routes: readonly ApiRoute[] = [
           promotion: listing.promotion ?? null,
           canChange: listing.canChange,
           declaresVocabulary: vocabulary,
+          elevated,
           health,
+          autonomous: listing.autonomous === true,
+          declaresTrigger: listing.declaresTrigger === true,
+          isOwner: listing.isOwner === true,
         };
+      }),
+  },
+  {
+    /** Allow an extension to start runs on its own, or withdraw it: the owner's alone, and nothing is rebuilt. BO_0264_018 */
+    method: "POST",
+    path: "extensions/[id]/autonomous",
+    handle: (event, params) =>
+      kernelAnswer(event, async () => {
+        const body = (await event.request.json()) as { allowed?: unknown };
+        if (typeof body.allowed !== "boolean")
+          throw new HttpError(400, 'the body must carry "allowed": true or false', "bad_request");
+        return kernelExtensions.setAutonomous(params["id"] ?? "", body.allowed);
       }),
   },
   {
@@ -203,6 +258,53 @@ const routes: readonly ApiRoute[] = [
         return kernelExtensions.setVersion(params["id"] ?? "", {
           revision: body.revision,
         });
+      }),
+  },
+  {
+    /**
+     * The open groups touching this extension, each with what a person
+     * judges it by — the change document and its staged status, what it
+     * touches, the runs and their gates. No diff: the shell shows no code
+     * (`contribution-contract.md`, Not Here). BO_0282_008
+     */
+    method: "GET",
+    path: "extensions/[id]/groups",
+    handle: (event, params) =>
+      kernelAnswer(event, async () => {
+        const id = params["id"] ?? "";
+        const [groups, candidate] = await Promise.all([
+          kernelExtensions.groups(id),
+          kernelExtensions.candidate().catch(() => ({ running: false })),
+        ]);
+        return { ...groups, candidate };
+      }),
+  },
+  {
+    /** One group, which additionally counts the files it touches. BO_0282_008 */
+    method: "GET",
+    path: "extensions/[id]/groups/[group]",
+    handle: (event, params) =>
+      kernelAnswer(event, () =>
+        kernelExtensions.group(params["id"] ?? "", params["group"] ?? ""),
+      ),
+  },
+  {
+    /**
+     * Move a change document's status. The shell writes nothing: the kernel
+     * stages the one-line edit and the person's acceptance establishes it,
+     * which is what keeps acceptance the single non-delegable human action.
+     * BO_0282_009
+     */
+    method: "POST",
+    path: "extensions/[id]/change-status",
+    handle: (event, params) =>
+      kernelAnswer(event, async () => {
+        const body = (await event.request.json()) as { path?: unknown; status?: unknown };
+        if (typeof body.path !== "string" || body.path === "")
+          throw new HttpError(400, 'the body must carry "path": the change document\'s member path', "bad_request");
+        if (typeof body.status !== "string" || body.status === "")
+          throw new HttpError(400, 'the body must carry "status": the status to move to', "bad_request");
+        return kernelExtensions.setChangeStatus(params["id"] ?? "", body.path, body.status);
       }),
   },
 ];

@@ -10,14 +10,8 @@ describe("a setDisposition command", () => {
     baseRevisionId: "rev-a",
   };
 
-  it("Given a standing on the scale, Then it is read as that standing, neutral included", () => {
-    for (const standing of [
-      "pin",
-      "keep",
-      "resolved",
-      "discarded",
-      "neutral",
-    ]) {
+  it("Given a standing on the scale, Then it is read as that standing, keep included", () => {
+    for (const standing of ["fixate", "keep", "discarded"]) {
       expect(parseDocumentCommand({ ...base, standing })).toEqual({
         command: {
           command: "setDisposition",
@@ -31,7 +25,7 @@ describe("a setDisposition command", () => {
 
   it("Given no standing, Then it is refused rather than read as clearing one", () => {
     expect(parseDocumentCommand(base)).toEqual({
-      failure: "A standing is one of discarded, resolved, neutral, keep, pin.",
+      failure: "A standing is one of discarded, keep, fixate, prompt.",
     });
   });
 
@@ -44,7 +38,7 @@ describe("a setDisposition command", () => {
   it("Given no block or no base, Then it is refused", () => {
     expect(
       "failure" in
-        parseDocumentCommand({ command: "setDisposition", standing: "pin" }),
+        parseDocumentCommand({ command: "setDisposition", standing: "fixate" }),
     ).toBe(true);
   });
 });
@@ -66,6 +60,15 @@ describe("a split command", () => {
     });
   });
 
+  it("Given the head's words and role, Then the split carries them, and a run outside the vocabulary is refused before the graph", () => {
+    // The editor sends what it holds, so the head is written once. DO_0015_001
+    expect(parseDocumentCommand({ ...base, tailBlockId: tail, runs: [{ text: "Typed " }, { text: "words", marks: ["bold"] }], role: "h2" })).toEqual({
+      command: { command: "split", blockId: "blk-a", baseRevisionId: "rev-a", at: 3, tailBlockId: tail, runs: [{ text: "Typed " }, { text: "words", marks: ["bold"] }], role: "h2" },
+    });
+    expect("failure" in parseDocumentCommand({ ...base, runs: [{ text: "x", marks: ["glitter"] }] })).toBe(true);
+    expect("failure" in parseDocumentCommand({ ...base, role: "banner" })).toBe(true);
+  });
+
   it("Given a tail that is not a block identity, Then it is refused before the graph", () => {
     for (const tailBlockId of ["", "blk-b", 7, `${tail} `, tail.toUpperCase()]) {
       expect(parseDocumentCommand({ ...base, tailBlockId })).toEqual({
@@ -73,4 +76,118 @@ describe("a split command", () => {
       });
     }
   });
+});
+
+/**
+ * Mathematics through the commands route (`BO_0290_028`).
+ *
+ * This is the layer the walk found empty: the editor sent an equation and the
+ * parser answered that a new block is text, a divider, a table or code — so
+ * *Add equation* could never make one. The render harness could not catch it,
+ * because it answers for the server itself; only the parser can say what the
+ * parser takes.
+ */
+describe("an equation through the commands route", () => {
+  it("Given an insert of an equation, Then it is read with its source", () => {
+    expect(
+      parseDocumentCommand({
+        command: "insert",
+        block: { kind: "equation", tex: "E = mc^2", numbered: true, caption: "Mass and energy" },
+        placement: { at: "end" },
+      }),
+    ).toEqual({
+      command: {
+        command: "insert",
+        block: { kind: "equation", tex: "E = mc^2", numbered: true, caption: "Mass and energy" },
+        placement: { at: "end" },
+      },
+    });
+  });
+
+  it("Given an equation with no source, Then it is refused", () => {
+    expect(
+      parseDocumentCommand({ command: "insert", block: { kind: "equation", tex: "  " }, placement: { at: "end" } }),
+    ).toEqual({ failure: "An equation carries the tex it is set from." });
+  });
+
+  it("Given a number written on one, Then it is refused: the number is the document's order", () => {
+    expect(
+      parseDocumentCommand({
+        command: "insert",
+        block: { kind: "equation", tex: "x", number: 1 },
+        placement: { at: "end" },
+      }),
+    ).toEqual({ failure: "An equation number is the document order and is never written." });
+  });
+
+  it("Given a kind this build does not write, Then the refusal names what it does", () => {
+    const answer = parseDocumentCommand({
+      command: "insert",
+      block: { kind: "diagram" },
+      placement: { at: "end" },
+    });
+    expect("failure" in answer && answer.failure).toContain("an equation");
+  });
+
+  it("Given a revise whose runs carry mathematics, Then they survive the parse", () => {
+    const runs = [
+      { text: "Einstein wrote " },
+      { text: "E = mc^2", math: true },
+      { text: "", equationRef: "blk-e" },
+    ];
+    expect(
+      parseDocumentCommand({ command: "revise", blockId: "blk-a", baseRevisionId: "rev-a", runs }),
+    ).toEqual({
+      command: { command: "revise", blockId: "blk-a", baseRevisionId: "rev-a", runs, role: undefined },
+    });
+  });
+});
+
+/** Every command mathematics sends, through the parser that decides what the
+ * route takes. The walk found this layer empty twice over. BO_0290_028 */
+describe("every command mathematics sends", () => {
+  const cases: Record<string, Record<string, unknown>> = {
+    "an equation revised whole": {
+      command: "reviseEquation",
+      blockId: "b",
+      baseRevisionId: "r",
+      tex: "x^2",
+      caption: "C",
+      numbered: true,
+    },
+    "a sentence carrying mathematics": {
+      command: "revise",
+      blockId: "b",
+      baseRevisionId: "r",
+      runs: [{ text: "x", math: true }],
+    },
+    "a sentence carrying a reference": {
+      command: "revise",
+      blockId: "b",
+      baseRevisionId: "r",
+      runs: [{ text: "", equationRef: "blk-e" }],
+    },
+    "an equation inserted": {
+      command: "insert",
+      block: { kind: "equation", tex: "x" },
+      placement: { at: "end" },
+    },
+    "a paragraph placed between two drawn rows' keys (DO_0016_001)": {
+      command: "insert",
+      block: { kind: "text", runs: [] },
+      placement: { between: ["ab", null] },
+    },
+    "a document begun with an equation": {
+      command: "insert",
+      block: { kind: "equation", tex: "x", numbered: true },
+      placement: { at: "start" },
+    },
+  };
+
+  for (const [what, body] of Object.entries(cases)) {
+    it(`takes ${what}`, () => {
+      const answer = parseDocumentCommand(body);
+      expect("failure" in answer ? answer.failure : null).toBeNull();
+    });
+  }
 });

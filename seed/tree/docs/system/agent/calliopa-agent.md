@@ -4,7 +4,7 @@
 
 - This document is the authoritative description of Calliopa's agent layer: the roles, the runtimes and their billing asymmetry, the pinned upstream contract, subscription sign-in and credential custody, confinement, memory, the tool surface the agent reaches, and the run lifecycle.
 - `CA_0022_FEAT_agent-layer` is the originating change.
-- The compose services, their ports, the Postgres image, and the generated API key live in [Application Foundation](../foundation/development-environment.md). The agent console lives in [Workspace Shell](../workspace/command-dock.md). The tool surface over the authenticated boundary lives in [Graph Gateway](../content-store/external-api.md). None of them are restated here.
+- The compose services, their ports, the Postgres image, and the generated API key live in [Application Foundation](../foundation/development-environment.md). The agent console lives in [Workspace Shell](../workspace/commands-and-runs.md). The tool surface over the authenticated boundary lives in [Graph Gateway](../content-store/external-api.md). None of them are restated here.
 - The design is taken from what ran in `_calliopa-old/calliopa-bootstrap`, not from what was specified elsewhere. Honcho is the one part taken from `studio`.
 
 ## Roles

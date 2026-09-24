@@ -4,8 +4,11 @@ import type { DocumentView } from "../server/assemble";
 import { anchorAt } from "~/lib/passage";
 import { REVEAL_MS } from "./reveal";
 import {
+  activateBlock,
   documentsApi,
   mountEditor,
+  pointFrom,
+  stopPointing,
   type SentCommand,
 } from "./testing/editor-harness";
 
@@ -28,7 +31,7 @@ const draft: DocumentView = {
       containmentId: "c-a",
       order: "a",
       role: "paragraph",
-      standing: "neutral",
+      standing: "keep",
       runs: [{ text: "Opening." }],
     },
     {
@@ -38,7 +41,7 @@ const draft: DocumentView = {
       containmentId: "c-b",
       order: "b",
       role: "paragraph",
-      standing: "neutral",
+      standing: "keep",
       runs: [{ text: "The storm arrives before the lights go out." }],
     },
     {
@@ -48,7 +51,7 @@ const draft: DocumentView = {
       containmentId: "c-c",
       order: "c",
       role: "paragraph",
-      standing: "neutral",
+      standing: "keep",
       runs: [{ text: "Closing." }],
     },
   ],
@@ -66,7 +69,7 @@ afterEach(async () => {
 
 /** Mounts the editor on the draft, with one block given a standing first. */
 const mount = async (
-  standings: { readonly pinned?: string; readonly discarded?: string } = {},
+  standings: { readonly fixated?: string; readonly discarded?: string } = {},
 ) => {
   const sent: SentCommand[] = [];
   const document: DocumentView = {
@@ -74,8 +77,8 @@ const mount = async (
     blocks: draft.blocks.map((block) =>
       block.kind !== "text"
         ? block
-        : block.blockId === standings.pinned
-          ? { ...block, standing: "pin" }
+        : block.blockId === standings.fixated
+          ? { ...block, standing: "fixate" }
           : block.blockId === standings.discarded
             ? { ...block, standing: "discarded" }
             : block,
@@ -111,17 +114,19 @@ describe("the block editor in the render harness", () => {
     ).toEqual(["blk-a", "blk-b", "blk-c"]);
   });
 
-  it("enters command mode from the dock and marks blocks in mark order", async () => {
-    const { root, userEvent, record } = await mount();
+  it("enters command mode from a block's command control and marks blocks in mark order", async () => {
+    const view = await mount();
+    const { root, userEvent, record } = view;
+    await activateBlock(view, "blk-b");
     expect(
       root
-        .querySelector('[data-dock-action="command-mode"]')
+        .querySelector('[data-block-command="blk-b"] [data-block-point]')
         ?.getAttribute("aria-pressed"),
     ).toBe("false");
-    await userEvent('[data-dock-action="command-mode"]', "click");
+    await pointFrom(view, "blk-b");
     expect(
-      root.querySelector("[data-view-body]")?.getAttribute("data-editor-mode"),
-    ).toBe("command");
+      root.querySelector('[data-pointing-from] [data-block-point]')?.getAttribute("aria-pressed"),
+    ).toBe("true");
 
     await userEvent('[data-block-id="blk-c"]', "click");
     await userEvent('[data-block-id="blk-a"]', "click");
@@ -144,13 +149,12 @@ describe("the block editor in the render harness", () => {
       { kind: "block", blockId: "blk-a", number: 2 },
     ]);
 
-    // Leaving keeps the marks and draws none of them.
-    await userEvent('[data-dock-action="command-mode"]', "click");
-    expect(
-      root.querySelector("[data-view-body]")?.getAttribute("data-editor-mode"),
-    ).toBe("reading");
+    // Leaving keeps the marks, draws none of them, and edits the prompt
+    // again.
+    await stopPointing(view);
     expect(row(root, "blk-c")?.hasAttribute("data-reference")).toBe(false);
     expect(record.pointing?.references).toHaveLength(2);
+    expect(root.querySelector('[data-block-id="blk-b"] [data-block-editor]') != null).toBe(true);
   });
 });
 
@@ -170,12 +174,16 @@ describe("a press on a block's words in command mode", () => {
   it("Given the mode entered after reading, When the words themselves are pressed, Then the block is marked and no editor opens", async () => {
     // The press is on the words, as a reader's is, not on the row around
     // them: the words carry the reading text's activation while reading.
-    const { root, userEvent, settle } = await mount();
-    await userEvent('[data-dock-action="command-mode"]', "click");
+    const view = await mount();
+    const { root, userEvent, settle } = view;
+    await pointFrom(view, "blk-a");
     await userEvent('[data-block-id="blk-b"] [data-block-reading]', "click");
     await settle();
     expect(row(root, "blk-b")?.getAttribute("data-reference")).toBe("1");
-    expect(root.querySelector("[data-block-toolbar]") ?? null).toBeNull();
+    // No editor opens on the block pressed; the prompt pointed from keeps its
+    // own. BO_0267_023
+    expect(root.querySelector('[data-block-id="blk-b"] [data-block-editor]') != null).toBe(false);
+    expect(root.querySelector('[data-block-id="blk-a"] [data-block-editor]') != null).toBe(true);
     // The words are the marking control now, pressed because the block is
     // marked — not the reading text's way into editing.
     expect(words(root, "blk-b")?.getAttribute("role")).toBe("button");
@@ -184,15 +192,15 @@ describe("a press on a block's words in command mode", () => {
 });
 
 describe("a block's standing in the render harness", () => {
-  it("Given the chord on a focused reading row, Then its standing steps, the row says so, and the dock can take it back", async () => {
-    const { root, userEvent, record, sent, settle } = await mount();
+  it("Given the chord on a focused reading row, Then its standing steps, the row says so, and the bar can take it back", async () => {
+    const { root, userEvent, sent, settle } = await mount();
     await userEvent(
       '[data-block-id="blk-b"] [data-block-reading]',
       "keydown",
       chord("ArrowRight"),
     );
     await settle(
-      () => row(root, "blk-b")?.getAttribute("data-standing") === "keep",
+      () => row(root, "blk-b")?.getAttribute("data-standing") === "fixate",
     );
 
     expect(standingWrites(sent)).toEqual([
@@ -200,77 +208,82 @@ describe("a block's standing in the render harness", () => {
         command: "setDisposition",
         blockId: "blk-b",
         baseRevisionId: "rev-b",
-        standing: "keep",
+        standing: "fixate",
       },
     ]);
     expect(
       row(root, "blk-b")
         ?.querySelector("[data-block-reading]")
         ?.getAttribute("aria-label"),
-    ).toBe("Edit block 2, kept");
+    ).toBe("Edit block 2, fixated");
     expect(
-      row(root, "blk-b")?.querySelector('[data-standing-mark="keep"]'),
+      row(root, "blk-b")?.querySelector('[data-card-label="fixate"]'),
     ).toBeTruthy();
     expect(root.querySelector("[data-standing-said]")?.textContent).toBe(
-      "Kept “The storm arrives before the lights go out.”",
+      "Fixated “The storm arrives before the lights go out.”",
     );
-    expect(record.undo?.label).toBe(
-      "Kept “The storm arrives before the lights go out.”",
-    );
+    // The take-back stands in the bar's trailing group, named by what it
+    // returns to, and writes the previous value. CA_0058_011
+    expect(
+      root.querySelector('[data-bar-action="take-back-standing"]')?.getAttribute("aria-label"),
+    ).toBe("Take back: Fixated “The storm arrives before the lights go out.”");
 
-    await record.undo?.undo$();
+    await userEvent('[data-bar-action="take-back-standing"]', "click");
     await settle(
-      () => row(root, "blk-b")?.getAttribute("data-standing") === "neutral",
+      () => row(root, "blk-b")?.getAttribute("data-standing") === "keep",
     );
     expect(standingWrites(sent).at(-1)).toMatchObject({
       blockId: "blk-b",
-      standing: "neutral",
+      standing: "keep",
     });
   });
 
-  it("Given a marked block discarded, Then it leaves the flow with its marks, the panel shows it in place, and the undo brings both back", async () => {
-    const { root, userEvent, record, settle } = await mount();
-    await userEvent('[data-dock-action="command-mode"]', "click");
+  it("Given a marked block discarded, Then it leaves the flow and keeps its mark, the panel shows it in place marked, and the undo leaves the mark standing", async () => {
+    const view = await mount();
+    const { root, userEvent, record, settle } = view;
+    await pointFrom(view, "blk-a");
     await userEvent('[data-block-id="blk-b"]', "click");
     expect(
       record.pointing?.references.map((reference) => reference.blockId),
     ).toEqual(["blk-b"]);
 
-    // Left twice: resolved at the first step, discarded at the second.
-    await userEvent('[data-block-id="blk-b"]', "keydown", chord("ArrowLeft"));
-    await settle(
-      () => row(root, "blk-b")?.getAttribute("data-standing") === "resolved",
-    );
+    // One action each way: a single step left discards it. BO_0272_006
     await userEvent('[data-block-id="blk-b"]', "keydown", chord("ArrowLeft"));
     await settle(() => row(root, "blk-b") === null);
-    expect(record.pointing?.references).toEqual([]);
+    // A reference is what was marked: discarding keeps it, and says so.
+    // BO_0263_004
+    await settle(() => record.pointing?.references[0]?.since === "discarded");
+    expect(record.pointing?.references.map((reference) => [reference.number, reference.what, reference.since])).toEqual([
+      [1, "discarded", "discarded"],
+    ]);
 
-    await userEvent('[data-inspector-action="discarded-blocks"]', "click");
+    await userEvent('[data-bar-action="discarded-blocks"]', "click");
     await settle(
       () => root.querySelector('[data-discarded-id="blk-b"]') != null,
     );
     expect(
       root.querySelector('[data-discarded-reopen="blk-b"]')?.textContent,
     ).toBe("Reopen");
-    await userEvent('[data-inspector-action="discarded-blocks"]', "click");
+    expect(root.querySelector('[data-discarded-id="blk-b"]')?.getAttribute("data-reference")).toBe("1");
+    await userEvent('[data-bar-action="discarded-blocks"]', "click");
     await settle(
       () => root.querySelector('[data-discarded-id="blk-b"]') == null,
     );
 
-    await record.undo?.undo$();
+    await userEvent('[data-bar-action="take-back-standing"]', "click");
     await settle(
-      () => row(root, "blk-b")?.getAttribute("data-standing") === "resolved",
+      () => row(root, "blk-b")?.getAttribute("data-standing") === "keep",
     );
-    await settle(() => (record.pointing?.references.length ?? 0) === 1);
+    await settle(() => record.pointing?.references[0]?.since === undefined);
     expect(row(root, "blk-b")?.getAttribute("data-reference")).toBe("1");
   });
 
-  it("Given a discarded block shown in place, When it is reopened, Then it is neutral and back in the flow", async () => {
+  it("Given a discarded block shown in place, When it is reopened, Then it is kept and back in the flow", async () => {
     const { root, userEvent, sent, settle } = await mount({
       discarded: "blk-c",
     });
     expect(row(root, "blk-c")).toBeNull();
-    await userEvent('[data-inspector-action="discarded-blocks"]', "click");
+    await userEvent('[data-bar-action="discarded-blocks"]', "click");
     await settle(
       () => root.querySelector('[data-discarded-reopen="blk-c"]') != null,
     );
@@ -281,15 +294,15 @@ describe("a block's standing in the render harness", () => {
         command: "setDisposition",
         blockId: "blk-c",
         baseRevisionId: "rev-c",
-        standing: "neutral",
+        standing: "keep",
       },
     ]);
   });
 
-  it("Given a pinned block, Then the pointing the composer reads carries it with its words", async () => {
-    const { record, settle } = await mount({ pinned: "blk-c" });
+  it("Given a fixated block, Then the pointing the composer reads carries it with its words", async () => {
+    const { record, settle } = await mount({ fixated: "blk-c" });
     await settle(() => record.pointing !== null);
-    expect(record.pointing?.pinned).toEqual([
+    expect(record.pointing?.fixated).toEqual([
       { blockId: "blk-c", words: "Closing." },
     ]);
   });
@@ -297,10 +310,9 @@ describe("a block's standing in the render harness", () => {
 
 describe("taking a passage back by its number", () => {
   it("Given a stale passage, When its number is pressed, Then the passage is taken back and the block below is not marked", async () => {
-    // A session left in command mode with one passage whose words are gone,
-    // as the page would have kept it.
+    // A prompt's marks with one passage whose words are gone, as the page
+    // would have kept them.
     const stored = JSON.stringify({
-      mode: "command",
       references: [
         {
           kind: "passage",
@@ -323,7 +335,9 @@ describe("taking a passage back by its number", () => {
         removeItem: () => undefined,
       },
     });
-    const { root, userEvent, record, settle } = await mount();
+    const view = await mount();
+    const { root, userEvent, record, settle } = view;
+    await pointFrom(view, "blk-a");
     await settle(() => root.querySelector('[data-passage-stale="1"]') != null);
     const badge = root.querySelector('[data-passage-stale="1"]') as HTMLElement;
     // This harness dispatches without a DOM target, so the press names it.
@@ -336,7 +350,7 @@ describe("taking a passage back by its number", () => {
   });
 });
 
-describe("standing in command mode", () => {
+describe("standing while reading", () => {
   const toolbar = (root: HTMLElement, blockId: string) =>
     (root.querySelector(
       `[data-block-id="${blockId}"] [data-standing-toolbar]`,
@@ -345,69 +359,102 @@ describe("standing in command mode", () => {
     (root.querySelector(
       `[data-block-id="${blockId}"] [data-standing-option="${standing}"]`,
     ) as HTMLElement | null) ?? null;
+  /** Turns to a reading row, as a rest of the pointer or a tap does. */
+  const turnTo = async (
+    view: Awaited<ReturnType<typeof mount>>,
+    blockId: string,
+  ) => {
+    await view.userEvent(
+      `[data-block-id="${blockId}"] [data-block-reading]`,
+      "focus",
+    );
+    await view.settle();
+  };
 
-  it("Given command mode, Then every text block carries the toolbar beside its marking words, none of it inside a button, and reading carries none", async () => {
-    const { root, userEvent } = await mount();
-    expect(toolbar(root, "blk-a")).toBeNull();
-    await userEvent('[data-dock-action="command-mode"]', "click");
-    for (const blockId of ["blk-a", "blk-b", "blk-c"]) {
-      const buttons = Array.from(
-        toolbar(root, blockId)?.querySelectorAll("button") ?? [],
-      );
-      expect(
-        buttons.map((button) => button.getAttribute("aria-label")),
-      ).toEqual(["Keep", "Pin", "Resolve", "Discard"]);
-      for (const button of buttons) {
-        // A boolean, so a failure prints a line rather than this DOM's element.
-        expect(button.parentElement?.closest('[role="button"]') != null).toBe(
-          false,
-        );
-      }
-    }
-    await userEvent('[data-dock-action="command-mode"]', "click");
+  it("Given the row turned to, Then it alone carries the three buttons, beside its words and none of it inside a button", async () => {
+    const view = await mount();
+    const { root } = view;
     expect(root.querySelector("[data-standing-toolbar]") ?? null).toBeNull();
+    await turnTo(view, "blk-b");
+    expect(toolbar(root, "blk-a")).toBeNull();
+    expect(toolbar(root, "blk-c")).toBeNull();
+    const buttons = Array.from(
+      toolbar(root, "blk-b")?.querySelectorAll("button") ?? [],
+    );
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
+      "Discard",
+      "Keep",
+      "Fixate",
+    ]);
+    for (const button of buttons) {
+      // A boolean, so a failure prints a line rather than this DOM's element.
+      expect(button.parentElement?.closest('[role="button"]') != null).toBe(
+        false,
+      );
+    }
   });
 
-  it("Given Pin pressed, Then the block is pinned and Pin reads pressed; pressed again, the block returns to neutral", async () => {
-    const { root, userEvent, sent, settle } = await mount();
-    await userEvent('[data-dock-action="command-mode"]', "click");
-    const pin = option(root, "blk-b", "pin")!;
-    await userEvent(pin, "click", { target: pin });
+  it("Given the focus turned to another row, Then the toolbar goes with it: one row carries it at a time", async () => {
+    const view = await mount();
+    const { root } = view;
+    await turnTo(view, "blk-b");
+    await turnTo(view, "blk-c");
+    expect(toolbar(root, "blk-b")).toBeNull();
+    expect(toolbar(root, "blk-c")).not.toBeNull();
+    expect(root.querySelectorAll("[data-standing-toolbar]")).toHaveLength(1);
+  });
+
+  it("Given a block being edited, Then it carries the toolbar, as the subject it is", async () => {
+    const view = await mount();
+    const { root } = view;
+    await activateBlock(view, "blk-b");
+    expect(toolbar(root, "blk-b")).not.toBeNull();
+    expect(toolbar(root, "blk-a")).toBeNull();
+  });
+
+  it("Given command mode, Then no row carries the toolbar, the prompt being edited to point from included; and it comes back on that prompt when the mode ends", async () => {
+    const view = await mount();
+    const { root } = view;
+    await turnTo(view, "blk-b");
+    await pointFrom(view, "blk-c");
+    // The mode clears the focus and draws none on the prompt it is pointing
+    // from, which is being edited. DO_0014_001
+    expect(root.querySelector("[data-standing-toolbar]") ?? null).toBeNull();
+    await stopPointing(view);
+    // Pointing ends with the prompt still edited, so reading finds a subject
+    // again and it is that block. BO_0267_013 DO_0014_002
+    expect(toolbar(root, "blk-c")).not.toBeNull();
+    expect(root.querySelectorAll("[data-standing-toolbar]")).toHaveLength(1);
+  });
+
+  it("Given Fixate pressed, Then the block is fixated and Fixate reads pressed; pressed again, the block returns to keep", async () => {
+    const view = await mount();
+    const { root, userEvent, sent, settle } = view;
+    await turnTo(view, "blk-b");
+    const fixate = option(root, "blk-b", "fixate")!;
+    await userEvent(fixate, "click", { target: fixate });
     await settle(
-      () => row(root, "blk-b")?.getAttribute("data-standing") === "pin",
+      () => row(root, "blk-b")?.getAttribute("data-standing") === "fixate",
     );
-    expect(option(root, "blk-b", "pin")?.getAttribute("aria-pressed")).toBe(
+    expect(option(root, "blk-b", "fixate")?.getAttribute("aria-pressed")).toBe(
       "true",
     );
     expect(option(root, "blk-b", "keep")?.getAttribute("aria-pressed")).toBe(
       "false",
     );
 
-    const pressed = option(root, "blk-b", "pin")!;
+    const pressed = option(root, "blk-b", "fixate")!;
     await userEvent(pressed, "click", { target: pressed });
     await settle(
-      () => row(root, "blk-b")?.getAttribute("data-standing") === "neutral",
+      () => row(root, "blk-b")?.getAttribute("data-standing") === "keep",
     );
     expect(standingWrites(sent).map((write) => write["standing"])).toEqual([
-      "pin",
-      "neutral",
+      "fixate",
+      "keep",
     ]);
   });
 
-  it("Given a press or Enter on a toolbar button, Then the block is not marked by it", async () => {
-    const { root, userEvent, settle } = await mount();
-    await userEvent('[data-dock-action="command-mode"]', "click");
-    const keep = option(root, "blk-a", "keep")!;
-    await userEvent(keep, "click", { target: keep });
-    await settle(
-      () => row(root, "blk-a")?.getAttribute("data-standing") === "keep",
-    );
-    const again = option(root, "blk-a", "keep")!;
-    await userEvent(again, "keydown", { key: "Enter", target: again });
-    expect(row(root, "blk-a")?.hasAttribute("data-reference")).toBe(false);
-  });
-
-  it("Given a divider, Then it carries no toolbar and stays its own marking control", async () => {
+  it("Given a divider turned to, Then it carries no toolbar", async () => {
     const sent: SentCommand[] = [];
     const document: DocumentView = {
       ...draft,
@@ -423,11 +470,11 @@ describe("standing in command mode", () => {
       ],
     };
     vi.stubGlobal("fetch", documentsApi(document, sent));
-    const { root, userEvent } = await mountEditor(document);
-    await userEvent('[data-dock-action="command-mode"]', "click");
+    const view = await mountEditor(document);
+    const { root } = view;
+    await view.userEvent('[data-block-id="blk-d"]', "focus");
+    await view.settle();
     expect(toolbar(root, "blk-d")).toBeNull();
-    expect(row(root, "blk-d")?.getAttribute("role")).toBe("button");
-    expect(row(root, "blk-a")?.hasAttribute("role")).toBe(false);
   });
 });
 
@@ -467,14 +514,16 @@ describe("revealing what a chip in the composer points at", () => {
   it("Given a passage revealed while reading, Then its block is scrolled to and the passage emphasized", async () => {
     const text = "The storm arrives before the lights go out.";
     const stored = JSON.stringify({
-      mode: "reading",
       references: [{ kind: "passage", blockId: "blk-b", number: 1, anchor: anchorAt(text, 25, 35) }],
       next: 2,
     });
     vi.stubGlobal("window", {
       localStorage: { getItem: () => stored, setItem: () => undefined, removeItem: () => undefined },
     });
-    const { root, userEvent, record, settle } = await mount();
+    const view = await mount();
+    const { root, userEvent, record, settle } = view;
+    // The marks are the prompt's: editing it brings them back.
+    await activateBlock(view, "blk-a");
     const calls = watchScroll(row(root, "blk-b"));
     record.reveal = { kind: "passage", blockId: "blk-b", number: 1 };
     await userEvent("[data-harness-reveal]", "click");
@@ -483,20 +532,20 @@ describe("revealing what a chip in the composer points at", () => {
   });
 
   it("Given a block revealed in command mode, Then it is emphasized and the mode stays command", async () => {
-    const { root, userEvent, record, settle } = await mount();
-    await userEvent('[data-dock-action="command-mode"]', "click");
+    const view = await mount();
+    const { root, userEvent, record, settle } = view;
+    await pointFrom(view, "blk-a");
     record.reveal = { kind: "block", blockId: "blk-b" };
     await userEvent("[data-harness-reveal]", "click");
     await settle(() => row(root, "blk-b")?.getAttribute("data-revealed") === "block");
     expect(
-      root.querySelector('[data-dock-action="command-mode"]')?.getAttribute("aria-pressed"),
+      root.querySelector('[data-pointing-from] [data-block-point]')?.getAttribute("aria-pressed"),
     ).toBe("true");
     expect(row(root, "blk-b")?.hasAttribute("data-reference")).toBe(false);
   });
 
   it("Given a stale passage revealed, Then the block that lost its words is revealed", async () => {
     const stored = JSON.stringify({
-      mode: "reading",
       references: [
         { kind: "passage", blockId: "blk-b", number: 1, anchor: { quote: "words no longer here", prefix: "", suffix: "", hint: 0 } },
       ],
@@ -505,7 +554,9 @@ describe("revealing what a chip in the composer points at", () => {
     vi.stubGlobal("window", {
       localStorage: { getItem: () => stored, setItem: () => undefined, removeItem: () => undefined },
     });
-    const { root, userEvent, record, settle } = await mount();
+    const view = await mount();
+    const { root, userEvent, record, settle } = view;
+    await activateBlock(view, "blk-a");
     record.reveal = { kind: "passage", blockId: "blk-b", number: 1 };
     await userEvent("[data-harness-reveal]", "click");
     await settle(() => row(root, "blk-b")?.getAttribute("data-revealed") === "block");

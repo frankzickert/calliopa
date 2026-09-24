@@ -19,8 +19,8 @@ const validateNode = (semanticType: string, content: unknown): string | null => 
 };
 
 describe("the committed block vocabulary", () => {
-  it("Given the vocabulary, Then it reads a document, a text block and a divider", () => {
-    expect(Object.keys(BLOCK_VALIDATORS).sort()).toEqual(["divider", "document", "text"]);
+  it("Given the vocabulary, Then it reads a document, a text block, a divider, a table, an equation, a picture and the code pair", () => {
+    expect(Object.keys(BLOCK_VALIDATORS).sort()).toEqual(["divider", "document", "equation", "image", "output", "sourcecode", "table", "text"]);
     expect([...BLOCK_TYPES].sort()).toEqual(["divider", "text"]);
   });
 });

@@ -1,10 +1,10 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { agentStatus, chooseAgent, chosenAgent, selectableRuntimes } from "./adapters";
+import { agentStatus, chooseAgent, chosenAgent, loginState, requestLogin, selectableRuntimes } from "./adapters";
 
 /**
  * What the command area may offer.
@@ -149,5 +149,70 @@ describe("the runtimes a command may be given to", () => {
 
     expect(stamped).toEqual({ runtime: "codex", credential: true, toolset: true });
     expect(stamped && "selected" in stamped).toBe(false);
+  });
+});
+
+/**
+ * The sign-in a request started, and no other.
+ *
+ * Pressing Sign in again after a flow failed or timed out found that flow's
+ * state still on the volume: the row read it as the new request's answer and
+ * stopped following, while the broker started the new flow unseen. The broker
+ * stamps every state with the id of the request that started its flow, so only
+ * a state carrying the request's own id is followed. BO_0261_002
+ */
+describe("the sign-in a request started", () => {
+  const previous = process.env["CALLIOPA_AGENT_CONFIG_DIR"];
+
+  afterEach(() => {
+    if (previous === undefined) delete process.env["CALLIOPA_AGENT_CONFIG_DIR"];
+    else process.env["CALLIOPA_AGENT_CONFIG_DIR"] = previous;
+  });
+
+  const earlierFlow = async (state: Record<string, unknown>): Promise<string> => {
+    const dir = await mkdtemp(join(tmpdir(), "agent-config-"));
+    await mkdir(join(dir, "login"));
+    await writeFile(join(dir, "login", "state.json"), JSON.stringify(state));
+    process.env["CALLIOPA_AGENT_CONFIG_DIR"] = dir;
+    return dir;
+  };
+
+  const timedOut = {
+    runtime: "claude-code",
+    status: "failed",
+    awaiting: null,
+    output: "Paste code here if prompted >\nthe login timed out",
+  };
+
+  it("Given an earlier flow that timed out, When Sign in is pressed again, Then its failure is not the new request's answer", async () => {
+    const dir = await earlierFlow(timedOut);
+
+    const id = await requestLogin("claude-code");
+
+    expect(JSON.parse(await readFile(join(dir, "login", "request.json"), "utf8"))).toEqual({
+      runtime: "claude-code",
+      id,
+    });
+    expect(await loginState(id)).toBeNull();
+  });
+
+  it("Given a flow still in flight under another request, Then neither its progress nor its supersession is the new request's", async () => {
+    await earlierFlow({ ...timedOut, id: "earlier", status: "running", awaiting: "code", url: "https://claude.com/old" });
+    const id = await requestLogin("claude-code");
+    expect(await loginState(id)).toBeNull();
+
+    await earlierFlow({ ...timedOut, id: "earlier", output: "superseded by a new request" });
+    expect(await loginState(id)).toBeNull();
+  });
+
+  it("Given the broker has started the request's flow, Then that flow is answered", async () => {
+    const dir = await earlierFlow(timedOut);
+    const id = await requestLogin("claude-code");
+    const started = { runtime: "claude-code", id, status: "running", awaiting: "code", url: "https://claude.com/new", output: "" };
+    await writeFile(join(dir, "login", "state.json"), JSON.stringify(started));
+
+    expect(await loginState(id)).toEqual(started);
+    // Two requests never share an id.
+    expect(await requestLogin("claude-code")).not.toBe(id);
   });
 });

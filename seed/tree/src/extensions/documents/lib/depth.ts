@@ -16,7 +16,7 @@ export const DERIVED_SECTIONS = [
   { kind: "frontier", heading: "What matters now", icon: "flag" },
   { kind: "tension", heading: "Tension", icon: "warning" },
   { kind: "alternative", heading: "Alternatives", icon: "lightbulb" },
-  { kind: "consequence", heading: "If accepted", icon: "arrow-circle-up" },
+  { kind: "consequence", heading: "What would change", icon: "arrow-circle-up" },
   { kind: "next", heading: "Next", icon: "caret-right" },
 ] as const;
 export type DerivedSection = (typeof DERIVED_SECTIONS)[number]["kind"];
@@ -42,18 +42,6 @@ export function derivedSection(block: BlockView): DerivedSection | null {
 export const isDerived = (block: BlockView): boolean =>
   derivedSection(block) !== null ||
   (isText(block) && block.blockKind === "synthesis" && (block.derivedFrom?.length ?? 0) > 0);
-
-export type DepthLayer = "pressure" | "relevance" | "provenance" | "evidence" | "relations" | "history" | "derived";
-
-export const LAYER_LABEL: Readonly<Record<DepthLayer, string>> = {
-  pressure: "Changed upstream",
-  relevance: "Why this matters now",
-  provenance: "Provenance",
-  evidence: "Evidence",
-  relations: "Related work",
-  history: "History",
-  derived: "Derived for this root",
-};
 
 /** A piece of evidence: a relation landing on one of the block's claims. */
 export interface EvidenceEntry {
@@ -96,18 +84,7 @@ export function orphanedOf(relations: DocumentRelations | null, blockId: string)
   return relations.relations.filter((relation) => relation.state === "orphaned" && (mine.has(relation.source.claimId) || mine.has(relation.target.claimId)));
 }
 
-/** Every other declared relation on the block's claims, as the relations
- * layer lists them: the ones evidence does not show, live ones only. */
-export function relatedOf(relations: DocumentRelations | null, blockId: string): readonly RelationView[] {
-  if (relations === null) return [];
-  const mine = claimIds(relations, blockId);
-  const evidence = new Set(evidenceOf(relations, blockId).map((entry) => entry.relation.relationId));
-  return relations.relations.filter(
-    (relation) => live(relation) && !evidence.has(relation.relationId) && (mine.has(relation.source.claimId) || mine.has(relation.target.claimId)),
-  );
-}
-
-/** The derived blocks whose `derivedFrom` names this block: why it matters now. */
+/** The derived blocks whose `derivedFrom` names this block: what rests on it. */
 export const relevanceOf = (blocks: readonly BlockView[], blockId: string): readonly TextBlockView[] =>
   blocks.filter((block): block is TextBlockView => isText(block) && isDerived(block) && (block.derivedFrom ?? []).includes(blockId));
 
@@ -120,38 +97,7 @@ export const relevanceOf = (blocks: readonly BlockView[], blockId: string): read
 export const provenanceMatters = (provenance: BlockProvenance | null): boolean =>
   provenance !== null && provenance.provenance !== "" && provenance.provenance !== "human-authored";
 
-/**
- * The categories the affordance line names for a focused block, in the
- * order the layers unfold. Empty when nothing holds material.
- */
-export function affordanceOf(input: {
-  readonly block: BlockView;
-  readonly blocks: readonly BlockView[];
-  readonly relations: DocumentRelations | null;
-  readonly provenance: BlockProvenance | null;
-  /** Whether unresolved pressure stands on the block: its layer comes
-   * before every other. BO_0248_008 */
-  readonly pressure?: boolean;
-  /** Whether any judgement is on record for the block, which its history lists. BO_0248_016 */
-  readonly judged?: boolean;
-}): readonly DepthLayer[] {
-  const { block, blocks, relations, provenance } = input;
-  const pressure: DepthLayer[] = input.pressure === true ? ["pressure"] : [];
-  if (isDerived(block)) {
-    return [...pressure, "derived", "provenance"];
-  }
-  const layers: DepthLayer[] = [...pressure];
-  if (relevanceOf(blocks, block.blockId).length > 0) layers.push("relevance");
-  if (provenanceMatters(provenance)) layers.push("provenance");
-  if (evidenceOf(relations, block.blockId).length > 0) layers.push("evidence");
-  if (relatedOf(relations, block.blockId).length > 0) layers.push("relations");
-  // History has material once anything else does, or once more than one
-  // hand touched the block; on request either way.
-  if (layers.length > 0 || provenanceMatters(provenance) || input.judged === true || orphanedOf(relations, block.blockId).length > 0) layers.push("history");
-  return layers;
-}
-
-/** The kind a relation reads as, in the relations layer's words. */
+/** The kind a relation reads as from the end it is declared on. */
 export const KIND_WORDS: Readonly<Record<string, string>> = {
   dependsOn: "Depends on",
   supports: "Supports",
@@ -163,6 +109,25 @@ export const KIND_WORDS: Readonly<Record<string, string>> = {
   evidences: "Provides evidence for",
   opensQuestionIn: "Opens a question in",
   affectedBy: "Is affected by",
+};
+
+/**
+ * The same kinds read from the other end, so a relation shown backwards reads
+ * as English: `dependsOn` is *Is depended on by*, never *Is depends on by*.
+ * A kind with no entry falls back to the forward words. BO_0258_024
+ */
+export const REVERSE_KIND_WORDS: Readonly<Record<string, string>> = {
+  dependsOn: "Is depended on by",
+  supports: "Is supported by",
+  contradicts: "Is contradicted by",
+  qualifies: "Is qualified by",
+  constrains: "Is constrained by",
+  implements: "Is implemented by",
+  supersedes: "Is superseded by",
+  evidences: "Is evidenced by",
+  opensQuestionIn: "Has a question opened by",
+  // `affectedBy` is already passive, so its other end is the plain active verb.
+  affectedBy: "Affects",
 };
 
 

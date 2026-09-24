@@ -50,17 +50,14 @@ export function passageNumberAt(target: EventTarget | null): number | null {
   return Number.isInteger(number) && number > 0 ? number : null;
 }
 
-/**
- * Whether a press or a key landed in a block's standing toolbar. The toolbar's
- * buttons answer their own press, and the row's one handler leaves it to them
- * rather than also marking the block. BO_0231_003
- */
-export function inStandingToolbar(target: EventTarget | null): boolean {
+/** Whether a press landed on a block's command control, which answers its
+ * own press rather than marking the block. BO_0267_013 */
+export function inCommandControl(target: EventTarget | null): boolean {
   const element =
     target !== null && typeof (target as Element).closest === "function"
       ? (target as Element)
       : null;
-  return (element?.closest("[data-standing-toolbar]") ?? null) !== null;
+  return (element?.closest("[data-block-command]") ?? null) !== null;
 }
 
 export function chordDirection(event: KeyboardEvent): "left" | "right" | null {

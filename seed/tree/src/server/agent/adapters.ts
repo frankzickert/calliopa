@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { access, mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -37,6 +38,8 @@ export type LoginRuntime = "codex" | "claude-code";
 
 export interface LoginState {
   readonly runtime: string;
+  /** The request that started this flow; the broker stamps it. BO_0261_002 */
+  readonly id?: string;
   readonly status: "running" | "succeeded" | "failed";
   /** Where the human signs in. Shown because it is what they must visit. */
   readonly url?: string;
@@ -199,17 +202,33 @@ export async function chooseAgent(agent: AgentId): Promise<void> {
   await rename(tmp, join(configDir(), "agent-choice.json"));
 }
 
-/** Asks the agent's broker to run a runtime's own sign-in flow. */
-export async function requestLogin(runtime: LoginRuntime): Promise<void> {
+/**
+ * Asks the agent's broker to run a runtime's own sign-in flow, and answers the
+ * id the broker stamps on every state of the flow this request starts.
+ */
+export async function requestLogin(runtime: LoginRuntime): Promise<string> {
+  const id = randomUUID();
   await mkdir(loginDir(), { recursive: true });
   const tmp = join(loginDir(), "request.json.tmp");
-  await writeFile(tmp, JSON.stringify({ runtime }), { mode: 0o600 });
+  await writeFile(tmp, JSON.stringify({ runtime, id }), { mode: 0o600 });
   await rename(tmp, join(loginDir(), "request.json"));
+  return id;
 }
 
-/** How the sign-in in flight is going, or null when none is. */
-export function loginState(): Promise<LoginState | null> {
-  return readJson<LoginState>(join(loginDir(), "state.json"));
+/**
+ * How the sign-in a request started is going, or null while it has not begun.
+ *
+ * The state on the volume is whatever flow wrote last: an earlier one that
+ * failed or timed out, or the one this request superseded, which the broker
+ * ends a moment after the request lands. Only a state stamped with the
+ * request's own id is its flow, so anything else reads as not started yet
+ * rather than as the answer. Without an id, the last state is answered as it
+ * stands. BO_0261_002
+ */
+export async function loginState(id?: string): Promise<LoginState | null> {
+  const state = await readJson<LoginState>(join(loginDir(), "state.json"));
+  if (id === undefined || state === null) return state;
+  return state.id === id ? state : null;
 }
 
 /**

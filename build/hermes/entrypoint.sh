@@ -190,6 +190,77 @@ approve_codex_server_tools() {
   ' "$config" > "$config.tmp" && mv "$config.tmp" "$config"
 }
 
+# name_codex_run_header NAME makes Codex send the run's id with every call to
+# a registered server: `env_http_headers` reads CALLIOPA_RUN_ID from the
+# environment of the `codex app-server` a run spawns, which the image's patch
+# sets to the kernel's run id, so the kernel binds the call to that run while
+# other runs are going. Like the approval above, it runs after the
+# registration, which rewrites the server's table. BO_0269_008
+name_codex_run_header() {
+  name="$1"
+  config="$HOME/.codex/config.toml"
+  [ -f "$config" ] || return 0
+  awk -v header="[mcp_servers.$name]" '
+    function place() { if (inside && !placed) { print "env_http_headers = { \"X-Calliopa-Run\" = \"CALLIOPA_RUN_ID\" }"; placed = 1 } }
+    /^\[/ { place(); inside = ($0 == header) }
+    inside && /^env_http_headers[ \t]*=/ { next }
+    { print }
+    END { place() }
+  ' "$config" > "$config.tmp" && mv "$config.tmp" "$config"
+}
+
+# The reasoning effort a fast run asks for; a thorough run asks for none and
+# reasons at the model's default, which is what every run did before speeds.
+# The value is the one measured and recorded in docs/system/hermes.md,
+# Concurrent And Faster Runs. BO_0269_011 BO_0269_012
+FAST_EFFORT="low"
+
+# write_routes prints the gateway's model routes and records their names in
+# `routes`: one per agent and speed, `calliopa-<agent>-<speed>`. A run names
+# its route, so Codex, Hermes and the API-key model run side by side in one
+# gateway and no run rewrites this configuration or restarts the gateway. The
+# image's patch lets a route carry `api_mode` and `reasoning_effort`.
+# BO_0269_009
+write_routes() {
+  routes=""
+  codex_model="${CALLIOPA_CODEX_MODEL:-gpt-5.5}"
+  api_provider=""
+  api_base=""
+  if [ -n "${OPENROUTER_API_KEY:-}" ]; then
+    api_provider="openrouter"
+  elif [ -n "${OPENAI_API_KEY:-}" ]; then
+    api_provider="openai"
+    api_base="${OPENAI_BASE_URL:-}"
+  fi
+  printf 'platforms:\n  api_server:\n    extra:\n      model_routes:\n'
+  for speed in fast thorough; do
+    effort=""
+    [ "$speed" = "fast" ] && effort="$FAST_EFFORT"
+    route_entry "calliopa-codex-$speed" "$codex_model" openai-codex codex_app_server "$effort" ""
+    if runtime_configurable hermes; then
+      if [ "$(hermes_model)" = "provider" ]; then
+        route_entry "calliopa-hermes-$speed" "$CALLIOPA_AGENT_MODEL" "$api_provider" "" "$effort" "$api_base"
+      else
+        route_entry "calliopa-hermes-$speed" "$codex_model" openai-codex codex_responses "$effort" ""
+      fi
+    fi
+    if [ -n "${CALLIOPA_AGENT_MODEL:-}" ]; then
+      route_entry "calliopa-provider-$speed" "$CALLIOPA_AGENT_MODEL" "$api_provider" "" "$effort" "$api_base"
+    fi
+  done
+}
+
+# route_entry ALIAS MODEL PROVIDER API_MODE EFFORT BASE_URL prints one route
+# and adds its alias to `routes`; an empty field is left out.
+route_entry() {
+  printf '        %s:\n          model: "%s"\n' "$1" "$2"
+  [ -n "$3" ] && printf '          provider: "%s"\n' "$3"
+  [ -n "$4" ] && printf '          api_mode: "%s"\n' "$4"
+  [ -n "$5" ] && printf '          reasoning_effort: "%s"\n' "$5"
+  [ -n "$6" ] && printf '          base_url: "%s"\n' "$6"
+  routes="$routes${routes:+, }\"$1\""
+}
+
 # runtime_configurable answers whether write_config below can name a model for
 # a runtime. It is the whole of the rule: a configuration with no `model:` line
 # is a gateway that refuses every run it is given — `model: String should have
@@ -274,12 +345,12 @@ write_config() {
         # Codex CLI's own home on this volume.
         printf 'model:\n  default: "%s"\n  provider: openai-codex\n  openai_runtime: codex_app_server\n' \
           "${CALLIOPA_CODEX_MODEL:-gpt-5.5}"
-        # A gateway context has no UI for an approval request, so the choice is
-        # between failing closed on every tool call and deferring to a real
-        # sandbox profile. Hermes defers; Codex's own profile below is the
-        # deny-by-default gate. The quoting keeps YAML from reading the value
-        # as a boolean.
-        printf 'approvals:\n  mode: "off"\n'
+        # No `approvals: off`: the configuration is every agent's now that
+        # runs name their controller by route (BO_0269_009), and Hermes's own
+        # loop keeps the default approvals. Codex asks for none — its profile
+        # below is `approval_policy = "never"` in `workspace-write`, the
+        # deny-by-default gate — and its calls to the kernel toolset are
+        # approved on the server's table.
         ;;
       hermes)
         # Hermes's own loop and tool dispatch, reasoning on what hermes_model
@@ -308,7 +379,11 @@ write_config() {
         fi
         ;;
     esac
+    write_routes
   } > "$HERMES_HOME/config.yaml"
+  # The routes the configuration offers, for the stamp; recomputed outside
+  # the redirection, whose subshell keeps its own `routes`.
+  routes="$(write_routes | sed -n 's/^        \(calliopa-[a-z]*-[a-z]*\):$/"\1"/p' | paste -sd, - | sed 's/,/, /g')"
 
   write_codex_profile
   # An entry an earlier start registered for the shell's retired surface is
@@ -318,6 +393,7 @@ write_config() {
   kernel_toolset_registered="$(register_codex_server calliopa-kernel "$KERNEL_TOOLS_URL" "$KERNEL_BEARER_FILE" CALLIOPA_AGENT_TOOLS_BEARER)"
   if [ "$kernel_toolset_registered" = "true" ]; then
     approve_codex_server_tools calliopa-kernel
+    name_codex_run_header calliopa-kernel
   fi
 
   # The active runtime and the toolset this start assembled are stamped as
@@ -340,7 +416,7 @@ write_config() {
   else
     hermes_model_name="${CALLIOPA_CODEX_MODEL:-gpt-5.5}"
   fi
-  hermes_fields="$(printf '"hermesModel": "%s", "hermesModelName": "%s"' "$(hermes_model)" "$hermes_model_name")"
+  hermes_fields="$(printf '"hermesModel": "%s", "hermesModelName": "%s", "routes": [%s]' "$(hermes_model)" "$hermes_model_name" "$routes")"
   if [ "$runtime" = "$selected" ]; then
     printf '{"runtime": "%s", "selected": "%s", %s, "kernelCredential": %s, "kernelToolset": %s}\n' \
       "$runtime" "$selected" "$hermes_fields" "$kernel_credential" "$kernel_toolset_registered" \

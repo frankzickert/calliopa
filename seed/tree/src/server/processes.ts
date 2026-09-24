@@ -9,7 +9,7 @@ import {
   type ProcessState,
 } from "~/lib/process";
 import { DOCUMENT_KIND } from "~/lib/command-target";
-import { judgementWords, listBridgeRuns, triggerOf, type BridgeRun } from "./agent/bridge";
+import { conclusionOf, listBridgeRuns, triggerOf, type BridgeRun } from "./agent/bridge";
 import { migrateTabKind, type TabKind } from "~/lib/tabs";
 import { HttpError } from "./http-error";
 import { kernelState } from "./kernel/client";
@@ -122,7 +122,7 @@ export async function listProcesses(workspaceId: string): Promise<ProcessRecord[
   // dropped from the listing, not from the record: absence tolerates what it
   // finds, and nothing is purged. BO_0203_006
   // A system process belongs to no workspace and is listed in every one:
-  // the kernel's refinement is not a fact about where a reader sat. BO_0245_009
+  // a run an extension started is not a fact about where a reader sat. BO_0245_009
   return records
     .filter(
       (record): record is ProcessRecord =>
@@ -167,12 +167,12 @@ async function syncSystemRuns(): Promise<void> {
     const existing = records.find((record) => record.runId === run.id);
     const state = stateOfRun(run.status);
     if (existing !== undefined) {
-      const concluded = judgementWords(run.judgement);
+      const concluded = conclusionOf(run);
       if (existing.state !== state || (concluded !== "" && existing.concluded !== concluded)) {
         await store({
           ...existing,
           state,
-          step: state === "running" ? "Refining" : state === "completed" ? "Done" : existing.step,
+          step: state === "running" ? "Running" : state === "completed" ? "Done" : existing.step,
           ...(concluded === "" ? {} : { concluded }),
           updatedAt: new Date().toISOString(),
         });
@@ -184,31 +184,29 @@ async function syncSystemRuns(): Promise<void> {
 }
 
 async function systemProcess(run: BridgeRun, state: ProcessState): Promise<ProcessRecord> {
-  const documentId = run.refined ?? null;
-  let title = "Refine";
-  if (documentId !== null) {
-    // What the refined document is called is the extension listing it to say;
-    // with no extension listing documents, the identity names it. BO_0255_007
-    const named = await labelOf(DOCUMENT_KIND, documentId);
-    title = `Refine: ${named ?? documentId}`;
-  }
+  // The run's goal is the extension's own words for it; the document it
+  // proposes into is named by the extension listing documents, or by its
+  // identity when none does. BO_0255_007 BO_0264_017
+  const documentId = run.artifact !== undefined && run.artifact !== "" ? run.artifact : null;
+  const label = documentId === null ? null : await labelOf(DOCUMENT_KIND, documentId);
   const now = new Date().toISOString();
-  const concluded = judgementWords(run.judgement);
+  const concluded = conclusionOf(run);
   return {
     id: randomUUID(),
     workspaceId: SYSTEM_WORKSPACE,
-    title,
+    title: run.goal.replace(/\.$/u, ""),
     state,
-    step: state === "running" ? "Refining" : state === "completed" ? "Done" : null,
+    step: state === "running" ? "Running" : state === "completed" ? "Done" : null,
     error: null,
     itemId: documentId,
     itemKind: documentId === null ? null : DOCUMENT_KIND,
+    ...(documentId === null ? {} : { itemLabel: label ?? documentId }),
     acknowledged: false,
     createdAt: now,
     updatedAt: now,
     runId: run.id,
     trigger: "system",
-    ...(documentId === null ? {} : { refined: { documentId, dataRevision: run.refinedAt ?? run.pin } }),
+    triggeredBy: { extension: run.extension ?? "", dataRevision: run.pin },
     ...(concluded === "" ? {} : { concluded }),
   };
 }
@@ -278,7 +276,7 @@ export async function transitionProcess(
  */
 export async function moveProcess(
   id: string,
-  change: Partial<Pick<ProcessRecord, "trigger" | "refined" | "concluded">> & {
+  change: Partial<Pick<ProcessRecord, "trigger" | "concluded">> & {
     readonly state: ProcessState;
     readonly step: string | null;
     readonly error: string | null;

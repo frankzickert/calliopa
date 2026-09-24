@@ -33,6 +33,23 @@ export const faceOf = (agent: string | null): string =>
     ? AGENT_FACES[agent as keyof typeof AGENT_FACES]
     : null) ?? AGENT_FACES.hermes;
 
+/**
+ * How a command asks its agent to work: *Fast* or *Thorough*, for every
+ * agent, each mapping it to its own model and effort. Fast is preselected,
+ * and the person's last speed is remembered for them by the kernel when a run
+ * starts with it. Thorough is how a run worked before speeds existed.
+ * BO_0269_015
+ */
+export type Speed = "fast" | "thorough";
+
+export const SPEED_LABEL: Readonly<Record<Speed, string>> = { fast: "Fast", thorough: "Thorough" };
+
+/** A speed the server answered, or fast. */
+export const speedOf = (value: unknown): Speed => (value === "thorough" ? "thorough" : "fast");
+
+/** The speed a press on the toggle leaves. */
+export const otherSpeed = (speed: Speed): Speed => (speed === "fast" ? "thorough" : "fast");
+
 /** Where the dropdown opens, and what the reader is told about it. */
 export interface Opening {
   readonly agent: string | null;
@@ -76,6 +93,142 @@ export function openingAgent(
     agent: fallback.id,
     notice: `${why} — opened on ${fallback.label}.`,
   };
+}
+
+/** What a later read of the list does to the choice. */
+export interface Reread {
+  readonly agent: string | null;
+  readonly restored: boolean;
+}
+
+/**
+ * A later read of the list, after the one the dropdown opened on. `awaiting`
+ * is the instance's remembered agent the page opened away from because it
+ * could not run, until the reader chooses on this page: once a read finds it
+ * able to run, it is the choice again, which is what the opening notice said
+ * had not happened. Anything else leaves the choice where it is — a choice the
+ * reader made on this page is theirs. CA_0052_002
+ */
+export function rereadAgent(
+  runtimes: readonly SelectableRuntime[],
+  agent: string | null,
+  awaiting: string | null,
+): Reread {
+  const remembered = runtimes.find((runtime) => runtime.id === awaiting);
+  return remembered?.selectable
+    ? { agent: remembered.id, restored: true }
+    : { agent, restored: false };
+}
+
+/**
+ * The agents as the command bar holds them: the list, the choice, the notice
+ * line, and what `rereadAgent` needs — the remembered agent the page opened
+ * away from, and the notice that said so, so lowering it never lowers
+ * anything said since. The shell's run store is one. CA_0052_002
+ */
+export interface AgentList {
+  runtimes: SelectableRuntime[];
+  agent: string | null;
+  /**
+   * What the reader chose on the chosen sender's axes, by axis name
+   * (`BO_0279_007`). An agent has no axes and leaves this empty; a sender's
+   * axes start where the sender says and change as the reader changes them.
+   */
+  options: Record<string, string>;
+  /** The next command's speed. BO_0269_015 */
+  speed: Speed;
+  notice: string | null;
+  awaiting: string | null;
+  openingNotice: string | null;
+}
+
+interface RuntimesAnswer {
+  readonly runtimes: SelectableRuntime[];
+  readonly chosen: string | null;
+  readonly active: string | null;
+  /** The signed-in person's last speed. BO_0269_015 */
+  readonly speed?: string;
+}
+
+/** `GET /api/agent/runtimes`, or null when it could not be read. */
+async function readRuntimes(): Promise<RuntimesAnswer | null> {
+  const response = await fetch("/api/agent/runtimes").catch(() => null);
+  if (response === null || !response.ok) return null;
+  return (await response.json().catch(() => null)) as RuntimesAnswer | null;
+}
+
+/**
+ * The first read, when the page opens: the list, and the agent
+ * `openingAgent` opens on, with its notice. BO_0228_011 CA_0052_002
+ */
+export async function loadAgents(list: AgentList): Promise<void> {
+  const answered = await readRuntimes();
+  if (answered === null) return;
+  list.runtimes = answered.runtimes;
+  list.speed = speedOf(answered.speed);
+  const opening = openingAgent(answered.runtimes, answered.chosen, answered.active);
+  list.agent = opening.agent;
+  list.awaiting = opening.notice === null ? null : answered.chosen;
+  list.openingNotice = opening.notice;
+  if (opening.notice !== null) list.notice = opening.notice;
+}
+
+/**
+ * Every later read — the dropdown opening, a choice the held list refused, a
+ * view saying the agents changed: the list as the server answers it now, and
+ * the remembered agent back when it can run. A read that fails keeps the list
+ * held. Answers the list read, or null. CA_0052_001 CA_0052_002
+ */
+export async function refreshAgents(
+  list: AgentList,
+): Promise<readonly SelectableRuntime[] | null> {
+  const answered = await readRuntimes();
+  if (answered === null) return null;
+  list.runtimes = answered.runtimes;
+  const reread = rereadAgent(answered.runtimes, list.agent, list.awaiting);
+  if (reread.restored) {
+    list.agent = reread.agent;
+    list.awaiting = null;
+    if (list.notice === list.openingNotice) list.notice = null;
+    list.openingNotice = null;
+  }
+  return answered.runtimes;
+}
+
+/**
+ * The reader's choice: it stands for the page — no later read takes it back
+ * — and is remembered for the instance, said when it could not be, since the
+ * next reload would open elsewhere. BO_0228_011 CA_0052_002
+ */
+export async function chooseAgent(list: AgentList, agent: string): Promise<void> {
+  list.agent = agent;
+  list.awaiting = null;
+  // A new choice brings its own axes, starting where it says. What was chosen
+  // for another model means nothing here — the values are not even the same
+  // words. BO_0279_007
+  list.options = startingOptions(list.runtimes, agent);
+  if (!(await rememberAgent(agent))) list.notice = CHOICE_NOT_REMEMBERED;
+}
+
+/** Where a sender's controls start: its own start value, or nothing chosen. */
+export function startingOptions(
+  runtimes: readonly SelectableRuntime[],
+  agent: string | null,
+): Record<string, string> {
+  const chosen = runtimes.find((runtime) => runtime.id === agent);
+  const starting: Record<string, string> = {};
+  for (const axis of chosen?.options ?? []) {
+    if (axis.start !== null && axis.values.includes(axis.start)) starting[axis.axis] = axis.start;
+  }
+  return starting;
+}
+
+/** The axes the chosen sender offers, or none. */
+export function axesOf(
+  runtimes: readonly SelectableRuntime[],
+  agent: string | null,
+): readonly { readonly axis: string; readonly label: string; readonly values: readonly string[]; readonly start: string | null }[] {
+  return runtimes.find((runtime) => runtime.id === agent)?.options ?? [];
 }
 
 /** What the reader is told when a choice could not be remembered. */
@@ -194,4 +347,38 @@ export function pick(
     return { state: { open: true, active: index }, choose: null };
   }
   return { state: { open: false, active: index }, choose: runtime.id };
+}
+
+/**
+ * Where the agent list opens, and how tall it may be (`BO_0273_036`).
+ *
+ * It opened upward always, which was right in the composer at the foot of the
+ * page and wrong on a block: a chip near the top pushed the list off the
+ * screen, and the models made the list long enough for that to happen on most
+ * blocks. So it opens on whichever side has more room, never asks for more
+ * than that side has, and scrolls inside it. The floor keeps something to
+ * scroll when a chip has almost no room either way.
+ */
+export interface Room {
+  readonly side: "above" | "below";
+  readonly room: number;
+  readonly from: "left" | "right";
+}
+
+export function roomFor(
+  anchor: { readonly top: number; readonly bottom: number; readonly left: number },
+  width: number,
+  viewport: { readonly width: number; readonly height: number },
+  margin = 8,
+  least = 120,
+): Room {
+  const above = anchor.top - margin;
+  const below = viewport.height - anchor.bottom - margin;
+  const side = below > above ? "below" : "above";
+  return {
+    side,
+    room: Math.max(least, Math.floor(side === "below" ? below : above)),
+    // Left-aligned to the button unless that would run past the right edge.
+    from: anchor.left + width > viewport.width - margin ? "right" : "left",
+  };
 }

@@ -86,7 +86,8 @@ export const jsonInit = (method: string, body?: unknown): RequestInit => ({
   ...(body === undefined ? {} : { body: JSON.stringify(body) }),
 });
 
-export type StateCollection = "workspaces" | "processes";
+/** The record kinds: the shell's working state, and each extension's instance settings under its id (`BO_0264_015`). */
+export type StateCollection = "workspaces" | "processes" | "settings";
 
 /** The per-instance state record: one JSON object per id. */
 export const kernelState = {
@@ -169,6 +170,13 @@ export interface PartySignIn {
 
 export interface PartyChange {
   readonly kind?: string;
+  /**
+   * The extension that declared this party. The kernel keeps it on the record
+   * so a run's tool reaches the party its own extension declared and no
+   * other's; only this side knows it, since the registry is where a
+   * contribution's owner is recorded. BO_0276_002
+   */
+  readonly extension?: string;
   readonly configuration?: Readonly<Record<string, string | null>>;
   readonly secrets?: Readonly<Record<string, string | null>>;
   readonly authorization?: PartyAuthorization;

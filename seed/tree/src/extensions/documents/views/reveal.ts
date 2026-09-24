@@ -66,10 +66,18 @@ export function showArea(
   target: RevealTarget,
   passage: PaintedPassage | null,
 ): () => void {
+  // Taking a reference back shows nothing. BO_0263_007
+  if (target.kind === "takeBack") return () => undefined;
+  // A block's row, or the proposal, retired or discarded row a reference
+  // stands on. BO_0263_007
   const row =
     Array.from(root.querySelectorAll<HTMLElement>("[data-block-id]")).find(
       (candidate) => candidate.getAttribute("data-block-id") === target.blockId,
-    ) ?? null;
+    ) ??
+    Array.from(root.querySelectorAll<HTMLElement>("[data-mark-row]")).find(
+      (candidate) => candidate.getAttribute("data-mark-row") === target.blockId,
+    ) ??
+    null;
   if (row === null) return () => undefined;
   if (typeof row.scrollIntoView === "function")
     row.scrollIntoView({ block: "center" });

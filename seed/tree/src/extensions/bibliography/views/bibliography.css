@@ -1,0 +1,280 @@
+/* The bibliography's surfaces (`BO_0291_019`). Every colour is a token. */
+
+.bib-search {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem 0.5rem;
+}
+
+.bib-search input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+}
+
+.bib-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.bib-row__who {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bib-row__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bib-candidates {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.bib-candidates button {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+}
+
+.bib-preview {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-raised);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.bib-preview__actions,
+.bib-work__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.bib-work {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  font-family: var(--font-ui);
+  color: var(--text);
+}
+
+.bib-work__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.75rem 1rem;
+}
+
+.bib-work__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.bib-work__field--wide {
+  grid-column: 1 / -1;
+}
+
+.bib-work__field > span {
+  font-size: 0.8em;
+  color: var(--text-muted);
+}
+
+.bib-work__field input,
+.bib-work__field select,
+.bib-work__field textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.35rem 0.5rem;
+  min-width: 0;
+}
+
+.bib-work__field textarea {
+  min-height: 4.5rem;
+  resize: vertical;
+}
+
+.bib-work__file {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 0.75rem;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+}
+
+.bib-work__notice {
+  color: var(--error);
+  margin: 0;
+}
+
+.bib-work__saved {
+  color: var(--success);
+  margin: 0;
+}
+
+.bib-work__fetched {
+  color: var(--text-muted);
+  font-size: 0.85em;
+  margin: 0;
+}
+
+.bib-button {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+}
+
+.bib-button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--canvas);
+}
+
+.bib-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (max-width: 40rem) {
+  .bib-work__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* A document's reference list (BO_0291_027), after its last block. */
+.bib-references {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-narrative, var(--font-ui));
+  color: var(--text);
+}
+
+.bib-references__heading {
+  font-size: 1rem;
+  margin: 0 0 0.75rem;
+}
+
+.bib-references__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.bib-references__entry {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr);
+  gap: 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+.bib-references__label {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* An author-date list has no labels: one column, a hanging indent. */
+.bib-references__entry--hanging {
+  grid-template-columns: minmax(0, 1fr);
+  padding-left: 2rem;
+  text-indent: -2rem;
+}
+
+.bib-settings {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 28rem;
+}
+
+/* Cited by: each citing document, pressed to open it, with the words of the
+   blocks that cite the source beneath it. BO_0291_023 */
+.bib-cited-by {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+
+.bib-cited-by__heading {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.bib-cited-by__list,
+.bib-cited-by__blocks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.bib-cited-by__title {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: start;
+}
+
+.bib-cited-by__title:hover,
+.bib-cited-by__title:focus-visible {
+  text-decoration: underline;
+}
+
+.bib-cited-by__blocks {
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+  padding-inline-start: 0.75rem;
+  border-inline-start: 2px solid var(--border);
+}
+
+.bib-cited-by__words {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+

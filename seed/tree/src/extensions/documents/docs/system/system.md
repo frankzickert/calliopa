@@ -10,6 +10,7 @@
 
 - `category: bundled`: every release carries it, and it is part of the Apache-2.0 body the distribution ships.
 - It is not in the kernel's code-registered required set, so an instance may switch it off. A tree without it builds and serves: the Documents category is absent and a tab that remembers a document opens in the frame's `context` placeholder, which is what makes view resolution total.
+- The Documents section stands under the *Docs* icon in the shell's icon column, Phosphor `files` (`ui.shell`'s `CA_0056`, [Contribution Contract](../../../../../docs/system/workspace/contribution-contract.md); `CA_0056_009`).
 - It declares no dependency. `publishing` and `calliopa-video` declare one on it, because a prose item and an episode's body are documents.
 
 ## Areas

@@ -1,0 +1,24 @@
+# The stack's own search engine: SearXNG with the settings the search service
+# needs and nothing else. `docs/system/search-service.md` carries the
+# contract; this file is where the engine side of it is enforced. BO_0281_001
+#
+# Everything not named here is SearXNG's default, the default engines
+# included. The secret key is set by the front at every start (SEARXNG_SECRET),
+# so none is written here.
+use_default_settings: true
+
+server:
+  # The front is the only caller, on the loopback address, and it is the one
+  # that tells the kernel from anyone else; a limiter here would count the
+  # kernel as one abusive client.
+  limiter: false
+  public_instance: false
+  # Nothing renders the engine's pages, so nothing needs images proxied.
+  image_proxy: false
+
+search:
+  # The JSON answer is what the kernel forwards to the extension; SearXNG
+  # refuses it unless it is listed.
+  formats:
+    - html
+    - json

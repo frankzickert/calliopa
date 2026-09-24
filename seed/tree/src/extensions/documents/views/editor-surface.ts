@@ -27,6 +27,9 @@ export interface EditorSurface {
   /** The block the reader is editing, and the one they focused. */
   readonly activeBlockId: string | null;
   readonly focusedBlockId: string | null;
+  /** The proposal the reader turned to, when it is a proposal rather than a
+   * block. Exclusive with `focusedBlockId`. DO_0006_004 */
+  readonly focusedItemId: string | null;
   /** The tab the editor is mounted in, for a decoration that pushes a route. */
   readonly tab: Tab;
   /** The proposals staged against the document, as the editor read them: a

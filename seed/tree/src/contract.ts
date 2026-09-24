@@ -1,8 +1,11 @@
 import type { Component, QRL } from "@builder.io/qwik";
 import type { RequestEvent } from "@builder.io/qwik-city";
 import type { DragOperation } from "~/lib/drag";
+import type { IconName } from "~/components/shell/icons";
 import type { ViewProps } from "~/components/shell/view-host";
 import type { PartyAuthorization, PartyTest } from "~/server/kernel/client";
+import type { Run } from "~/lib/runs";
+import type { GraphOutcome } from "~/server/outcome";
 
 /**
  * What an extension present in the tree may contribute to the shell, as typed
@@ -55,6 +58,11 @@ export interface LibraryItem {
    * `hermes`, `provider`) or null for a person, `name` the words shown.
    * BO_0251_012 */
   readonly proposedBy?: { readonly agent: string | null; readonly name: string };
+  /** The label is the name the item was minted with rather than one a person
+   * wrote, so the frame draws it muted wherever it names the item — the row
+   * and the tab. The contributing extension decides, because the words are
+   * its own; the frame never recognises them. DO_0012_007 */
+  readonly unnamed?: boolean;
 }
 
 /** What a section contributed as a component receives from the shell. */
@@ -112,8 +120,35 @@ export interface ViewContribution {
   readonly component: Component<ViewProps>;
 }
 
+/**
+ * A section of the settings tab an extension contributes: its own settings,
+ * drawn below the tab's sections while the extension is active and gone with
+ * it. The component reads and writes through the extension's own routes.
+ * BO_0264_016
+ */
+export interface SettingsSection {
+  readonly name: string;
+  readonly title: string;
+  readonly component: Component<Record<string, never>>;
+}
+
+/**
+ * The one icon an extension's library sections stand under in the library's
+ * icon column: its title, named on the button and shown as its tooltip, and
+ * a Phosphor name from the shell's icon table. Required of an extension that
+ * contributes sections; the registry refuses one without it. CA_0056_008
+ */
+export interface LibraryIcon {
+  readonly title: string;
+  readonly name: IconName;
+}
+
 export interface ClientContributions {
   readonly sections?: readonly LibrarySection[];
+  /** The icon the sections stand under. CA_0056_008 */
+  readonly icon?: LibraryIcon;
+  /** Sections of the settings tab. BO_0264_016 */
+  readonly settingsSections?: readonly SettingsSection[];
   /**
    * Tab kinds by bare name, each carrying the view it opens with and that
    * view's component in one value, so a kind cannot enter the registry without
@@ -132,6 +167,78 @@ export interface ClientContributions {
   readonly views?: readonly ViewContribution[];
 }
 
+/**
+ * One sender in the agent menu: what it is called, the icon it wears, and
+ * whether it can be chosen. `selectable: false` keeps it listed with the reason
+ * it cannot run, as an unconfigured runtime is listed. BO_0273_035
+ */
+/**
+ * One axis a sender offers before it is sent to (`BO_0279_007`).
+ *
+ * What a model makes is not only who makes it: a picture has a shape and a
+ * quality, and which values it takes are the model's own. A sender that has
+ * none draws as it always did.
+ */
+export interface SenderAxis {
+  /** The service's own name for it, e.g. `aspect-ratio`; sent back unchanged. */
+  readonly axis: string;
+  /** What the reader sees on the control, e.g. *Ratio*. */
+  readonly label: string;
+  readonly values: readonly string[];
+  /** Where the control starts, or null to start on nothing chosen. */
+  readonly start: string | null;
+}
+
+export interface SenderDescriptor {
+  readonly id: string;
+  readonly label: string;
+  readonly icon: IconName;
+  readonly selectable: boolean;
+  readonly reason: string | null;
+  /**
+   * What this sender lets a person choose before the press. Absent or empty
+   * draws no controls, which is every sender that is not a model.
+   * BO_0279_007
+   */
+  readonly options?: readonly SenderAxis[];
+}
+
+/** A command sent to a contributed sender. BO_0273_035 */
+export interface SendRequest {
+  readonly workspaceId: string;
+  readonly sender: string;
+  readonly documentId: string;
+  /** The block the command was written in, whose words are the command. */
+  readonly blockId: string;
+  /**
+   * What the person chose on the sender's axes, by axis name. An axis absent
+   * from here was not chosen, and what that means is the sender's business —
+   * for a model it means the vendor's own default. BO_0279_007
+   */
+  readonly options?: Readonly<Record<string, string>>;
+}
+
+/**
+ * What a send would cost, asked before the press (`BO_0279_009`).
+ *
+ * Free: a quote is the generator's own dry run and spends nothing. Answered as
+ * words rather than a number, because what a press costs is the vendor's own
+ * unit — credits here, something else elsewhere — and the shell only shows it.
+ */
+export interface SendQuote {
+  readonly ok: boolean;
+  /** What it would cost, in the vendor's own words, e.g. `11 credits`. */
+  readonly cost?: string;
+  readonly error?: string;
+}
+
+/** What a sender answers: a process to watch, or why it did nothing. */
+export interface SendOutcome {
+  readonly ok: boolean;
+  readonly processId?: string;
+  readonly error?: string;
+}
+
 export type ApiMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
 
 /**
@@ -143,6 +250,12 @@ export type ApiMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
 export interface ApiRoute {
   readonly method: ApiMethod;
   readonly path: string;
+  /**
+   * A route the kernel calls — a trigger, a context, a tool — answers only a
+   * request carrying the kernel's callback secret, and no browser's.
+   * BO_0264_002
+   */
+  readonly kernelCallback?: boolean;
   readonly handle: (
     event: RequestEvent,
     params: Readonly<Record<string, string>>,
@@ -197,6 +310,34 @@ export interface PartyDescriptor {
   readonly fixed?: Readonly<Record<string, string>>;
 }
 
+/**
+ * What a citation resolver is asked (`BO_0291_030`): a document's citations
+ * in reading order, the cited works in the order the document's read numbers
+ * them — so a numeric style numbers as the read does — and the document's own
+ * style when it names one.
+ */
+export interface CitationRequest {
+  readonly documentId: string;
+  readonly style?: string;
+  readonly order: readonly string[];
+  readonly cited: readonly { readonly work: string; readonly locator?: string }[];
+}
+
+/** What it answers: each citation's in-text label, keyed by `citationKey` of `~/lib/runs`. */
+export interface CitationAnswer {
+  readonly labels: Readonly<Record<string, string>>;
+  /** The style the labels are in, the instance's default, and the styles a
+   * document may choose by id and name, so the document's control lists them
+   * without knowing them itself. BO_0291_037 */
+  readonly styles?: CitationStyles;
+}
+
+export interface CitationStyles {
+  readonly applied: string;
+  readonly instanceDefault: string;
+  readonly offered: readonly { readonly id: string; readonly name: string }[];
+}
+
 export interface ServerContributions {
   /**
    * The route-loader readers by section name. An item section's reader answers
@@ -206,6 +347,13 @@ export interface ServerContributions {
    */
   readonly readers?: Readonly<Record<string, () => Promise<unknown>>>;
   readonly routes?: readonly ApiRoute[];
+  /**
+   * How a document's citations read in its style (`BO_0291_030`): asked by
+   * `documents`' read, so the labels arrive with the document and nothing
+   * re-flows. At most one extension answers; with none, a citation is drawn
+   * as its number.
+   */
+  readonly citations?: (request: CitationRequest) => Promise<CitationAnswer>;
   readonly parties?: readonly PartyDescriptor[];
   /**
    * A party roster read at runtime, for parties that are data rather than
@@ -217,6 +365,35 @@ export interface ServerContributions {
    * that read. CA_0049_001
    */
   readonly partyRoster?: () => Promise<readonly PartyDescriptor[]>;
+  /**
+   * Senders this extension offers beside the agents (`BO_0273_035`).
+   *
+   * A sender stands in the agent menu and a command is sent to it the way a
+   * command is sent to an agent: the press on *Send* is the whole gesture, and
+   * what the sender does with the block is its own business. The media
+   * extension offers one per model it can make a picture with.
+   *
+   * A roster read at runtime, like `partyRoster`, because which senders exist
+   * depends on what is signed in and what the owner offers. Ids are namespaced
+   * by the contributing extension; one outside its namespace is dropped rather
+   * than shadowing an agent. A roster that throws contributes none.
+   */
+  readonly senders?: () => Promise<readonly SenderDescriptor[]>;
+  /**
+   * What a command sent to one of this extension's senders would cost, asked
+   * as the reader changes what they chose and never as part of a press. It
+   * spends nothing; an extension that cannot say answers `ok: false` and the
+   * shell shows nothing rather than a guess. BO_0279_009
+   */
+  readonly quote?: (request: SendRequest) => Promise<SendQuote>;
+  /**
+   * What happens when a command is sent to one of this extension's senders.
+   * The frame hands over the sender, the block and the workspace, and the
+   * extension answers a process to watch — as an agent run answers one — or a
+   * refusal in words. It is reached only for a sender this extension
+   * contributed. `BO_0273_035`
+   */
+  readonly send?: (request: SendRequest) => Promise<SendOutcome>;
   /**
    * What a run staged into this extension's content, for the run detail the
    * frame shows. The frame knows a run has a proposal group; what a group
@@ -234,6 +411,14 @@ export interface ServerContributions {
    * rows unmarked. BO_0256_008
    */
   readonly itemGlyphs?: (kind: string) => Promise<Readonly<Record<string, LibraryGlyph>>>;
+  /**
+   * How a child of each of this extension's target kinds is made and read,
+   * keyed by the bare kind the registry qualifies. Focused work is the
+   * shell's capability and the vocabulary is the extension's, so the shell
+   * asks rather than writing `document`, `text` and `contains` itself; a kind
+   * contributing none opens no focused work. CA_0065_001
+   */
+  readonly focusedWork?: Readonly<Record<string, FocusedWorkContribution>>;
 }
 
 /** One thing a run proposed into, as the run detail lists it: what to open,
@@ -245,6 +430,62 @@ export interface ProposedTarget {
   readonly kind: string;
   readonly title: string;
   readonly unanswered: number;
+}
+
+/**
+ * The child a block would open as, as the extension owning the target kind
+ * plans it: the statements the shell commits inside its own script, so the
+ * child and the `focuses` edge that makes it focused work are one write.
+ * Nothing here is committed by the extension. CA_0065_001
+ */
+export interface ChildPlan {
+  /** The child's identity, which the shell relates the block to. */
+  readonly itemId: string;
+  readonly title: string;
+  /** The statements creating the child, folded into the shell's script. */
+  readonly statements: readonly string[];
+  /** The parameters those statements read, merged into the shell's own. */
+  readonly parameters: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * The face a child wears on the block it focuses: what to call it, and the
+ * words it currently says for itself when it says any. What that line looks
+ * like is the view's; what it says is the extension's. CA_0065_005
+ */
+export interface ChildFace {
+  readonly itemId: string;
+  readonly title: string;
+  readonly face: readonly Run[] | null;
+}
+
+/**
+ * How a child of one target kind is made and read, so the shell can open any
+ * block as focused work without writing a vocabulary it does not own.
+ *
+ * Focused work is the frame's capability — it retargets a tab, pushes a route
+ * and lands on a block — but `document`, `text` and `contains` are the
+ * `documents` extension's and only `focuses` is the shell's declaration. So
+ * the extension that contributes a target kind says what a child of it is,
+ * which of its blocks may be opened, what the child is called and what it
+ * says for itself; the shell asks. A kind that contributes none opens no
+ * focused work and the shell's control is not drawn for it. User decision,
+ * 2026-09-23 (`CA_0065_001`).
+ */
+export interface FocusedWorkContribution {
+  /** The node type a child is, which the shell reads the `focuses` edge to. */
+  readonly childType: string;
+  /** The child a block would open as, or the refusal in words. */
+  readonly plan: (input: {
+    readonly targetId: string;
+    readonly blockId: string;
+  }) => Promise<GraphOutcome<ChildPlan>>;
+  /** What each of these children says for itself, for the parents' faces. */
+  readonly faces: (itemIds: readonly string[]) => Promise<GraphOutcome<readonly ChildFace[]>>;
+  /** The blocks a target holds, in reading order. Which blocks a target has
+   * is the extension's knowledge, so the shell asks for them rather than
+   * reading a containment vocabulary it does not own. CA_0065_003 */
+  readonly blocksOf: (targetId: string) => Promise<GraphOutcome<readonly string[]>>;
 }
 
 /**
@@ -263,7 +504,15 @@ export interface LibraryGlyph {
   readonly label: string;
 }
 
-export type BlockPlace = "headline" | "depth" | "below";
+/**
+ * Where a contributed decoration is drawn on a block. `headline`, `depth` and
+ * `below` stand on a block as it is read; `command` stands in the command chip
+ * of the block being edited, between *Attach files* and the chips of what the
+ * command carries, so an extension may offer a control there without the chip
+ * knowing what it is (BO_0273_007); `run` stands beneath a code block's
+ * source, where the extension that runs code draws its send (BO_0289_019).
+ */
+export type BlockPlace = "headline" | "depth" | "below" | "command" | "run";
 
 /** What a decoration is handed: the block it decorates, and whether the
  * reader is editing it. Everything else it reads for itself — the document
@@ -282,15 +531,35 @@ export interface DocumentDecorationProps {
 }
 
 /**
+ * Where a contributed decoration is drawn once on a document rather than on
+ * each block (`BO_0291_031`): `end`, after the last block — where the
+ * bibliography draws a document's reference list. The presenting view draws
+ * the place and knows nothing of what fills it.
+ */
+export type DocumentPlace = "end";
+
+/** What a document place is handed: the document, and the data revision it
+ * was read at, so a place that reads for itself reads again when the
+ * document changes. */
+export interface DocumentPlaceProps {
+  readonly documentId: string;
+  readonly dataRevision?: number | undefined;
+}
+
+/**
  * One extension's decorations for one bare kind. The provider is mounted once
  * around the presented content, so a decoration set reads a document once and
  * shares it through its own context rather than fetching per block; the places
  * are drawn on every block. Both are ordinary components the build resolves,
- * like a section's.
+ * like a section's. Several extensions may provide for one kind: the
+ * presenting view nests their providers in extension order (BO_0289_019).
  */
 export interface Decorations {
   readonly provider?: Component<DocumentDecorationProps>;
   readonly places: Readonly<Partial<Record<BlockPlace, Component<BlockDecorationProps>>>>;
+  /** Places drawn once on the document, merged in extension order as the
+   * block places are. BO_0291_031 */
+  readonly documentPlaces?: Readonly<Partial<Record<DocumentPlace, Component<DocumentPlaceProps>>>>;
 }
 
 /** Typing helpers, so an entrypoint's export is checked against the contract. */

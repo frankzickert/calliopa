@@ -1,6 +1,140 @@
 {
   "members": [
     {
+      "extension": "bibliography",
+      "nodeId": "node:work",
+      "type": "ext.blocktype",
+      "content": {
+        "id": "work",
+        "name": "work",
+        "optionalProperties": [
+          "author",
+          "editor",
+          "issued",
+          "container-title",
+          "volume",
+          "issue",
+          "page",
+          "publisher",
+          "publisher-place",
+          "DOI",
+          "ISBN",
+          "URL",
+          "accessed",
+          "abstract",
+          "tags",
+          "fetched",
+          "file",
+          "containerTitle",
+          "publisherPlace"
+        ],
+        "permittedChildTypes": [],
+        "permittedValues": {
+          "kind": [
+            "article-journal",
+            "book",
+            "chapter",
+            "paper-conference",
+            "thesis",
+            "report",
+            "webpage",
+            "post",
+            "dataset",
+            "software",
+            "document"
+          ]
+        },
+        "properties": {
+          "containerTitle": "CSL's container-title — the journal, book or site the work appears in — stored in camel case because the Cypher dialect has no quoted identifiers; container-title itself cannot be written",
+          "fetched": "what answered the record, when, and from which identifier",
+          "file": "the work's own file, a PDF, as the core's blob reference with its mediaType",
+          "id": "the work's identity, a UUID the shell mints; the node id is node:<id>",
+          "kind": "the CSL type of the work: article-journal, book, chapter, paper-conference, thesis, report, webpage, post, dataset, software or document",
+          "publisherPlace": "CSL's publisher-place, stored in camel case for the same reason",
+          "title": "the work's title"
+        },
+        "requiredProperties": [
+          "id",
+          "title",
+          "kind"
+        ],
+        "semantics": "A work of the instance's bibliography — a bibliographic work, the cited thing — a root node with no parent and no block flag, so it is never offered among the kinds a document's block may take; its record in CSL-JSON shape, the shape a DOI resolves to, the engine exports and the citation processor consumes. Declared by bibliography under BO_0291; named work rather than source because node:source is already relations' relation type (user decision, 2026-09-23). The identifier — DOI, ISBN or URL — is the identity for duplicates. A citation is a run of a text block carrying cite with the work's identity and no text of its own, drawn as the work's number, which the document read derives and never stores. The record's two hyphenated CSL keys are stored as containerTitle and publisherPlace, the dialect having no quoted identifiers; the extension maps them at its write and its read.",
+        "singleOpenCandidate": true
+      }
+    },
+    {
+      "extension": "bibliography",
+      "nodeId": "node:bibliography.citing",
+      "type": "ext.skill",
+      "content": {
+        "conventions": {
+          "citeByRun": "A citation is a run of the sentence carrying cite: {work: <workId>, locator?} and empty text, proposed with propose_document_changes like any change to the sentence. Never write the number: the document's read derives it.",
+          "fetchDontDraft": "A work that is not in the bibliography is fetched with fetch_record — its DOI, ISBN, PMID, arXiv id or an address — and proposed with propose_work. Never draft a record from memory: a wrong author or year in a reference is worse than no reference.",
+          "locatorWhenItHelps": "Give a locator — p. 12, §3, fig. 2 — when the claim rests on one place in a long work; leave it out otherwise.",
+          "oneWorkOnce": "propose_work refuses a work the bibliography already holds and names it: cite that one.",
+          "readBeforeCiting": "Read the bibliography with read_works before citing, and cite by the workId it answers. A work cited twice keeps its number."
+        },
+        "goal": "Cite what a claim rests on, from the instance's bibliography, where a reader would want to follow it; add a work to the bibliography only from a record you fetched.",
+        "id": "bibliography.citing",
+        "outputContract": "A conclusion naming the works you cited and any you proposed; zero or more works staged into the run's group; the sentences carrying their cite runs staged beside them.",
+        "permittedOperations": "read_works to read the bibliography; fetch_record, the kernel's, to fetch a work's record; propose_work to stage a work into your group; propose_document_changes to stage a sentence carrying a cite run. Nothing you hold writes truth.",
+        "preconditions": [
+          "The bibliography extension is active: read_works answers. If it does not, say so and cite nothing.",
+          "You can say which sentence the work supports; a citation stands where a claim does."
+        ]
+      }
+    },
+    {
+      "extension": "bibliography",
+      "nodeId": "node:bibliography.propose_work",
+      "type": "ext.tool",
+      "content": {
+        "description": "Propose a work to the instance's bibliography: the record fetch_record answered for it, as it came — one CSL-JSON item — and what you fetched it from. The work is staged into your proposal group, never written as truth: the person accepts it with the rest. A work sharing a DOI, an ISBN or an address with one the bibliography already holds is refused, naming that work: cite it instead. Fetch the record first; do not draft one from memory. Once proposed, cite it by the workId this answers.",
+        "id": "bibliography.propose_work",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "description": "the identifier or address you fetched it from",
+              "type": "string"
+            },
+            "record": {
+              "additionalProperties": true,
+              "description": "one CSL-JSON item as fetch_record answered it",
+              "type": "object"
+            }
+          },
+          "required": [
+            "record"
+          ],
+          "type": "object"
+        },
+        "name": "propose_work",
+        "route": "kernel/tools/propose_work"
+      }
+    },
+    {
+      "extension": "bibliography",
+      "nodeId": "node:bibliography.read_works",
+      "type": "ext.tool",
+      "content": {
+        "description": "The instance's bibliography at your pin: each work's identity, a line saying who, when and what, its record but for the abstract, and whether it holds a file, narrowed by every word of an optional query. Read it before citing: a citation names a work by the workId this answers. It stages nothing.",
+        "id": "bibliography.read_works",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "query": {
+              "description": "words to narrow by: an author, a title word, a year, a DOI, a tag",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "name": "read_works",
+        "route": "kernel/tools/read_works"
+      }
+    },
+    {
       "extension": "calliopa-base",
       "nodeId": "node:calliopa-base.working",
       "type": "ext.skill",
@@ -8,10 +142,11 @@
         "conventions": {
           "atomicProposal": "One extension change is one proposal group: every staged revision and relation belongs to the same group and is accepted or rejected as a unit. Never trickle per-file proposals; a half-applied extension state must never be materializable.",
           "humanWritesCostAConfirmation": "Every human-class write from the shell parks at the kernel bridge and waits for a confirmation on the kernel's own origin — no human mutation travels from the app origin to CCGW. Budget one cross-origin confirmation per write. That is proportionate for occasional truth like creating a channel and disproportionate for continuous editing, so a surface that writes on every keystroke needs a different shape than one that writes on a button.",
+          "oneOpenProposalPerBlock": "A block carries at most one open proposal: every block type declares singleOpenCandidate, so a candidate of a block another open group already holds a candidate of is refused by the core — there is no second candidate to stage beside the first. Work bearing on such a block builds on the candidate that stands, staged into that group as a refinement (the document tools' refines; conventions.openProposals of ui.shell.documents), rather than opening a competing one, so the person answers once. Nothing here answers a proposal: accepting and rejecting stay the person's (proofsAreNotProposals). (BO_0271)",
           "proofsAreNotProposals": "Never stage a proposal whose intended outcome is rejection. A proof-only group is indistinguishable from a real one at the review surface — the rationale is rendered as ordinary text — so after a run of proposals that all deserved acceptance, one that did not will be accepted by the same motion. Construct demonstrations so the refusal is the whole proof and stop there: a refused mutation stages nothing and opens no group. Acceptance is the one non-delegable human action in the architecture and its entire value is the attention behind it, so anything that produces frequent near-identical almost-always-correct proposals is spending that attention down.",
           "valuesTravelAsParameters": "How a statement says values, which the grammar will not let you guess:\n- Every value beyond a scalar travels beside the statement in the tool call's parameters field, which is one JSON object written as text — for example parameters: \"{\\\"bid\\\": \\\"art-x.b1\\\", \\\"runs\\\": [{\\\"text\\\": \\\"...\\\"}]}\". The statement writes $name where a value belongs; lists and objects have no literal form inside the statement itself, and runs: [{text: ...}] inline is a parse error every time.\n- Every $name in the statement must have a key in that JSON object. An empty parameters value beside a parameterized statement is always wrong, and resending a refused statement without filling it changes nothing.\n- A script is one or more statements separated by semicolons; CREATE ... RELATE ... in one breath is a parse error at RELATE. Aliases scope per statement but parameters are request-global, so one parameters object serves the whole script: the canonical block write is CREATE (n:Text {id: $bid, runs: $runs, order: $order}); RELATE childRef -[r:CONTAINS]-> parentRef, with bid, runs, order, childRef and parentRef all keys of the one JSON object.\n- RELATE endpoint refs resolve from parameters — <ref>NodeId first, then <ref> — and those values carry the node: prefix (childRef: \"node:art-x.b1\"), even though the id property inside CREATE content is bare. The ref names an existing node; the id property mints one.\n- When syntax is uncertain, calliopa_explain compiles a statement without executing it. Explain and correct rather than retrying a refusal unchanged — the diagnostics name what they want.",
           "whereRequirementsLive": "An extension's requirements and open work live in its own docs/ members (docs/system/**/*.md under the live-line protocol), read through calliopa_query like its code. An extension's changes are its own docs/changes/ members (BO_0254): docs/changes/<PREFIX>_NNNN_TYPE_<short-name>.md in its subtree, finished ones under docs/changes/completed/, each carrying its status in a Status: line from idea, draft, ready, wip, completed, rejected. They are written and revised the way every other docs member is — from a checkout, in the proposal that carries the code — and rendered read-only in the shell's Extensions section. A run working from the composer holds no checkout and so writes none. A run that changes an extension's behaviour also updates its docs in the same proposal group and keeps its change document's Status: line honest — wip when it claims ready work, completed when the work is done; only a person establishes draft or ready, and acceptance is what establishes any status. (BO_0201, BO_0254)",
-          "workVocabulary": "Documents carry a decision vocabulary (BO_0244): a text block may have a kind, asserts claims, and reason-bearing relations connect claims. Two rules, whichever tool writes them: a relation is proposed with a reason naming the condition that connects its ends — never that they seem related — and with origin inferred or derived, since a run never declares; and a claim is drafted before a relation is anchored on a block that asserts none, which the relate item does for you when its end names a block with the claim's words. Propose these through propose_document_changes (items kind, claim, relate, reason, derive), never by statement, so review sees them as the editor would have written them.",
+          "workVocabulary": "Documents carry a decision vocabulary (BO_0244): a text block may have a kind, and reason-bearing relations connect blocks. Two rules, whichever tool writes them: a relation is proposed with a reason naming the condition that connects its ends — never that they seem related — and with origin inferred or derived, since a run never declares; and each end names a block by blockId, of this document or another, never a retired or discarded one, and never the same block twice. A relation anchored a claim until BO_0288; claim and asserts are calliopa-refine's vocabulary now and no kernel tool reads or writes them. Propose these through propose_document_changes (items kind, relate, reason, derive), never by statement, so review sees them as the editor would have written them.",
           "writeShapeFollowsFrequency": "Choose the write path by how often the operation happens, not by what it touches. Continuous editing stages candidates with no confirmation and one deliberate act to establish them; an occasional deliberate act — creating a channel, filing something into one — takes the confirmation directly, where the ceremony is proportionate. Both are the same architecture; only the frequency differs, and reaching for one shape everywhere makes typing intolerable or truth too cheap."
         },
         "goal": "Stage work into Calliopa's graph as one reviewable proposal, whatever the reader's intention was.",
@@ -47,18 +182,19 @@
       "type": "ext.skill",
       "content": {
         "conventions": {
-          "authoringRoutes": "Two routes produce the same graph shape; pick one per change and never mix them. (1) Direct CCGW staging — what the examples below show: you write CREATE/SET and stage every partOf and dependsOn relation yourself. (2) The materializer round-trip — kernel checkout into a working tree, edit files, kernel commit — which derives partOf from the tree layout and dependsOn from the manifest dependencies map, so you never write a relation by hand. Human and agent authoring default to the materializer route — the kernel workspace tools are that route for a run; a Block that does not materialize (ext.skill, ext.settings, ext.migration, ext.blocktype, ext.relationtype, ext.intention) is reached by route 1, or carried by a members sidecar on kernel commit --members.",
+          "authoringRoutes": "Two routes produce the same graph shape; pick one per change and never mix them. (1) Direct CCGW staging — what the examples below show: you write CREATE/SET and stage every partOf and dependsOn relation yourself. (2) The materializer round-trip — checkout into a working tree, edit files, commit — which derives partOf from the tree layout and dependsOn from the manifest dependencies map, so you never write a relation by hand. Route 2 is the default for human and agent authoring alike, and the kernel workspace tools ARE route 2 for a run: calliopa_workspace_checkout, _list, _read, _edit, _create, _delete, _build, _check, _test, _diff and _commit work a real tree on the kernel and stage its whole diff into your group. A Block that does not materialize (ext.skill, ext.settings, ext.migration, ext.blocktype, ext.relationtype, ext.intention) is reached by route 1, or carried by a members sidecar on kernel commit --members.",
           "binaryAssets": "Binary files travel: a binary in the diff becomes an ext.source Block whose code is a blob reference, the bytes uploaded through PUT /v1/blobs before the referencing mutation and hash-verified. The shell's favicon, PNGs and font ship this way.",
           "breakingChanges": "Tightening an established definition is gated; loosening it is free. Adding a required property, adding a unique property already duplicated, narrowing permitted children, enabling singleOpenCandidate, renaming, or removing a definition are breaking *when the type has established content* — and only then, so the same change is refused on a populated type and permitted on an empty one. A breaking change needs an ext.migration Block in the same group naming the types it covers, with a rationale and the operations that transform existing content travelling alongside; its authority is the human review of that group, not machinery. Removing a required property needs none, because requiring less invalidates nothing.",
           "capabilities": "The manifest capabilities object carries renders — the surface kinds the extension renders, as plural nouns: routes, views — and ccgwScopes, the CCGW operations its skills need, absent when the extension reads nothing. Nothing validates the shape, so a misspelled capabilities key builds clean and is never noticed.",
           "checkWhereEnforcementRuns": "A declaration is only enforced where something reads it. permittedChildTypes is honoured by the pages layer, and the pages layer is mounted in the production cell rather than the dogfood app — so in a dogfood deployment the declaration is real, resolved, and unenforced. Before relying on any declared constraint, find the code that acts on it and confirm that code is reachable from where the writes happen. When it is not, the surface owns the constraint and the gap belongs in the record.",
+          "codeRun": "A run that changes an extension names the change document it works on, and everything follows from that: the run stages into that change's own proposal group rather than one minted for the run, so however many runs a change takes it arrives as ONE proposal for the person to answer; and the build tree belongs to that group, so a second run finds the first's tree with its dependencies already installed. The order: read the extension's docs/ and the change document the run names — the requirements live there, not in the command; calliopa_workspace_checkout; read and edit with the workspace tools; then calliopa_workspace_build, calliopa_workspace_check and calliopa_workspace_test until all three are green, because the person does not read your diff and the green gates plus your own account of what you did are most of what they judge the change by; then calliopa_workspace_commit with a rationale. Write the docs and the change document's Status: line in the SAME commit as the code: a proposal that changes behaviour and leaves the docs behind is incomplete and is not accepted as complete.",
           "crossExtensionImports": "The shell imports its extensions and an extension may import the shell's lib and server modules by the ~/ alias; the tree is one pnpm package, so every import resolves and builds. Nothing enforces the manifest's dependsOn against those imports — declare what you import anyway, because the dependency edge is what makes the relationship traversable in the graph.",
           "declaredBaseline": "On the direct CCGW route the mutation must carry dataRevision — the pin the change was computed against. An auto-created proposal group records it as its baseDataRevision, and acceptance conflict-checks against that base. Omit it and the group bases at 0, so acceptance refuses with mutation_resolution_failed conflicts with truth that moved past its base revision 0 — a refusal that names a conflict but is really a missing baseline, and that only appears at acceptance, long after staging looked successful. The materializer route passes the checkout pin for you, which is why this trap belongs to route 1 alone.",
           "definitionShape": "Definition fields are data, not prose. In an ext.blocktype or ext.relationtype Block, requiredProperties, uniqueProperties, permittedChildTypes and runProperties are lists of property-name strings; block and singleOpenCandidate are booleans. A string where a list belongs parses to nothing at all — uniqueProperties: \"name among active channels\" declares no unique property and the rule silently never fires, which is far worse than a refusal because the definition still reads correctly to a human. Put the qualifier in a separate descriptive field, never inside the declaration. The same rule governs the manifest: dependencies is a map of extension id to semver range, capabilities is an object, and category is exactly bundled or individual.",
           "dependencyReferences": "A dependency on another extension is a dependsOn relation from the depending manifest to the dependency manifest, with the semver range recorded in the depending manifest dependencies map keyed by extension id — the range is content because a relation stores no properties, and the relation is what makes the dependency traversable. On the materializer route kernel commit derives the edge from the map; on the direct route you stage it. A dependencies entry naming an extension with no manifest, established or added by the same change, is refused. Two extensions added together may depend on each other. The range is checked twice: the registry scan fails a build whose tree holds a version outside a declared range (dependency_out_of_range), and the kernel refuses a version flip or an activation that would serve one before writing it (BO_0219). A version is the manifest version label at the subtree's last established state under it: bump version when you want a state of the subtree to be a version a person can serve from the extension view; two revisions under one label are one version, its last state.",
           "deploymentIsSeparate": "Acceptance and deployment are two acts. Accepting a proposal establishes truth at a new dataRevision; the kernel keeps serving the promoted release pin until kernel pin --to head moves it, building the candidate before it promotes. An accepted extension is therefore not yet a running one, and nothing warns that the two have diverged — verify the surface appears rather than inferring it from acceptance.",
           "derivedFiles": "Files matching *.gen.* are build output, never content, and the commit path skips them. The tree root's node_modules/, dist/ and server/ are the build's derived directories and are never committed either; a nested src/server/ is ordinary source.",
-          "docs": "An extension carries its owner's knowledge beside its code, as ext.source members under docs/: docs/system/<area>/<topic>.md under the live-line protocol — a list item's marker is its commitment (* fixed, - mutable), its checkbox its state ([ ] open, [x] claimed, none is truth), a line beginning 'Functional question' awaits the owner, and a task identifier (XX_0000_000) ties a line to the change that made it true. docs/system/system.md's Purpose section is what the extension is for; README.md is the fallback; the skill's goal is the last resort. An extension's changes are its own docs/changes/ members (BO_0254): docs/changes/<PREFIX>_NNNN_TYPE_<short-name>.md in its subtree, finished ones under docs/changes/completed/, each carrying its status in a Status: line from idea, draft, ready, wip, completed, rejected. They are written and revised the way every other docs member is — from a checkout, in the proposal that carries the code — and rendered read-only in the shell's Extensions section. A run working from the composer holds no checkout and so writes none. The shell renders the system docs as a navigable network for the owner, so a change to an extension is not complete until its docs say so: convert the [x] lines you claimed into truth, add [ ] follow-ups for what remains, keep the identifiers, and write the change document's Status: line in the same proposal. Read the docs before changing the code; they are where the requirements live. (BO_0201, BO_0254) An extension may be started from the shell's Extensions section with a manifest and a docs/system/system.md alone — its purpose under Purpose, version 0.1.0, individual, no entrypoint, nothing to serve (BO_0224); the first topic names the extension's prefix, and the first code arrives through this skill as a proposal. An extension can leave an instance as one file — the kernel's export: its tree — its change documents among it — and its members — and enter another as a proposal the owner accepts, arriving switched off; ext.settings, activation and pins never travel, and the archive's category lands as individual.",
+          "docs": "An extension carries its owner's knowledge beside its code, as ext.source members under docs/: docs/system/<area>/<topic>.md under the live-line protocol — a list item's marker is its commitment (* fixed, - mutable), its checkbox its state ([ ] open, [x] claimed, none is truth), a line beginning 'Functional question' awaits the owner, and a task identifier (XX_0000_000) ties a line to the change that made it true. docs/system/system.md's Purpose section is what the extension is for; README.md is the fallback; the skill's goal is the last resort. An extension's changes are its own docs/changes/ members (BO_0254): docs/changes/<PREFIX>_NNNN_TYPE_<short-name>.md in its subtree, finished ones under docs/changes/completed/, each carrying its status in a Status: line from idea, draft, ready, wip, completed, rejected. They are written and revised the way every other docs member is — from a checkout, in the proposal that carries the code — and rendered read-only in the shell's Extensions section. A run working from a checkout writes them like any other member, in the proposal that carries the code — which is what the workspace tools are for. BO_0254 decided that a change document is not written through the DOCUMENT tools (create_document carries neither change nor status), not that a run holds no checkout. The shell renders the system docs as a navigable network for the owner, so a change to an extension is not complete until its docs say so: convert the [x] lines you claimed into truth, add [ ] follow-ups for what remains, keep the identifiers, and write the change document's Status: line in the same proposal. Read the docs before changing the code; they are where the requirements live. (BO_0201, BO_0254) An extension may be started from the shell's Extensions section with a manifest and a docs/system/system.md alone — its purpose under Purpose, version 0.1.0, individual, no entrypoint, nothing to serve (BO_0224); the first topic names the extension's prefix, and the first code arrives through this skill as a proposal. An extension can leave an instance as one file — the kernel's export: its tree — its change documents among it — and its members — and enter another as a proposal the owner accepts, arriving switched off; ext.settings, activation and pins never travel, and the archive's category lands as individual.",
           "domainVocabulary": "A domain vocabulary is ext.blocktype and ext.relationtype Blocks in an extension of its own, depending on ui.shell — never inside the shell, which stays domain-neutral. Neither Block materializes, so the definitions are staged through direct CCGW or a members sidecar while the extension's sources go through the materializer; that is one rung, two routes, and they must not be mixed inside a single change. Declare uniqueness with uniqueProperties and let the lifecycle carry the qualifier: declared uniqueness is scoped to established revisions, so retiring a node frees its unique values and a \"retired\" or \"archived\" flag kept in content does not, because a flagged node stays established and keeps claiming them.",
           "draftingSurfacesReadThroughTheirDraft": "A surface that stages before establishing has two halves, and the staged half is invisible by design. Staged content is a candidate and does not resolve at head, so every read in a drafting surface must carry the draft’s overlay — the list that finds unoffered drafts, and the read that shows what was just written. Getting this wrong does not produce an error: it produces a dead end, where the author is told to offer a draft they cannot see or reach. Verify that the author can see what they wrote, not only that the write succeeded.",
           "featureExtensions": "A feature extension carries code, not values. The first is settings: src/extensions/settings/ holds the view (settings.tsx), the server modules (server/connections.ts, server/connection-tests.ts, server/adapters.ts) and the feature's migrations (migrations/*.sql, one sequence with the shell's own migrations/ ordered by file name and applied by the tree's serve entry). The shell keeps the thin route files under src/routes/api/settings/ importing from ~/extensions/settings/server/…, and its manifest declares dependencies {\"ui.shell\": \">=0.1.0\"}. Values the feature stores stay where the feature keeps them — the shell's encrypted connection store — never in ext.settings Blocks, which are plain graph content.",
@@ -188,7 +324,8 @@
           "The target extension id is decided and does not collide with an existing ext.manifest id.",
           "Every extension named in the manifest dependencies map has a manifest, established or added by this same change.",
           "The mutation context declares an agent identity scoped to one open proposal group; a skill execution never writes established truth.",
-          "The extension's docs/ members are read before its code is changed: docs/system/**/*.md carry the requirements and open work, and docs/changes/*.md the changes and the status each stands at (BO_0254)."
+          "The extension's docs/ members are read before its code is changed: docs/system/**/*.md carry the requirements and open work, and docs/changes/*.md the changes and the status each stands at (BO_0254).",
+          "For a code change: the change document the run names is read before the code is touched, and the run's group is that change's."
         ]
       }
     },
@@ -240,28 +377,6 @@
     },
     {
       "extension": "documents",
-      "nodeId": "node:claim",
-      "type": "ext.blocktype",
-      "content": {
-        "id": "claim",
-        "name": "claim",
-        "properties": {
-          "id": "the claim's identity, a UUID the shell mints; the node id is node:<id>",
-          "text": "the assertion in canonical words, as runs, distinct from the wording of the block that asserts it"
-        },
-        "requiredProperties": [
-          "id",
-          "text"
-        ],
-        "runProperties": [
-          "text"
-        ],
-        "semantics": "An assertion with an identity of its own, made by exactly one text block through asserts. A block may assert several; relations anchor on claims, never on blocks, so a rewording of the block and a change of its meaning can be told apart (BO_0248 compares a claim's revisions). Not a block: it is not ordered and nothing contains it. Declared by ui.shell under BO_0244_006.",
-        "singleOpenCandidate": true
-      }
-    },
-    {
-      "extension": "documents",
       "nodeId": "node:divider",
       "type": "ext.blocktype",
       "content": {
@@ -296,20 +411,44 @@
           "intention",
           "record",
           "phase",
-          "supersededBy"
+          "supersededBy",
+          "runtime",
+          "authors",
+          "affiliations",
+          "keywords",
+          "venue",
+          "citationStyle"
         ],
         "permittedChildTypes": [
           "text",
-          "divider"
+          "divider",
+          "image",
+          "video",
+          "table",
+          "equation",
+          "sourcecode",
+          "output"
         ],
-        "permittedValues": {},
+        "permittedValues": {
+          "citationStyle": [
+            "ieee",
+            "apa",
+            "chicago-author-date"
+          ]
+        },
         "properties": {
+          "affiliations": "the affiliations the authors name, in order, as words (BO_0293)",
+          "authors": "the manuscript's authors, in order, each {name, affiliations?, email?, corresponding?}: affiliations are indexes into the document's affiliations, corresponding is true for the one to write to (BO_0293)",
+          "citationStyle": "the document's own citation style, by the id of a style the bibliography ships; absent, the document follows the instance's default (BO_0291_037)",
           "id": "the document's identity, a UUID the shell mints; the node id is node:<id>",
           "intention": "the marking a reader gave the whole document: the marks value of an established ext.intention declaration; unconstrained here because intention extensions are declared per instance and a permitted set in this declaration would refuse a marking the instance legitimately declares — the agent bridge refuses an unknown intention at run start",
+          "keywords": "the manuscript's keywords, in order (BO_0293)",
           "phase": "the root's phase (BO_0249): proposed — a safe hypothetical environment, the default when absent; accepted — the wider system may rely on it; superseded — another root replaced it, named in supersededBy. The values are an established RootPhase declaration's, unconstrained here for the reason kind is (BO_0256_002)",
           "record": "the record slot carried over from the previous document type: names a record declaration; no permitted set, per the recorded non-enforcement of BO_0199_002",
+          "runtime": "the runtime the document is connected to for running its code blocks, by its id; absent means none. Written by the kernel as the person's own edit (BO_0289)",
           "supersededBy": "the id of the root that superseded this one; present only with phase superseded, written in the same mutation that accepts the successor (BO_0249)",
-          "title": "the document's title"
+          "title": "the document's title",
+          "venue": "the venue a manuscript of this document is made for, a word the manuscripts extension knows — generic or ieee (BO_0293)"
         },
         "requiredProperties": [
           "id",
@@ -321,84 +460,183 @@
     },
     {
       "extension": "documents",
-      "nodeId": "node:policy",
+      "nodeId": "node:equation",
       "type": "ext.blocktype",
       "content": {
-        "id": "policy",
-        "name": "policy",
-        "optionalProperties": [],
+        "block": true,
+        "id": "equation",
+        "name": "equation",
+        "optionalProperties": [
+          "caption",
+          "numbered",
+          "source"
+        ],
         "permittedChildTypes": [],
-        "permittedValues": {
-          "rule": [
-            "owner"
-          ]
-        },
         "properties": {
-          "id": "the policy's identity; the node id is node:<id>",
-          "rule": "who may establish a root under this policy: owner — the instance's owner and any human account the instance admits, the one rule today (BO_0249_006); named approvers, required reviewers and majorities are each their own change"
+          "caption": "words under the equation, optional",
+          "id": "the block's identity, a UUID the shell mints; the node id is node:<id>",
+          "numbered": "true when the author asked for a number; absent means none. The number itself is never stored: a read numbers the numbered equations in the document's reading order, so an insert, a retire or a restore renumbers the rest with no write",
+          "order": "the block's place among its siblings, the same key text carries",
+          "source": "where the equation came from, keyed by the extension that wrote it, stored and never interpreted here",
+          "tex": "the exact authored TeX the equation is set from, without delimiters; a plain string and deliberately not a run property, since runs canonicalize and a mark over source syntax would mean nothing"
         },
         "requiredProperties": [
           "id",
-          "rule"
+          "order",
+          "tex"
         ],
-        "semantics": "An acceptance policy a root references through an acceptedBy relation (material §27): acceptance policy belongs to the block, never to the route, and a child inherits policy only through an explicit relation. Declared by ui.shell under BO_0249_006 with one permitted rule, owner, so the hook is the relation the material asks for and not a policy engine.",
+        "semantics": "A display equation: one block holding exact TeX, drawn typeset wherever it is read and never as its source. Declared by documents under BO_0290; an equation stays an equation whatever renders it. Inline mathematics is not this type but a run of a text block carrying math: true whose text is its TeX, and a reference to a numbered equation is a run carrying equationRef with the equation's identity and no text of its own — both tolerated by the core's run shape, which requires a text string and nothing else.",
         "singleOpenCandidate": true
       }
     },
     {
       "extension": "documents",
-      "nodeId": "node:relation",
+      "nodeId": "node:image",
       "type": "ext.blocktype",
       "content": {
-        "id": "relation",
-        "name": "relation",
+        "block": true,
+        "id": "image",
+        "name": "image",
         "optionalProperties": [
-          "state"
+          "reference",
+          "alt",
+          "width",
+          "height",
+          "source",
+          "caption",
+          "numbered"
         ],
-        "permittedValues": {
-          "kind": [
-            "dependsOn",
-            "supports",
-            "contradicts",
-            "qualifies",
-            "constrains",
-            "implements",
-            "supersedes",
-            "evidences",
-            "opensQuestionIn",
-            "affectedBy"
-          ],
-          "origin": [
-            "declared",
-            "derived",
-            "inferred"
-          ],
-          "state": [
-            "declared",
-            "exercised",
-            "needsReview",
-            "orphaned",
-            "retired"
-          ]
-        },
+        "permittedChildTypes": [],
+        "permittedValues": {},
         "properties": {
-          "id": "the relation's identity, a UUID the shell mints; the node id is node:<id>",
-          "kind": "what the source claim does to the target claim, from the material's list; derives-from is the derivedFrom provenance edge, not a kind here",
-          "origin": "declared by a person or a governed process; derived mechanically from accepted structure; inferred by a run — an inferred relation is a proposal until a person confirms it and never propagates pressure before",
-          "reason": "why the source matters to the target, as runs, in the reader's or the run's words: the condition that connects them, which is what makes propagation precise",
-          "state": "the relation's lifecycle: absent means declared; exercised once evaluated against a change; needsReview when its reason may no longer apply; orphaned when an end is gone; retired when intentionally ended. A relation ends by this state and is never RETIREd, so its record stays readable"
+          "alt": "what the picture shows, in words: the block's accessible name, and what the editor draws while there are no bytes yet",
+          "caption": "words under it, optional; a number needs none (BO_0295)",
+          "height": "the drawn height in pixels, advisory, written when the bytes are uploaded. The blob reference carries no dimensions, so a block that wants its layout reserved before the bytes arrive stores them itself",
+          "id": "the block's identity, a UUID the shell mints; the node id is node:<id>",
+          "numbered": "the author's ask for a number: true asks, absent asks none. The number itself is the document's order — figures (pictures and numbered outputs) and tables counted apart, in reading order — derived on every read and never stored (BO_0295)",
+          "order": "the block's place among its siblings: a fractional key compared as a string, as every block's is",
+          "reference": "the picture's bytes, as the core's blob reference — an object bearing _kind blob with its hash, media type and size. Absent means the bytes have not been made yet, which is the whole of that state: a generation proposed and not yet paid for is this block without this property",
+          "source": "what made the bytes, as an object this model stores and never interprets, keyed by the extension that wrote it. A generator records its prompt, service, model, job id, cost and time here; nothing in this extension reads it",
+          "width": "the drawn width in pixels, advisory, written when the bytes are uploaded"
         },
         "requiredProperties": [
           "id",
-          "kind",
-          "reason",
-          "origin"
+          "order"
         ],
-        "runProperties": [
-          "reason"
+        "runProperties": [],
+        "semantics": "A picture. A leaf block, containable through CONTAINS and ordered by its order key like every block. It carries no authored text and takes no text editor. The bytes live in Garage behind CCGW and are reached only through the blob reference, which is the sole identity and integrity carrier; mediaType, size, width, height and alt are advisory. The block type belongs to this extension rather than to whatever makes the bytes, so a picture stays a picture when a generator is switched off (BO_0273, user decision 2026-09-21)."
+      }
+    },
+    {
+      "extension": "documents",
+      "nodeId": "node:output",
+      "type": "ext.blocktype",
+      "content": {
+        "block": true,
+        "id": "output",
+        "name": "output",
+        "optionalProperties": [
+          "pictures",
+          "files",
+          "executionCount",
+          "elapsed",
+          "caption",
+          "numbered"
         ],
-        "semantics": "A reason-bearing relation between two claims: a node, because a Relation stores no properties and the reason is what carries consequence (data-model.md BO_0029_003). Joined to its ends by source and target edges leaving this node, so staging one revises neither claim nor block. Proposed is the node being a candidate, not a state. Declared by ui.shell under BO_0244_006.",
+        "permittedChildTypes": [],
+        "permittedValues": {},
+        "properties": {
+          "caption": "words under the output's picture, set by a person after accepting the output, never by the kernel that stages it (BO_0295)",
+          "elapsed": "seconds the execution took",
+          "execution": "the execution's id in the service's record",
+          "executionCount": "the kernel's count for the execution, when it gave one",
+          "files": "every file the execution wrote, each the core's blob reference with its filename",
+          "id": "the block's identity, a UUID the shell mints; the node id is node:<id>",
+          "items": "what the execution streamed, in order: each {kind} stream (name, text), error (name, value, traceback), display or result (data, a MIME bundle whose picture entries name an index into pictures; executionCount), cut (reason), clear",
+          "numbered": "the author's ask for a number: true asks, absent asks none. The number itself is the document's order — figures (pictures and numbered outputs) and tables counted apart, in reading order — derived on every read and never stored (BO_0295); set by a person after accepting the output, and its first picture is then the figure",
+          "of": "the id of the code block the execution ran",
+          "order": "the block's place among its siblings, the same key text carries",
+          "outcome": "how the execution ended: ok, error, interrupted, timed out, output cap",
+          "pictures": "every picture the items show, each the core's blob reference, hoisted here so the references are live"
+        },
+        "requiredProperties": [
+          "id",
+          "order",
+          "items",
+          "outcome",
+          "execution",
+          "of"
+        ],
+        "runProperties": [],
+        "semantics": "What one execution of a code block produced, proposed directly after it by whoever sent it and never written as truth by the kernel. Declared by documents under BO_0289; only an execution writes one.",
         "singleOpenCandidate": true
+      }
+    },
+    {
+      "extension": "documents",
+      "nodeId": "node:sourcecode",
+      "type": "ext.blocktype",
+      "content": {
+        "block": true,
+        "id": "sourcecode",
+        "name": "sourcecode",
+        "optionalProperties": [
+          "language"
+        ],
+        "permittedChildTypes": [],
+        "permittedValues": {},
+        "properties": {
+          "id": "the block's identity, a UUID the shell mints; the node id is node:<id>",
+          "language": "the language the code is written in, such as python; the runtime's kernel decides what it runs",
+          "order": "the block's place among its siblings, the same key text carries",
+          "source": "the code itself, as text"
+        },
+        "requiredProperties": [
+          "id",
+          "order",
+          "source"
+        ],
+        "runProperties": [],
+        "semantics": "Code a person or a run wrote to be sent to the session of the runtime the document is connected to: a code block, of kind sourcecode because code names the extension that runs it and a declaration and a manifest share one node namespace. Declared by documents under BO_0289, so a code block stays a code block when the code extension is switched off.",
+        "singleOpenCandidate": true
+      }
+    },
+    {
+      "extension": "documents",
+      "nodeId": "node:table",
+      "type": "ext.blocktype",
+      "content": {
+        "block": true,
+        "id": "table",
+        "name": "table",
+        "optionalProperties": [
+          "columns",
+          "rows",
+          "caption",
+          "reference",
+          "rowCount",
+          "source",
+          "numbered"
+        ],
+        "permittedChildTypes": [],
+        "permittedValues": {},
+        "properties": {
+          "caption": "words under the table, optional",
+          "columns": "the columns in order, each {name, type} with type one of text, number, date, boolean",
+          "id": "the block's identity, a UUID the shell mints; the node id is node:<id>",
+          "numbered": "the author's ask for a number: true asks, absent asks none. The number itself is the document's order — figures (pictures and numbered outputs) and tables counted apart, in reading order — derived on every read and never stored (BO_0295)",
+          "order": "the block's place among its siblings, the same key text carries",
+          "reference": "the bytes of the file standing behind the table, as the core's blob reference; absent, the rows are the whole table",
+          "rowCount": "the file's row count, written at import and present only with reference",
+          "rows": "the rows in order, each one cell per column; a cell is a string in its column's canonical spelling (a number a decimal in canonical form, a date ISO 8601, a boolean true or false) or empty; behind a file, the file's first 100 rows",
+          "source": "where the data came from, keyed by the extension that wrote it, stored and never interpreted here"
+        },
+        "requiredProperties": [
+          "id",
+          "order"
+        ],
+        "runProperties": [],
+        "semantics": "A table: one block of typed columns and rows, revised whole, so a cell edit keeps the block's identity and a proposal to change it is a replace of the one block. Declared by documents under BO_0287; a table stays a table whatever later makes or charts one."
       }
     },
     {
@@ -418,20 +656,21 @@
         "permittedChildTypes": [],
         "permittedValues": {
           "disposition": [
-            "keep",
-            "pin",
-            "resolved",
-            "discarded"
+            "fixate",
+            "discarded",
+            "prompt"
           ],
           "role": [
             "paragraph",
             "h1",
             "h2",
             "h3",
-            "quote"
+            "quote",
+            "abstract"
           ]
         },
         "properties": {
+          "disposition": "the standing the reader gave the block: fixate — left standing and sent with every command issued in its document — or discarded, which leaves the drawn flow while the block stays in the document and its order, or prompt, a block sent as a command. Absent means keep, where a block stands unless someone says otherwise. Narrowed from keep, pin, resolved, discarded by BO_0272: pin is fixate under its own name, a resolved block reads as discarded and the old keep as the resting state, until the next write stores it",
           "id": "the block's identity, a UUID the shell mints; the node id is node:<id>",
           "intention": "the marking a reader gave this block, resolved own marking first, else the nearest marked ancestor, else the document's; the marks value of an established ext.intention declaration, unconstrained for the reason the document type records",
           "kind": "what the block is, in whatever vocabulary an extension declares for it: the value of an established BlockKind declaration. Unconstrained here, because the values are declared by the extension that owns them and this one has none to name (BO_0256_002)",
@@ -453,22 +692,48 @@
     },
     {
       "extension": "documents",
-      "nodeId": "node:acceptedBy",
-      "type": "ext.relationtype",
+      "nodeId": "node:video",
+      "type": "ext.blocktype",
       "content": {
-        "id": "acceptedBy",
-        "name": "acceptedBy",
-        "semantics": "A root's acceptance policy: directed from a document to the policy node whose rule says who may establish it. Absent, the root is under the owner rule. Declared by ui.shell under BO_0249_006."
+        "block": true,
+        "id": "video",
+        "name": "video",
+        "optionalProperties": [
+          "reference",
+          "alt",
+          "width",
+          "height",
+          "source"
+        ],
+        "permittedChildTypes": [],
+        "permittedValues": {},
+        "properties": {
+          "alt": "what the picture shows, in words: the block's accessible name, and what the editor draws while there are no bytes yet",
+          "height": "the drawn height in pixels, advisory, written when the bytes are uploaded. The blob reference carries no dimensions, so a block that wants its layout reserved before the bytes arrive stores them itself",
+          "id": "the block's identity, a UUID the shell mints; the node id is node:<id>",
+          "order": "the block's place among its siblings: a fractional key compared as a string, as every block's is",
+          "reference": "the moving picture's bytes, as the core's blob reference — an object bearing _kind blob with its hash, media type and size. Absent means the bytes have not been made yet, which is the whole of that state: a generation proposed and not yet paid for is this block without this property",
+          "source": "what made the bytes, as an object this model stores and never interprets, keyed by the extension that wrote it. A generator records its prompt, service, model, job id, cost and time here; nothing in this extension reads it",
+          "width": "the drawn width in pixels, advisory, written when the bytes are uploaded"
+        },
+        "requiredProperties": [
+          "id",
+          "order"
+        ],
+        "runProperties": [],
+        "semantics": "A moving picture. A leaf block, containable through CONTAINS and ordered by its order key like every block. It carries no authored text and takes no text editor. The bytes live in Garage behind CCGW and are reached only through the blob reference, which is the sole identity and integrity carrier; mediaType, size, width, height and alt are advisory. The block type belongs to this extension rather than to whatever makes the bytes, so a picture stays a picture when a generator is switched off (BO_0273, user decision 2026-09-21)."
       }
     },
     {
       "extension": "documents",
-      "nodeId": "node:asserts",
-      "type": "ext.relationtype",
+      "nodeId": "node:migration-bo-0272",
+      "type": "ext.migration",
       "content": {
-        "id": "asserts",
-        "name": "asserts",
-        "semantics": "A text block asserts a claim; directed block to claim, one relation per claim, in the block's order. A block gets its claims when a relation is declared on it or a run drafts them. Declared by ui.shell under BO_0244_006."
+        "id": "migration-bo-0272",
+        "migrates": [
+          "text"
+        ],
+        "rationale": "BO_0272 narrows text.disposition from keep, pin, resolved, discarded, prompt to fixate, discarded, prompt: the standing scale becomes three states — discard, keep, fixate — where keep is the absence of a value (user decision, 2026-09-21). Nothing is lost. A block carrying pin reads as fixate, which is the same standing under its own name; one carrying resolved reads as discarded, the remaining state for a block its reader had set aside; one carrying the old keep reads as the resting state, which is what the word now means. The mapping is the kernel's StandingOf and the shell's RETIRED, so a reader and a run are told the same of one block, and the next write stores the new value. This instance carried no block with any disposition when the declaration was revised (90 text blocks, checked over CCGW on 2026-09-21), so no content operation travels with it here."
       }
     },
     {
@@ -503,54 +768,201 @@
     },
     {
       "extension": "documents",
-      "nodeId": "node:source",
-      "type": "ext.relationtype",
-      "content": {
-        "id": "source",
-        "name": "source",
-        "semantics": "A relation node's source claim, the assertion whose change may matter; directed relation to claim. Declared by ui.shell under BO_0244_006."
-      }
-    },
-    {
-      "extension": "documents",
-      "nodeId": "node:target",
-      "type": "ext.relationtype",
-      "content": {
-        "id": "target",
-        "name": "target",
-        "semantics": "A relation node's target claim, the assertion that may be affected; directed relation to claim. Declared by ui.shell under BO_0244_006."
-      }
-    },
-    {
-      "extension": "documents",
       "nodeId": "node:ui.shell.documents",
       "type": "ext.skill",
       "content": {
         "conventions": {
           "changeDocuments": "An extension's changes are its own docs/changes/ members (BO_0254): docs/changes/<PREFIX>_NNNN_TYPE_<short-name>.md in its subtree, finished ones under docs/changes/completed/, each carrying its status in a Status: line from idea, draft, ready, wip, completed, rejected. They are written and revised the way every other docs member is — from a checkout, in the proposal that carries the code — and rendered read-only in the shell's Extensions section. A run working from the composer holds no checkout and so writes none. A document tool never writes one: create_document takes a title and a first block and nothing else. (BO_0254)",
           "claimsAndRelations": "A block asserts claims — its assertions in canonical words, each with an identity — and relations anchor on claims, never on blocks: a relate item names a source and a target claim by claimId, or a block by blockId with the claim's words to draft when the block asserts none; a block that asserts exactly one claim may be named alone. A relation is proposed with a reason naming the condition that connects its ends (cache reuse is safe only while the context is unchanged), never that they seem related, and with origin inferred or derived — a run never declares. A block's kind says what it is in the decision vocabulary (assumption, question, evidence, decision, …); a derive item says which blocks a block the same group inserts rests on. A relation ends by its state and is never removed. (BO_0244)",
-          "commit": "A commit command is answered by a proposal, never by a write (BO_0249_012; material §46, rule 19): when the command says 'yes, this is the decision', 'treat this as the requirement', 'make this the accepted direction' or the like, stage exactly one phase item {kind: \"phase\", phase: \"accepted\"} on the document the command is about, with the rationale as one sentence of consequences drawn from the relations sourced on the document's claims and the judgements standing on its blocks — never a decision block, never a rewrite of the pinned synthesis. The shell draws that proposal as the transition card under the intent, and the reader's press on Establish is the one confirmation. This rule lives here because a person's run reads this skill whatever the document's intention; refine's conventions carry it as well. 'This' in a commit command is the document, never a block: a block the reader marked or referenced says where the decision is stated, so the phase item is the answer even then — mark that block's kind decision in the same proposal if it is not already, but a kind item alone answers nothing (found live 2026-09-15: two runs answered 'yes, this is the decision' with a marked block by a kind item and no phase).",
+          "commit": "A commit command is answered by a proposal, never by a write (BO_0249_012; material §46, rule 19): when the command says 'yes, this is the decision', 'treat this as the requirement', 'make this the accepted direction' or the like, stage exactly one phase item {kind: \"phase\", phase: \"accepted\"} on the document the command is about, with the rationale as one sentence of consequences drawn from the relations sourced on the document's claims and the judgements standing on its blocks — never a decision block, never a rewrite of the pinned synthesis. The shell draws that proposal as the transition card under the intent, and the reader's press on Establish is the one confirmation. This rule lives here because a person's run reads this skill whatever the document's intention; refine's conventions carry it as well. 'This' in a commit command is the document, never a block: a block the reader marked or referenced says where the decision is stated, so the phase item is the answer even then — mark that block's kind decision in the same proposal if it is not already, but a kind item alone answers nothing (found live 2026-09-15: two runs answered 'yes, this is the decision' with a marked block by a kind item and no phase). The rationale's one sentence of consequences also names the proposals standing unanswered in the document, since accepting the direction leaves them to be answered (BO_0271).",
           "marks": "A run carries text and, when it has any, marks among bold, italic, strikethrough and code, and may carry a link. Marks are not declared in the graph's vocabulary; the editor's set is the one that renders.",
-          "readerAnswersPerItem": "Each item is decided on its own in the editor. Keep an item to one intent, so a reader can accept the heading and reject the rewrite."
+          "notes": "A read and each proposed item may carry a note: one short line, at most 80 characters, saying what you do with the block. The person sees it on the block while you work, and on the proposal after. Give one when the plain words — Reading, Proposes a rewrite, Proposes removal — would not say what you are doing; leave it out otherwise. A note is never the change itself (BO_0265).",
+          "openProposals": "The document you work in is not settled: other runs' proposals may stand unanswered on its blocks, and read_document answers them (BO_0271). Every block carries proposal — {group, item, proposer, kind, words, refinable, reason} — when another group has proposed against it, and the document carries proposedInserts, the new blocks proposed into it, each with where it would stand. Read them before writing anything new. What stands and needs sharpening is refined in place, never proposed again beside it: a block keeps one open proposal, so a second rewrite of the same block is refused by the core. A refinement is a replace carrying refines: {group, item} — the group and item read_document answered — with the runs and, if it changes, the role; it lands on that proposal's candidate, under that group, and the person answers once. A proposed insert is refined the same way, by its group and item. Stage only what needs changing. Where a standing proposal already says what you would say, leave its words as they are; say that you left it plainly only when there is really nothing to add anywhere. The document's own blocks — accepted text — are left as they are unless the command referenced one (a marked block or passage) or plainly asks for those words to change; every proposal the person has not answered is open matter, accepted words are not. A proposal whose refinable is false is context: read it, build on what it says, never propose against it — its reason says why: a run still going may restage the same block a moment later, another person's branch is theirs, a candidate the system derived is answered by the person alone, a fixated framing is kept, an answered member is settled, and a removal or a move has no words to refine. Your final words say what you refined and whose it was, and what you left standing because it already said it. When the command asks to reconcile, merge or reduce the standing proposals (BO_0286): refine the proposals that stay, so the reconciled words live in them; withdraw the ones those words make surplus with a withdraw item — proposal: {group, item}, successor: the standing item or the index of the item in this call that supersedes it, withdrawalReason: one short line where the successor does not say it — and stage nothing beside them. A withdrawal is a proposal, never an answer: the item stays open with its words, the person rejects it with one press or accepts it anyway, and accepting the successor rejects what it supersedes in the same press. Any withdrawable item may be withdrawn, a removal or a move too, which then leaves the block as it stands. The final words say how many proposals were refined and how many withdrawn, and in whose favour.",
+          "prompts": "A block with the prompt standing is a command the reader wrote in the document and sent, not material of it (BO_0267): never rewrite, remove or move it, and do not build on it unless the command asks. When your run was sent from a block, the instructions name it. Every command given in a document is answered by proposing into it: when the command asks a question, the answer is staged directly after the block the command was sent from, as the blocks the reader should read it as (conventions.structure), and your final words say what you staged.",
+          "readerAnswersPerItem": "Each item is decided on its own in the editor. Keep an item to one intent, so a reader can accept the heading and reject the rewrite.",
+          "structure": "What you stage arrives as the structure you wrote, never as one block holding all of it (BO_0270). Split the content at its headings: a heading is its own text block with the role it has — h1, h2, h3 — and a block's runs never carry # characters, which nothing renders. Under a heading each paragraph is its own block, and each list item is its own block with its marker as plain text, since no role renders a list; a fenced code block stays one text block, because it is one unit; and a table is a table block — kind table, with its typed columns (text, number, date, boolean) and its rows, one block whole (BO_0287) — never pipes in a paragraph. An equation is an equation block — kind equation, carrying the exact TeX it is set from, optionally a caption and numbered when its author asks for a number (BO_0290) — never TeX in a paragraph; mathematics inside a sentence is a run of that sentence carrying math: true whose text is its TeX, and a reference to a numbered equation is a run carrying equationRef with that equation's identity and no text of its own. A picture carries an optional caption and numbered when its author asks for a figure number, and a table numbered likewise (BO_0295); a reference to a numbered figure — a picture, or an output a person numbered — is a run carrying figureRef with its identity and no text of its own, and to a numbered table a run carrying tableRef. A citation is a run of its sentence carrying cite — {work, locator?}: the identity of a work of the instance's bibliography, and where in it when the claim rests on one place, such as p. 12 — whose text is empty, never a bracketed number or an author and year typed into the words (BO_0291); read_document answers each citation's number, or missing when its work is gone, and how the reader sees it drawn is the document's citation style. Never set a caption or numbered on an output: an output is what an execution produced, and its caption and number are the person's. A number is never written: read_document answers the number the document's order gives each numbered equation, figure and table — figures and tables counted apart — and a reference answers the number it resolves to, or missing when its block is gone or asks for none. A change to a table is a replace of that one block carrying the whole table; where a file stands behind it, read_document says so with its row count and the rows you read are its first hundred, and your replace drops the file, since the cells you propose are the whole table. A paper's abstract is one text block with the role abstract, wherever it stands; a manuscript's authors, affiliations, keywords and venue are the document's own properties, set by a person, and a run proposes none of them (BO_0293). Never invent structure: content that carries no heading is given none, and a one-sentence answer is one block by this rule rather than by an exception. A rewrite carries it too: rewriting a block into content with headings stages the replace beside the inserts in the one group, with the rationale saying the items are one change."
         },
         "examples": {
           "addAClaim": "propose_document_changes {documentId, rationale, items: [{kind: claim, blockId, text: [{text: 'Cached authorization stays valid for the request.'}]}]}",
+          "addAColumnToATable": "read_blocks {documentId, blockIds: [<table>]} → the block answers columns, rows and, behind a file, file: true with rowCount → propose_document_changes {documentId, rationale, items: [{kind: replace, blockId: <table>, columns: [...the columns, {name: 'Founded', type: date}], rows: [...each row with its new cell, '' where unknown]}]}",
           "addAHeadingAbove": "propose_document_changes {documentId, rationale, items: [{kind: insert, block: {kind: text, role: h2, runs: [{text: 'Heading'}]}, placement: {before: blockId}}]}",
+          "addATable": "propose_document_changes {documentId, rationale, items: [{kind: insert, block: {kind: table, columns: [{name: 'City', type: text}, {name: 'Population', type: number}], rows: [['Berlin', '3755000'], ['Hamburg', '1892000']], caption: 'German cities'}, placement: {after: blockId}}]}",
+          "answerAQuestion": "a short answer is one block: the command, sent from block <p>, asks 'what does #1 mean?' → read_blocks {documentId, blockIds: [<#1>]} → propose_document_changes {documentId, rationale, items: [{kind: insert, block: {kind: text, runs: [{text: '#1 means ...'}]}, placement: {after: <p>}, note: 'Answers the question'}]}",
+          "answerWithSections": "an answer that has sections is one item per block, in reading order, each placed after the command block — the kernel gives each its own order key (BO_0268): propose_document_changes {documentId, rationale, items: [{kind: insert, block: {kind: text, role: h2, runs: [{text: 'What it costs'}]}, placement: {after: <p>}}, {kind: insert, block: {kind: text, runs: [{text: 'The first paragraph of that section.'}]}, placement: {after: <p>}}, {kind: insert, block: {kind: text, role: h2, runs: [{text: 'What it buys'}]}, placement: {after: <p>}}, {kind: insert, block: {kind: text, runs: [{text: 'The second section.'}]}, placement: {after: <p>}}]}",
           "commitADecision": "propose_document_changes {documentId, rationale: 'The reader said yes, this is the decision. Accepting would make two documents rest on its definition and reopen one requirement under review.', items: [{kind: phase, phase: accepted}]}",
           "commitADecisionWithAMarkedBlock": "propose_document_changes {documentId, rationale: 'The reader said yes, this is the decision, marking block #8 where it is stated. Accepting would …', items: [{kind: phase, phase: accepted}, {kind: kind, blockId: <#8>, blockKind: decision}]}",
           "dropAStrayDivider": "propose_document_changes {documentId, rationale, items: [{kind: remove, blockId}]}",
           "findAnExtensionsChanges": "the extension's docs/changes/ members, read from a checkout or GET /api/extensions/<id> — the Status: line of each says where it stands",
+          "leaveWhatAlreadySaysIt": "read_document {documentId} → the block the command bears on carries proposal {…, kind: 'rewrite', words: '…', refinable: true} whose words already say what the command asks → stage nothing against that block; propose only what the standing rewrite does not cover, if anything → final words: 'The rewrite standing on <block> already says this; I left it as it stands and staged nothing there.'",
+          "readTheBlocksYouWorkOn": "read_document {documentId} → read_blocks {documentId, blockIds: [blockId, blockId], note: 'Checking the definition against its use'} → propose_document_changes {documentId, rationale, items: [{kind: replace, blockId, runs: [{text: '...'}], note: 'Tightens the definition'}]}",
+          "reconcileStandingProposals": "read_document {documentId} → twenty proposed inserts stand from an ended run, all refinable → read_blocks {documentId, blockIds: […]} → propose_document_changes {documentId, rationale: 'Reconciles the twenty proposed blocks into one argument of six: the six that carry it are refined, the fourteen they absorb are withdrawn in their favour', items: [{kind: replace, refines: {group: 'node:run-…', item: 'node:run-…|insert|node:<a>'}, runs: […]}, …, {kind: withdraw, proposal: {group: 'node:run-…', item: 'node:run-…|insert|node:<b>'}, successor: {index: 0}, withdrawalReason: 'folded into the opening paragraph'}, …]} — nothing is staged beside the standing proposals; the person answers each withdrawn block from its chip, or all of them by accepting the refined ones",
+          "refineAStandingProposal": "read_document {documentId} → the block carries proposal {group: 'node:run-…', item: 'node:run-…|replace|node:<blockId>', proposer: 'Codex', kind: 'rewrite', words: '…', refinable: true} → read_blocks {documentId, blockIds: [blockId]} → propose_document_changes {documentId, rationale: 'Sharpens the standing rewrite of the definition: the words are Codex's with the exception stated', items: [{kind: replace, refines: {group: 'node:run-…', item: 'node:run-…|replace|node:<blockId>'}, runs: [{text: '…'}], note: 'Sharpens the standing rewrite'}]} — the block still carries one proposal, now with these words, and the person answers once",
           "relateTwoClaims": "read_document {documentId} → find the claims → propose_document_changes {documentId, rationale, items: [{kind: relate, relation: {kind: dependsOn, reason: [{text: 'the cache is safe only while the request sees one revision'}], origin: inferred, source: {claimId}, target: {blockId, claim: [{text: 'A request sees one stable revision.'}]}}}]}",
           "reviseAReason": "propose_document_changes {documentId, rationale, items: [{kind: reason, relationId, reason: [{text: '...'}]}]}",
-          "rewriteAParagraph": "read_document {documentId} → find the block whose runs carry the sentence → propose_document_changes {documentId, rationale, items: [{kind: replace, blockId, runs: [{text: '...'}]}]}",
+          "rewriteAParagraph": "read_document {documentId} → find the block whose runs carry the sentence → read_blocks {documentId, blockIds: [blockId]} → propose_document_changes {documentId, rationale, items: [{kind: replace, blockId, runs: [{text: '...'}]}]}",
+          "rewriteIntoSections": "a rewrite that grows sections keeps the block and adds the rest in the same group: propose_document_changes {documentId, rationale: 'One change: the paragraph becomes two sections.', items: [{kind: replace, blockId, runs: [{text: 'The opening, rewritten.'}]}, {kind: insert, block: {kind: text, role: h3, runs: [{text: 'Trade-offs'}]}, placement: {after: blockId}}, {kind: insert, block: {kind: text, runs: [{text: 'What they are.'}]}, placement: {after: blockId}}]}",
           "sayWhatABlockRestsOn": "propose_document_changes {documentId, rationale, items: [{kind: insert, block: {...}, placement}, {kind: derive, blockId: <the inserted block>, from: [blockId, blockId]}]}",
           "setAKind": "propose_document_changes {documentId, rationale, items: [{kind: kind, blockId, blockKind: assumption}]}"
         },
         "goal": "Read and propose changes to the documents a reader writes in, through the kernel toolset's document tools, so a run's proposal lands exactly what the editor would have written and is reviewed per item.",
         "id": "ui.shell.documents",
-        "outputContract": "One propose_document_changes call per coherent change to one document, with a rationale saying why. Report the group the tool answered and what it stages; never claim the change is accepted. A refusal envelope is an answer: read its diagnostics and adjust the items rather than retrying the same call. A commit command — 'yes, this is the decision', 'treat this as the requirement', 'make this the accepted direction' — is answered by one phase item {kind: \"phase\", phase: \"accepted\"} on the document, whatever block is marked or referenced: the marks say where the decision is stated, not what to change, and a kind item alone is the wrong answer (conventions.commit).",
-        "permittedOperations": "list_documents to find a document by title, and an extension's changes by change — each row carries change and status for a change document; read_document for its blocks in reading order with their identities, kinds, roles and runs, and for a change document its extension and status; propose_document_changes with items of kind replace (runs and/or role for a block), insert (a new text or divider block at a placement), remove (a block leaves the reading order, retired rather than deleted), move (a block to a placement) and status (a change document's status, one of idea, draft, ready, wip, completed, rejected); create_document for a new document with a title, its first block and — for a change of an extension — change naming the extension and a status, idea unless said. Everything stages into this run's proposal group; nothing writes truth. The statement tools remain available for anything beyond documents. — and, since BO_0244, kind (a block's blockKind, none clears it), claim (add a claim to a block, or revise one by claimId), relate (a reason-bearing relation between two claims), reason (a relation's new reason) and derive (the blocks a block rests on). read_document answers each block's blockKind, claims, provenance and derivedFrom, and the document's relations with both ends. Since BO_0249, phase: the root's phase — {kind: \"phase\", phase: proposed | accepted | superseded, supersededBy only with superseded} on the document itself, refused on a change document, whose status is its lifecycle. An agent proposes a phase and never sets it; the reader establishes it from the transition card.",
-        "preconditions": "The run holds the kernel toolset. The document to change exists at the run's pin; read it with read_document before proposing against it, because a replace or a move names a block by the identity that read answered."
+        "outputContract": "One propose_document_changes call per coherent change to one document, with a rationale saying why. Report the group the tool answered and what it stages; never claim the change is accepted. A refusal envelope is an answer: read its diagnostics and adjust the items rather than retrying the same call. A commit command — 'yes, this is the decision', 'treat this as the requirement', 'make this the accepted direction' — is answered by one phase item {kind: \"phase\", phase: \"accepted\"} on the document, whatever block is marked or referenced: the marks say where the decision is stated, not what to change, and a kind item alone is the wrong answer (conventions.commit). A commit's sentence of consequences names the proposals standing unanswered in the document. A refinement is reported as what it refined and whose proposal that was; a standing proposal left as it stands because it already says it is reported as left, not as done (conventions.openProposals). A reconciliation is reported as how many standing proposals were refined and how many withdrawn, and in whose favour, never as new blocks staged beside them.",
+        "permittedOperations": "list_documents to find a document by title, and an extension's changes by change — each row carries change and status for a change document; read_document for its blocks in reading order with their identities, kinds, roles and runs, and for a change document its extension and status; read_blocks for only the blocks it names, in reading order and in read_document's shape, which is how the person sees what you look at (BO_0265); propose_document_changes with items of kind replace (runs and/or role for a block), insert (a new text or divider block at a placement), remove (a block leaves the reading order, retired rather than deleted), move (a block to a placement) and status (a change document's status, one of idea, draft, ready, wip, completed, rejected); create_document for a new document with a title, its first block and — for a change of an extension — change naming the extension and a status, idea unless said. Everything stages into this run's proposal group; nothing writes truth. The statement tools remain available for anything beyond documents. — and, since BO_0244, kind (a block's blockKind, none clears it), claim (add a claim to a block, or revise one by claimId), relate (a reason-bearing relation between two claims), reason (a relation's new reason) and derive (the blocks a block rests on). read_document answers each block's blockKind, claims, provenance and derivedFrom, and the document's relations with both ends. Since BO_0249, phase: the root's phase — {kind: \"phase\", phase: proposed | accepted | superseded, supersededBy only with superseded} on the document itself, refused on a change document, whose status is its lifecycle. An agent proposes a phase and never sets it; the reader establishes it from the transition card. Since BO_0271, read_document and read_blocks answer on each block its proposal — the standing proposal another group holds against it: group, item, proposer, kind (rewrite, removal, move), words, refinable and, when not refinable, reason — and the document's proposedInserts, each with its placement; and a replace item may carry refines: {group, item}, landing its runs and role on that proposal's candidate in that group instead of in this run's, which is how a standing proposal is refined (conventions.openProposals). Since BO_0286, withdraw: {kind: \"withdraw\", proposal: {group, item}, successor?: {group, item} | {index}, withdrawalReason?} marks a standing proposal as surplus, on the proposal itself, for the person to reject with one press; read_document answers each standing proposal's withdrawable and, when a run has proposed one, its withdrawnBy — the run, its agent, the successor and the reason (conventions.openProposals).",
+        "preconditions": "The run holds the kernel toolset. The document to change exists at the run's pin; read it once with read_document to find your way, then read the blocks you work on with read_blocks before proposing against them — the person sees each block you read marked while you read it — because a replace or a move names a block by the identity those reads answered."
+      }
+    },
+    {
+      "extension": "manuscripts",
+      "nodeId": "node:manuscript",
+      "type": "ext.blocktype",
+      "content": {
+        "id": "manuscript",
+        "name": "manuscript",
+        "optionalProperties": [
+          "title",
+          "log",
+          "omitted"
+        ],
+        "permittedChildTypes": [],
+        "permittedValues": {
+          "outcome": [
+            "ok",
+            "errors",
+            "failed",
+            "timed out"
+          ]
+        },
+        "properties": {
+          "by": "who made it: a person's name, or the run that made it",
+          "files": "the LaTeX source, its .bib and the PDF, each the core's blob reference with its filename, hoisted to a top-level list",
+          "id": "the manuscript's identity, a UUID; the node id is node:<id>",
+          "log": "the typesetting's errors and warnings, in order",
+          "made": "when it was made, ISO 8601",
+          "of": "the document the manuscript was made of",
+          "omitted": "what the projection left out and why, in words",
+          "outcome": "what the typesetting answered: ok, errors, failed or timed out",
+          "revision": "the dataRevision the manuscript projects",
+          "title": "the document's title at the revision projected",
+          "venue": "the venue it was made for"
+        },
+        "requiredProperties": [
+          "id",
+          "of",
+          "revision",
+          "venue",
+          "files",
+          "made",
+          "by",
+          "outcome"
+        ],
+        "semantics": "A manuscript made of a document and kept (BO_0293): a root node with no parent and no block flag, as a work is, so it is never offered among the kinds a document's block may take."
+      }
+    },
+    {
+      "extension": "media",
+      "nodeId": "node:media.pictures",
+      "type": "ext.skill",
+      "content": {
+        "conventions": {
+          "oneAtATime": "Propose one picture per place it is wanted. A run that stages six pictures has decided six times that someone should pay.",
+          "quoteBeforeProposing": "Ask what it would cost first, and put the figure in your answer, so the person decides with the price in front of them.",
+          "theBlockIsThePrompt": "Propose a picture from what the document already says. Leave `prompt` out unless the block's words would make a poor picture, and say why you replaced them.",
+          "theModelDecidesTheKind": "A model makes pictures or moving pictures, not both. Name the model and let its kind follow; never ask for a kind the model does not make."
+        },
+        "goal": "Offer a picture where a document would be clearer for one, and never make it yourself. You propose; a person decides and pays.",
+        "id": "media.pictures",
+        "outputContract": "A conclusion naming what you proposed, which block it follows, and what it would cost; zero or more pending picture blocks staged into the run's group; and nothing made.",
+        "permittedOperations": "quote_generation to say what something would cost, and propose_generation to stage a picture that is not made yet. Nothing you hold can spend: the press that bills is a person's, on a route no run can reach.",
+        "preconditions": [
+          "A generator is signed in. If none is, say so and stop: the person signs in to Higgsfield or OpenArt in Settings, with their own subscription.",
+          "You can name the block the picture belongs after. A picture is made from a block's own words, so the block is the prompt.",
+          "The person has not said they do not want one. An unasked-for picture that costs money is worse than no picture."
+        ]
+      }
+    },
+    {
+      "extension": "media",
+      "nodeId": "node:media.propose_generation",
+      "type": "ext.tool",
+      "content": {
+        "description": "Propose a picture or a moving picture after a block, made from that block's own words. It proposes and does not make: what you stage is a picture that does not exist yet, and a person presses to make it with the cost in front of them. You cannot spend, and no tool you hold can. Use it when a document would be clearer with a picture and you can say which block it belongs after.",
+        "id": "media.propose_generation",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "afterBlockId": {
+              "description": "The block the picture follows, and whose words are its prompt.",
+              "type": "string"
+            },
+            "documentId": {
+              "description": "The document, as a record id.",
+              "type": "string"
+            },
+            "kind": {
+              "description": "image or video, matching the model's own kind.",
+              "type": "string"
+            },
+            "model": {
+              "description": "The model, as the generators list them. The model decides whether a picture or a moving picture is made.",
+              "type": "string"
+            },
+            "prompt": {
+              "description": "Words to use instead of the block's own. Leave it out unless the block's words would make a poor picture.",
+              "type": "string"
+            },
+            "service": {
+              "description": "The generator: higgsfield or openart. Ask the person which they have signed in to rather than guessing.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "service",
+            "model",
+            "documentId",
+            "afterBlockId"
+          ],
+          "type": "object"
+        },
+        "name": "propose_generation",
+        "route": "kernel/tools/propose_generation"
+      }
+    },
+    {
+      "extension": "media",
+      "nodeId": "node:media.quote_generation",
+      "type": "ext.tool",
+      "content": {
+        "description": "What a picture or a moving picture would cost, before anyone makes it. Free: nothing is spent by asking. Use it when a person wonders whether something is worth making, or before you propose one, so the cost is in front of them when they decide.",
+        "id": "media.quote_generation",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "description": "image or video, matching the model's own kind.",
+              "type": "string"
+            },
+            "model": {
+              "description": "The model, as the generators list them. The model decides whether a picture or a moving picture is made.",
+              "type": "string"
+            },
+            "prompt": {
+              "description": "The words the picture would be made from.",
+              "type": "string"
+            },
+            "service": {
+              "description": "The generator: higgsfield or openart. Ask the person which they have signed in to rather than guessing.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "service",
+            "model",
+            "prompt"
+          ],
+          "type": "object"
+        },
+        "name": "quote_generation",
+        "route": "kernel/tools/quote_generation"
       }
     },
     {
@@ -991,6 +1403,145 @@
       }
     },
     {
+      "extension": "relations",
+      "nodeId": "node:rootphase-accepted",
+      "type": "RootPhase",
+      "content": {
+        "id": "rootphase-accepted",
+        "value": "accepted"
+      }
+    },
+    {
+      "extension": "relations",
+      "nodeId": "node:rootphase-proposed",
+      "type": "RootPhase",
+      "content": {
+        "id": "rootphase-proposed",
+        "value": "proposed"
+      }
+    },
+    {
+      "extension": "relations",
+      "nodeId": "node:rootphase-superseded",
+      "type": "RootPhase",
+      "content": {
+        "id": "rootphase-superseded",
+        "value": "superseded"
+      }
+    },
+    {
+      "extension": "relations",
+      "nodeId": "node:policy",
+      "type": "ext.blocktype",
+      "content": {
+        "id": "policy",
+        "name": "policy",
+        "optionalProperties": [],
+        "permittedChildTypes": [],
+        "permittedValues": {
+          "rule": [
+            "owner"
+          ]
+        },
+        "properties": {
+          "id": "the policy's identity; the node id is node:<id>",
+          "rule": "who may establish a root under this policy: owner — the instance's owner and any human account the instance admits, the one rule today (BO_0249_006); named approvers, required reviewers and majorities are each their own change"
+        },
+        "requiredProperties": [
+          "id",
+          "rule"
+        ],
+        "semantics": "An acceptance policy a root references through an acceptedBy relation (material §27): acceptance policy belongs to the block, never to the route, and a child inherits policy only through an explicit relation. Declared by ui.shell under BO_0249_006 with one permitted rule, owner, so the hook is the relation the material asks for and not a policy engine. It moved to relations with the root's phase under BO_0288_015, because what accepting a root would change is a relation traversal.",
+        "singleOpenCandidate": true
+      }
+    },
+    {
+      "extension": "relations",
+      "nodeId": "node:relation",
+      "type": "ext.blocktype",
+      "content": {
+        "id": "relation",
+        "name": "relation",
+        "optionalProperties": [
+          "state"
+        ],
+        "permittedValues": {
+          "kind": [
+            "dependsOn",
+            "supports",
+            "contradicts",
+            "qualifies",
+            "constrains",
+            "implements",
+            "supersedes",
+            "evidences",
+            "opensQuestionIn",
+            "affectedBy"
+          ],
+          "origin": [
+            "declared",
+            "derived",
+            "inferred"
+          ],
+          "state": [
+            "declared",
+            "exercised",
+            "needsReview",
+            "orphaned",
+            "retired"
+          ]
+        },
+        "properties": {
+          "id": "the relation's identity, a UUID the shell mints; the node id is node:<id>",
+          "kind": "what the source claim does to the target claim, from the material's list; derives-from is the derivedFrom provenance edge, not a kind here",
+          "origin": "declared by a person or a governed process; derived mechanically from accepted structure; inferred by a run — an inferred relation is a proposal until a person confirms it and never propagates pressure before",
+          "reason": "why the source matters to the target, as runs, in the reader's or the run's words: the condition that connects them, which is what makes propagation precise",
+          "state": "the relation's lifecycle: absent means declared; exercised once evaluated against a change; needsReview when its reason may no longer apply; orphaned when an end is gone; retired when intentionally ended. A relation ends by this state and is never RETIREd, so its record stays readable"
+        },
+        "requiredProperties": [
+          "id",
+          "kind",
+          "reason",
+          "origin"
+        ],
+        "runProperties": [
+          "reason"
+        ],
+        "semantics": "A reason-bearing relation between two blocks: a node, because a Relation stores no properties and the reason is what carries consequence (data-model.md BO_0029_003). Joined to its ends by source and target edges leaving this node, so staging one revises neither end. Proposed is the node being a candidate, not a state. Declared by ui.shell under BO_0244_006, anchored on claims until BO_0288_015 moved it to relations and gave it the block: any block says something, and a claim only ever existed where refinement had been.",
+        "singleOpenCandidate": true
+      }
+    },
+    {
+      "extension": "relations",
+      "nodeId": "node:acceptedBy",
+      "type": "ext.relationtype",
+      "content": {
+        "id": "acceptedBy",
+        "name": "acceptedBy",
+        "semantics": "A root's acceptance policy: directed from a document to the policy node whose rule says who may establish it. Absent, the root is under the owner rule. Declared by ui.shell under BO_0249_006, moved to relations with the phase under BO_0288_015."
+      }
+    },
+    {
+      "extension": "relations",
+      "nodeId": "node:source",
+      "type": "ext.relationtype",
+      "content": {
+        "id": "source",
+        "name": "source",
+        "semantics": "A relation node's source block, the one whose change may matter; directed relation to text block. Declared by ui.shell under BO_0244_006, re-pointed from a claim by BO_0288_015."
+      }
+    },
+    {
+      "extension": "relations",
+      "nodeId": "node:target",
+      "type": "ext.relationtype",
+      "content": {
+        "id": "target",
+        "name": "target",
+        "semantics": "A relation node's target block, the one that may be affected; directed relation to text block. Declared by ui.shell under BO_0244_006, re-pointed from a claim by BO_0288_015."
+      }
+    },
+    {
       "extension": "ui.shell",
       "nodeId": "node:attachment",
       "type": "ext.blocktype",
@@ -1032,10 +1583,16 @@
     }
   ],
   "extensions": [
+    "bibliography",
     "calliopa-base",
     "calliopa-extension",
+    "calliopa-refine",
+    "code",
     "documents",
+    "manuscripts",
+    "media",
     "publishing",
+    "relations",
     "settings",
     "ui.shell"
   ]

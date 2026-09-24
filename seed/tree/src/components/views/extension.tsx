@@ -11,6 +11,8 @@ import {
   ViewBridgeContext,
   type InspectorFact,
 } from "~/components/shell/view-bridge";
+import { ExtensionGroups } from "./extension-groups";
+import { ChangeStatus, changeStatusOf, isChangeDocumentPath } from "./change-status";
 import type { ViewProps } from "~/components/shell/view-host";
 import type { OwnerBlock, OwnerDocument } from "~/lib/owner-docs/render";
 import type { Run } from "~/lib/runs";
@@ -50,7 +52,13 @@ interface Control {
   promotion: KernelPromotion | null;
   canChange: boolean;
   declaresVocabulary: boolean;
+  elevated: boolean;
   health: KernelHealth | null;
+  /** Whether it may start runs on its own, whether it declares a trigger,
+   * and whether the reader is the owner who allows it. BO_0264_018 */
+  autonomous: boolean;
+  declaresTrigger: boolean;
+  isOwner: boolean;
   /** What the person asked for, while the promotion it started runs. */
   pending: string;
   /** The refusal of the last request, in the kernel's words. */
@@ -64,7 +72,11 @@ interface ControlAnswer {
   readonly promotion: KernelPromotion | null;
   readonly canChange: boolean;
   readonly declaresVocabulary: boolean;
+  readonly elevated?: boolean;
   readonly health: KernelHealth | null;
+  readonly autonomous: boolean;
+  readonly declaresTrigger: boolean;
+  readonly isOwner: boolean;
 }
 
 /** The dependents of an extension that are themselves active, by the listing's own dependents list. */
@@ -123,7 +135,11 @@ export const ExtensionView = component$<ViewProps>(({ tab }) => {
     promotion: null,
     canChange: false,
     declaresVocabulary: false,
+    elevated: false,
     health: null,
+    autonomous: false,
+    declaresTrigger: false,
+    isOwner: false,
     pending: "",
     refusal: "",
   });
@@ -154,7 +170,11 @@ export const ExtensionView = component$<ViewProps>(({ tab }) => {
       control.promotion = answer.promotion;
       control.canChange = answer.canChange;
       control.declaresVocabulary = answer.declaresVocabulary;
+      control.elevated = answer.elevated === true;
       control.health = answer.health;
+      control.autonomous = answer.autonomous;
+      control.declaresTrigger = answer.declaresTrigger;
+      control.isOwner = answer.isOwner;
       control.status = "ready";
       control.detail = "";
       return answer;
@@ -232,6 +252,26 @@ export const ExtensionView = component$<ViewProps>(({ tab }) => {
       await watch$();
     },
   );
+
+  /** The owner's allowance: whether this extension may start runs no person
+   * asked for. It changes what runs, not what is served, so it writes and
+   * reads again with no rebuild to watch. BO_0264_018 */
+  const allow$ = $(async () => {
+    const extension = control.extension;
+    if (extension === null) return;
+    control.refusal = "";
+    const response = await fetch(`/api/x/ui.shell/extensions/${encodeURIComponent(extension.id)}/autonomous`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ allowed: !control.autonomous }),
+    });
+    if (!response.ok) {
+      const refusal = (await response.json().catch(() => ({}))) as { message?: string; error?: string };
+      control.refusal = refusal.message ?? refusal.error ?? `the kernel answered ${response.status}`;
+      return;
+    }
+    await readControl$();
+  });
 
   const toggle$ = $(async () => {
     const extension = control.extension;
@@ -424,6 +464,23 @@ export const ExtensionView = component$<ViewProps>(({ tab }) => {
                 />
                 <span>{served.active ? "Active" : "Inactive"}</span>
               </label>
+              {control.declaresTrigger && (
+                <label class="extension-toggle" data-extension-autonomous data-allowed={control.autonomous ? "true" : "false"}>
+                  <input
+                    type="checkbox"
+                    checked={control.autonomous}
+                    disabled={!control.isOwner || busy}
+                    aria-label={`${served.id} ${control.autonomous ? "may" : "may not"} start runs on its own`}
+                    onChange$={allow$}
+                  />
+                  <span>May start runs on its own</span>
+                </label>
+              )}
+              {control.declaresTrigger && !control.isOwner && (
+                <span class="extension-note" data-extension-note="autonomous">
+                  whether it starts runs on its own is the owner's to allow
+                </span>
+              )}
               {served.required && (
                 <span class="extension-note" data-extension-note="required">
                   required to run Calliopa
@@ -560,6 +617,23 @@ export const ExtensionView = component$<ViewProps>(({ tab }) => {
         >
           {state.detail}
         </p>
+      )}
+      {served !== null && !control.elevated && (
+        <p class="extension-note" data-dependency-note>
+          A dependency this tree does not already hold is a change to{" "}
+          <code>ui.shell</code>: <code>package.json</code>, the lockfile,{" "}
+          <code>vite.config</code> and <code>tsconfig</code> are its
+          root-mapped members, and only an elevated extension may claim a
+          root-mapped path.
+        </p>
+      )}
+      {served !== null && <ExtensionGroups extension={served.id} />}
+      {state.document !== null && isChangeDocumentPath(nodeTarget(tab.itemId ?? "").path) && (
+        <ChangeStatus
+          extension={nodeTarget(tab.itemId ?? "").extension}
+          path={nodeTarget(tab.itemId ?? "").path ?? ""}
+          status={changeStatusOf(state.document.facts)}
+        />
       )}
       {state.document !== null && (
         <article

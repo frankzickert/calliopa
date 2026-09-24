@@ -30,8 +30,8 @@ const proposals: DocumentProposals = {
       stagedBy: ["claude"],
       proposer: started.proposed?.proposer ?? { kind: "person", name: "" },
       items: [
-        { itemId: first, groupId: "node:run-start", kind: "insert", blockId: "blk-1", block: { kind: "text", blockId: "blk-1", revisionId: "rev-1", containmentId: "", order: "i", role: "h2", standing: "neutral", runs: [{ text: "First day" }] } },
-        { itemId: second, groupId: "node:run-start", kind: "insert", blockId: "blk-2", block: { kind: "text", blockId: "blk-2", revisionId: "rev-2", containmentId: "", order: "u", role: "paragraph", standing: "neutral", runs: [{ text: "Get a laptop" }] } },
+        { itemId: first, groupId: "node:run-start", kind: "insert", blockId: "blk-1", block: { kind: "text", blockId: "blk-1", revisionId: "rev-1", containmentId: "", order: "i", role: "h2", standing: "keep", runs: [{ text: "First day" }] } },
+        { itemId: second, groupId: "node:run-start", kind: "insert", blockId: "blk-2", block: { kind: "text", blockId: "blk-2", revisionId: "rev-2", containmentId: "", order: "u", role: "paragraph", standing: "keep", runs: [{ text: "Get a laptop" }] } },
       ],
     },
   ],

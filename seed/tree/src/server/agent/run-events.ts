@@ -35,6 +35,12 @@ export type RunEvent =
       readonly seconds: number | null;
     }
   | {
+      readonly kind: "documentActivity";
+      readonly runId: string;
+      readonly at: number;
+      readonly activity: DocumentActivity;
+    }
+  | {
       readonly kind: "runCompleted";
       readonly runId: string;
       readonly at: number;
@@ -55,6 +61,26 @@ export type RunEvent =
       readonly at: number;
       readonly document?: string;
     };
+
+/**
+ * What a run did in a document, as the kernel's toolset reported it while the
+ * run was going: a whole-document read, a read of named blocks, or one staged
+ * item against its block. Ids, kinds and the agent's own short note, never
+ * the block's words. BO_0265_006
+ */
+export interface DocumentActivity {
+  readonly document: string;
+  /** `document` for a whole-document read or an item naming no block. */
+  readonly scope: "document" | "blocks";
+  /** `read`, or the staged item's kind. */
+  readonly action: string;
+  readonly blocks: readonly string[];
+  /** The group the run staged into, once it has staged. */
+  readonly group?: string;
+  /** The staged member a staged item's decision covers. */
+  readonly member?: string;
+  readonly note?: string;
+}
 
 /** The first event of every run, recorded the moment the run opens. */
 export function runStarted(runId: string, when = Date.now()): RunEvent {

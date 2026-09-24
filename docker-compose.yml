@@ -230,6 +230,201 @@ services:
       timeout: 5s
       retries: 30
 
+  # The media service: Calliopa's generator. It holds the two vendor CLIs and
+  # their credentials so nothing else does, and it is the one place a paid call
+  # is made. Profile-gated: an install whose owner has signed in to neither
+  # service runs no container for it. BO_0273_001
+  media:
+    image: calliopa-media:${CALLIOPA_RELEASE_VERSION:-local}
+    pull_policy: never
+    build:
+      context: build/media
+    profiles: ["media"]
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    environment:
+      CALLIOPA_MEDIA_STATE: /var/lib/calliopa/media
+      CALLIOPA_MEDIA_CONFIG_DIR: /var/lib/calliopa/media-config
+      CALLIOPA_MEDIA_BEARER_FILE: /run/secrets/calliopa/media_bearer
+      CALLIOPA_MEDIA_PORT: "8095"
+      CALLIOPA_MEDIA_CALLBACK_PORT: "8765"
+    # The callback port is published on the loopback address, and on the
+    # literal one rather than CALLIOPA_HOST_BIND: a vendor login's redirect
+    # goes to 127.0.0.1 by definition, so the browser must be on this host,
+    # and binding it wider would expose it wherever that points without
+    # helping anyone. An install whose browser is elsewhere pastes the code
+    # instead. BO_0273_028
+    ports:
+      - "127.0.0.1:${CALLIOPA_MEDIA_CALLBACK_PORT:-8765}:8765"
+    volumes:
+      - media-data:/var/lib/calliopa/media
+      - media-config:/var/lib/calliopa/media-config
+      - calliopa-secrets:/run/secrets/calliopa:ro
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8095/health',timeout=4).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # The page capture service: a headless browser that renders a public page
+  # to a PDF, a screenshot and its text for refinement's investigations. Always
+  # on, internal network only, no port, no volume; its bearer from the
+  # bootstrap. Every connection the browser makes passes the service's own
+  # address rule, so it can reach nothing on this network. BO_0277_001
+  capture:
+    image: calliopa-capture:${CALLIOPA_RELEASE_VERSION:-local}
+    pull_policy: never
+    build:
+      context: build/capture
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    environment:
+      CALLIOPA_CAPTURE_BEARER_FILE: /run/secrets/calliopa/capture_bearer
+      CALLIOPA_CAPTURE_PORT: "8096"
+    volumes:
+      - calliopa-secrets:/run/secrets/calliopa:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8096/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # The search service: the stack's own web search engine, SearXNG, behind a
+  # small front that holds the bearer, for refinement's outward reach. Always
+  # on, internal network only, no port, no volume; its bearer from the
+  # bootstrap. The engine asks the public web; nothing here reaches this
+  # network. BO_0281_001
+  search:
+    image: calliopa-search:${CALLIOPA_RELEASE_VERSION:-local}
+    pull_policy: never
+    build:
+      context: build/search
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    environment:
+      CALLIOPA_SEARCH_BEARER_FILE: /run/secrets/calliopa/search_bearer
+      CALLIOPA_SEARCH_PORT: "8097"
+    volumes:
+      - calliopa-secrets:/run/secrets/calliopa:ro
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8097/health', timeout=4).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # The bibliography service: the Zotero translation server — the engine
+  # behind Zotero's add-by-identifier and its browser connector — behind a
+  # small front that holds the bearer and the address rule, so a source's
+  # record is fetched from a DOI, an ISBN, a PMID, an arXiv id or a URL rather
+  # than typed. Always on, internal network only, no port, no volume; its
+  # bearer from the bootstrap. The engine asks the public web through a proxy
+  # that refuses this network. BO_0291_002
+  bibliography:
+    image: calliopa-bibliography:${CALLIOPA_RELEASE_VERSION:-local}
+    pull_policy: never
+    build:
+      context: build/bibliography
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    environment:
+      CALLIOPA_BIBLIOGRAPHY_BEARER_FILE: /run/secrets/calliopa/bibliography_bearer
+      CALLIOPA_BIBLIOGRAPHY_PORT: "8099"
+    volumes:
+      - calliopa-secrets:/run/secrets/calliopa:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8099/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # The typesetting service: Pandoc and TeX Live behind a front holding the
+  # bearer, turning a document's projection into a manuscript — LaTeX with its
+  # .bib and the PDF typeset from them. Always on, internal network only, no
+  # port, no volume of its own, and no request to the web; its bearer from the
+  # bootstrap; the kernel alone holds its address.
+  # `docs/system/typesetting-service.md`. BO_0293_002
+  typeset:
+    image: calliopa-typeset:${CALLIOPA_RELEASE_VERSION:-local}
+    pull_policy: never
+    build:
+      context: build/typeset
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    environment:
+      CALLIOPA_TYPESET_BEARER_FILE: /run/secrets/calliopa/typeset_bearer
+      CALLIOPA_TYPESET_PORT: "8094"
+    volumes:
+      - calliopa-secrets:/run/secrets/calliopa:ro
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8094/health', timeout=4).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # The code formatter: the container that parses a code block's source, so
+  # that the service holding the docker socket never has to. Always on,
+  # internal network only, no port, no volume, no socket and no credential to
+  # anything; its bearer from the bootstrap; the code service alone holds its
+  # address, because the code service is its only caller. It initiates no
+  # request of its own: everything it needs arrives in the one it answers.
+  # `docs/system/code-service.md`, Formatting. BO_0296_006
+  code-format:
+    image: calliopa-code-format:${CALLIOPA_RELEASE_VERSION:-local}
+    pull_policy: never
+    build:
+      context: build/code-format
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    environment:
+      CALLIOPA_CODE_FORMAT_BEARER_FILE: /run/secrets/calliopa/code_format_bearer
+      CALLIOPA_CODE_FORMAT_PORT: "8093"
+    volumes:
+      - calliopa-secrets:/run/secrets/calliopa:ro
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8093/health', timeout=4).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # The code service: the holder of the docker socket that makes runtimes —
+  # containers from any image with a Jupyter kernelspec — and speaks the
+  # kernel protocol to the sessions in them, so a document can run code.
+  # Always on, internal network only, no port, no volume of its own; its
+  # bearer from the bootstrap; the kernel alone holds its address. The
+  # runtimes it starts join a network of the service's own, which it makes
+  # and joins itself, and never this one; they appear in `docker ps` beside
+  # the stack. BO_0289_015
+  code:
+    image: calliopa-code:${CALLIOPA_RELEASE_VERSION:-local}
+    pull_policy: never
+    build:
+      context: build/code
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+    environment:
+      CALLIOPA_CODE_BEARER_FILE: /run/secrets/calliopa/code_bearer
+      CALLIOPA_CODE_PORT: "8098"
+      # The formatter's address and bearer sit on this service and on no
+      # other: the code service is the formatter's only caller, so the kernel
+      # keeps one door for both. BO_0296_002
+      CALLIOPA_CODE_FORMAT_URL: http://code-format:8093
+      CALLIOPA_CODE_FORMAT_BEARER_FILE: /run/secrets/calliopa/code_format_bearer
+    volumes:
+      - calliopa-secrets:/run/secrets/calliopa:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8098/health', timeout=4).status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
   # The UI kernel: bootloader and CLI. Prod serve materializes the promoted
   # release pin from the graph, builds it, and serves it behind the kernel
   # proxy on port 8090. The served tree is the shell, whose runtime
@@ -267,6 +462,11 @@ services:
       CALLIOPA_KERNEL_CONFIRM_BIND: 0.0.0.0
       CALLIOPA_KERNEL_CONFIRM_URL: ${CALLIOPA_KERNEL_CONFIRM_URL:-}
       CALLIOPA_KERNEL_CONFIRM_PUBLIC_PORT: ${CALLIOPA_CONFIRM_PORT:-8091}
+      # The candidate origin, where a staged group is served beside the
+      # promoted tree so a person can try a change before accepting it. Same
+      # shape as the confirmation origin, one port further on. BO_0282_003
+      CALLIOPA_KERNEL_CANDIDATE_BIND: 0.0.0.0
+      CALLIOPA_KERNEL_CANDIDATE_PUBLIC_PORT: ${CALLIOPA_CANDIDATE_PORT:-8092}
       # The agent bridge: the kernel half of the Hermes agent service.
       # BO_0089_012
       CALLIOPA_HERMES_URL: http://hermes:8642
@@ -274,6 +474,19 @@ services:
       CALLIOPA_HERMES_BEARER_FILE: /run/secrets/calliopa/hermes_api_key
       CALLIOPA_AGENT_TOOLS_BEARER_FILE: /run/secrets/calliopa/agent_tools_bearer
       CALLIOPA_AGENT_CONFIG_DIR: /var/lib/calliopa/agent-config
+      CALLIOPA_MEDIA_CONFIG_DIR: /var/lib/calliopa/media-config
+      CALLIOPA_MEDIA_URL: http://media:8095
+      CALLIOPA_MEDIA_BEARER_FILE: /run/secrets/calliopa/media_bearer
+      CALLIOPA_CAPTURE_URL: http://capture:8096
+      CALLIOPA_CAPTURE_BEARER_FILE: /run/secrets/calliopa/capture_bearer
+      CALLIOPA_SEARCH_URL: http://search:8097
+      CALLIOPA_SEARCH_BEARER_FILE: /run/secrets/calliopa/search_bearer
+      CALLIOPA_BIBLIOGRAPHY_URL: http://bibliography:8099
+      CALLIOPA_BIBLIOGRAPHY_BEARER_FILE: /run/secrets/calliopa/bibliography_bearer
+      CALLIOPA_TYPESET_URL: http://typeset:8094
+      CALLIOPA_TYPESET_BEARER_FILE: /run/secrets/calliopa/typeset_bearer
+      CALLIOPA_CODE_URL: http://code:8098
+      CALLIOPA_CODE_BEARER_FILE: /run/secrets/calliopa/code_bearer
       # The kernel hands the served tree the two addresses it needs, CCGW's
       # and its own, and nothing else: the shell keeps no database, bucket or
       # at-rest key of its own (BO_0207_007). The old shell's stores stay on
@@ -300,9 +513,11 @@ services:
     ports:
       - "${CALLIOPA_HOST_BIND:-0.0.0.0}:${CALLIOPA_PORT:-8090}:8090"
       - "${CALLIOPA_HOST_BIND:-0.0.0.0}:${CALLIOPA_CONFIRM_PORT:-8091}:8091"
+      - "${CALLIOPA_HOST_BIND:-0.0.0.0}:${CALLIOPA_CANDIDATE_PORT:-8092}:8092"
     volumes:
       - kernel-data:/var/lib/calliopa-kernel
       - agent-config:/var/lib/calliopa/agent-config
+      - media-config:/var/lib/calliopa/media-config
       - calliopa-secrets:/run/secrets/calliopa:ro
       # The one host path the stack sees: the owner's update request goes
       # out, the updater's status comes in, nothing else crosses. install.sh
@@ -398,4 +613,6 @@ volumes:
   garage-data:
   kernel-data:
   hermes-data:
+  media-data:
+  media-config:
   agent-config:

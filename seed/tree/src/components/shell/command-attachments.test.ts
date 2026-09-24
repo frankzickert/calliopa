@@ -2,18 +2,16 @@ import { jsx } from "@builder.io/qwik";
 import { createDOM } from "@builder.io/qwik/testing";
 import { describe, expect, it } from "vitest";
 
-import type { Pointing } from "~/lib/command-target";
-import { ComposerHost, releaseUpload, resetUploads } from "./testing/composer-host";
+import { AttachmentsHost, releaseUpload, resetUploads } from "./testing/attachments-host";
 
 /**
  * The paperclip and the attachment chips pressed through the shell's own JSX
- * (`composer-host.tsx`): chosen files become chips, uploading then ready or
- * refused, a file past the bound or the tenth is refused beside the paperclip
- * with nothing uploaded, × takes a chip off, and what *Run* posts is the ready
- * files. BO_0229_010 BO_0229_013
+ * (`attachments-host.tsx`), as a block's command control mounts them: chosen
+ * files become chips, uploading then ready or refused, a file past the bound
+ * or the tenth is refused beside the paperclip with nothing uploaded, × takes
+ * a chip off, and what a command would carry is the ready files.
+ * BO_0229_010 BO_0229_013 CA_0058_002
  */
-const report: Pointing = { references: [{ kind: "block", number: 1, blockId: "a", words: "Opening.", stale: false }], pinned: [] };
-
 /** Waits, in short steps, until the bar shows what a test expects: a fixed
  * pause flaked under a full suite's load. */
 const settle = async (until: () => boolean = () => true) => {
@@ -26,7 +24,7 @@ const settle = async (until: () => boolean = () => true) => {
 const mount = async () => {
   resetUploads();
   const dom = await createDOM();
-  await dom.render(jsx(ComposerHost, { report }));
+  await dom.render(jsx(AttachmentsHost, {}));
   const root = dom.screen as unknown as HTMLElement;
   const find = (selector: string) => (root.querySelector(selector) as HTMLElement | null) ?? null;
   const all = (selector: string) => Array.from(root.querySelectorAll(selector)) as HTMLElement[];
@@ -35,14 +33,14 @@ const mount = async () => {
 };
 
 describe("the paperclip", () => {
-  it("Given the bar, Then Attach files is a native multi-file picker beside the field, disabled while a command is sent", async () => {
+  it("Given a command control, Then Attach files is a native multi-file picker beside it, disabled while a command is sent", async () => {
     const { find, userEvent } = await mount();
     const input = find("[data-attach-input]");
     expect(input?.getAttribute("type")).toBe("file");
     expect(input?.hasAttribute("multiple")).toBe(true);
     expect(input?.getAttribute("aria-label")).toBe("Attach files");
     expect(find("[data-attach]")?.getAttribute("aria-disabled")).toBe("false");
-    expect(find(".composer__bar > [data-attach]")).not.toBeNull();
+    expect(find(".block-command__line > [data-attach]")).not.toBeNull();
     await userEvent("[data-sending]", "click");
     expect(input?.hasAttribute("disabled")).toBe(true);
     expect(find("[data-attach]")?.getAttribute("aria-disabled")).toBe("true");
@@ -52,7 +50,6 @@ describe("the paperclip", () => {
 describe("the attachment chips", () => {
   it("Given two files and one past 10 MB, Then two chips upload and turn ready, the large one is refused beside the paperclip, and the ready files are what is posted", async () => {
     const { find, all, read, userEvent } = await mount();
-    await userEvent("[data-report]", "click");
     await userEvent("[data-host-attach]", "click");
     await settle(() => find("[data-attach-refusal]") !== null && all("[data-attachment-chip]").length === 2);
     expect(find("[data-attach-refusal]")?.textContent).toBe("huge.bin is larger than 10 MB, the most a command can carry per file.");
@@ -63,10 +60,8 @@ describe("the attachment chips", () => {
     expect(read("[data-attachments-uploading]")).toEqual(["plan.md", "notes.txt"]);
     expect(read("[data-attachments-sent]")).toEqual([]);
 
-    // The chips sit along the field's edge, before the reference chips.
-    const field = find(".composer__field");
-    const order = Array.from(field?.children ?? []).map((child) => (child as HTMLElement).getAttribute("data-attachments") !== null ? "attachments" : (child as HTMLElement).getAttribute("data-chips") !== null ? "references" : "");
-    expect(order.indexOf("attachments")).toBeLessThan(order.indexOf("references"));
+    // The chips sit on the control's line, beside the paperclip.
+    expect(find(".block-command__line [data-attachments]") !== null).toBe(true);
 
     releaseUpload();
     releaseUpload("notes.txt could not be read");

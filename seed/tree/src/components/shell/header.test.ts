@@ -62,7 +62,11 @@ describe("the header's one-line controls", () => {
     ];
 
     expect(seen()).toEqual(["Theme: system. Switch theme", "circle-half"]);
-    expect(view.one(".theme-toggle")?.textContent?.trim()).toBe("");
+    // Its one text is the label the phone's *Minimum* menu shows, which the
+    // stylesheet hides everywhere else (CA_0054_003).
+    expect(view.one(".theme-toggle")?.textContent?.trim()).toBe(
+      view.one(".theme-toggle .menu-label")?.textContent,
+    );
     await view.userEvent(".theme-toggle", "click");
     expect(seen()).toEqual(["Theme: light. Switch theme", "sun"]);
     await view.userEvent(".theme-toggle", "click");

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  serviceSave,
   agentNeeds,
   configurationRefusal,
   type AgentStatus,
@@ -248,5 +249,95 @@ describe("A channel's configuration", () => {
     expect(
       configurationRefusal(honcho, { address: "https://example.com" }),
     ).toBe("honcho takes no configuration.");
+  });
+
+  it("Given a service that declares a field, Then it takes that field and nothing else", () => {
+    const evaluation = {
+      id: "evaluation",
+      kind: "service" as const,
+      fields: [{ key: "retention", label: "Data retention", hint: "require or allow" }],
+      fixed: { address: "https://ai-gateway.vercel.sh/v1" },
+    };
+    // A service takes what it declares: the key it fixes and the field it asks
+    // the owner for. Its row draws the field as a channel's does. BO_0280_008
+    expect(
+      configurationRefusal(evaluation, { address: "https://ai-gateway.vercel.sh/v1", retention: "require" }),
+    ).toBeNull();
+    // A field it declares is required once declared, so a row cannot be saved
+    // half-answered.
+    expect(configurationRefusal(evaluation, { address: "https://ai-gateway.vercel.sh/v1" })).toBe(
+      "Data retention is required.",
+    );
+    expect(
+      configurationRefusal(evaluation, { address: "https://ai-gateway.vercel.sh/v1", retention: "  " }),
+    ).toBe("Data retention is required.");
+    // Anything it neither fixes nor declares is still nothing it takes.
+    expect(
+      configurationRefusal(evaluation, { address: "x", retention: "allow", library: "512345" }),
+    ).toBe("evaluation takes no configuration.");
+  });
+
+  it("Given a service that fixes its own address, When that address is in the record, Then it is accepted", () => {
+    const evaluation = {
+      id: "calliopa-refine-evaluation",
+      kind: "service" as const,
+      fields: [],
+      fixed: { address: "https://ai-gateway.vercel.sh/v1" },
+    };
+    // Written with the record by the save, never typed: the kernel's broker
+    // refuses a party with no configured address, so refusing it here left a
+    // service that could hold a credential and never be used with it.
+    expect(
+      configurationRefusal(evaluation, {
+        address: "https://ai-gateway.vercel.sh/v1",
+      }),
+    ).toBeNull();
+    expect(configurationRefusal(evaluation, {})).toBeNull();
+    // Anything it does not fix is still nothing a service takes.
+    expect(
+      configurationRefusal(evaluation, {
+        address: "https://ai-gateway.vercel.sh/v1",
+        library: "512345",
+      }),
+    ).toBe("calliopa-refine-evaluation takes no configuration.");
+  });
+});
+
+describe("What a service row's Save would write", () => {
+  const fields = [{ key: "retention", label: "Data retention", hint: "require or allow" }];
+  const stored = { address: "https://ai-gateway.vercel.sh/v1", retention: "require" };
+
+  it("Given nothing typed anywhere, Then there is nothing to save", () => {
+    expect(serviceSave("", fields, {}, stored)).toBeNull();
+    expect(serviceSave("   ", fields, {}, stored)).toBeNull();
+    // A party with no fields and no key typed has nothing either.
+    expect(serviceSave("", [], {}, {})).toBeNull();
+  });
+
+  it("Given a field changed and no key typed, Then the field is saved and the key is left alone", () => {
+    const save = serviceSave("", fields, { retention: "allow" }, stored);
+    // An empty key box is a person who did not touch it. Sending it would have
+    // cleared the credential of anyone who came to change a field.
+    expect(save).toEqual({ configuration: { retention: "allow" } });
+    expect(save && "secret" in save).toBe(false);
+  });
+
+  it("Given a key typed, Then it is saved with the configuration as it stands", () => {
+    expect(serviceSave("sk-new", fields, {}, stored)).toEqual({
+      secret: "sk-new",
+      configuration: { retention: "require" },
+    });
+    expect(serviceSave("sk-new", fields, { retention: "allow" }, stored)).toEqual({
+      secret: "sk-new",
+      configuration: { retention: "allow" },
+    });
+  });
+
+  it("Given a party that declares no fields, Then only the key is written", () => {
+    expect(serviceSave("sk-new", [], {}, {})).toEqual({ secret: "sk-new" });
+  });
+
+  it("Given a field typed back to what it already was, Then nothing was changed", () => {
+    expect(serviceSave("", fields, { retention: "require" }, stored)).toBeNull();
   });
 });

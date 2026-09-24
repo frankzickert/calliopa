@@ -5,7 +5,7 @@ Status: completed
 Completed 2026-09-17. The kernel half (`BO_0229_001`–`BO_0229_006`) is truth in
 `docs/system/ui-kernel.md`; the image table is set from the walk and recorded in
 `docs/system/hermes.md`, Images Through Tools. The shell half (`BO_0229_007`–`BO_0229_014`) is
-truth in `ui.shell`'s `workspace/command-dock.md` and `workspace/processes.md`, served since pin
+truth in `ui.shell`'s `workspace/commands-and-runs.md` and `workspace/processes.md`, served since pin
 1264 with the walk fix at 1284. The walk (`BO_0229_014`) ran on this instance on all three
 agents and in a browser, and found one defect — attachment nodes written without
 `status: "established"` — fixed in the graph before completion.
@@ -152,7 +152,7 @@ Re-transferred on 2026-09-16, after the split of `ui.shell` into the frame, `doc
 
 - **The shell half is `ui.shell`'s and lives in its graph docs.** The command bar, the run routes
   and the process detail are the frame's; nothing here is `documents`'s or `calliopa-refine`'s.
-  `BO_0229_007`–`_010` and `_012`–`_014` are in `workspace/command-dock.md`, *Command File
+  `BO_0229_007`–`_010` and `_012`–`_014` are in `workspace/commands-and-runs.md`, *Command File
   Attachments*, and `_011` in `workspace/processes.md`; `docs/system/ui-shell.md` keeps a pointer.
 - **`attachment` is the first type `ui.shell` declares** since `BO_0255` moved the document
   vocabulary to `documents`; `_007` rewrites the shell's *does not define a content model* line

@@ -8,7 +8,9 @@ import { LibraryRowHost } from "./testing/library-row-host";
 /**
  * A library row pressed through the shell's own JSX: a document a run started
  * and nobody has taken yet carries its proposer's face and says so in its
- * name; an ordinary row carries neither. BO_0251_012
+ * name; an ordinary row carries neither (`BO_0251_012`). A row the listing
+ * marks unnamed draws its label muted and keeps the label as its name
+ * (`DO_0012_007`).
  */
 const open = (itemId: string, title: string) => ({ kind: "documents:document", itemId, title });
 const items: LibraryItem[] = [
@@ -24,6 +26,12 @@ const items: LibraryItem[] = [
     label: "Handover",
     open: open("doc-person", "Handover"),
     proposedBy: { agent: null, name: "sam" },
+  },
+  {
+    id: "doc-new",
+    label: "Untitled document",
+    open: open("doc-new", "Untitled document"),
+    unnamed: true,
   },
 ];
 
@@ -68,6 +76,18 @@ describe("a proposed document in the library", () => {
     expect(row?.hasAttribute("data-proposed")).toBe(false);
     expect(row?.querySelector("[data-proposer-face]") ?? null).toBeNull();
     expect(nameOf(row)).toBe("Notes");
+  });
+
+  it("Given the listing says nobody has named the item, Then its label is drawn muted and still names the row", async () => {
+    const { find } = await mount();
+    const row = find('[data-item-id="doc-new"]');
+    expect(row?.querySelector(".library-entry__label")?.getAttribute("data-unnamed")).toBe("true");
+    expect(nameOf(row)).toBe("Untitled document");
+    // Every other row says it is named, rather than leaving the attribute off
+    // one row for the reason the tab strip writes `data-active` on every tab.
+    expect(
+      find('[data-item-id="doc-plain"]')?.querySelector(".library-entry__label")?.getAttribute("data-unnamed"),
+    ).toBe("false");
   });
 
   it("When a proposed row is pressed, Then it opens as any row does", async () => {

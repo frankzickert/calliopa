@@ -1,9 +1,15 @@
 import { readStanding, type Standing } from "~/extensions/documents/lib/disposition";
+import { readFrontMatter, type FrontMatter } from "../lib/front-matter";
+import type { CitationStyles } from "~/contract";
 import type { Proposer } from "~/extensions/documents/lib/proposals";
 import { byOrder, isOrderKey } from "~/lib/order";
 import type { ReadNode, ReadResult } from "~/server/ccgw/client";
 import { bareId, contentOf, nodeRef, typeOf } from "~/server/ccgw/nodes";
+import { isBlobReference, objectIdOfHash } from "~/server/ccgw/blobs";
+import { isTypeset, typeset } from "~/extensions/documents/lib/mathjax";
+import { readColumns, readRows, type TableColumn, type TableRow } from "~/extensions/documents/lib/table";
 import {
+  ACCEPTED_AT_PROPERTY,
   PHASE_PROPERTY,
   SUPERSEDED_BY_PROPERTY,
   isPhase,
@@ -44,12 +50,19 @@ interface BlockCommon {
    * reader's mark is compared with (`BO_0246_007`). Absent on a view built
    * without one. */
   readonly revisedAt?: number;
+  /** Who made the revision the block carries. BO_0258_016 */
+  readonly revisedBy?: string;
 }
 
 export interface TextBlockView extends BlockCommon {
   readonly kind: "text";
   readonly role: TextRole;
   readonly runs: readonly Run[];
+  /** Each math run's source, set here as the equations are (`BO_0290_015`),
+   * keyed by that source. It travels with the block so the line arrives
+   * already set and the browser typesets nothing to read it; a source that
+   * could not be set is absent, and the run draws as itself. */
+  readonly mathSvg?: Readonly<Record<string, string>>;
   /** The standing the reader gave the block; neutral when none is stored. BO_0227_010 */
   readonly standing: Standing;
   /** What the block is in the decision vocabulary — the graph's `kind`
@@ -67,6 +80,35 @@ export interface DividerBlockView extends BlockCommon {
 }
 
 /**
+ * A picture or a moving picture (`BO_0273_008`). The bytes are a blob behind
+ * CCGW and the block carries only what is needed to draw them: the object id
+ * the blob route takes, the reference's own media type — which a video must be
+ * retyped with, since retrieval serves every object as an octet stream — and
+ * the advisory box the reference does not carry.
+ *
+ * **`objectId` absent is the pending state**: a generation proposed and not yet
+ * paid for is this block with no reference. `source` is whatever made the
+ * bytes, stored and never interpreted here; the extension that wrote it draws
+ * it (`BO_0273_019`).
+ */
+export interface MediaBlockView extends BlockCommon {
+  readonly kind: "image" | "video";
+  readonly objectId?: string;
+  readonly mediaType?: string;
+  readonly alt?: string;
+  readonly width?: number;
+  readonly height?: number;
+  readonly source?: Record<string, unknown>;
+  /** A picture's caption (`BO_0295_006`); a number needs none. */
+  readonly caption?: string;
+  /** The author's ask for a number, and — when they asked — the number the
+   * document's order gives it, figures and tables counted apart
+   * (`BO_0295_008`). Resolved on every read, stored nowhere. */
+  readonly numbered?: boolean;
+  readonly number?: number;
+}
+
+/**
  * A block whose stored type or content this build cannot render. It is
  * reported rather than dropped: a document that quietly loses a block on an
  * older deployment is worse than one that says it holds something it cannot
@@ -78,7 +120,120 @@ export interface UnsupportedBlockView extends BlockCommon {
   readonly content: Record<string, unknown>;
 }
 
-export type BlockView = TextBlockView | DividerBlockView | UnsupportedBlockView;
+/**
+ * A table (`BO_0287_008`): its typed columns and rows as the block holds them,
+ * its caption, and — when a file stands behind it — the object the blob route
+ * takes with the file's row count, of which the rows here are the first
+ * hundred. `source` is where the data came from, stored and never interpreted
+ * here.
+ */
+export interface TableBlockView extends BlockCommon {
+  readonly kind: "table";
+  readonly columns: readonly TableColumn[];
+  readonly rows: readonly TableRow[];
+  readonly caption?: string;
+  readonly file?: { readonly objectId: string; readonly rowCount: number };
+  readonly source?: Record<string, unknown>;
+  /** The author's ask for a number, and — when they asked — the number the
+   * document's order gives it, figures and tables counted apart
+   * (`BO_0295_008`). Resolved on every read, stored nowhere. */
+  readonly numbered?: boolean;
+  readonly number?: number;
+}
+
+/**
+ * An equation (`BO_0290_008`): the exact TeX it is set from, its caption, the
+ * standing its reader gave it, whether its author asked for a number and — when
+ * they did — the `number` the document's order gives it.
+ *
+ * **The number is resolved on every read and stored nowhere** (`numberEquations`),
+ * so an equation inserted above renumbers those below it with no write. `source`
+ * is whatever wrote the block, stored and never interpreted here.
+ */
+export interface EquationBlockView extends BlockCommon {
+  readonly kind: "equation";
+  readonly tex: string;
+  readonly caption?: string;
+  readonly standing: Standing;
+  readonly numbered?: boolean;
+  readonly number?: number;
+  /** The equation, typeset here rather than where it is drawn (BO_0290_014).
+   * The markup travels in the response, so what arrives already *is* the
+   * equation and nothing resizes once the page is live — and MathJax stays
+   * out of the browser bundle for reading, since the views import only the
+   * types from this module. */
+  readonly svg?: string;
+  /** Why it could not be set, when it could not: the block draws its source
+   * with this sentence, and the engine own error markup never reaches a
+   * reader. */
+  readonly failure?: string;
+  readonly source?: Record<string, unknown>;
+}
+
+/**
+ * Code (`BO_0289_018`): the source as the block holds it and the language it
+ * is written in. Running it is the `code` extension's; this model reads and
+ * writes the block.
+ */
+export interface CodeBlockView extends BlockCommon {
+  readonly kind: "sourcecode";
+  readonly source: string;
+  readonly language?: string;
+}
+
+/** One thing an execution streamed, as the output block holds it: text on a
+ * stream, an error with its traceback, a display or a result whose bundle
+ * names a picture by its index into the block's pictures, a cut. */
+export type OutputItem =
+  | { readonly kind: "stream"; readonly name: string; readonly text: string }
+  | { readonly kind: "error"; readonly name: string; readonly value: string; readonly traceback: readonly string[] }
+  | { readonly kind: "display" | "result"; readonly text?: string; readonly html?: string; readonly picture?: number; readonly executionCount?: number }
+  | { readonly kind: "cut"; readonly reason: string }
+  | { readonly kind: "clear" };
+
+/** A picture an execution showed or a file it wrote: the object the blob
+ * route takes, with the name, type and size the reference carries. */
+export interface OutputObject {
+  readonly objectId: string;
+  readonly filename: string;
+  readonly mediaType: string;
+  readonly size: number;
+}
+
+/**
+ * What one execution of a code block produced (`BO_0289_018`): proposed after
+ * the code block by whoever sent it, never written as truth by the kernel,
+ * and read here as the items in order with the pictures and the files they
+ * name. `of` is the code block's id; `outcome` is how the execution ended.
+ */
+export interface OutputBlockView extends BlockCommon {
+  readonly kind: "output";
+  readonly of: string;
+  readonly outcome: string;
+  readonly items: readonly OutputItem[];
+  readonly pictures: readonly OutputObject[];
+  readonly files: readonly OutputObject[];
+  readonly elapsed?: number;
+  readonly executionCount?: number;
+  /** Set by a person after accepting the output (`BO_0295_006`): its first
+   * picture is then a figure, counted with the images. */
+  readonly caption?: string;
+  /** The author's ask for a number, and — when they asked — the number the
+   * document's order gives it, figures and tables counted apart
+   * (`BO_0295_008`). Resolved on every read, stored nowhere. */
+  readonly numbered?: boolean;
+  readonly number?: number;
+}
+
+export type BlockView =
+  | TextBlockView
+  | DividerBlockView
+  | MediaBlockView
+  | TableBlockView
+  | EquationBlockView
+  | CodeBlockView
+  | OutputBlockView
+  | UnsupportedBlockView;
 
 export interface DocumentView {
   readonly documentId: string;
@@ -88,7 +243,40 @@ export interface DocumentView {
   readonly phase?: Phase;
   /** The root that superseded this one, with `phase` superseded. */
   readonly supersededBy?: string;
+  /** The dataRevision the acceptance was made at, absent for a root that was
+   * never accepted: what is accepted is derived from it (`BO_0274_005`). */
+  readonly acceptedAt?: number;
   readonly blocks: readonly BlockView[];
+  /** The number each numbered equation carries, by block identity, for the
+   * whole document: what a reference run is drawn as. Derived on every read
+   * and stored nowhere, so it can never be stale (`BO_0290_011`). */
+  readonly equationNumbers?: Readonly<Record<string, number>>;
+  /** The front matter a manuscript's head projects, as the node carries it.
+   * BO_0293_012 */
+  readonly frontMatter?: FrontMatter;
+  /** The number of every numbered figure and table, by identity. BO_0295_008 */
+  readonly figureNumbers?: Readonly<Record<string, number>>;
+  readonly tableNumbers?: Readonly<Record<string, number>>;
+  /** The number each cited work carries in this document, by the work's
+   * identity, in first-citation order over the reading order: what a
+   * citation run is drawn as. Derived on every read and stored nowhere
+   * (`BO_0291_013`). */
+  readonly citationNumbers?: Readonly<Record<string, number>>;
+  /** Each citation's label in the document's style, by `citationKey`, as
+   * the bibliography answers it (`BO_0291_030`); absent when nothing
+   * answers, and a citation is then drawn as its number. */
+  readonly citationLabels?: Readonly<Record<string, string>>;
+  /** The document's own citation style, by the style's id, when it chose
+   * one; absent, it follows the instance's default. BO_0291_037 */
+  readonly citationStyle?: string;
+  /** The style its citations are drawn in and the styles it may choose, as
+   * the citation resolver answers them: present when the document cites
+   * anything and a resolver answers. BO_0291_037 */
+  readonly citationStyles?: CitationStyles;
+  /** The works the document cites that were not at the pin when it was read
+   * — retired, or never there — whose citations draw as missing rather than
+   * with a stale number (`BO_0291_013`). */
+  readonly missingWorks?: readonly string[];
   /** The data revision the document was read at, which the reader's mark
    * records once its derived blocks were in view (`BO_0246_007`). */
   readonly dataRevision?: number;
@@ -124,6 +312,10 @@ export function toBlock(node: ReadNode, containmentId: string): BlockView {
     containmentId,
     order: orderOf(content),
     ...(typeof node.revision.dataRevision === "number" ? { revisedAt: node.revision.dataRevision } : {}),
+    // Who made the revision the block carries, so a reader of the document
+    // can tell a block a run maintains from one a person took as their own
+    // without a second read. BO_0258_016
+    ...(typeof node.revision.createdBy === "string" && node.revision.createdBy !== "" ? { revisedBy: node.revision.createdBy } : {}),
   };
 
   if (semanticType === "text") {
@@ -136,11 +328,19 @@ export function toBlock(node: ReadNode, containmentId: string): BlockView {
       : "paragraph";
     const standing = readStanding(content["disposition"]);
     const blockKind = content["kind"];
+    // The mathematics in the sentence, set once here. BO_0290_015
+    const mathSvg: Record<string, string> = {};
+    for (const entry of runs) {
+      if (entry.math !== true || mathSvg[entry.text] !== undefined) continue;
+      const set = typeset(entry.text, false);
+      if (isTypeset(set)) mathSvg[entry.text] = set.svg;
+    }
     return {
       ...common,
       kind: "text",
       role,
       runs,
+      ...(Object.keys(mathSvg).length > 0 ? { mathSvg } : {}),
       standing,
       ...(typeof blockKind === "string" && blockKind !== "" ? { blockKind } : {}),
     };
@@ -150,6 +350,115 @@ export function toBlock(node: ReadNode, containmentId: string): BlockView {
     return { ...common, kind: "divider" };
   }
 
+  if (semanticType === "image" || semanticType === "video") {
+    const reference = content["reference"];
+    // A reference that is not one is no reference: the block is pending rather
+    // than broken, and nothing downstream is handed a hash it cannot resolve.
+    const objectId = isBlobReference(reference) ? objectIdOfHash(reference.hash) : null;
+    const box = (name: "width" | "height"): number | null => {
+      const stored = content[name];
+      return typeof stored === "number" && Number.isFinite(stored) && stored > 0 ? stored : null;
+    };
+    const width = box("width");
+    const height = box("height");
+    const alt = content["alt"];
+    const source = content["source"];
+    return {
+      ...common,
+      kind: semanticType,
+      ...(objectId !== null ? { objectId } : {}),
+      ...(isBlobReference(reference) && reference.mediaType !== "" ? { mediaType: reference.mediaType } : {}),
+      ...(typeof alt === "string" && alt !== "" ? { alt } : {}),
+      ...(width !== null ? { width } : {}),
+      ...(height !== null ? { height } : {}),
+      ...(source !== null && typeof source === "object" && !Array.isArray(source)
+        ? { source: source as Record<string, unknown> }
+        : {}),
+      ...(semanticType === "image" ? captionedOf(content) : {}),
+    };
+  }
+
+  if (semanticType === "equation") {
+    const tex = content["tex"];
+    // A stored equation carrying no source is not one: reported, never drawn
+    // as an empty box.
+    if (typeof tex === "string" && tex.trim() !== "") {
+      const caption = content["caption"];
+      const source = content["source"];
+      const set = typeset(tex, true);
+      return {
+        ...common,
+        kind: "equation",
+        tex,
+        standing: readStanding(content["disposition"]),
+        ...(isTypeset(set) ? { svg: set.svg } : { failure: set.failure }),
+        ...(typeof caption === "string" && caption !== "" ? { caption } : {}),
+        ...(content["numbered"] === true ? { numbered: true } : {}),
+        ...(source !== null && typeof source === "object" && !Array.isArray(source)
+          ? { source: source as Record<string, unknown> }
+          : {}),
+      };
+    }
+  }
+
+  if (semanticType === "table") {
+    const columns = readColumns(content["columns"]);
+    const rows = readRows(content["rows"]);
+    // A stored table this build cannot read as one is reported, not dropped.
+    if ("columns" in columns && "rows" in rows) {
+      const reference = content["reference"];
+      const objectId = isBlobReference(reference) ? objectIdOfHash(reference.hash) : null;
+      const rowCount = content["rowCount"];
+      const caption = content["caption"];
+      const source = content["source"];
+      return {
+        ...common,
+        kind: "table",
+        columns: columns.columns,
+        rows: rows.rows,
+        ...(typeof caption === "string" && caption !== "" ? { caption } : {}),
+        ...(objectId !== null
+          ? { file: { objectId, rowCount: typeof rowCount === "number" && rowCount >= 0 ? rowCount : rows.rows.length } }
+          : {}),
+        ...(content["numbered"] === true ? { numbered: true } : {}),
+        ...(source !== null && typeof source === "object" && !Array.isArray(source)
+          ? { source: source as Record<string, unknown> }
+          : {}),
+      };
+    }
+  }
+
+  if (semanticType === "sourcecode" && typeof content["source"] === "string") {
+    const language = content["language"];
+    return {
+      ...common,
+      kind: "sourcecode",
+      source: content["source"],
+      ...(typeof language === "string" && language !== "" ? { language } : {}),
+    };
+  }
+
+  if (semanticType === "output" && Array.isArray(content["items"])) {
+    const pictures = readOutputObjects(content["pictures"], "figure");
+    const files = readOutputObjects(content["files"], "file");
+    const outcome = content["outcome"];
+    const of = content["of"];
+    const elapsed = content["elapsed"];
+    const executionCount = content["executionCount"];
+    return {
+      ...common,
+      kind: "output",
+      of: typeof of === "string" ? of : "",
+      outcome: typeof outcome === "string" ? outcome : "",
+      items: (content["items"] as readonly unknown[]).flatMap((item) => readOutputItem(item)),
+      pictures,
+      files,
+      ...(typeof elapsed === "number" ? { elapsed } : {}),
+      ...(typeof executionCount === "number" ? { executionCount } : {}),
+      ...captionedOf(content),
+    };
+  }
+
   return {
     ...common,
     kind: "unsupported",
@@ -157,6 +466,79 @@ export function toBlock(node: ReadNode, containmentId: string): BlockView {
     content,
   };
 }
+
+/** A picture's or an output's caption and number ask, as a read answers
+ * them: an empty caption is no caption. `BO_0295_006` */
+const captionedOf = (
+  content: Record<string, unknown>,
+): { caption?: string; numbered?: true } => {
+  const caption = content["caption"];
+  return {
+    ...(typeof caption === "string" && caption !== "" ? { caption } : {}),
+    ...(content["numbered"] === true ? { numbered: true as const } : {}),
+  };
+};
+
+/** The blob references an output hoists, each as the object the blob route
+ * takes; one that is not a reference is left out rather than drawn broken. */
+const readOutputObjects = (value: unknown, fallback: string): OutputObject[] =>
+  Array.isArray(value)
+    ? value.flatMap((entry, index) => {
+        if (!isBlobReference(entry)) return [];
+        const objectId = objectIdOfHash(entry.hash);
+        if (objectId === null) return [];
+        const named = (entry as { filename?: unknown }).filename;
+        return [
+          {
+            objectId,
+            filename: typeof named === "string" && named !== "" ? named : `${fallback}-${index + 1}`,
+            mediaType: entry.mediaType,
+            size: entry.size,
+          },
+        ];
+      })
+    : [];
+
+/** One stored item as the view reads it: a display or result keeps its plain
+ * text, its HTML as text, and the index of its picture; the bytes are never
+ * in the block. */
+const readOutputItem = (value: unknown): OutputItem[] => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return [];
+  const item = value as Record<string, unknown>;
+  const kind = item["kind"];
+  if (kind === "stream") {
+    return [{ kind, name: typeof item["name"] === "string" ? item["name"] : "stdout", text: typeof item["text"] === "string" ? item["text"] : "" }];
+  }
+  if (kind === "error") {
+    const traceback = Array.isArray(item["traceback"]) ? item["traceback"].filter((line): line is string => typeof line === "string") : [];
+    return [{ kind, name: String(item["name"] ?? ""), value: String(item["value"] ?? ""), traceback }];
+  }
+  if (kind === "display" || kind === "result") {
+    const data = item["data"];
+    const bundle = data !== null && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : {};
+    let picture: number | undefined;
+    for (const [mime, entry] of Object.entries(bundle)) {
+      if (!mime.startsWith("image/") || entry === null || typeof entry !== "object") continue;
+      const index = (entry as { picture?: unknown }).picture;
+      if (typeof index === "number") picture = index;
+    }
+    const text = bundle["text/plain"];
+    const html = bundle["text/html"];
+    const count = item["executionCount"];
+    return [
+      {
+        kind,
+        ...(typeof text === "string" ? { text } : {}),
+        ...(typeof html === "string" ? { html } : {}),
+        ...(picture !== undefined ? { picture } : {}),
+        ...(typeof count === "number" ? { executionCount: count } : {}),
+      },
+    ];
+  }
+  if (kind === "cut") return [{ kind, reason: String(item["reason"] ?? "") }];
+  if (kind === "clear") return [{ kind }];
+  return [];
+};
 
 /**
  * The blocks a relation type attaches to a document, in deterministic order.
@@ -214,9 +596,124 @@ export function documentNodeOf(
 
 /** The document at the root of this graph, with its blocks in order, or null
  * when the graph holds no such document. */
+/**
+ * The numbers no one stores (`BO_0290_010`), and the number every reference
+ * run answers (`BO_0290_011`).
+ *
+ * The numbered equations of the reading order are numbered from one, in that
+ * order: an equation that asked for none takes none and consumes none, and
+ * neither does a discarded one, since it is not in the order a reader reads.
+ * Inserting, retiring or restoring an equation therefore renumbers the rest by
+ * itself — there is no renumbering write, no migration, and no number stored
+ * anywhere to go stale.
+ *
+ * A reference whose equation is gone from the reading order, is discarded or
+ * carries no number resolves to nothing, and the surface says its equation is
+ * gone rather than drawing a stale number.
+ */
+export function numberEquations(blocks: readonly BlockView[]): {
+  readonly blocks: BlockView[];
+  readonly numbers: Readonly<Record<string, number>>;
+} {
+  const numbers: Record<string, number> = {};
+  let next = 1;
+  const numbered = blocks.map((block) => {
+    if (block.kind !== "equation") return block;
+    if (block.numbered !== true || block.standing === "discarded") return block;
+    const number = next;
+    next += 1;
+    numbers[block.blockId] = number;
+    return { ...block, number };
+  });
+  return { blocks: numbered, numbers };
+}
+
+/**
+ * The figures' and the tables' numbers (`BO_0295_008`), by `numberEquations`'
+ * rule: the numbered ones of the reading order from one, figures — pictures
+ * and the outputs a person numbered — in one sequence and tables in another,
+ * a block that asked for none taking none and consuming none. A retired block
+ * never reaches this view, and neither kind carries a standing to discard it
+ * by, so nothing else is skipped. A reference whose block is gone or carries
+ * no number resolves to nothing and draws as missing.
+ */
+export function numberFiguresAndTables(blocks: readonly BlockView[]): {
+  readonly blocks: BlockView[];
+  readonly figures: Readonly<Record<string, number>>;
+  readonly tables: Readonly<Record<string, number>>;
+} {
+  const figures: Record<string, number> = {};
+  const tables: Record<string, number> = {};
+  let nextFigure = 1;
+  let nextTable = 1;
+  const numbered = blocks.map((block): BlockView => {
+    if (block.kind === "table") {
+      if (block.numbered !== true) return block;
+      tables[block.blockId] = nextTable;
+      return { ...block, number: nextTable++ };
+    }
+    if (block.kind === "image" || block.kind === "output") {
+      if (block.numbered !== true) return block;
+      figures[block.blockId] = nextFigure;
+      return { ...block, number: nextFigure++ };
+    }
+    return block;
+  });
+  return { blocks: numbered, figures, tables };
+}
+
+/**
+ * The citations' numbers (`BO_0291_013`): the works the reading order cites,
+ * numbered from one in the order of their first citation, a work cited twice
+ * keeping its number. A discarded block's citations take no number and consume
+ * none, since it is not in the order a reader reads; a retired block never
+ * reaches this view. A citation names a node the document does not contain,
+ * so `known` says which cited works the read found at the pin: a work not
+ * among them is answered as missing and takes no number, never a stale one.
+ * With `known` absent nothing was looked up and every cited work is numbered.
+ */
+export function numberCitations(
+  blocks: readonly BlockView[],
+  known?: ReadonlySet<string>,
+): {
+  readonly numbers: Readonly<Record<string, number>>;
+  readonly missing: readonly string[];
+} {
+  const numbers: Record<string, number> = {};
+  const missing: string[] = [];
+  let next = 1;
+  for (const block of blocks) {
+    if (block.kind !== "text") continue;
+    for (const run of block.runs) {
+      const work = run.cite?.work;
+      if (work === undefined) continue;
+      if (known !== undefined && !known.has(work)) {
+        if (!missing.includes(work)) missing.push(work);
+        continue;
+      }
+      if (block.standing === "discarded" || numbers[work] !== undefined) continue;
+      numbers[work] = next;
+      next += 1;
+    }
+  }
+  return { numbers, missing };
+}
+
+/** The node's front matter when it carries any and it reads as such; a value
+ * that does not is left out of the read rather than drawn wrong. BO_0293_012 */
+/** The document property naming its citation style. BO_0291_037 */
+export const CITATION_STYLE_PROPERTY = "citationStyle";
+
+const frontMatterOf = (content: Record<string, unknown>): { frontMatter?: FrontMatter } => {
+  const read = readFrontMatter(content);
+  if ("failure" in read || Object.keys(read.frontMatter).length === 0) return {};
+  return { frontMatter: read.frontMatter };
+};
+
 export function assembleDocument(
   graph: ReadResult,
   documentId: string,
+  options: { readonly knownWorks?: ReadonlySet<string> } = {},
 ): DocumentView | null {
   const node = documentNodeOf(graph, documentId);
   if (node === undefined) return null;
@@ -225,13 +722,31 @@ export function assembleDocument(
   const title = content["title"];
   const phase = content[PHASE_PROPERTY];
   const supersededBy = content[SUPERSEDED_BY_PROPERTY];
+  const acceptedAt = content[ACCEPTED_AT_PROPERTY];
+  const equations = numberEquations(blocksOf(graph, documentId, CONTAINS));
+  const figures = numberFiguresAndTables(equations.blocks);
+  const citations = numberCitations(figures.blocks, options.knownWorks);
   return {
     documentId: bareId(node.id),
     revisionId: node.revision.id,
     title: typeof title === "string" ? title : "",
     ...(isPhase(phase) && phase !== "proposed" ? { phase } : {}),
     ...(typeof supersededBy === "string" && supersededBy !== "" ? { supersededBy } : {}),
-    blocks: blocksOf(graph, documentId, CONTAINS),
+    ...(typeof acceptedAt === "number" ? { acceptedAt } : {}),
+    ...frontMatterOf(content),
+    ...(typeof content[CITATION_STYLE_PROPERTY] === "string" && content[CITATION_STYLE_PROPERTY] !== "" ? { citationStyle: content[CITATION_STYLE_PROPERTY] as string } : {}),
+    blocks: figures.blocks,
+    // The numbers a reference run is drawn as, for the whole document: a
+    // reference names an equation of its own document and nothing else.
+    // BO_0290_011
+    ...(Object.keys(equations.numbers).length > 0 ? { equationNumbers: equations.numbers } : {}),
+    // The numbers a figure or a table reference is drawn as. BO_0295_008
+    ...(Object.keys(figures.figures).length > 0 ? { figureNumbers: figures.figures } : {}),
+    ...(Object.keys(figures.tables).length > 0 ? { tableNumbers: figures.tables } : {}),
+    // The numbers a citation run is drawn as, and the works it cannot be:
+    // resolved here so every view answers the same number. BO_0291_013
+    ...(Object.keys(citations.numbers).length > 0 ? { citationNumbers: citations.numbers } : {}),
+    ...(citations.missing.length > 0 ? { missingWorks: citations.missing } : {}),
     ...(graph.resolvedDataRevision > 0 ? { dataRevision: graph.resolvedDataRevision } : {}),
   };
 }

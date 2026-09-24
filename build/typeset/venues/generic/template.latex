@@ -1,0 +1,56 @@
+% The generic article (BO_0293_020): one column, numbered sections, numbered
+% citations in first-citation order. A Pandoc LaTeX template: the manuscript's
+% head comes from the document's front matter, the body from its reading order.
+\documentclass[11pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{longtable,booktabs,array}
+\usepackage{caption}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[hidelinks]{hyperref}
+% Pandoc sets a code block in colour by itself: it writes \KeywordTok,
+% \CommentTok and their kin, and these macros are what define them. No
+% Pygments, no minted, and shell escape stays off (BO_0296_008).
+\usepackage{fancyvrb}
+$highlighting-macros$
+\usepackage{listings}
+\lstset{basicstyle=\ttfamily\small,breaklines=true}
+\providecommand{\tightlist}{\setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\makeatletter
+\def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
+\makeatother
+\setkeys{Gin}{width=\maxwidth,keepaspectratio}
+
+\title{$title$}
+\author{$for(author)$$author.name$$if(author.affiliation)$\\{\small $author.affiliation$}$endif$$if(author.email)$\\{\small\texttt{$author.email$}}$endif$$sep$ \and $endfor$}
+\date{}
+
+\begin{document}
+\maketitle
+$if(abstract)$
+\begin{abstract}
+$abstract$
+\end{abstract}
+$endif$
+$if(keywords)$
+\noindent\textbf{Keywords:} $for(keywords)$$keywords$$sep$, $endfor$
+$endif$
+
+$body$
+
+$if(natbib)$
+$if(bibliography)$
+\bibliographystyle{$if(biblio-style)$$biblio-style$$else$unsrtnat$endif$}
+\bibliography{$for(bibliography)$$bibliography$$sep$,$endfor$}
+$endif$
+$endif$
+$if(supplementary)$
+\clearpage
+\appendix
+\section*{Supplementary Material}
+$supplementary$
+$endif$
+\end{document}

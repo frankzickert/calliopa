@@ -1,14 +1,20 @@
 {
-  "version": "0.3.10",
-  "pin": 25,
+  "version": "0.4.0",
+  "pin": 2524,
   "mapRoot": "ui.shell",
   "marker": "ui.shell",
-  "members": 40,
+  "members": 56,
+  "inactive": [],
   "extensions": [
+    "bibliography",
     "calliopa-base",
     "calliopa-extension",
+    "code",
     "documents",
+    "manuscripts",
+    "media",
     "publishing",
+    "relations",
     "settings",
     "ui.shell"
   ]

@@ -8,8 +8,9 @@ import {
 import { createDOM } from "@builder.io/qwik/testing";
 import { describe, expect, it } from "vitest";
 
+import { NO_POINTING } from "~/lib/command-target";
 import { anchorAt, MAX_PASSAGE_QUOTE, type PassageAnchor } from "~/lib/passage";
-import { addPassage, NO_MARKING, type Marking } from "../../lib/references";
+import { addPassage, NO_MARKING, type Marked, type Marking } from "../../lib/references";
 import type { DocumentView } from "../../server/assemble";
 import { MarkingContext, type MarkingControls } from "../marking/use-marking";
 import { PassageAffordance } from "./passage-affordance";
@@ -36,14 +37,14 @@ const document = (blockText: string): DocumentView => ({
       containmentId: "c-b",
       order: "b",
       role: "paragraph",
-      standing: "neutral",
+      standing: "keep",
       runs: [{ text: blockText }],
     },
   ],
 });
 
 interface Pressed {
-  added: { blockId: string; anchor: PassageAnchor }[];
+  added: { blockId: string; anchor: PassageAnchor; marked?: Marked }[];
   repointed: { number: number; anchor: PassageAnchor }[];
   removed: number[];
 }
@@ -53,9 +54,11 @@ const harness = (input: {
   blockText: string;
   end: number;
   pressed: Pressed;
+  /** Words selected in a proposal, a retired or a discarded row. BO_0263_005 */
+  row?: { readonly marked: Marked; readonly text: string };
 }) =>
   component$(() => {
-    const markingStore = useStore({ marking: input.marking });
+    const markingStore = useStore({ marking: input.marking, prompt: null as string | null, byPrompt: {}, report: NO_POINTING });
     const passages = useStore<PassagesStore>({
       selected: {
         blockId: "blk-b",
@@ -63,16 +66,18 @@ const harness = (input: {
         end: input.end,
         bottom: 10,
         left: 20,
+        ...(input.row === undefined ? {} : { marked: input.row.marked, text: input.row.text }),
       },
       badges: { "blk-b": [{ number: 1, top: 2, left: 30 }] },
     });
     const noop = $(() => undefined);
     const controls: MarkingControls = {
       store: markingStore,
-      setMode$: $(async () => undefined),
+      point$: $(async () => undefined),
+      selectPrompt$: $(async () => undefined),
       toggleReference$: noop,
-      addPassage$: $((blockId: string, anchor: PassageAnchor) => {
-        input.pressed.added.push({ blockId, anchor });
+      addPassage$: $((blockId: string, anchor: PassageAnchor, marked?: Marked) => {
+        input.pressed.added.push({ blockId, anchor, ...(marked === undefined ? {} : { marked }) });
       }),
       repointPassage$: $((number: number, anchor: PassageAnchor) => {
         input.pressed.repointed.push({ number, anchor });
@@ -80,7 +85,6 @@ const harness = (input: {
       removeReference$: $((number: number) => {
         input.pressed.removed.push(number);
       }),
-      restore$: noop,
       recover$: noop,
     };
     useContextProvider(MarkingContext, controls);
@@ -98,6 +102,7 @@ const mount = async (input: {
   marking?: Marking;
   blockText?: string;
   end?: number;
+  row?: { readonly marked: Marked; readonly text: string };
 }) => {
   const pressed: Pressed = { added: [], repointed: [], removed: [] };
   const dom = await createDOM();
@@ -108,6 +113,7 @@ const mount = async (input: {
         blockText: input.blockText ?? text,
         end: input.end ?? start + "before the lights".length,
         pressed,
+        ...(input.row === undefined ? {} : { row: input.row }),
       }),
       {},
     ),
@@ -197,5 +203,34 @@ describe("taking a passage back from the page", () => {
     ).toBe("Take back #1");
     await view.userEvent('[data-passage-take-back="1"]', "pointerdown");
     expect(view.pressed.removed).toEqual([1]);
+  });
+});
+
+/**
+ * Words in a proposal and in a retired block are referenced as a passage on
+ * that row: anchored in the row's own words, and carrying what the row is.
+ * BO_0263_005
+ */
+describe("a passage in what was marked", () => {
+  const proposal: Marked = { target: "proposal", group: "node:g", item: "node:g|replace|node:blk-b", revisionId: "rev-b2", proposer: "Claude Code" };
+  const proposed = "The storm arrives early, before the lights go out.";
+
+  it("Given words selected in a proposal, When Reference is pressed, Then the passage is anchored in the proposal's words and stands on the proposal", async () => {
+    const at = proposed.indexOf("early");
+    const view = await mount({ row: { marked: proposal, text: proposed }, end: at + "early".length, blockText: text });
+    await view.userEvent("[data-passage-reference]", "pointerdown");
+    const [added] = view.pressed.added;
+    expect(added?.blockId).toBe("blk-b");
+    expect(added?.marked).toEqual(proposal);
+    // The selection's offsets are read in the proposal's words, not the block's.
+    expect(added?.anchor.quote).toBe(proposed.slice(start, at + "early".length));
+  });
+
+  it("Given words selected in a retired block, When Reference is pressed, Then the passage carries the retired block", async () => {
+    const retired: Marked = { target: "retired", revisionId: "rev-r" };
+    const view = await mount({ row: { marked: retired, text }, blockText: "Something else entirely." });
+    await view.userEvent("[data-passage-reference]", "pointerdown");
+    expect(view.pressed.added[0]?.marked).toEqual(retired);
+    expect(view.pressed.added[0]?.anchor.quote).toBe("before the lights");
   });
 });

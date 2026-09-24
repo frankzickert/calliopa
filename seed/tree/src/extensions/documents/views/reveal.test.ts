@@ -18,7 +18,7 @@ const blocks: readonly BlockView[] = [
     containmentId: "c-b",
     order: "b",
     role: "paragraph",
-    standing: "neutral",
+    standing: "keep",
     runs: [{ text }],
   },
 ];

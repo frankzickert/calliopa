@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DocumentView } from "../server/assemble";
 import { SAVE_PAUSE_MS } from "./block-editor";
+import { WRITE_FLOOR_MS } from "./documents-client";
 import {
   documentsApi,
   mountEditor,
@@ -30,7 +31,7 @@ const draft: DocumentView = {
       containmentId: "c-a",
       order: "a",
       role: "paragraph",
-      standing: "neutral",
+      standing: "keep",
       runs: [{ text: "Opening." }],
     },
     {
@@ -40,7 +41,7 @@ const draft: DocumentView = {
       containmentId: "c-b",
       order: "b",
       role: "paragraph",
-      standing: "neutral",
+      standing: "keep",
       runs: [{ text: "The storm arrives before the lights go out." }],
     },
     {
@@ -50,7 +51,7 @@ const draft: DocumentView = {
       containmentId: "c-c",
       order: "c",
       role: "paragraph",
-      standing: "neutral",
+      standing: "keep",
       runs: [{ text: "Closing." }],
     },
   ],
@@ -72,7 +73,7 @@ afterEach(async () => {
 });
 
 const mount = async (
-  options: { refuseSplits?: boolean; writeDelayMs?: number } = {},
+  options: { refuseSplits?: boolean; writeDelayMs?: number; refuseByFloor?: { command: string; times: number } } = {},
 ) => {
   const sent: SentCommand[] = [];
   const reads: string[] = [];
@@ -178,7 +179,7 @@ const mount = async (
 };
 
 describe("Enter splits the block on screen at once", () => {
-  it("Given typing, When Enter is pressed mid-block, Then the tail is the editor before anything is answered, and the split lands under the tail's identity after the head's words", async () => {
+  it("Given typing, When Enter is pressed mid-block, Then the tail is the editor before anything is answered, and one split carrying the head's words lands under the tail's identity", async () => {
     const view = await mount();
     await view.open("blk-b");
     await view.typeTo(`${STORM} More`);
@@ -187,8 +188,9 @@ describe("Enter splits the block on screen at once", () => {
 
     await view.press("Enter");
     await view.userEvent(view.root, "harnessSettle");
-    // Drawn before either write has had time to answer.
-    expect(view.commands("split")).toHaveLength(0);
+    // Drawn before the one write has had time to answer: sent at most, never
+    // landed, since a round trip is longer than a settle.
+    expect(view.commands("split").length).toBeLessThanOrEqual(1);
     const tailId = view.editing();
     expect(tailId).not.toBeNull();
     expect(tailId).not.toBe("blk-b");
@@ -215,20 +217,19 @@ describe("Enter splits the block on screen at once", () => {
     expect(counts.every((count) => count === 1)).toBe(true);
     expect(view.editing()).toBe(tailId);
 
-    // The head's words first, then the split at the caret, naming the tail.
-    const [revise] = view.commands("revise");
+    // One write: the split at the caret carries the head's words as typed,
+    // based on the revision the graph holds, and no save goes before it —
+    // a save first fell inside the kernel's per-node floor. DO_0015_001
+    expect(view.commands("revise")).toHaveLength(0);
     const [split] = view.commands("split");
-    expect(revise?.body).toMatchObject({
-      blockId: "blk-b",
-      baseRevisionId: "rev-b",
-      runs: [{ text: `${STORM} More` }],
-    });
     expect(split?.body).toMatchObject({
       blockId: "blk-b",
+      baseRevisionId: "rev-b",
       at: STORM.length,
       tailBlockId: tailId,
+      runs: [{ text: `${STORM} More` }],
+      role: "paragraph",
     });
-    expect(split?.body["baseRevisionId"]).not.toBe("rev-b");
     // No read of the document for the whole gesture, and the rows it did not
     // change are the same nodes.
     expect(view.reads.length).toBe(readsBefore);
@@ -239,6 +240,10 @@ describe("Enter splits the block on screen at once", () => {
       tailId,
       "blk-c",
     ]);
+    const texts = held.blocks.map((block) =>
+      block.kind === "text" ? block.runs.map((run) => run.text).join("") : "",
+    );
+    expect(texts).toEqual(["Opening.", STORM, " More", "Closing."]);
     expect(view.row("blk-a")).toBe(untouched[0]);
     expect(view.row("blk-c")).toBe(untouched[1]);
   });
@@ -272,13 +277,20 @@ describe("Enter splits the block on screen at once", () => {
     SAVE_PAUSE_MS + 5000,
   );
 
-  it("Given two quick Enters, Then three blocks stand in order, on screen at once and in the graph after", async () => {
+  it("Given two quick Enters, Then three blocks stand in order, on screen at once and in the graph after, the second split sent no sooner than the floor after the first answered", async () => {
     const view = await mount();
     await view.open("blk-c");
     await view.typeTo("Closing. One");
     await view.press("Enter");
     await view.userEvent(view.root, "harnessSettle");
     const first = view.editing() ?? "";
+    // Sent from the drain, not a render, so a tight poll sees it as it goes.
+    const sentAt = async (count: number) => {
+      for (let tick = 0; tick < 2000 && view.commands("split").length < count; tick++)
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      return Date.now();
+    };
+    const firstSent = await sentAt(1);
     await view.press("Enter");
     // Drawn at once: before the second split is even sent, whatever renders
     // the counts' visible task adds after the first one. DO_0001_003
@@ -291,7 +303,12 @@ describe("Enter splits the block on screen at once", () => {
     );
     expect(drawn).toEqual(["blk-a", "blk-b", "blk-c", first, second]);
 
-    await view.waitFor(() => view.commands("split").length === 2);
+    const secondSent = await sentAt(2);
+    // The second writes the tail and the document node the first just wrote,
+    // so it waits the kernel's floor out after the first answered rather than
+    // being refused as written too frequently. DO_0015_002
+    expect(secondSent - firstSent).toBeGreaterThanOrEqual(ROUND_TRIP_MS + WRITE_FLOOR_MS - 10);
+    await view.userEvent(view.root, "harnessSettle");
     await new Promise((resolve) => setTimeout(resolve, 3 * ROUND_TRIP_MS));
     const held = await view.graph();
     expect(held.blocks.map((block) => block.blockId)).toEqual([
@@ -314,6 +331,24 @@ describe("Enter splits the block on screen at once", () => {
       tailBlockId: second,
     });
     expect(view.editing()).toBe(second);
+  });
+
+  it("Given a split the kernel's floor refuses, Then it is sent again after the floor and lands, with nothing named on the block", async () => {
+    const view = await mount({ refuseByFloor: { command: "split", times: 1 } });
+    await view.open("blk-b");
+    await view.typeTo(`${STORM} More`);
+    await view.press("Enter");
+    await view.userEvent(view.root, "harnessSettle");
+    const tailId = view.editing() ?? "";
+    await view.waitFor(() => view.commands("split").length === 2);
+    await new Promise((resolve) => setTimeout(resolve, 3 * ROUND_TRIP_MS));
+    await view.userEvent(view.root, "harnessSettle");
+    const [refused, landed] = view.commands("split");
+    expect(landed?.body).toEqual(refused?.body);
+    expect(view.editing()).toBe(tailId);
+    expect(view.root.querySelector("[data-block-failure]") ?? null).toBeNull();
+    const held = await view.graph();
+    expect(held.blocks.map((block) => block.blockId)).toEqual(["blk-a", "blk-b", tailId, "blk-c"]);
   });
 
   it(

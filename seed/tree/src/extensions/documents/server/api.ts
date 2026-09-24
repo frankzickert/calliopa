@@ -1,8 +1,11 @@
-import { SCALE, type Standing } from "~/extensions/documents/lib/disposition";
+import { STANDINGS, type Standing } from "~/extensions/documents/lib/disposition";
 import type { DocumentSummary } from "~/lib/library";
 import { readRuns, TEXT_ROLES, type Run, type TextRole } from "~/lib/runs";
+import { readFrontMatter, type FrontMatter } from "../lib/front-matter";
 import type { GraphOutcome, NonEmpty } from "~/server/outcome";
 import { refusal, respond, type OutcomeResponse } from "~/server/outcome";
+import { blobReference, isBlobReference, objectIdOfHash, putBlob, type BlobReference } from "~/server/ccgw/blobs";
+import { checkTable, readColumns, readRows, type TableColumn, type TableRow } from "~/extensions/documents/lib/table";
 import {
   answerDocumentProposal,
   placeProposedItem,
@@ -10,6 +13,13 @@ import {
   deleteDocument,
   insertBlock,
   listDocuments,
+  reviseCode,
+  turnIntoCode,
+  reviseEquation,
+  setFigure,
+  setCitationStyle,
+  setFrontMatter,
+  reviseTable,
   mergeTextBlocks,
   moveBlock,
   proposeDocumentChanges,
@@ -20,6 +30,7 @@ import {
   setDocumentPhase,
   readRetiredBlocks,
   restoreBlock,
+  moveRetiredBlock,
   retireBlock,
   reviseTextBlock,
   setBlockDisposition,
@@ -31,6 +42,9 @@ import {
   type DocumentProposalItem,
   type DocumentProposals,
   type NewBlock,
+  type NewEquationBlock,
+  type NewTableBlock,
+  type NewCodeBlock,
   type Placement,
   type ProposalAnswer,
   type SplitBlocks,
@@ -56,10 +70,9 @@ import {
   type RelationEndInput,
   type RelationInput,
 } from "./work";
-import { focusedWorkOf, openFocusedWork, type FocusedWork, type OpenedFocusedWork } from "./focus";
 import { readMark, writeMark, type ReadMark } from "./read-mark";
 import { classify, documentStates, judgementsOf, resolveJudgement, type DocumentJudgements } from "./judgements";
-import { consequencesFor, type Consequences } from "./phase";
+import { acceptanceOf, consequencesFor, type Acceptance, type Consequences } from "./phase";
 import { branchOf, documentPolicy, readStanding, signedInAccount, type BranchOfDocument, type BranchStanding, type DocumentPolicy } from "./branch";
 import { withBranch } from "~/server/ccgw/branch-scope";
 import { PHASES, isPhase, type Phase } from "./vocabulary";
@@ -116,12 +129,111 @@ function readPlacement(
   if (before !== null) return { placement: { before } };
   const after = text(input["after"]);
   if (after !== null) return { placement: { after } };
+  // Two order keys, either null at an end. BO_0263_001
+  const between = input["between"];
+  if (Array.isArray(between) && between.length === 2) {
+    const keys = between.map((key: unknown) => (key === null ? null : text(key)));
+    if (keys.every((key, index) => key !== null || between[index] === null)) {
+      return { placement: { between: [keys[0] ?? null, keys[1] ?? null] } };
+    }
+  }
   return {
-    failure: "A placement names a block to go before or after, or an end.",
+    failure: "A placement names a block to go before or after, two order keys to go between, or an end.",
   };
 }
 
-/** A new block: the two types this build writes, and nothing else. */
+/**
+ * A table as a request carries it (`BO_0287_008`): columns, rows and an
+ * optional caption; and, from an import, the file's blob reference with its
+ * row count and where the data came from. A cell outside its column's type
+ * is refused naming the cell and the column.
+ */
+function readTableBlock(
+  input: Record<string, unknown>,
+): { readonly block: NewTableBlock } | { readonly failure: string } {
+  if (input["runs"] !== undefined) return { failure: "A table carries columns and rows, not runs." };
+  const columns = readColumns(input["columns"]);
+  if ("failure" in columns) return columns;
+  const rows = readRows(input["rows"]);
+  if ("failure" in rows) return rows;
+  const misfit = checkTable(columns.columns, rows.rows);
+  if (misfit !== null) return { failure: misfit.failure };
+  const caption = input["caption"];
+  if (caption !== undefined && typeof caption !== "string") return { failure: "A table's caption is words." };
+  const reference = input["reference"];
+  if (reference !== undefined && !isBlobReference(reference)) return { failure: "A table's reference is the core's blob reference." };
+  const rowCount = input["rowCount"];
+  if (rowCount !== undefined && (typeof rowCount !== "number" || !Number.isInteger(rowCount) || rowCount < 0)) {
+    return { failure: "A table's rowCount is a whole number." };
+  }
+  if (rowCount !== undefined && reference === undefined) return { failure: "A table's rowCount goes with the reference of the file behind it." };
+  const source = record(input["source"]);
+  return {
+    block: {
+      kind: "table",
+      columns: columns.columns,
+      rows: rows.rows,
+      ...(typeof caption === "string" ? { caption } : {}),
+      ...(isBlobReference(reference) ? { reference } : {}),
+      ...(typeof rowCount === "number" ? { rowCount } : {}),
+      ...(source === null ? {} : { source }),
+    },
+  };
+}
+
+/** Code (`BO_0289_018`): its source as text and, optionally, its language. */
+function readCodeBlock(
+  input: Record<string, unknown>,
+): { readonly block: NewCodeBlock } | { readonly failure: string } {
+  if (input["runs"] !== undefined) return { failure: "A code block carries its source, not runs." };
+  const source = input["source"];
+  if (typeof source !== "string") return { failure: "A code block's source is the code itself, as text." };
+  const language = input["language"];
+  if (language !== undefined && typeof language !== "string") return { failure: "A code block's language is a word." };
+  return {
+    block: {
+      kind: "sourcecode",
+      source,
+      ...(typeof language === "string" && language.trim() !== "" ? { language: language.trim() } : {}),
+    },
+  };
+}
+
+/**
+ * A new equation (`BO_0290_028`): the exact TeX, an optional caption and the
+ * author ask for a number. The number itself is never taken — it is the
+ * document own order, resolved on every read.
+ */
+function readEquationBlock(
+  input: Record<string, unknown>,
+): { readonly block: NewEquationBlock } | { readonly failure: string } {
+  if (input["runs"] !== undefined) return { failure: "An equation carries its tex, not runs." };
+  const tex = input["tex"];
+  if (typeof tex !== "string" || tex.trim() === "") {
+    return { failure: "An equation carries the tex it is set from." };
+  }
+  const caption = input["caption"];
+  if (caption !== undefined && typeof caption !== "string") return { failure: "An equation caption is words." };
+  const numbered = input["numbered"];
+  if (numbered !== undefined && typeof numbered !== "boolean") {
+    return { failure: "An equation numbered is true or false." };
+  }
+  if (input["number"] !== undefined) {
+    return { failure: "An equation number is the document order and is never written." };
+  }
+  const source = record(input["source"]);
+  return {
+    block: {
+      kind: "equation",
+      tex,
+      ...(caption === undefined || caption.trim() === "" ? {} : { caption }),
+      ...(numbered === true ? { numbered: true } : {}),
+      ...(source === null ? {} : { source }),
+    },
+  };
+}
+
+/** A new block: the types this build writes, and nothing else. */
 function readNewBlock(
   value: unknown,
 ): { readonly block: NewBlock } | { readonly failure: string } {
@@ -129,8 +241,14 @@ function readNewBlock(
   if (input === null) return { failure: "A block is an object." };
   const kind = input["kind"];
   if (kind === "divider") return { block: { kind: "divider" } };
+  if (kind === "table") return readTableBlock(input);
+  if (kind === "sourcecode") return readCodeBlock(input);
+  if (kind === "equation") return readEquationBlock(input);
+  if (kind === "output") {
+    return { failure: "An output block is what an execution produced; send the code instead of writing its output." };
+  }
   if (kind !== "text") {
-    return { failure: `A new block is text or a divider, not ${String(kind)}.` };
+    return { failure: `A new block is text, a divider, a table, an equation or code, not ${String(kind)}.` };
   }
   const role = readRole(input["role"]);
   if ("failure" in role) return role;
@@ -168,6 +286,48 @@ export type DocumentCommand =
       readonly runs: readonly Run[];
       readonly role: TextRole | undefined;
     }
+  /** An equation revised whole: its source, caption and ask for a number.
+   * BO_0290_012 */
+  | {
+      readonly command: "reviseEquation";
+      readonly blockId: string;
+      readonly baseRevisionId: string;
+      readonly tex: string;
+      readonly caption?: string;
+      readonly numbered?: boolean;
+    }
+  /** A picture's or an output's caption and number ask, or a table's ask.
+   * BO_0295_008 */
+  | {
+      readonly command: "setFigure";
+      readonly blockId: string;
+      readonly baseRevisionId: string;
+      readonly caption?: string;
+      readonly numbered?: boolean;
+    }
+  /** A document's own citation style, or null for the instance's default. BO_0291_037 */
+  | { readonly command: "setCitationStyle"; readonly baseRevisionId: string; readonly style: string | null }
+  /** A document's front matter set whole. BO_0293_012 */
+  | { readonly command: "setFrontMatter"; readonly baseRevisionId: string; readonly frontMatter: FrontMatter }
+  /** A text block turned into a code block in its place. BO_0289_021 */
+  | { readonly command: "turnIntoCode"; readonly blockId: string; readonly baseRevisionId: string }
+  /** A code block revised whole: its source and language. BO_0289_018 */
+  | {
+      readonly command: "reviseCode";
+      readonly blockId: string;
+      readonly baseRevisionId: string;
+      readonly source: string;
+      readonly language?: string;
+    }
+  /** A table revised whole: its columns, rows and caption. BO_0287_009 */
+  | {
+      readonly command: "reviseTable";
+      readonly blockId: string;
+      readonly baseRevisionId: string;
+      readonly columns: readonly TableColumn[];
+      readonly rows: readonly TableRow[];
+      readonly caption?: string;
+    }
   | {
       readonly command: "setDisposition";
       readonly blockId: string;
@@ -180,6 +340,11 @@ export type DocumentCommand =
       readonly baseRevisionId: string;
       readonly at: number;
       readonly tailBlockId?: string;
+      /** The head's words as the editor holds them, split rather than the
+       * runs at the base revision, so a split after typing is one write of
+       * the head. DO_0015_001 */
+      readonly runs?: readonly Run[];
+      readonly role?: TextRole;
     }
   | {
       readonly command: "merge";
@@ -209,7 +374,6 @@ export type DocumentCommand =
   | { readonly command: "delete"; readonly baseRevisionId: string }
   | { readonly command: "retire"; readonly blockId: string }
   /** Opens a block as focused work, or answers the child it has. CA_0047_002 */
-  | { readonly command: "openFocusedWork"; readonly blockId: string }
   | {
       readonly command: "propose";
       readonly items: NonEmpty<DocumentProposalItem>;
@@ -229,6 +393,13 @@ export type DocumentCommand =
   | {
       readonly command: "restore";
       readonly blockId: string;
+      readonly placement: Placement;
+    }
+  /** A retired block moved, still retired. BO_0263_012 */
+  | {
+      readonly command: "moveRetired";
+      readonly blockId: string;
+      readonly baseRevisionId: string;
       readonly placement: Placement;
     }
   /** The work operations (`BO_0244_007`). */
@@ -325,6 +496,115 @@ export function parseDocumentCommand(
         },
       };
     }
+    case "reviseEquation": {
+      if (blockId === null || baseRevisionId === null) {
+        return { failure: "An equation revise names a block and the revision it is based on." };
+      }
+      const tex = input["tex"];
+      if (typeof tex !== "string" || tex.trim() === "") {
+        return { failure: "An equation carries the tex it is set from." };
+      }
+      const caption = input["caption"];
+      if (caption !== undefined && typeof caption !== "string") {
+        return { failure: "An equation's caption is words." };
+      }
+      const numbered = input["numbered"];
+      if (numbered !== undefined && typeof numbered !== "boolean") {
+        return { failure: "An equation's numbered is true or false." };
+      }
+      return {
+        command: {
+          command: "reviseEquation",
+          blockId,
+          baseRevisionId,
+          tex,
+          ...(caption === undefined ? {} : { caption }),
+          ...(numbered === undefined ? {} : { numbered }),
+        },
+      };
+    }
+    case "setFigure": {
+      if (blockId === null || baseRevisionId === null) {
+        return { failure: "Numbering a figure or a table names a block and the revision it is based on." };
+      }
+      const caption = input["caption"];
+      if (caption !== undefined && typeof caption !== "string") {
+        return { failure: "A figure's caption is words." };
+      }
+      const numbered = input["numbered"];
+      if (numbered !== undefined && typeof numbered !== "boolean") {
+        return { failure: "A figure's or a table's numbered is true or false." };
+      }
+      if (input["number"] !== undefined) {
+        return { failure: "A number is the document's order and is never written." };
+      }
+      return {
+        command: {
+          command: "setFigure",
+          blockId,
+          baseRevisionId,
+          ...(caption === undefined ? {} : { caption }),
+          ...(numbered === undefined ? {} : { numbered }),
+        },
+      };
+    }
+    case "setFrontMatter": {
+      if (baseRevisionId === null) {
+        return { failure: "Setting the front matter names the revision of the document it is based on." };
+      }
+      const read = readFrontMatter(record(input["frontMatter"]) ?? {});
+      if ("failure" in read) return read;
+      return { command: { command: "setFrontMatter", baseRevisionId, frontMatter: read.frontMatter } };
+    }
+    case "setCitationStyle": {
+      if (baseRevisionId === null) {
+        return { failure: "Setting the citation style names the revision of the document it is based on." };
+      }
+      const style = input["style"];
+      if (style !== null && (typeof style !== "string" || style.trim() === "")) {
+        return { failure: "A citation style is a style's id, or null for the instance's default." };
+      }
+      return { command: { command: "setCitationStyle", baseRevisionId, style } };
+    }
+    case "turnIntoCode": {
+      if (blockId === null || baseRevisionId === null) {
+        return { failure: "Turning a block into code names the block and the revision it is based on." };
+      }
+      return { command: { command: "turnIntoCode", blockId, baseRevisionId } };
+    }
+    case "reviseCode": {
+      if (blockId === null || baseRevisionId === null) {
+        return { failure: "A code revise names a block and the revision it is based on." };
+      }
+      const code = readCodeBlock({ source: input["source"], ...(input["language"] === undefined ? {} : { language: input["language"] }) });
+      if ("failure" in code) return code;
+      return {
+        command: {
+          command: "reviseCode",
+          blockId,
+          baseRevisionId,
+          source: code.block.source,
+          ...(code.block.language === undefined ? {} : { language: code.block.language }),
+        },
+      };
+    }
+    case "reviseTable": {
+      if (blockId === null || baseRevisionId === null) {
+        return { failure: "A table revise names a block and the revision it is based on." };
+      }
+      const table = readTableBlock({ columns: input["columns"], rows: input["rows"], ...(input["caption"] === undefined ? {} : { caption: input["caption"] }) });
+      if ("failure" in table) return table;
+      return {
+        command: {
+          command: "reviseTable",
+          blockId,
+          baseRevisionId,
+          columns: table.block.columns,
+          rows: table.block.rows,
+          ...(table.block.caption === undefined ? {} : { caption: table.block.caption }),
+        },
+      };
+    }
     case "setDisposition": {
       if (blockId === null || baseRevisionId === null) {
         return { failure: "A standing names a block and the revision it is based on." };
@@ -332,8 +612,8 @@ export function parseDocumentCommand(
       // Neutral is named rather than left out, so a body that forgot the
       // field is refused rather than read as clearing the block's standing.
       const standing = input["standing"];
-      if (typeof standing !== "string" || !(SCALE as readonly string[]).includes(standing)) {
-        return { failure: `A standing is one of ${SCALE.join(", ")}.` };
+      if (typeof standing !== "string" || !(STANDINGS as readonly string[]).includes(standing)) {
+        return { failure: `A standing is one of ${STANDINGS.join(", ")}.` };
       }
       return {
         command: {
@@ -352,16 +632,26 @@ export function parseDocumentCommand(
       if (typeof at !== "number" || !Number.isInteger(at) || at < 0) {
         return { failure: "A split happens at a character position." };
       }
+      // The head's words, when the editor sends them: the split then splits
+      // these, and the head is written once. DO_0015_001
+      const runs = input["runs"] === undefined ? { runs: undefined } : readRuns(input["runs"]);
+      if ("failure" in runs) return runs;
+      const role = readRole(input["role"]);
+      if ("failure" in role) return role;
+      const words = {
+        ...(runs.runs === undefined ? {} : { runs: runs.runs }),
+        ...(role.role === undefined ? {} : { role: role.role }),
+      };
       // The tail's identity, when the editor chose it: a UUID, as every block
       // identity the shell mints is. CA_0045_004
       const tail = input["tailBlockId"];
       if (tail === undefined) {
-        return { command: { command: "split", blockId, baseRevisionId, at } };
+        return { command: { command: "split", blockId, baseRevisionId, at, ...words } };
       }
       if (typeof tail !== "string" || !BLOCK_ID.test(tail)) {
         return { failure: "A split's tail is named by a block identity." };
       }
-      return { command: { command: "split", blockId, baseRevisionId, at, tailBlockId: tail } };
+      return { command: { command: "split", blockId, baseRevisionId, at, tailBlockId: tail, ...words } };
     }
     case "merge": {
       const intoBlockId = text(input["intoBlockId"]);
@@ -435,10 +725,6 @@ export function parseDocumentCommand(
       if (blockId === null) return { failure: "A promotion names the block." };
       return { command: { command: "promoteBlock", group, blockId } };
     }
-    case "openFocusedWork": {
-      if (blockId === null) return { failure: "Focused work names the block it opens." };
-      return { command: { command: "openFocusedWork", blockId } };
-    }
     case "propose": {
       const items = input["items"];
       if (!Array.isArray(items) || items.length === 0) {
@@ -489,6 +775,14 @@ export function parseDocumentCommand(
       return {
         command: { command: "restore", blockId, placement: placement.placement },
       };
+    }
+    case "moveRetired": {
+      if (blockId === null || baseRevisionId === null) {
+        return { failure: "A retired block's move names the block and the revision it is based on." };
+      }
+      const placement = readPlacement(input["placement"]);
+      if ("failure" in placement) return placement;
+      return { command: { command: "moveRetired", blockId, baseRevisionId, placement: placement.placement } };
     }
     case "setKind": {
       if (blockId === null || baseRevisionId === null) return { failure: "A kind names a block and the revision it is based on." };
@@ -672,7 +966,6 @@ export function runDocumentCommand(
     | WrittenRelation
     | { readonly claimId: string; readonly dataRevision: string }
     | { readonly relationId: string; readonly revisionId: string; readonly dataRevision: string }
-    | OpenedFocusedWork
     | { readonly judgementId: string; readonly resolved: string; readonly dataRevision: string }
     | { readonly judgementId: string; readonly blockId: string; readonly dataRevision: string }
     | PromotedBlock
@@ -687,10 +980,48 @@ export function runDocumentCommand(
       );
     case "resolveJudgement":
       return resolveJudgement({ judgementId: command.judgementId });
+    case "turnIntoCode":
+      return turnIntoCode({ documentId, blockId: command.blockId, baseRevisionId: command.baseRevisionId });
+    case "reviseCode":
+      return reviseCode({
+        documentId,
+        blockId: command.blockId,
+        baseRevisionId: command.baseRevisionId,
+        source: command.source,
+        ...(command.language === undefined ? {} : { language: command.language }),
+      });
+    case "reviseEquation":
+      return reviseEquation({
+        documentId,
+        blockId: command.blockId,
+        baseRevisionId: command.baseRevisionId,
+        tex: command.tex,
+        ...(command.caption === undefined ? {} : { caption: command.caption }),
+        ...(command.numbered === undefined ? {} : { numbered: command.numbered }),
+      });
+    case "setCitationStyle":
+      return setCitationStyle({ documentId, baseRevisionId: command.baseRevisionId, style: command.style });
+    case "setFrontMatter":
+      return setFrontMatter({ documentId, baseRevisionId: command.baseRevisionId, frontMatter: command.frontMatter });
+    case "setFigure":
+      return setFigure({
+        documentId,
+        blockId: command.blockId,
+        baseRevisionId: command.baseRevisionId,
+        ...(command.caption === undefined ? {} : { caption: command.caption }),
+        ...(command.numbered === undefined ? {} : { numbered: command.numbered }),
+      });
+    case "reviseTable":
+      return reviseTable({
+        documentId,
+        blockId: command.blockId,
+        baseRevisionId: command.baseRevisionId,
+        columns: command.columns,
+        rows: command.rows,
+        ...(command.caption === undefined ? {} : { caption: command.caption }),
+      });
     case "classify":
       return classify({ documentId, blockId: command.blockId, outcome: command.outcome, explanation: command.explanation });
-    case "openFocusedWork":
-      return openFocusedWork({ documentId, blockId: command.blockId });
     case "setKind":
       return setBlockKind({ documentId, blockId: command.blockId, baseRevisionId: command.baseRevisionId, blockKind: command.blockKind });
     case "addClaim":
@@ -733,6 +1064,8 @@ export function runDocumentCommand(
         baseRevisionId: command.baseRevisionId,
         at: command.at,
         ...(command.tailBlockId === undefined ? {} : { tailBlockId: command.tailBlockId }),
+        ...(command.runs === undefined ? {} : { runs: command.runs }),
+        ...(command.role === undefined ? {} : { role: command.role }),
       });
     case "merge":
       return mergeTextBlocks({
@@ -784,6 +1117,13 @@ export function runDocumentCommand(
       return placeProposedItem({
         documentId,
         itemId: command.itemId,
+        placement: command.placement,
+      });
+    case "moveRetired":
+      return moveRetiredBlock({
+        documentId,
+        blockId: command.blockId,
+        baseRevisionId: command.baseRevisionId,
         placement: command.placement,
       });
     case "restore":
@@ -886,16 +1226,6 @@ export async function handleProvenanceRead(
   return respond(await provenanceRead(blockId));
 }
 
-/** The focused work of a document's blocks, with each child's synthesis for
- * the parent's face: read with the relations on focus. CA_0047_002 */
-export async function handleFocusedRead(
-  documentId: string,
-): Promise<OutcomeResponse<FocusedWork>> {
-  const document = await readDocument(documentId);
-  if (document.outcome !== "success") return respond(document as GraphOutcome<never>);
-  return respond(await focusedWorkOf(document.result));
-}
-
 /** What accepting the document would do, for the transition card: the
  * relations reaching other roots, the roots it supersedes, the judgements
  * standing unresolved, whether the signed-in person may establish, and the
@@ -908,6 +1238,19 @@ export async function handleConsequencesRead(documentId: string): Promise<Outcom
   const judgements = await judgementsOf(document.result, relations.result);
   if (judgements.outcome !== "success") return respond(judgements as GraphOutcome<never>);
   return respond(await consequencesFor(document.result, judgements.result));
+}
+
+/** What the root's acceptance accepted, derived per claim from the stamp it
+ * stored: accepted, changed since, or not accepted — a claim added after the
+ * press, or one contradicting a claim accepted elsewhere. BO_0274_006 */
+export async function handleAcceptanceRead(documentId: string): Promise<OutcomeResponse<Acceptance>> {
+  const document = await readDocument(documentId);
+  if (document.outcome !== "success") return respond(document as GraphOutcome<never>);
+  const relations = await relationsOf(document.result);
+  if (relations.outcome !== "success") return respond(relations as GraphOutcome<never>);
+  const judgements = await judgementsOf(document.result, relations.result);
+  if (judgements.outcome !== "success") return respond(judgements as GraphOutcome<never>);
+  return respond(await acceptanceOf(document.result, relations.result, judgements.result));
 }
 
 /** The signed-in person's read mark on a document: read with the document,
@@ -964,6 +1307,40 @@ export async function handleDocumentCommand(
   // command stages into it instead of establishing. BO_0250_011
   const branch = text(record(body)?.["branch"]);
   return respond(await withBranch(branch ?? undefined, () => runDocumentCommand(documentId, parsed.command)));
+}
+
+/**
+ * The bytes of a file a table stands behind (`BO_0287_013`): the body is the
+ * file, its name in `X-Calliopa-Filename`, percent-encoded. Uploaded through
+ * CCGW immediately before the block that references it is written, which is
+ * the blob contract; the answer is the reference the insert carries. A file
+ * CCGW refuses as too large is refused in its words.
+ */
+export async function handleTableFile(request: Request): Promise<OutcomeResponse<{ readonly reference: BlobReference }>> {
+  const encoded = request.headers.get("x-calliopa-filename") ?? "";
+  let filename = "";
+  try {
+    filename = decodeURIComponent(encoded).trim();
+  } catch {
+    return respond(refusal("requestShape", "The file's name is not percent-encoded."));
+  }
+  if (filename === "") return respond(refusal("requestShape", "The file's name belongs in X-Calliopa-Filename."));
+  const mediaType = request.headers.get("content-type") ?? "";
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (bytes.byteLength === 0) return respond(refusal("requestShape", `${filename} is empty.`));
+  const uploaded = await putBlob(bytes);
+  if (uploaded.outcome !== "success") return respond(uploaded as GraphOutcome<never>);
+  const objectId = objectIdOfHash(uploaded.result.hash);
+  if (objectId === null) return respond(refusal("storage", `CCGW answered a hash this build does not read: ${uploaded.result.hash}.`));
+  return respond({
+    outcome: "success",
+    result: {
+      reference: {
+        ...blobReference(objectId, mediaType === "" ? "text/csv" : mediaType, uploaded.result.size),
+        filename,
+      },
+    },
+  });
 }
 
 /** The branch's standing against head, per member. BO_0250_012 */

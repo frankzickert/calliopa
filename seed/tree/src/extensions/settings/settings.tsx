@@ -7,13 +7,13 @@ import {
   useVisibleTask$,
 } from "@builder.io/qwik";
 
-import { agentNeeds, type ConnectionRecord, type HermesModel } from "~/lib/connections";
-import { parseRefinement, refinementWords, type RefinementSettings } from "~/lib/refinement";
+import { agentNeeds, type ConnectionRecord, type HermesModel, serviceSave } from "~/lib/connections";
 import type { ViewProps } from "~/components/shell/view-host";
 import type { LoginState } from "~/server/agent/adapters";
 import type { AccountListing, AccountView, LicenceView } from "~/server/kernel/accounts";
 import type { Person } from "~/server/session";
 import { ViewBridgeContext } from "~/components/shell/view-bridge";
+import { REGISTRY } from "~/registry.gen";
 import { candidates, fetchReleases, parseReleases } from "~/lib/releases";
 import type { UpdateView } from "~/server/kernel/update";
 
@@ -105,44 +105,6 @@ export const SettingsView = component$<ViewProps>(() => {
     error: null,
     errorParty: null,
   });
-  /** Whether the kernel refines on its own and after how long a quiet, as
-   * its route answers; the owner's switch and field write it back and the
-   * row re-reads. BO_0245_011 */
-  const refinement = useStore<{
-    settings: RefinementSettings | null;
-    settle: string;
-    busy: boolean;
-    error: string | null;
-  }>({ settings: null, settle: "30", busy: false, error: null });
-  const readRefinement$ = $(async () => {
-    const response = await fetch("/api/agent/refinement");
-    if (!response.ok) {
-      refinement.settings = null;
-      return;
-    }
-    const settings = parseRefinement((await response.json()) as unknown);
-    refinement.settings = settings;
-    if (settings !== null) refinement.settle = String(settings.settleSeconds);
-  });
-  const setRefinement$ = $(async (next: RefinementSettings) => {
-    refinement.busy = true;
-    refinement.error = null;
-    try {
-      const response = await fetch("/api/agent/refinement", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(next),
-      });
-      if (!response.ok) {
-        const refused = (await response.json().catch(() => ({}))) as { error?: string };
-        refinement.error = refused.error ?? "The kernel refused the change.";
-        return;
-      }
-      await readRefinement$();
-    } finally {
-      refinement.busy = false;
-    }
-  });
   const entered = useSignal("");
   /**
    * What the reader has typed into a channel's fields, keyed by party and
@@ -150,6 +112,14 @@ export const SettingsView = component$<ViewProps>(() => {
    * an address is readable, unlike the key beside it.
    */
   const channelField = useStore<Record<string, string>>({});
+  const serviceField = useStore<Record<string, string>>({});
+  /** What the owner typed into one service row's fields, by field key. */
+  const typedFieldsOf = (party: string): Record<string, string> =>
+    Object.fromEntries(
+      Object.entries(serviceField)
+        .filter(([key]) => key.startsWith(`${party}.`))
+        .map(([key, value]) => [key.slice(party.length + 1), value]),
+    );
   const channelKey = useStore<Record<string, string>>({});
   /** What the copy control last managed, said where the reader is looking. */
   const copied = useSignal("");
@@ -256,7 +226,6 @@ export const SettingsView = component$<ViewProps>(() => {
     }
     state.rows = (await response.json()) as ConnectionRecord[];
     state.loaded = true;
-    await readRefinement$();
   });
 
   // The rows are the server's answer, so every request re-reads rather than
@@ -287,6 +256,9 @@ export const SettingsView = component$<ViewProps>(() => {
         state.error = refused.error ?? "The sign-in could not be started.";
         return;
       }
+      // Only the flow this request started is followed: a state an earlier
+      // flow left answers null until the broker starts this one. BO_0261_002
+      const { id } = (await asked.json()) as { id: string };
       // The broker writes its progress as it goes; this follows it until the
       // flow ends rather than asking once and leaving the reader guessing.
       //
@@ -296,7 +268,9 @@ export const SettingsView = component$<ViewProps>(() => {
       // needs to go and sign in.
       for (let attempt = 0; attempt < 900; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
-        const reported = await fetch("/api/x/settings/agent/login");
+        const reported = await fetch(
+          `/api/x/settings/agent/login?id=${encodeURIComponent(id)}`,
+        );
         const answered = reported.ok
           ? ((await reported.json()) as LoginState | null)
           : null;
@@ -311,6 +285,10 @@ export const SettingsView = component$<ViewProps>(() => {
         }
       }
       await read$();
+      // However the flow ended, the command bar reads the agents again: the
+      // server's list, not this flow's last state, says what can run now.
+      // CA_0052_003
+      await bridge.agentsChanged$();
     } catch {
       state.error = "The agent could not be reached.";
     } finally {
@@ -625,68 +603,6 @@ export const SettingsView = component$<ViewProps>(() => {
                       )}
                     </div>
                   )}
-                  {/* Refinement: whether the kernel refines on its own after
-                      a change settles, and after how long. The owner switches
-                      it and sets the settle time; anyone else reads it. With
-                      no runtime signed in it waits, and the row says so.
-                      BO_0245_011 */}
-                  {row.party === "hermes" && refinement.settings !== null && (
-                    <div class="agent-report__refinement" data-refinement={refinement.settings.enabled ? "on" : "off"}>
-                      <p data-refinement-words>
-                        {refinementWords(refinement.settings, !agentNeeds(state.rows).some((need) => need.blocking))}
-                      </p>
-                      <p class="connection__controls">
-                        <button
-                          type="button"
-                          class="connection__action"
-                          data-refinement-switch
-                          aria-pressed={refinement.settings.enabled ? "true" : "false"}
-                          disabled={refinement.busy}
-                          onClick$={() =>
-                            setRefinement$({
-                              enabled: !(refinement.settings?.enabled ?? true),
-                              settleSeconds: refinement.settings?.settleSeconds ?? 30,
-                            })
-                          }
-                        >
-                          {refinement.settings.enabled ? "Turn refinement off" : "Turn refinement on"}
-                        </button>
-                        <label class="connection__field">
-                          {"Settle time, seconds "}
-                          <input
-                            type="number"
-                            min={0}
-                            step={1}
-                            data-refinement-settle
-                            value={refinement.settle}
-                            disabled={refinement.busy}
-                            onInput$={(_event, element) => {
-                              refinement.settle = element.value;
-                            }}
-                          />
-                        </label>
-                        <button
-                          type="button"
-                          class="connection__action"
-                          data-refinement-save
-                          disabled={refinement.busy || !/^\d+$/u.test(refinement.settle) || Number(refinement.settle) === refinement.settings.settleSeconds}
-                          onClick$={() =>
-                            setRefinement$({
-                              enabled: refinement.settings?.enabled ?? true,
-                              settleSeconds: Number(refinement.settle),
-                            })
-                          }
-                        >
-                          Save settle time
-                        </button>
-                      </p>
-                      {refinement.error !== null && (
-                        <p class="connection__error" role="status" data-refinement-error>
-                          {refinement.error}
-                        </p>
-                      )}
-                    </div>
-                  )}
                   {row.kind === "status" ? (
                     <div class="connection__controls" data-status-controls>
                       {row.status !== null && (
@@ -803,6 +719,26 @@ export const SettingsView = component$<ViewProps>(() => {
                     </div>
                   ) : (
                     <div class="connection__controls">
+                      {/* What Save would write, and whether there is anything to write. BO_0280_009 */}
+                      {/* A service takes what it declares, the way a channel
+                          does: a party with fields shows them here, so what
+                          the owner may set is set where the key is entered.
+                          BO_0280_008 */}
+                      {row.fields.map((field) => (
+                        <label class="connection__field" key={field.key}>
+                          <span class="connection__label">{field.label}</span>
+                          <input
+                            type="text"
+                            class="connection__input"
+                            autoComplete="off"
+                            value={serviceField[`${row.party}.${field.key}`] ?? row.configuration[field.key] ?? ""}
+                            placeholder={field.hint}
+                            data-service-field={field.key}
+                            aria-label={`${row.label || row.party} ${field.label.toLowerCase()}`}
+                            onInput$={(_, element) => (serviceField[`${row.party}.${field.key}`] = element.value)}
+                          />
+                        </label>
+                      ))}
                       <label class="connection__field">
                         <span class="connection__label">
                           {row.keySet ? "Replace key" : "Key"}
@@ -824,7 +760,7 @@ export const SettingsView = component$<ViewProps>(() => {
                       <button
                         type="button"
                         class="connection__action"
-                        disabled={busy || entered.value.trim() === ""}
+                        disabled={busy || serviceSave(entered.value, row.fields, typedFieldsOf(row.party), row.configuration) === null}
                         onClick$={async () => {
                           await request$(
                             row.party,
@@ -832,7 +768,9 @@ export const SettingsView = component$<ViewProps>(() => {
                             {
                               method: "PUT",
                               headers: { "content-type": "application/json" },
-                              body: JSON.stringify({ secret: entered.value }),
+                              body: JSON.stringify(
+                                serviceSave(entered.value, row.fields, typedFieldsOf(row.party), row.configuration),
+                              ),
                             },
                           );
                           entered.value = "";
@@ -1345,6 +1283,18 @@ export const SettingsView = component$<ViewProps>(() => {
           </form>
         )}
       </section>
+
+      {/* The sections active extensions contribute, below the tab's own:
+          an extension's settings are its own, and leave with it when it is
+          deactivated. BO_0264_016 */}
+      {REGISTRY.settingsSections.map((section) => (
+        <section key={section.key} class="settings-section" aria-labelledby={`settings-${section.key}`} data-settings-section={section.key}>
+          <h2 class="settings-section__heading" id={`settings-${section.key}`}>
+            {section.title}
+          </h2>
+          <section.component />
+        </section>
+      ))}
 
       {update.shown && (
         <section class="settings-section" aria-labelledby="settings-update" data-settings-update>

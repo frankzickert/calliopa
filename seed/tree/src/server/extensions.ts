@@ -338,6 +338,20 @@ export async function declaresVocabulary(id: string): Promise<boolean> {
   return manifest !== undefined && snapshot.value.declaring.has(manifest.id);
 }
 
+/**
+ * Whether an extension may claim root-mapped paths, which only an elevated
+ * one may (`BO_0099_002`). It decides one sentence the extension's page
+ * shows: `package.json`, the lockfile, `vite.config` and `tsconfig` are
+ * root-mapped members of `ui.shell`, so adding a dependency the tree does
+ * not already hold is a change to the shell — which is worth saying before
+ * someone meets it as a refusal with no explanation. BO_0282_011
+ */
+export async function isElevated(id: string): Promise<boolean> {
+  const snapshot = await readSnapshot();
+  if (!snapshot.ok) return false;
+  return snapshot.value.elevated.includes(id);
+}
+
 export async function listExtensions(): Promise<ExtensionListing> {
   const snapshot = await readSnapshot();
   if (!snapshot.ok)

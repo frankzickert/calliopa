@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import type { PointedReference } from "./command-target";
 import {
   danglingNumbers,
-  insertReference,
   namedNumbers,
   pendingReference,
   referenceMatches,
@@ -46,18 +45,6 @@ describe("naming a reference by typing #", () => {
       referenceMatches(references, "1").map((reference) => reference.number),
     ).toEqual([1, 12]);
     expect(referenceMatches(references, "3")).toEqual([]);
-  });
-
-  it("Given a reference chosen, Then #<number> is written where the reader was typing, and the caret follows it", () => {
-    const text = "tighten #1 and keep the rest";
-    const pending = pendingReference(text, 10)!;
-    expect(insertReference(text, pending, 10, 12)).toEqual({
-      text: "tighten #12 and keep the rest",
-      caret: 12,
-    });
-    expect(
-      insertReference("rewrite #", pendingReference("rewrite #", 9)!, 9, 2),
-    ).toEqual({ text: "rewrite #2 ", caret: 11 });
   });
 });
 

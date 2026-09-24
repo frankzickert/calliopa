@@ -76,6 +76,16 @@ export function activeTab(state: TabsState): Tab | undefined {
   return state.tabs.find((tab) => tab.id === state.activeTabId);
 }
 
+/** The kind the target is open in, for a shell capability that must reach
+ * the extension owning that kind — focused work asks the kind's contribution
+ * for the child. The active tab answers first, so two tabs on one target
+ * cannot disagree about the one the reader is in. CA_0065_003 */
+export function kindOf(state: TabsState, itemId: string): TabKind | null {
+  const active = activeTab(state);
+  if (active !== undefined && active.itemId === itemId) return active.kind;
+  return state.tabs.find((tab) => tab.itemId === itemId)?.kind ?? null;
+}
+
 export function openTab(state: TabsState, tab: Tab): TabsState {
   const existing = state.tabs.find(
     (candidate) =>
@@ -95,12 +105,42 @@ export function selectTab(state: TabsState, id: string): TabsState {
     : state;
 }
 
+/** How many tabs lie before and after the active one: the counts the phone's
+ * *Minimum* header shows on the one tab's faded edges. CA_0054_007 */
+export function tabsBeside(state: TabsState): {
+  before: number;
+  after: number;
+} {
+  const index = state.tabs.findIndex((tab) => tab.id === state.activeTabId);
+  if (index < 0) return { before: 0, after: 0 };
+  return { before: index, after: state.tabs.length - 1 - index };
+}
+
+/** The neighbouring tab made active, one step before (-1) or after (1). It
+ * stops at the first and the last tab and never wraps, so the edge counts
+ * never lie. CA_0054_007 CA_0054_008 */
+export function neighbourTab(state: TabsState, step: -1 | 1): TabsState {
+  const index = state.tabs.findIndex((tab) => tab.id === state.activeTabId);
+  const next = state.tabs[index + step];
+  return index < 0 || next === undefined
+    ? state
+    : { ...state, activeTabId: next.id };
+}
+
 export function closeTab(state: TabsState, id: string): TabsState {
   const index = state.tabs.findIndex((tab) => tab.id === id);
   if (index < 0) return state;
   const tabs = state.tabs.filter((tab) => tab.id !== id);
   if (state.activeTabId !== id) return { tabs, activeTabId: state.activeTabId };
   return { tabs, activeTabId: (tabs[index] ?? tabs[index - 1])?.id ?? null };
+}
+
+/** Every tab closed at once: no tabs and no active tab. The one definition
+ * the *Close all tabs* control and any later gesture over several tabs share
+ * with `closeTab`. An empty state answers itself, so a caller can tell that
+ * nothing changed. CA_0067_001 */
+export function closeAllTabs(state: TabsState): TabsState {
+  return state.tabs.length === 0 ? state : { tabs: [], activeTabId: null };
 }
 
 export function moveTab(

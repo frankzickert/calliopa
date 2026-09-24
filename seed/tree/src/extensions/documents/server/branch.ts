@@ -18,41 +18,62 @@ export async function signedInAccount(): Promise<GraphOutcome<string>> {
   return { outcome: "success", result: person.name };
 }
 
-export interface BranchOfDocument {
-  /** The open branch, or the name the next branch takes. */
+/** One of the person's open proposal sessions on a document. CA_0057_009 */
+export interface ProposalSession {
   readonly branch: string;
-  readonly status: "open" | "accepted" | "rejected" | "none";
+  /** When its first staging minted the group, in epoch milliseconds. */
+  readonly since: number;
+}
+
+export interface BranchOfDocument {
+  /** The name the next session takes: always a free one, even while earlier
+   * sessions stand open, since each session is its own proposal. CA_0057_007 */
+  readonly branch: string;
+  /** The person's open sessions on this document, newest first. CA_0057_009 */
+  readonly sessions: readonly ProposalSession[];
   /** The newest closed branch of the person on this document, when there is one. */
   readonly previous?: { readonly branch: string; readonly status: "accepted" | "rejected" };
 }
 
-/** The signed-in person's branch on a document and the group's state. BO_0250_010 */
+/** The signed-in person's proposal sessions on a document, and the name the
+ * next one takes. BO_0250_010 CA_0057_009 */
 export async function branchOf(documentId: string): Promise<GraphOutcome<BranchOfDocument>> {
   const account = await signedInAccount();
   if (account.outcome !== "success") return account as GraphOutcome<never>;
+  // With history: a group's revision is revised as stagers join it, and its
+  // session began at its first. Each prior revision answers as an entry of
+  // its own under the same id. A group only moves from open to accepted or
+  // rejected, so a closed status on any of its entries is its status.
+  // CA_0057_009
   const groups = await query({
-    statement: "MATCH (g:ProposalGroup) RETURN GRAPH g",
+    statement: "MATCH (g:ProposalGroup) RETURN GRAPH g INCLUDE HISTORY",
     proposalOverlay: "",
     unbounded: true,
     purpose: "branch lookup",
   });
-  if (groups.outcome === "noResult") return { outcome: "success", result: { branch: branchGroupId(documentId, account.result), status: "none" } };
+  if (groups.outcome === "noResult") return { outcome: "success", result: { branch: branchGroupId(documentId, account.result), sessions: [] } };
   if (groups.outcome !== "success") return groups as GraphOutcome<never>;
-  // Every branch of the person on this root, by attempt: the open one is the
-  // branch; otherwise the next name is free and the newest closed one is
-  // history. BO_0250_010
-  const mine = groups.result.nodes
-    .map((node) => ({ id: node.id, status: String(node.revision.content?.["status"] ?? ""), named: branchGroupOf(node.id) }))
-    .filter((entry) => entry.named !== null && entry.named.documentId === documentId && entry.named.account === account.result)
-    .sort((a, b) => (b.named?.attempt ?? 0) - (a.named?.attempt ?? 0));
-  const open = mine.find((entry) => entry.status === "open");
-  if (open !== undefined) return { outcome: "success", result: { branch: open.id, status: "open" } };
-  const newest = mine[0];
-  const next = branchGroupId(documentId, account.result, (newest?.named?.attempt ?? 0) + 1);
-  if (newest === undefined || (newest.status !== "accepted" && newest.status !== "rejected")) {
-    return { outcome: "success", result: { branch: next, status: "none" } };
+  const byId = new Map<string, { status: string; since: number }>();
+  for (const node of groups.result.nodes) {
+    const named = branchGroupOf(node.id);
+    if (named === null || named.documentId !== documentId || named.account !== account.result) continue;
+    const since = Math.min(node.revision.createdAt, ...(node.history ?? []).map((revision) => revision.createdAt));
+    const seen = byId.get(node.id);
+    const statuses = [String(node.revision.content?.["status"] ?? ""), ...(node.history ?? []).map((revision) => String(revision.content?.["status"] ?? "")), seen?.status ?? ""];
+    const status = statuses.find((value) => value === "accepted" || value === "rejected") ?? (statuses.includes("open") ? "open" : "");
+    byId.set(node.id, { status, since: Math.min(since, seen?.since ?? since) });
   }
-  return { outcome: "success", result: { branch: next, status: "none", previous: { branch: newest.id, status: newest.status } } };
+  // Every branch of the person on this root, by attempt: the open ones are
+  // sessions, the next name is past every attempt, and the newest closed one
+  // is history. BO_0250_010 CA_0057_007
+  const mine = [...byId]
+    .map(([id, entry]) => ({ id, status: entry.status, since: entry.since, named: branchGroupOf(id) }))
+    .sort((a, b) => (b.named?.attempt ?? 0) - (a.named?.attempt ?? 0));
+  const sessions = mine.filter((entry) => entry.status === "open").map((entry) => ({ branch: entry.id, since: entry.since }));
+  const branch = branchGroupId(documentId, account.result, (mine[0]?.named?.attempt ?? 0) + 1);
+  const closed = mine.find((entry) => entry.status === "accepted" || entry.status === "rejected");
+  if (closed === undefined) return { outcome: "success", result: { branch, sessions } };
+  return { outcome: "success", result: { branch, sessions, previous: { branch: closed.id, status: closed.status as "accepted" | "rejected" } } };
 }
 
 export type BranchStanding = Standing;

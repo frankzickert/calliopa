@@ -1,14 +1,18 @@
 import type { Component } from "@builder.io/qwik";
+import { isIconName } from "~/components/shell/icons";
 import type { DragOperation } from "~/lib/drag";
 import type { ViewProps } from "~/components/shell/view-host";
 import type {
   ApiRoute,
   ClientContributions,
+  LibraryIcon,
   LibrarySection,
   Decorations,
+  FocusedWorkContribution,
   PartyDescriptor,
   ProposedTarget,
   ServerContributions,
+  SettingsSection,
   ViewContribution,
 } from "~/contract";
 
@@ -71,6 +75,22 @@ export interface RegisteredSection extends LibrarySection {
   readonly opens?: string;
 }
 
+/**
+ * One icon of the library's icon column: an extension's icon and the keys of
+ * its sections under it, in contribution order. CA_0056_001 CA_0056_008
+ */
+export interface RegisteredLibraryIcon extends LibraryIcon {
+  /** The extension id, which is the icon's id in the stored layout. */
+  readonly id: string;
+  readonly sections: readonly string[];
+}
+
+/** A settings section as registered, keyed `<ext>:<name>`. BO_0264_016 */
+export interface RegisteredSettingsSection extends SettingsSection {
+  readonly key: string;
+  readonly extension: string;
+}
+
 /** One extension's decorations for a kind, in contribution order. BO_0256_007 */
 export interface RegisteredDecorations {
   readonly extension: string;
@@ -80,11 +100,16 @@ export interface RegisteredDecorations {
 export interface Registry {
   readonly extensions: readonly string[];
   readonly sections: readonly RegisteredSection[];
+  /** The library's icon column, one icon per extension with sections, in
+   * contribution order. CA_0056_001 */
+  readonly libraryIcons: readonly RegisteredLibraryIcon[];
   /** Every qualified tab kind and the id of the view it opens with. */
   readonly kinds: Readonly<Record<string, string>>;
   readonly views: readonly ViewType[];
   /** Decorations by qualified kind, in extension order. BO_0256_007 */
   readonly decorations: Readonly<Record<string, readonly RegisteredDecorations[]>>;
+  /** Settings sections, in extension order. BO_0264_016 */
+  readonly settingsSections: readonly RegisteredSettingsSection[];
 }
 
 export function buildRegistry(
@@ -92,8 +117,10 @@ export function buildRegistry(
   entries: readonly Entry<ClientContributions>[],
 ): Registry {
   const sections: RegisteredSection[] = [];
+  const libraryIcons: RegisteredLibraryIcon[] = [];
   const kinds: Record<string, string> = {};
   const decorations: Record<string, RegisteredDecorations[]> = {};
+  const settingsSections: RegisteredSettingsSection[] = [];
   const views = new Map<string, { view: ViewType; source: ViewContribution }>();
 
   const addView = (extension: string, source: ViewContribution, presents: readonly string[]) => {
@@ -122,7 +149,32 @@ export function buildRegistry(
   };
 
   for (const { id, contributions } of [{ id: HOST, contributions: host }, ...entries]) {
-    for (const section of contributions.sections ?? []) {
+    // An extension's sections stand under its one icon, so the column never
+    // shows a blank button: sections without an icon, or an icon the table
+    // does not hold, are refused by name. CA_0056_008
+    const contributed = contributions.sections ?? [];
+    if (contributed.length > 0) {
+      const icon = contributions.icon;
+      if (icon === undefined) {
+        throw new RegistryError(
+          "section_icon_missing",
+          `${id} contributes sections without the icon they stand under in the library`,
+        );
+      }
+      if (!isIconName(icon.name)) {
+        throw new RegistryError(
+          "icon_unknown",
+          `${id}'s library icon ${icon.name} is not in the shell's icon table`,
+        );
+      }
+      libraryIcons.push({
+        id,
+        title: icon.title,
+        name: icon.name,
+        sections: contributed.map((section) => qualify(id, section.name)),
+      });
+    }
+    for (const section of contributed) {
       const key = qualify(id, section.name);
       const taken = sections.find((candidate) => candidate.key === key);
       if (taken !== undefined) {
@@ -144,6 +196,13 @@ export function buildRegistry(
       addView(id, view, [kind]);
     }
     for (const view of contributions.views ?? []) addView(id, view, []);
+    for (const section of contributions.settingsSections ?? []) {
+      const key = qualify(id, section.name);
+      if (settingsSections.some((candidate) => candidate.key === key)) {
+        throw new RegistryError("settings_section_collision", `settings section ${key} is contributed twice`);
+      }
+      settingsSections.push({ ...section, key, extension: id });
+    }
   }
 
   // Decorations are keyed by the *qualified* kind they draw on, so an
@@ -163,26 +222,20 @@ export function buildRegistry(
           `${id} decorates ${kind}, which no extension contributes`,
         );
       }
-      if (set.provider !== undefined) {
-        const provided = (decorations[known] ?? []).find(
-          (candidate) => candidate.decorations.provider !== undefined,
-        );
-        if (provided !== undefined) {
-          throw new RegistryError(
-            "decoration_provider_collision",
-            `${provided.extension} and ${id} both provide for ${known}; a kind takes one provider, and the presenting view wraps it once`,
-          );
-        }
-      }
+      // A second provider for a kind is nested inside the first by the
+      // presenting view, in extension order (BO_0289_019); the refusal that
+      // stood here was the change that made it a nest.
       (decorations[known] ??= []).push({ extension: id, decorations: set });
     }
   }
   const registry: Registry = {
     extensions: entries.map((entry) => entry.id),
     sections,
+    libraryIcons,
     kinds,
     views: [...views.values()].map((entry) => entry.view),
     decorations,
+    settingsSections,
   };
   // A view contributed for a kind nothing declares would never be reached;
   // saying so is what keeps a stale contribution from surviving unnoticed.
@@ -214,6 +267,15 @@ export interface RegisteredProposedTargets {
   readonly read: (group: string) => Promise<readonly ProposedTarget[]>;
 }
 
+/** One extension's senders and what a command sent to one of them does. */
+export interface RegisteredSenders {
+  readonly extension: string;
+  readonly roster: NonNullable<ServerContributions["senders"]>;
+  readonly send: NonNullable<ServerContributions["send"]>;
+  /** What a send would cost, when this extension can say. BO_0279_009 */
+  readonly quote?: NonNullable<ServerContributions["quote"]>;
+}
+
 export interface ServerRegistry {
   readonly extensions: readonly string[];
   /** Readers by section key, `<ext>:<name>`. */
@@ -223,10 +285,18 @@ export interface ServerRegistry {
   readonly parties: readonly RegisteredParty[];
   /** The rosters read at runtime, in extension order. */
   readonly rosters: readonly RegisteredRoster[];
+  /** Senders beside the agents, by extension, in contribution order. BO_0273_035 */
+  readonly senders: readonly RegisteredSenders[];
   /** What each extension says a run proposed into it, in extension order. */
   readonly proposedTargets: readonly RegisteredProposedTargets[];
   /** What each extension says the items of a kind are marked with. BO_0256_008 */
   readonly itemGlyphs: readonly NonNullable<ServerContributions["itemGlyphs"]>[];
+  /** How a child of a target kind is made and read, by qualified kind. The
+   * shell opens any block as focused work through these and writes no
+   * extension's vocabulary itself. CA_0065_001 */
+  readonly focusedWork: Readonly<Record<string, FocusedWorkContribution>>;
+  /** The one citation resolver, with the extension that answers. BO_0291_030 */
+  readonly citations?: { readonly extension: string; readonly resolve: NonNullable<ServerContributions["citations"]> };
 }
 
 /**
@@ -256,17 +326,48 @@ export function buildServerRegistry(
   const routes: Record<string, readonly ApiRoute[]> = {};
   const parties: RegisteredParty[] = [];
   const rosters: RegisteredRoster[] = [];
+  const senders: RegisteredSenders[] = [];
   const proposedTargets: RegisteredProposedTargets[] = [];
   const itemGlyphs: NonNullable<ServerContributions["itemGlyphs"]>[] = [];
+  const focusedWork: Record<string, FocusedWorkContribution> = {};
+  let citations: ServerRegistry["citations"];
   for (const { id, contributions } of entries) {
+    if (contributions.citations !== undefined) {
+      // One answer to how a citation reads: a second would make the same
+      // document read two ways. BO_0291_030
+      if (citations !== undefined) {
+        throw new RegistryError("citation_resolver_collision", `${id} resolves citations, which ${citations.extension} already does`);
+      }
+      citations = { extension: id, resolve: contributions.citations };
+    }
     if (contributions.partyRoster !== undefined) {
       rosters.push({ extension: id, roster: contributions.partyRoster });
+    }
+    if (contributions.senders !== undefined) {
+      // Both halves or neither: a sender nothing answers for would stand in
+      // the menu and refuse every send.
+      if (contributions.send === undefined) {
+        throw new RegistryError("sender_unanswered", `${id} offers senders and answers no send`);
+      }
+      senders.push({
+        extension: id,
+        roster: contributions.senders,
+        send: contributions.send,
+        // Optional: a sender that cannot say what it would cost is still a
+        // sender. BO_0279_009
+        ...(contributions.quote === undefined ? {} : { quote: contributions.quote }),
+      });
     }
     if (contributions.itemGlyphs !== undefined) {
       itemGlyphs.push(contributions.itemGlyphs);
     }
     if (contributions.proposedTargets !== undefined) {
       proposedTargets.push({ extension: id, read: contributions.proposedTargets });
+    }
+    // Keyed by the qualified kind, as a tab's kind is, so the shell reaches
+    // the contribution from the target it already holds. CA_0065_001
+    for (const [kind, contribution] of Object.entries(contributions.focusedWork ?? {})) {
+      focusedWork[qualify(id, kind)] = contribution;
     }
     for (const [name, reader] of Object.entries(contributions.readers ?? {})) {
       readers[qualify(id, name)] = reader;
@@ -309,8 +410,11 @@ export function buildServerRegistry(
     routes,
     parties,
     rosters,
+    senders,
     proposedTargets,
     itemGlyphs,
+    focusedWork,
+    ...(citations === undefined ? {} : { citations }),
   };
 }
 

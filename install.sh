@@ -230,6 +230,14 @@ if grep -q '^CALLIOPA_CONFIRM_PORT=' .env; then
 else
   printf 'CALLIOPA_CONFIRM_PORT=%s\n' "$confirm_port" >> .env
 fi
+# The candidate origin, derived the same way one port further on: a staged
+# group is served there beside the promoted tree. BO_0282_003
+candidate_port=$(( port + 2 ))
+if grep -q '^CALLIOPA_CANDIDATE_PORT=' .env; then
+  sed -i "s|^CALLIOPA_CANDIDATE_PORT=.*|CALLIOPA_CANDIDATE_PORT=${candidate_port}|" .env
+else
+  printf 'CALLIOPA_CANDIDATE_PORT=%s\n' "$candidate_port" >> .env
+fi
 
 # Install is zero-secret: agent credentials are configured at first start
 # through the UI (or a subscription CLI login), never here. BO_0089_002

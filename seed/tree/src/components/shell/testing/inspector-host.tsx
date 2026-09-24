@@ -1,22 +1,25 @@
-import { $, component$, useStore } from "@builder.io/qwik";
+import { $, component$, useStore, useTask$ } from "@builder.io/qwik";
 
+import { executionProcess } from "~/lib/execution";
+import type { Layout } from "~/lib/layout";
 import type { ProcessRecord } from "~/lib/process";
-import { NO_SELECTION } from "~/lib/process-selection";
+import { NO_SELECTION, pressProcess } from "~/lib/process-selection";
 import type { Tab, TabsState } from "~/lib/tabs";
+import { ExecutionSection, type ExecutionRead } from "../execution";
 import {
   InspectorPanel,
-  ProcessList,
   type ProcessRegistry,
   type ProposedRead,
 } from "../inspector";
-import type { ViewInspector } from "../view-bridge";
+import type { RunEvent } from "~/server/agent/run-events";
+import type { ViewAnswerAll, ViewInspector, ViewToggleRun } from "../view-bridge";
 
 /**
- * The console's process list and the inspector, wired in real JSX the way the
- * shell wires them: the registry, the tabs and the view's contribution are
- * stores the host owns, and a tab switch is the active tab id changing, which
- * is all the shell's switch does to them. Test support, imported by
- * `process-selection.test.ts` and nothing that ships. CA_0040_001
+ * The panel's run list and the inspector, wired in real JSX the way the shell
+ * wires them: the registry, the tabs and the view's contribution are stores
+ * the host owns, and a tab switch is the active tab id changing, which is all
+ * the shell's switch does to them. Test support, imported by
+ * `process-selection.test.ts` and nothing that ships. CA_0040_001 CA_0058_005
  */
 const process = (id: string, title: string): ProcessRecord => ({
   id,
@@ -52,7 +55,29 @@ export const InspectorHost = component$(() => {
     tabs: [tab("a"), tab("b")],
     activeTabId: "a",
   });
-  const proposed = useStore<ProposedRead>({ processId: null, documents: [], attachments: [] });
+  const proposed = useStore<ProposedRead>({ processId: null, documents: [], attachments: [], events: [] });
+  const read = useStore<ExecutionRead>({ itemId: null, runs: [], error: null });
+  const answerAll = useStore<ViewAnswerAll>({ itemId: null, group: null, answer: null, seq: 0 });
+  const toggleRun = useStore<ViewToggleRun>({ itemId: null, key: null, seq: 0 });
+  const layout = useStore<Layout>({ sections: {} } as unknown as Layout);
+  /** What the shell's own task does when the selection changes: it reads the
+   * selected run's events for the detail. CA_0058_006 */
+  useTask$(({ track }) => {
+    const selected = track(() =>
+      tabs.activeTabId === null
+        ? registry.selection.noTab
+        : (registry.selection.byTab[tabs.activeTabId] ?? null),
+    );
+    proposed.processId = selected;
+    proposed.events =
+      selected === null
+        ? []
+        : ([
+            { kind: "runStarted" },
+            { kind: "toolStarted", tool: "read_document" },
+            { kind: "runCompleted", output: "Proposed one rewrite." },
+          ] as RunEvent[]);
+  });
   const inspector = useStore<ViewInspector>({
     text: null,
     facts: [],
@@ -84,7 +109,27 @@ export const InspectorHost = component$(() => {
           {open.title}
         </button>
       ))}
-      <ProcessList registry={registry} tabs={tabs} startDrag$={$(() => {})} />
+      <ExecutionSection
+        itemId={null}
+        selection={null}
+        read={read}
+        processes={registry.items.map(executionProcess)}
+        selected={
+          tabs.activeTabId === null
+            ? registry.selection.noTab
+            : (registry.selection.byTab[tabs.activeTabId] ?? null)
+        }
+        chips={[]}
+        answerAll={answerAll}
+        toggleRun={toggleRun}
+        layout={layout}
+        onToggle$={$(() => undefined)}
+        onCancel$={$(() => undefined)}
+        onSelect$={$((processId: string) => {
+          registry.selection = pressProcess(registry.selection, tabs.activeTabId, processId);
+        })}
+        startDrag$={$(() => {})}
+      />
       <aside data-inspector-panel>
         <InspectorPanel
           registry={registry}

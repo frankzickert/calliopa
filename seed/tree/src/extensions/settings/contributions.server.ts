@@ -176,10 +176,15 @@ const routes: readonly ApiRoute[] = [
     },
   },
   {
-    /** How the sign-in in flight is going, as the agent's broker reports it. */
+    /**
+     * How the sign-in a request started is going, as the agent's broker
+     * reports it: `?id=` names the request, and another flow's state answers
+     * null. BO_0261_002
+     */
     method: "GET",
     path: "agent/login",
-    handle: async (event) => event.json(200, (await loginState()) ?? null),
+    handle: async (event) =>
+      event.json(200, (await loginState(event.url.searchParams.get("id") ?? undefined)) ?? null),
   },
   {
     // Asks the agent to run a runtime's own sign-in flow. The application asks
@@ -195,8 +200,8 @@ const routes: readonly ApiRoute[] = [
         event.json(400, { error: `There is no ${String(runtime)} runtime.` });
         return;
       }
-      await requestLogin(runtime);
-      event.json(202, { runtime });
+      const id = await requestLogin(runtime);
+      event.json(202, { runtime, id });
     },
   },
   {
@@ -233,6 +238,36 @@ export const contributions = declare({
       probe: {
         authorization: { secretField: "apiKey" },
         test: { method: "GET", url: "https://api.openai.com/v1/models", expectStatus: 200 },
+      },
+    },
+    {
+      id: "evaluation",
+      kind: "service",
+      credential: "apiKey",
+      label: "Evaluation",
+      purpose:
+        "A model that answers typed questions about supplied material. With a key entered, any agent run on this instance may ask it, and the material it judges is sent to Vercel AI Gateway; each question costs a little. Clearing the key is how it stops.",
+      fields: [
+        {
+          key: "retention",
+          label: "Data retention",
+          // Zero data retention is the provider's guarantee that it keeps
+          // nothing it was sent. It is a paid plan's feature, and asking for
+          // it on a plan without it refuses the whole call — so requiring it
+          // unconditionally would not protect the work, it would stop the
+          // service running. The owner decides, once, here. BO_0280_008
+          hint: 'require — refuse to ask unless the provider guarantees it keeps nothing (Pro and Enterprise plans); allow — let the provider retain what is judged',
+        },
+      ],
+      // The gateway's root is fixed rather than typed: nothing anyone enters
+      // can send the work to another host. BO_0280_001
+      fixed: { address: "https://ai-gateway.vercel.sh/v1" },
+      // Measured rather than guessed: GET /v1/models answers 200 with no
+      // credential at all, so a probe on it would report every key — and no
+      // key — as verified. /credits refuses a wrong one and spends nothing.
+      probe: {
+        authorization: { secretField: "apiKey" },
+        test: { method: "GET", url: "{configuration.address}/credits", expectStatus: 200 },
       },
     },
     {

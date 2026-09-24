@@ -1,0 +1,12 @@
+{
+  "name": "calliopa-capture",
+  "private": true,
+  "type": "module",
+  "description": "The page capture service: renders a public page to a PDF, a screenshot and its text. docs/system/page-capture-service.md",
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "playwright": "1.62.1"
+  }
+}

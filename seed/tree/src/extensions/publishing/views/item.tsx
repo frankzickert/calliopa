@@ -17,6 +17,16 @@ const refusalOf = (body: unknown): string => {
 
 const mib = (bytes: number): string => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MiB` : `${Math.round(bytes / 1024)} KiB`);
 
+/**
+ * Where the browser reads stored bytes: the shell's own route, by the bare
+ * object id. CCGW's `/v1/blobs` is not reachable from the app origin — nothing
+ * forwards `/v1` — so a preview pointed there drew nothing. The prefix is
+ * stripped here rather than imported, because a client view may not import a
+ * value from `~/server`. BO_0273_046
+ */
+const blobRoute = (hash: string): string =>
+  `/api/blobs/${encodeURIComponent(hash.replace(/^sha256:/u, ""))}`;
+
 export const ItemView = component$<ViewProps>(({ tab }) => {
   const bridge = useContext(ViewBridgeContext);
   const missing = useSignal(false);
@@ -262,7 +272,7 @@ export const ItemView = component$<ViewProps>(({ tab }) => {
             <ul class="item__exports">
               {item.exports.map((found) => (
                 <li key={found.exportId} data-export-row={found.exportId}>
-                  {item.class === "image" && <img class="item__preview" src={`/v1/blobs/${encodeURIComponent(found.hash)}`} alt={item.alt} width={96} />}
+                  {item.class === "image" && <img class="item__preview" src={blobRoute(found.hash)} alt={item.alt} width={96} />}
                   <code>{found.mediaType}</code>
                   {found.width !== null && found.height !== null && <span> · {found.width}×{found.height}{found.aspect === null ? "" : ` (${found.aspect})`}</span>}
                   <span> · {mib(found.size)}</span>

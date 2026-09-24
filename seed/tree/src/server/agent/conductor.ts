@@ -5,7 +5,7 @@ import { attachRun, createProcess, listAllProcesses, moveProcess, readProcess } 
 import {
   cancelBridgeRun,
   followBridgeEvents,
-  judgementWords,
+  conclusionOf,
   readBridgeRun,
   startBridgeRun,
 } from "./bridge";
@@ -27,7 +27,10 @@ import { readSession } from "../session";
 
 export type ConductedRun =
   | { readonly ok: true; readonly runId: string; readonly process: ProcessRecord }
-  | { readonly ok: false; readonly reason: "busy"; readonly detail: string }
+  /** The kernel refused it as a conflict: the intention's extension is
+   * switched off. Runs go side by side, so no run is refused as busy.
+   * BO_0264_006 BO_0269_014 */
+  | { readonly ok: false; readonly reason: "conflict"; readonly detail: string }
   /** The kernel refused the request for what it said — a target it cannot
    * mean, a goal it cannot take. The reader's to correct, not the agent's
    * failure, so it is not reported as one. BO_0226_004 */
@@ -56,19 +59,23 @@ const stepFor = (event: RunEvent): string => {
 
 /**
  * Opens a run for a goal: the bridge takes the goal first, so a goal it
- * refuses — busy, no agent configured, unreachable — leaves nothing behind,
+ * refuses — no agent configured, unreachable — leaves nothing behind,
  * and a goal it takes gets the process the reader sees it through.
  */
 export async function conductRun(input: {
   readonly workspaceId: string;
   readonly goal: string;
   readonly agent?: string;
+  /** Fast or thorough, as the reader chose it. BO_0269_015 */
+  readonly speed?: "fast" | "thorough";
   /** What the command was aimed at, or null for a command aimed at nothing. */
   readonly target?: CommandTarget | null;
   /** The person's branch the run proposes into. BO_0250_005 */
   readonly group?: string;
   /** The attachment nodes written for the files the command carries. BO_0229_009 */
   readonly attachments?: readonly string[];
+  /** The intention a gesture names, passed through to the bridge. BO_0258_006 */
+  readonly intention?: string;
 }): Promise<ConductedRun> {
   // The runtime is the reader's explicit choice or the one the agent
   // stamped as active; the bridge reads an empty selection as the API-key
@@ -79,28 +86,35 @@ export async function conductRun(input: {
     goal: input.goal,
     context: `raised from workspace ${input.workspaceId}`,
     agent,
+    ...(input.speed === undefined ? {} : { speed: input.speed }),
     target: input.target ?? null,
     ...(input.group === undefined ? {} : { group: input.group }),
     ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
+    ...(input.intention === undefined || input.intention === "" ? {} : { intention: input.intention }),
   });
   if (!started.ok) {
     return {
       ok: false,
-      reason: started.status === 409 ? "busy" : started.status === 400 ? "refused" : started.status === 403 ? "forbidden" : "agent",
+      reason: started.status === 409 ? "conflict" : started.status === 400 ? "refused" : started.status === 403 ? "forbidden" : "agent",
       detail: started.detail,
     };
   }
   // The process is the person's, as the run is. BO_0232_006
   const person = await readSession();
+  // A command sent from a block names its process by the block's first line,
+  // which the kernel read. BO_0267_009
   const process = await createProcess(
     input.workspaceId,
-    { title: input.goal, step: "Started" },
+    { title: firstLine(started.value.goal) || input.goal, step: "Started" },
     undefined,
     person?.name,
   );
   const attached = await attachRun(process.id, started.value.id);
   return { ok: true, runId: started.value.id, process: attached ?? process };
 }
+
+/** The first line of a command's words, which a process is named by. */
+export const firstLine = (words: string): string => words.trim().split("\n")[0]?.trim() ?? "";
 
 /**
  * Follows a run to its end through the bridge's stream and keeps the process
@@ -129,20 +143,17 @@ export async function followRun(processId: string, runId: string): Promise<void>
     await moveProcess(processId, { state: "failed", step: null, error: followed.detail });
     return;
   }
-  // A command's run that carried a queued refinement with it says so in its
-  // detail: what it refined and what it concluded. BO_0245_009
-  const carried = await readBridgeRun(runId);
-  if (carried.ok && carried.value.refined !== undefined) {
+  // A run that concluded without proposing — a silence an extension's tool
+  // recorded — says so in its detail. BO_0264_017
+  const concludedRun = await readBridgeRun(runId);
+  if (concludedRun.ok && conclusionOf(concludedRun.value) !== "") {
     const current = await readProcess(processId).catch(() => null);
     if (current !== null) {
-      const concluded = judgementWords(carried.value.judgement);
       await moveProcess(processId, {
         state: current.state,
         step: current.step,
         error: current.error,
-        trigger: "person",
-        refined: { documentId: carried.value.refined, dataRevision: carried.value.refinedAt ?? carried.value.pin },
-        ...(concluded === "" ? {} : { concluded }),
+        concluded: conclusionOf(concludedRun.value),
       });
     }
   }

@@ -1,11 +1,11 @@
-import { component$, useStore } from "@builder.io/qwik";
+import { $, component$, useStore } from "@builder.io/qwik";
 
 import {
-  CHOICE_NOT_REMEMBERED,
-  openingAgent,
-  rememberAgent,
+  chooseAgent,
+  loadAgents,
+  refreshAgents,
+  type AgentList,
 } from "~/lib/agent-menu";
-import type { SelectableRuntime } from "~/lib/connections";
 import { AgentMenu } from "../agent-menu";
 
 /**
@@ -17,43 +17,36 @@ import { AgentMenu } from "../agent-menu";
  * Real JSX and late data are the point: a prop that froze at mount passed
  * every `jsx()`-built test in BO_0227 and showed an empty list in the served
  * shell (`qwik-member-props-freeze`).
+ *
+ * The list is read as the shell reads it — `loadAgents` on mount,
+ * `refreshAgents` when the menu opens and when a view says the agents
+ * changed, which `data-agents-changed` stands for. CA_0052
  */
-export const AgentMenuHost = component$<{
-  runtimes: readonly SelectableRuntime[];
-  chosen: string | null;
-  active: string | null;
-}>((props) => {
-  const run = useStore({
-    runtimes: [] as SelectableRuntime[],
-    agent: null as string | null,
-    notice: null as string | null,
+export const AgentMenuHost = component$(() => {
+  const run = useStore<AgentList>({
+    runtimes: [],
+    agent: null,
+    options: {},
+    speed: "fast",
+    notice: null,
+    awaiting: null,
+    openingNotice: null,
   });
+  const refresh$ = $(() => refreshAgents(run));
   return (
     <div>
       <AgentMenu
         runtimes={run.runtimes}
         value={run.agent}
         disabled={false}
-        onChoose$={async (agent) => {
-          run.agent = agent;
-          if (!(await rememberAgent(agent))) run.notice = CHOICE_NOT_REMEMBERED;
-        }}
+        onChoose$={(agent) => chooseAgent(run, agent)}
+        refresh$={refresh$}
       />
-      <button
-        type="button"
-        data-load
-        onClick$={() => {
-          run.runtimes = [...props.runtimes];
-          const opening = openingAgent(
-            props.runtimes,
-            props.chosen,
-            props.active,
-          );
-          run.agent = opening.agent;
-          if (opening.notice !== null) run.notice = opening.notice;
-        }}
-      >
+      <button type="button" data-load onClick$={() => loadAgents(run)}>
         load
+      </button>
+      <button type="button" data-agents-changed onClick$={refresh$}>
+        agents changed
       </button>
       <p data-host-agent={run.agent ?? ""} data-host-notice={run.notice ?? ""}>
         {run.notice}

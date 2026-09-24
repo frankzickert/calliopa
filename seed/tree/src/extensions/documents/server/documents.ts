@@ -1,4 +1,5 @@
-import { storedValue, type Standing } from "~/extensions/documents/lib/disposition";
+import { readStanding, storedValue, type Standing } from "~/extensions/documents/lib/disposition";
+import type { FrontMatter } from "../lib/front-matter";
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { orderBetween } from "~/lib/order";
@@ -15,8 +16,9 @@ import {
 } from "~/server/ccgw/client";
 import { branchGroupOf, currentBranch, outsideBranch } from "~/server/ccgw/branch-scope";
 import type { GraphOutcome, NonEmpty } from "~/server/outcome";
-import { assembleDocument, assembleRetired, CONTAINS, RETIRED, toBlock, type BlockView, type DocumentView } from "./assemble";
+import { assembleDocument, assembleRetired, blocksOf, CONTAINS, RETIRED, toBlock, type BlockView, type DocumentView } from "./assemble";
 import { bareId, contentOf, nodeRef, typeOf } from "~/server/ccgw/nodes";
+import type { BlobReference } from "~/server/ccgw/blobs";
 import { sameRuns } from "~/lib/runs";
 import {
   ASSERTS,
@@ -39,16 +41,20 @@ import {
   type RelationState,
   type RelationView,
 } from "./work";
-import { childrenOf, focusOf } from "./focus";
+import { childrenOf, focusOf } from "~/server/focused-work";
+import { DOCUMENT_TARGET_KIND } from "./focus";
 import { reachesDocument } from "./reach";
 import {
+  ACCEPTED_AT_PROPERTY,
   DOCUMENT_TYPE,
   normalizeRuns,
   splitRuns,
   type Run,
   type TextRole,
 } from "./vocabulary";
-import { PHASE_PROPERTY, SUPERSEDED_BY_PROPERTY, isPhase, type Phase } from "./vocabulary";
+import { checkTable, type TableColumn, type TableRow } from "~/extensions/documents/lib/table";
+import { PHASE_PROPERTY, SUPERSEDED_BY_PROPERTY, WORK_TYPE, isPhase, type Phase } from "./vocabulary";
+import { proposedWorksCited } from "./proposed-works";
 import { conflictsOf } from "./phase";
 
 /**
@@ -83,7 +89,11 @@ export type Placement =
   | { readonly at: "start" }
   | { readonly at: "end" }
   | { readonly before: string }
-  | { readonly after: string };
+  | { readonly after: string }
+  /** Between two drawn rows' order keys, either `null` at an end: the rows a
+   * reader dropped between, which may be a proposed insert, a retired block
+   * or a discarded one as well as a block of the document. BO_0263_001 */
+  | { readonly between: readonly [string | null, string | null] };
 
 /** A slice of a document's blocks. Bounds name blocks and are exclusive. */
 export interface DocumentRange {
@@ -102,7 +112,82 @@ export interface NewDividerBlock {
   readonly kind: "divider";
 }
 
-export type NewBlock = NewTextBlock | NewDividerBlock;
+/**
+ * A picture or a moving picture (`BO_0273_017`). The bytes are a blob behind
+ * CCGW and the block carries the reference; **absent is the pending state**, a
+ * generation proposed and not yet paid for, which is why every property here is
+ * optional. `source` is what made it, stored and never interpreted by this
+ * model.
+ */
+export interface NewMediaBlock {
+  readonly kind: "image" | "video";
+  readonly reference?: BlobReference;
+  readonly alt?: string;
+  readonly width?: number;
+  readonly height?: number;
+  readonly source?: Record<string, unknown>;
+}
+
+/**
+ * A table (`BO_0287_008`): typed columns and rows of cells, one block revised
+ * whole. Behind a file the block carries the core's blob reference and the
+ * file's row count, and the rows are its first hundred; `source` is where the
+ * data came from, keyed by its writer and never interpreted by this model.
+ */
+export interface NewTableBlock {
+  readonly kind: "table";
+  readonly columns: readonly TableColumn[];
+  readonly rows: readonly TableRow[];
+  readonly caption?: string;
+  readonly reference?: BlobReference;
+  readonly rowCount?: number;
+  readonly source?: Record<string, unknown>;
+}
+
+/**
+ * An equation (`BO_0290_008`): the exact TeX, an optional caption and the
+ * author's ask for a number. What the number *is* is never stored — the
+ * document's order decides it on every read — so nothing here carries one.
+ */
+export interface NewEquationBlock {
+  readonly kind: "equation";
+  readonly tex: string;
+  readonly caption?: string;
+  readonly numbered?: boolean;
+  readonly source?: Record<string, unknown>;
+}
+
+/**
+ * Code (`BO_0289_018`): the code itself as text and the language it is
+ * written in. It is sent to the session of the runtime the document is
+ * connected to by the `code` extension and by a run's `execute_code`, and
+ * what came back is an `output` block only an execution writes — so there is
+ * no `NewOutputBlock` here: the kernel stages one, and this model reads it.
+ * The kind is `sourcecode`, since `code` names the extension that runs it and
+ * a declaration and a manifest share the `node:<id>` namespace.
+ */
+export interface NewCodeBlock {
+  readonly kind: "sourcecode";
+  readonly source: string;
+  readonly language?: string;
+}
+
+export type NewBlock =
+  | NewTextBlock
+  | NewDividerBlock
+  | NewMediaBlock
+  | NewTableBlock
+  | NewEquationBlock
+  | NewCodeBlock;
+
+const isCode = (block: NewBlock): block is NewCodeBlock => block.kind === "sourcecode";
+
+const isTable = (block: NewBlock): block is NewTableBlock => block.kind === "table";
+
+const isEquation = (block: NewBlock): block is NewEquationBlock => block.kind === "equation";
+
+const isMedia = (block: NewBlock): block is NewMediaBlock =>
+  block.kind === "image" || block.kind === "video";
 
 export interface CreatedDocument {
   readonly documentId: string;
@@ -171,8 +256,54 @@ function conflict<T>(nodeId: string, expected: string, current: string | null): 
 const nodeOf = (graph: ReadResult, id: string): ReadNode | undefined =>
   graph.nodes.find((candidate) => candidate.id === nodeRef(id));
 
-const blockContent = (block: NewBlock, order: string): Record<string, unknown> =>
-  block.kind === "divider"
+const mediaContent = (block: NewMediaBlock, order: string): Record<string, unknown> => ({
+  order,
+  // Every one optional: a block with no reference is a generation not made yet,
+  // and the dimensions are the block's own because the reference carries none.
+  ...(block.reference !== undefined ? { reference: block.reference } : {}),
+  ...(block.alt !== undefined && block.alt !== "" ? { alt: block.alt } : {}),
+  ...(block.width !== undefined ? { width: block.width } : {}),
+  ...(block.height !== undefined ? { height: block.height } : {}),
+  ...(block.source !== undefined ? { source: block.source } : {}),
+});
+
+const tableContent = (block: NewTableBlock, order: string): Record<string, unknown> => ({
+  order,
+  columns: block.columns.map((column) => ({ name: column.name, type: column.type })),
+  rows: block.rows.map((row) => [...row]),
+  ...(block.caption !== undefined && block.caption.trim() !== "" ? { caption: block.caption.trim() } : {}),
+  ...(block.reference !== undefined ? { reference: block.reference } : {}),
+  // The count goes with the file: a table held whole has nothing to count.
+  ...(block.reference !== undefined && block.rowCount !== undefined ? { rowCount: block.rowCount } : {}),
+  ...(block.source !== undefined ? { source: block.source } : {}),
+});
+
+const equationContent = (block: NewEquationBlock, order: string): Record<string, unknown> => ({
+  order,
+  tex: block.tex,
+  ...(block.caption !== undefined && block.caption.trim() !== "" ? { caption: block.caption.trim() } : {}),
+  // Absent means no number, as an absent role means paragraph.
+  ...(block.numbered === true ? { numbered: true } : {}),
+  ...(block.source !== undefined ? { source: block.source } : {}),
+});
+
+/** What a new block stores, exported so it can be proven on its own. */
+const codeContent = (block: NewCodeBlock, order: string): Record<string, unknown> => ({
+  order,
+  source: block.source,
+  ...(block.language !== undefined && block.language.trim() !== "" ? { language: block.language.trim() } : {}),
+});
+
+export const blockContentFor = (block: NewBlock, order: string): Record<string, unknown> =>
+  isMedia(block)
+    ? mediaContent(block, order)
+    : isEquation(block)
+    ? equationContent(block, order)
+    : isTable(block)
+    ? tableContent(block, order)
+    : isCode(block)
+    ? codeContent(block, order)
+    : block.kind === "divider"
     ? { order }
     : {
         order,
@@ -183,6 +314,37 @@ const blockContent = (block: NewBlock, order: string): Record<string, unknown> =
       };
 
 const blockType = (block: NewBlock): string => block.kind;
+
+/**
+ * The works the document's blocks cite that stand at the pin (`BO_0291_013`):
+ * a citation names a node the document does not contain, so one rooted read
+ * over the cited identities, made only when something is cited, says which
+ * of them are there. The match names no label — a root that is a node of
+ * another type is then an ordinary miss, read as not a work — and an empty
+ * answer is the ordinary case for a citation of nothing.
+ */
+async function citedWorksAt(
+  graph: ReadResult,
+  documentId: string,
+): Promise<{ readonly ok: true; readonly works: ReadonlySet<string> | undefined } | { readonly ok: false; readonly outcome: GraphOutcome<never> }> {
+  const cited = new Set<string>();
+  for (const block of blocksOf(graph, documentId, CONTAINS)) {
+    if (block.kind !== "text") continue;
+    for (const run of block.runs) if (run.cite !== undefined) cited.add(run.cite.work);
+  }
+  if (cited.size === 0) return { ok: true, works: undefined };
+  const works = await query({
+    statement: "MATCH (w) RETURN GRAPH w ROOT w",
+    roots: [...cited].map((work) => nodeRef(work)),
+    purpose: "cited works",
+  });
+  if (works.outcome === "noResult") return { ok: true, works: new Set() };
+  if (works.outcome !== "success") return { ok: false, outcome: works as GraphOutcome<never> };
+  return {
+    ok: true,
+    works: new Set(works.result.nodes.filter((node) => typeOf(node) === WORK_TYPE).map((node) => bareId(node.id))),
+  };
+}
 
 /**
  * Reads a document and the graph it came from. Callers that only need the
@@ -205,7 +367,11 @@ async function loadDocument(
   if (outcome.outcome !== "success") {
     return { ok: false, outcome: outcome as GraphOutcome<never> };
   }
-  const assembled = assembleDocument(outcome.result, documentId);
+  const knownWorks = await citedWorksAt(outcome.result, documentId);
+  if (knownWorks.ok === false) {
+    return { ok: false, outcome: knownWorks.outcome };
+  }
+  const assembled = assembleDocument(outcome.result, documentId, knownWorks.works === undefined ? {} : { knownWorks: knownWorks.works });
   if (assembled === null) {
     return {
       ok: false,
@@ -215,16 +381,41 @@ async function loadDocument(
       },
     };
   }
+  // How the citations read in the document's style, answered by whichever
+  // extension resolves them, so the labels arrive with the document and
+  // nothing re-flows once it is drawn. Imported where it is used: the
+  // registry imports this module's extension. BO_0291_030
+  let styled = assembled;
+  const numbers = assembled.citationNumbers ?? {};
+  if (relationType === CONTAINS && Object.keys(numbers).length > 0) {
+    const cited: { work: string; locator?: string }[] = [];
+    for (const block of assembled.blocks) {
+      if (block.kind !== "text" || block.standing === "discarded") continue;
+      for (const run of block.runs) {
+        if (run.cite !== undefined && numbers[run.cite.work] !== undefined) cited.push({ work: run.cite.work, ...(run.cite.locator === undefined ? {} : { locator: run.cite.locator }) });
+      }
+    }
+    const order = Object.entries(numbers).sort((left, right) => left[1] - right[1]).map(([work]) => work);
+    const { resolveCitations } = await import("~/server/registry");
+    const answer = await resolveCitations({ documentId, order, cited, ...(assembled.citationStyle === undefined ? {} : { style: assembled.citationStyle }) });
+    if (answer !== null) {
+      styled = {
+        ...assembled,
+        ...(Object.keys(answer.labels).length > 0 ? { citationLabels: answer.labels } : {}),
+        ...(answer.styles === undefined ? {} : { citationStyles: answer.styles }),
+      };
+    }
+  }
   // Which blocks a run derived from which: one rooted read over
   // `derivedFrom` beside the containment read, so the body's order and the
   // depth's relevance layer need no second request. Only the containment
   // read is asked for the retired blocks. CA_0046_005
-  if (relationType !== CONTAINS || assembled.blocks.length === 0) {
-    return { ok: true, graph: outcome.result, document: assembled };
+  if (relationType !== CONTAINS || styled.blocks.length === 0) {
+    return { ok: true, graph: outcome.result, document: styled };
   }
   const derived = await query({
     statement: `MATCH (b)-[e:${DERIVED_FROM}]->(f) RETURN GRAPH b, e, f ROOT b`,
-    roots: assembled.blocks.map((block) => nodeRef(block.blockId)),
+    roots: styled.blocks.map((block) => nodeRef(block.blockId)),
     unbounded: true,
     purpose: "derivations",
   });
@@ -237,8 +428,8 @@ async function loadDocument(
     sources.set(relation.fromNodeId, [...(sources.get(relation.fromNodeId) ?? []), bareId(relation.to.nodeId)].sort());
   }
   const document: DocumentView = {
-    ...assembled,
-    blocks: assembled.blocks.map((block) => {
+    ...styled,
+    blocks: styled.blocks.map((block) => {
       const from = sources.get(nodeRef(block.blockId));
       return block.kind === "text" && from !== undefined ? { ...block, derivedFrom: from } : block;
     }),
@@ -331,7 +522,14 @@ async function startedIn(documentId: string): Promise<string | null> {
 /** The blocks that carry a usable order key, which are the ones a placement
  * can be computed against. */
 const placeable = (blocks: readonly BlockView[]): BlockView[] =>
-  blocks.filter((block) => block.order !== "");
+  blocks
+    .filter((block) => block.order !== "")
+    // In the reading order's own order — by key, then by block — so a block
+    // staged into the list sorts where it will stand. DO_0004_008
+    .sort((left, right) => (left.order !== right.order ? (left.order < right.order ? -1 : 1) : left.blockId < right.blockId ? -1 : left.blockId > right.blockId ? 1 : 0));
+
+/** A block this group has staged ahead of the item being placed. */
+const stagedSibling = (block: BlockView | undefined): boolean => block?.blockId.startsWith("staged:") === true;
 
 /**
  * The order key a placement asks for, or a refusal when it names a block that
@@ -342,21 +540,35 @@ const placeable = (blocks: readonly BlockView[]): BlockView[] =>
  * where the caller asked; leaving it out would change the key and not the
  * order.
  */
-function orderFor(
+export function orderFor(
   blocks: readonly BlockView[],
   placement: Placement,
 ): { readonly order: string } | { readonly failure: GraphOutcome<never> } {
   const siblings = placeable(blocks);
 
+  // Two keys the caller drew, not blocks of this document: a proposed insert
+  // and a retired block carry a key as a sibling does, and a key minted
+  // between them lands the block where the drop mark showed it. BO_0263_001
+  if ("between" in placement) {
+    const [low, high] = placement.between;
+    if (low !== null && high !== null && low >= high) {
+      return {
+        failure: refuse("unorderedBetween", `Order key ${low} does not sort before ${high}.`),
+      };
+    }
+    return { order: orderBetween(low ?? "", high ?? "") };
+  }
+
   if ("at" in placement) {
-    const first = siblings[0]?.order ?? "";
+    if (placement.at === "start") {
+      // After the blocks this group already put at the start, so its items
+      // keep their order. DO_0004_008
+      let at = 0;
+      while (stagedSibling(siblings[at])) at += 1;
+      return { order: orderBetween(siblings[at - 1]?.order ?? "", siblings[at]?.order ?? "") };
+    }
     const last = siblings[siblings.length - 1]?.order ?? "";
-    return {
-      order:
-        placement.at === "start"
-          ? orderBetween("", first)
-          : orderBetween(last, ""),
-    };
+    return { order: orderBetween(last, "") };
   }
 
   const anchorId = "before" in placement ? placement.before : placement.after;
@@ -370,13 +582,23 @@ function orderFor(
     };
   }
   const anchor = siblings[index] as BlockView;
+  // The neighbour a key is minted against is the nearest one whose key
+  // differs from the anchor's: two blocks sharing a key have nothing between
+  // them. After an anchor, the blocks this group already put after it are
+  // passed too, so its items keep their order and never share a key.
+  // DO_0004_008
   if ("before" in placement) {
+    let low = index - 1;
+    while (low >= 0 && (siblings[low] as BlockView).order >= anchor.order) low -= 1;
     return {
-      order: orderBetween(siblings[index - 1]?.order ?? "", anchor.order),
+      order: orderBetween(siblings[low]?.order ?? "", anchor.order),
     };
   }
+  let high = index + 1;
+  while (high < siblings.length && (stagedSibling(siblings[high]) || (siblings[high] as BlockView).order <= anchor.order)) high += 1;
+  const low = siblings[high - 1]?.order ?? anchor.order;
   return {
-    order: orderBetween(anchor.order, siblings[index + 1]?.order ?? ""),
+    order: orderBetween(low, siblings[high]?.order ?? ""),
   };
 }
 
@@ -466,7 +688,7 @@ export async function createDocument(input: {
   const content: Record<string, unknown> = { id: documentId, title: input.title };
   const statement = [
     `CREATE (d:${DOCUMENT_TYPE} {${properties("d", content, parameters, true)}})`,
-    `CREATE (b:${blockType(block)} {${properties("b", { id: blockId, ...blockContent(block, orderBetween("", "")) }, parameters, true)}})`,
+    `CREATE (b:${blockType(block)} {${properties("b", { id: blockId, ...blockContentFor(block, orderBetween("", "")) }, parameters, true)}})`,
     `RELATE dref -[c:${CONTAINS}]-> bref`,
   ].join("; ");
 
@@ -599,13 +821,17 @@ export async function listDocuments(): Promise<GraphOutcome<readonly ListedDocum
 }
 
 /**
- * A root's phase, set by the reader from the transition card (`BO_0249_007`):
- * the base is compared first as a rename's is, and `accepted` is refused while another accepted root contradicts
- * this one on a declared `contradicts` relation — named in the refusal —
- * unless `supersede` names that root, in which case its `phase` and
- * `supersededBy` move in the same mutation. A content write, confirmation-free
- * at the bridge: the press on *Establish* is the confirmation (`BO_0249`,
- * Decided).
+ * A root's phase, set by the reader from the transition card (`BO_0249_007`,
+ * `BO_0274_005`): the base is compared first as a rename's is, and `accepted`
+ * writes `acceptedAt` — the dataRevision the acceptance is made at — beside
+ * the phase, which is the one fact the acceptance stores; what it accepted is
+ * derived from it per claim (`acceptanceOf`). A claim contradicting an accepted
+ * claim elsewhere is derived as not accepted rather than refusing the press, so
+ * a press accepts what it can; `supersede` stays as the deliberate way to
+ * replace a direction, moving the superseded root's `phase` and `supersededBy`
+ * in the same mutation. A phase that is not `accepted` clears the stamp. A
+ * content write, confirmation-free at the bridge: the press on *Establish* is
+ * the confirmation (`BO_0249`, Decided).
  */
 export async function setDocumentPhase(input: {
   readonly documentId: string;
@@ -621,17 +847,21 @@ export async function setDocumentPhase(input: {
   if (loaded.document.revisionId !== input.baseRevisionId) {
     return conflict(input.documentId, input.baseRevisionId, loaded.document.revisionId);
   }
-  const statements = [`SET d.${PHASE_PROPERTY} = $phase`];
-  const parameters: Record<string, unknown> = { dNodeId: nodeRef(input.documentId), phase: input.phase };
+  // The stamp is written with the phase and cleared by any other phase: a root
+  // moved back to proposed, or superseded, has no acceptance to derive from.
+  // It is the revision the document was read at — the same one the base check
+  // passed against — so a claim established after the reader looked at what
+  // they were accepting is not accepted by their press. BO_0274_005
+  const statements = [`SET d.${PHASE_PROPERTY} = $phase, d.${ACCEPTED_AT_PROPERTY} = $acceptedAt`];
+  const parameters: Record<string, unknown> = {
+    dNodeId: nodeRef(input.documentId),
+    phase: input.phase,
+    acceptedAt: input.phase === "accepted" ? (loaded.document.dataRevision ?? 0) : null,
+  };
   let rationale = `set phase of document ${input.documentId} to ${input.phase}`;
   if (input.phase === "accepted") {
     const conflicts = await conflictsOf(loaded.document);
     if (conflicts.outcome !== "success") return conflicts as GraphOutcome<never>;
-    const standing = conflicts.result.filter((other) => other.documentId !== input.supersede);
-    if (standing.length > 0) {
-      const named = standing.map((other) => `«${other.title}» (${other.documentId})`).join(", ");
-      return refuse("contradicted", `An accepted root contradicts this one: ${named}. Establish and supersede it, or leave this proposed.`);
-    }
     const superseded = conflicts.result.find((other) => other.documentId === input.supersede);
     if (input.supersede !== undefined && superseded === undefined) {
       return refuse("notContradicting", `Document ${input.supersede} is not an accepted root contradicting this one, so there is nothing to supersede.`);
@@ -741,6 +971,70 @@ export async function renameDocument(input: {
 }
 
 /**
+ * A document's front matter set whole on its base revision (`BO_0293_012`):
+ * the authors, the affiliations, the keywords and the venue a manuscript's
+ * head projects, each written by property so what the panel leaves empty is
+ * cleared. The abstract is a block and is written as one.
+ */
+export async function setFrontMatter(input: {
+  readonly documentId: string;
+  readonly baseRevisionId: string;
+  readonly frontMatter: FrontMatter;
+}): Promise<GraphOutcome<WrittenDocument>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  if (loaded.document.revisionId !== input.baseRevisionId) {
+    return conflict(input.documentId, input.baseRevisionId, loaded.document.revisionId);
+  }
+  const { authors, affiliations, keywords, venue } = input.frontMatter;
+  return commit(
+    "SET d.authors = $authors, d.affiliations = $affiliations, d.keywords = $keywords, d.venue = $venue",
+    {
+      dNodeId: nodeRef(input.documentId),
+      // A null clears the property, as an ordinary paragraph stores no role.
+      authors: authors === undefined ? null : authors,
+      affiliations: affiliations === undefined ? null : affiliations,
+      keywords: keywords === undefined ? null : keywords,
+      venue: venue === undefined ? null : venue,
+    },
+    `set front matter of document ${input.documentId}`,
+    async (dataRevision, revisionOf) => ({
+      documentId: input.documentId,
+      revisionId: await revisionOf(input.documentId),
+      dataRevision,
+    }),
+  );
+}
+
+/**
+ * A document's own citation style set (`BO_0291_037`): the style's id, or
+ * null to follow the instance's default again, written on the document's
+ * base. Which ids exist is the declaration's to refuse — `document` permits
+ * the shipped styles' ids — so `documents` holds no list of styles itself.
+ */
+export async function setCitationStyle(input: {
+  readonly documentId: string;
+  readonly baseRevisionId: string;
+  readonly style: string | null;
+}): Promise<GraphOutcome<WrittenDocument>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  if (loaded.document.revisionId !== input.baseRevisionId) {
+    return conflict(input.documentId, input.baseRevisionId, loaded.document.revisionId);
+  }
+  return commit(
+    "SET d.citationStyle = $style",
+    { dNodeId: nodeRef(input.documentId), style: input.style },
+    `set the citation style of document ${input.documentId}`,
+    async (dataRevision, revisionOf) => ({
+      documentId: input.documentId,
+      revisionId: await revisionOf(input.documentId),
+      dataRevision,
+    }),
+  );
+}
+
+/**
  * One block of a document with everything it contains. A block holds no
  * children until a container block type exists, so today this is the block
  * itself, read without pulling in its siblings.
@@ -764,6 +1058,42 @@ export async function readBlock(
 }
 
 /** Inserts a new block at a placement among its siblings. */
+/**
+ * The statements that insert a media block, composed rather than written
+ * (`BO_0273_018`).
+ *
+ * An agent's tool answers the kernel with statements and the kernel stages
+ * them into the run's group as the run; nothing an extension does may write on
+ * a run's behalf. So the vocabulary stays here — the type is this extension's —
+ * and what the caller gets back is the same `CREATE` and `RELATE` `insertBlock`
+ * would have run, with the block's identity and its order among its siblings
+ * already settled.
+ */
+export async function composeMediaInsert(input: {
+  readonly documentId: string;
+  readonly block: NewMediaBlock;
+  readonly placement: Placement;
+}): Promise<
+  | { readonly ok: true; readonly blockId: string; readonly statement: string; readonly parameters: Record<string, unknown> }
+  | { readonly ok: false; readonly refusal: string }
+> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return { ok: false, refusal: `No document ${input.documentId}.` };
+  const order = orderFor(loaded.document.blocks, input.placement);
+  if ("failure" in order) return { ok: false, refusal: `Nothing to place that after in ${input.documentId}.` };
+
+  const blockId = randomUUID();
+  const parameters: Record<string, unknown> = {
+    dref: nodeRef(input.documentId),
+    bref: nodeRef(blockId),
+  };
+  const statement = [
+    `CREATE (b:${blockType(input.block)} {${properties("b", { id: blockId, ...blockContentFor(input.block, order.order) }, parameters, true)}})`,
+    `RELATE dref -[c:${CONTAINS}]-> bref`,
+  ].join("; ");
+  return { ok: true, blockId, statement, parameters };
+}
+
 export async function insertBlock(input: {
   readonly documentId: string;
   readonly block: NewBlock;
@@ -781,11 +1111,53 @@ export async function insertBlock(input: {
     bref: nodeRef(blockId),
   };
   const statement = [
-    `CREATE (b:${blockType(input.block)} {${properties("b", { id: blockId, ...blockContent(input.block, order.order) }, parameters, true)}})`,
+    `CREATE (b:${blockType(input.block)} {${properties("b", { id: blockId, ...blockContentFor(input.block, order.order) }, parameters, true)}})`,
     `RELATE dref -[c:${CONTAINS}]-> bref`,
   ].join("; ");
 
   return commit(statement, parameters, `insert block into ${input.documentId}`, async (dataRevision, revisionOf) => ({
+    blockId,
+    revisionId: await revisionOf(blockId),
+    dataRevision,
+  }));
+}
+
+/**
+ * Turns a text block into a code block in its place (`BO_0289_021`): a code
+ * block whose source is the block's words takes the text block's order key,
+ * and the text block is retired, in one write — so the words are never in
+ * two places and the retired block can be restored. A block type is a node's
+ * label and cannot change, which is why this is a new block and not a
+ * revise; the new block's id is answered.
+ */
+export async function turnIntoCode(input: {
+  readonly documentId: string;
+  readonly blockId: string;
+  readonly baseRevisionId: string;
+}): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  const located = locate(loaded.document, input.blockId, input.baseRevisionId);
+  if ("failure" in located) return located.failure;
+  if (located.block.kind !== "text") {
+    return refuse("blockKind", `Block ${input.blockId} is a ${located.block.kind} block; only a text block turns into code.`);
+  }
+  const source = located.block.runs.map((run) => run.text).join("");
+  const blockId = randomUUID();
+  const parameters: Record<string, unknown> = {
+    dref: nodeRef(input.documentId),
+    bref: nodeRef(blockId),
+    cRelationId: located.block.containmentId,
+    dref2: nodeRef(input.documentId),
+    oref: nodeRef(input.blockId),
+  };
+  const statement = [
+    `CREATE (b:sourcecode {${properties("b", { id: blockId, order: located.block.order, source }, parameters, true)}})`,
+    `RELATE dref -[c1:${CONTAINS}]-> bref`,
+    "CLOSE c",
+    `RELATE dref2 -[r:${RETIRED}]-> oref`,
+  ].join("; ");
+  return commit(statement, parameters, `turn block ${input.blockId} into code`, async (dataRevision, revisionOf) => ({
     blockId,
     revisionId: await revisionOf(blockId),
     dataRevision,
@@ -847,6 +1219,245 @@ export async function reviseTextBlock(input: {
 }
 
 /**
+ * Fills a media block with the bytes that were made for it, keeping its
+ * identity and its place (`BO_0273_017`).
+ *
+ * This is how a proposed generation stops being pending: the same block, the
+ * same candidate, now carrying the reference — so the reader answers the
+ * proposal they were already looking at rather than a second one appearing
+ * beside it. The box travels with it, because the blob reference carries no
+ * dimensions, and `source` is replaced whole by whatever made the bytes.
+ *
+ * A block that is not a media block is refused: the reference would be inert
+ * data on a type that does not recognize it.
+ */
+export async function fillMediaBlock(input: {
+  readonly documentId: string;
+  readonly blockId: string;
+  readonly baseRevisionId: string;
+  readonly reference: BlobReference;
+  readonly width?: number;
+  readonly height?: number;
+  readonly source?: Record<string, unknown>;
+}): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  const located = locate(loaded.document, input.blockId, input.baseRevisionId);
+  if ("failure" in located) return located.failure;
+  if (located.block.kind !== "image" && located.block.kind !== "video") {
+    return refuse(
+      "blockKind",
+      `Block ${input.blockId} is a ${located.block.kind} block and holds no picture.`,
+    );
+  }
+
+  return commit(
+    "SET b.reference = $reference, b.width = $width, b.height = $height, b.source = $source",
+    {
+      bNodeId: nodeRef(input.blockId),
+      reference: input.reference,
+      // A null clears the property, as an ordinary paragraph stores no role:
+      // a picture whose maker reported no dimensions stores none.
+      width: input.width ?? null,
+      height: input.height ?? null,
+      source: input.source ?? null,
+    },
+    `fill block ${input.blockId}`,
+    async (dataRevision, revisionOf) => ({
+      blockId: input.blockId,
+      revisionId: await revisionOf(input.blockId),
+      dataRevision,
+    }),
+  );
+}
+
+/**
+ * Revises a table whole (`BO_0287_009`): its columns, rows and caption, on
+ * the base revision the caller names, keeping its identity and its place. A
+ * cell outside its column's type is refused naming the cell and the column,
+ * before anything is sent.
+ *
+ * A cell edit, a row or a column added or removed on a table that a file
+ * stands behind drops the reference and the row count, since the rows no
+ * longer are the file's first hundred; a caption or a column's type changed
+ * keeps them, since no cell changed. The same rule as a run's replace (user
+ * decision, 2026-09-23), applied to a person.
+ */
+/**
+ * An equation revised whole (`BO_0290_012`): its source, its caption and its
+ * ask for a number, each written by property, so a revise that leaves the
+ * caption out clears it and one that leaves `numbered` out takes the number
+ * away — as an absent role clears a role. The block keeps its identity and its
+ * place, and the numbers of every equation below it follow on the next read
+ * with nothing written to them.
+ */
+export async function reviseEquation(input: {
+  readonly documentId: string;
+  readonly blockId: string;
+  readonly baseRevisionId: string;
+  readonly tex: string;
+  readonly caption?: string;
+  readonly numbered?: boolean;
+}): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  const located = locate(loaded.document, input.blockId, input.baseRevisionId);
+  if ("failure" in located) return located.failure;
+  if (located.block.kind !== "equation") {
+    return refuse("blockKind", `Block ${input.blockId} is a ${located.block.kind} block and holds no equation.`);
+  }
+  if (input.tex.trim() === "") {
+    return refuse("equationShape", "An equation carries the tex it is set from.");
+  }
+  return commit(
+    "SET b.tex = $tex, b.caption = $caption, b.numbered = $numbered",
+    {
+      bNodeId: nodeRef(input.blockId),
+      tex: input.tex,
+      // A null clears the property, as an ordinary paragraph stores no role.
+      caption: input.caption === undefined || input.caption.trim() === "" ? null : input.caption.trim(),
+      numbered: input.numbered === true ? true : null,
+    },
+    `revise equation ${input.blockId}`,
+    async (dataRevision, revisionOf) => ({
+      blockId: input.blockId,
+      revisionId: await revisionOf(input.blockId),
+      dataRevision,
+    }),
+  );
+}
+
+/**
+ * A figure's or a table's caption and its ask for a number (`BO_0295_008`),
+ * set by property on the block's base revision: a picture's and an accepted
+ * output's caption and ask, a table's ask — a table's caption is its own
+ * `reviseTable`'s. A revise that leaves the caption out clears it and one that
+ * leaves `numbered` out takes the number away, as an equation's does; the
+ * figures and tables below follow on the next read with nothing written to
+ * them. An output still proposed is not in the document this read answers, so
+ * it is refused as unknown until the person accepts it: its caption and number
+ * are the person's to set, after the kernel's proposal of what ran.
+ */
+export async function setFigure(input: {
+  readonly documentId: string;
+  readonly blockId: string;
+  readonly baseRevisionId: string;
+  readonly caption?: string;
+  readonly numbered?: boolean;
+}): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  const located = locate(loaded.document, input.blockId, input.baseRevisionId);
+  if ("failure" in located) return located.failure;
+  const kind = located.block.kind;
+  if (kind !== "image" && kind !== "output" && kind !== "table") {
+    return refuse("blockKind", `Block ${input.blockId} is a ${kind} block, and only a picture, an output or a table is numbered as a figure or a table.`);
+  }
+  const numbered = input.numbered === true ? true : null;
+  if (kind === "table") {
+    if (input.caption !== undefined) {
+      return refuse("figureShape", "A table's caption is revised with the table.");
+    }
+    return commit(
+      "SET b.numbered = $numbered",
+      { bNodeId: nodeRef(input.blockId), numbered },
+      `number table ${input.blockId}`,
+      async (dataRevision, revisionOf) => ({ blockId: input.blockId, revisionId: await revisionOf(input.blockId), dataRevision }),
+    );
+  }
+  return commit(
+    "SET b.caption = $caption, b.numbered = $numbered",
+    {
+      bNodeId: nodeRef(input.blockId),
+      caption: input.caption === undefined || input.caption.trim() === "" ? null : input.caption.trim(),
+      numbered,
+    },
+    `caption figure ${input.blockId}`,
+    async (dataRevision, revisionOf) => ({ blockId: input.blockId, revisionId: await revisionOf(input.blockId), dataRevision }),
+  );
+}
+
+/**
+ * Revises a code block's source and language on its base revision, keeping
+ * the block's identity (`BO_0289_018`). A person types the code in place;
+ * each settled edit is one write of the whole block, as a table's is, and an
+ * empty language clears it.
+ */
+export async function reviseCode(input: {
+  readonly documentId: string;
+  readonly blockId: string;
+  readonly baseRevisionId: string;
+  readonly source: string;
+  readonly language?: string;
+}): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  const located = locate(loaded.document, input.blockId, input.baseRevisionId);
+  if ("failure" in located) return located.failure;
+  if (located.block.kind !== "sourcecode") {
+    return refuse("blockKind", `Block ${input.blockId} is a ${located.block.kind} block and holds no code.`);
+  }
+  const language = input.language === undefined || input.language.trim() === "" ? null : input.language.trim();
+  return commit(
+    "SET b.source = $source, b.language = $language",
+    { bNodeId: nodeRef(input.blockId), source: input.source, language },
+    `revise code ${input.blockId}`,
+    async (dataRevision, revisionOf) => ({
+      blockId: input.blockId,
+      revisionId: await revisionOf(input.blockId),
+      dataRevision,
+    }),
+  );
+}
+
+export async function reviseTable(input: {
+  readonly documentId: string;
+  readonly blockId: string;
+  readonly baseRevisionId: string;
+  readonly columns: readonly TableColumn[];
+  readonly rows: readonly TableRow[];
+  readonly caption?: string;
+}): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  const located = locate(loaded.document, input.blockId, input.baseRevisionId);
+  if ("failure" in located) return located.failure;
+  if (located.block.kind !== "table") {
+    return refuse("blockKind", `Block ${input.blockId} is a ${located.block.kind} block and holds no table.`);
+  }
+  const misfit = checkTable(input.columns, input.rows);
+  if (misfit !== null) return refuse("tableShape", misfit.failure);
+
+  const held = located.block;
+  const sameCells =
+    held.rows.length === input.rows.length &&
+    held.columns.length === input.columns.length &&
+    held.rows.every((row, index) => row.every((cell, column) => cell === input.rows[index]?.[column]));
+  const keepFile = held.file !== undefined && sameCells;
+  const caption = input.caption === undefined || input.caption.trim() === "" ? null : input.caption.trim();
+  const statement = keepFile
+    ? "SET b.columns = $columns, b.rows = $rows, b.caption = $caption"
+    : "SET b.columns = $columns, b.rows = $rows, b.caption = $caption, b.reference = $reference, b.rowCount = $rowCount";
+  return commit(
+    statement,
+    {
+      bNodeId: nodeRef(input.blockId),
+      columns: input.columns.map((column) => ({ name: column.name, type: column.type })),
+      rows: input.rows.map((row) => [...row]),
+      // A null clears the property, as an ordinary paragraph stores no role.
+      caption,
+      ...(keepFile ? {} : { reference: null, rowCount: null }),
+    },
+    `revise table ${input.blockId}`,
+    async (dataRevision, revisionOf) => ({
+      blockId: input.blockId,
+      revisionId: await revisionOf(input.blockId),
+      dataRevision,
+    }),
+  );
+}
+
+/**
  * Sets a text block's standing on the disposition scale, keeping its identity,
  * text and position: one property on one node, so its inverse is the previous
  * value, which the caller holds. Neutral clears the property rather than
@@ -899,6 +1510,12 @@ export async function splitTextBlock(input: {
   /** The tail's identity, when the caller chose it: an editor that draws the
    * split before it lands names the block it drew. CA_0045_004 */
   readonly tailBlockId?: string;
+  /** The head's words as the caller holds them, split in place of the runs at
+   * the base revision, and its role: an editor that split after typing sends
+   * both with the split, so the head is written once rather than revised and
+   * then split inside the kernel's per-node floor. DO_0015_001 */
+  readonly runs?: readonly Run[];
+  readonly role?: TextRole;
 }): Promise<GraphOutcome<SplitBlocks>> {
   const loaded = await loadDocument(input.documentId);
   if (!loaded.ok) return loaded.outcome;
@@ -912,7 +1529,9 @@ export async function splitTextBlock(input: {
     return refuse("splitPoint", "A split happens at a character position.");
   }
 
-  const [head, tail] = splitRuns(block.runs, input.at);
+  const source = input.runs === undefined ? block.runs : normalizeRuns(input.runs);
+  const [head, tail] = splitRuns(source, input.at);
+  const role = input.role ?? block.role;
   const order = orderFor(loaded.document.blocks, { after: input.blockId });
   if ("failure" in order) return order.failure;
 
@@ -936,6 +1555,8 @@ export async function splitTextBlock(input: {
   const parameters: Record<string, unknown> = {
     bNodeId: nodeRef(input.blockId),
     head,
+    // A null clears the property: an ordinary paragraph stores no role.
+    role: role === "paragraph" ? null : role,
     dref: nodeRef(input.documentId),
     tref: nodeRef(tailBlockId),
   };
@@ -947,11 +1568,11 @@ export async function splitTextBlock(input: {
     id: tailBlockId,
     order: order.order,
     runs: tail,
-    ...(block.role === "paragraph" ? {} : { role: block.role }),
+    ...(role === "paragraph" ? {} : { role }),
     ...(standing === null ? {} : { disposition: standing }),
   };
   const statement = [
-    "SET b.runs = $head",
+    "SET b.runs = $head, b.role = $role",
     `CREATE (t:text {${properties("t", tailContent, parameters, true)}})`,
     `RELATE dref -[c:${CONTAINS}]-> tref`,
   ].join("; ");
@@ -1081,6 +1702,46 @@ export async function moveBlock(input: {
 }
 
 /**
+ * Moves a retired block without restoring it (BO_0263_012): its key is
+ * written and nothing else, so it stays retired, drawn where the reader put
+ * it, and *Restore* brings it back there. The key is minted against the
+ * document's blocks as a move's is, and a `{between}` placement names the
+ * keys of the rows drawn on either side.
+ */
+export async function moveRetiredBlock(input: {
+  readonly documentId: string;
+  readonly blockId: string;
+  readonly baseRevisionId: string;
+  readonly placement: Placement;
+}): Promise<GraphOutcome<WrittenBlock>> {
+  const contained = await loadDocument(input.documentId);
+  if (!contained.ok) return contained.outcome;
+  const loaded = await loadDocument(input.documentId, RETIRED);
+  if (!loaded.ok) return loaded.outcome;
+  const retired = assembleRetired(loaded.graph, input.documentId).find(
+    (block) => block.blockId === input.blockId,
+  );
+  if (retired === undefined) {
+    return refuse("notRetired", `Block ${input.blockId} is not retired from document ${input.documentId}.`);
+  }
+  if (retired.revisionId !== input.baseRevisionId) {
+    return refuse("staleBase", `Block ${input.blockId} changed since revision ${input.baseRevisionId}.`);
+  }
+  const order = orderFor(contained.document.blocks, input.placement);
+  if ("failure" in order) return order.failure;
+  return commit(
+    "SET b.order = $order",
+    { bNodeId: nodeRef(input.blockId), order: order.order },
+    `move retired block ${input.blockId}`,
+    async (dataRevision, revisionOf) => ({
+      blockId: input.blockId,
+      revisionId: await revisionOf(input.blockId),
+      dataRevision,
+    }),
+  );
+}
+
+/**
  * Retires a block: its containment closes and the document records it as
  * retired, so it leaves the reading order while staying reachable from the
  * document it belonged to. The close and the relation travel in one script
@@ -1098,7 +1759,7 @@ export async function retireBlock(input: {
   // A block with focused work stays until the child is deleted: nothing
   // cascades, and the child is named so the reader knows what stands in the
   // way. CA_0047_002
-  const children = await childrenOf([input.blockId]);
+  const children = await childrenOf(DOCUMENT_TARGET_KIND, [input.blockId]);
   if (children.outcome !== "success") return children as GraphOutcome<never>;
   const child = children.result.get(input.blockId);
   if (child !== undefined) {
@@ -1214,7 +1875,7 @@ export async function deleteDocument(input: {
 
   // Focused work closes its `focuses` edge in the same script, so a block
   // never points at a document that answers nothing. CA_0047_002
-  const focus = await focusOf(input.documentId);
+  const focus = await focusOf(DOCUMENT_TARGET_KIND, input.documentId);
   if (focus.outcome !== "success") return focus as GraphOutcome<never>;
   const parameters: Record<string, unknown> = { dNodeId: nodeRef(input.documentId) };
   const statements = ["RETIRE d"];
@@ -1464,7 +2125,7 @@ export async function proposeDocumentChanges(input: {
       parameters[`${alias}d`] = documentNode;
       parameters[`${alias}n`] = nodeRef(blockId);
       statements.push(
-        `CREATE (${alias}:${blockType(item.block)} {${properties(alias, { id: blockId, ...blockContent(item.block, order.order) }, parameters, false)}})`,
+        `CREATE (${alias}:${blockType(item.block)} {${properties(alias, { id: blockId, ...blockContentFor(item.block, order.order) }, parameters, false)}})`,
         `RELATE ${alias}d -[${alias}c:${CONTAINS}]-> ${alias}n`,
       );
       staged.push({ itemId: itemId(groupId, "insert", [nodeRef(blockId)]), kind: "insert", blockId });
@@ -1700,6 +2361,21 @@ export interface ProposedChange {
   readonly phase?: Phase;
   readonly supersededBy?: string;
   readonly sentence?: string;
+  /** The agent's own short line on the item, recorded by its run (the
+   * `agent.run` node's `notes`), shown on the item's mark in place of the
+   * derived words. BO_0265_011 */
+  readonly note?: string;
+  /** The run that refined this item on another run's proposal, and who it
+   * was: the candidate's `refinedBy` stamp (the kernel's `BO_0271_003`),
+   * resolved to the refining run's provenance node once it has landed; until
+   * then the agent is unknown here and the editor takes it from the run's
+   * activity. BO_0271_010 */
+  readonly refinedBy?: { readonly runId: string; readonly proposer: Proposer };
+  /** A withdrawal a run has proposed of this item: the marks the kernel
+   * writes on the candidate (`withdrawnBy`, `withdrawnFor`,
+   * `withdrawalReason`, its `BO_0286_001`), the run resolved to who it was as
+   * a refiner is. The item stays open; the person answers it. BO_0286_008 */
+  readonly withdrawal?: { readonly runId: string; readonly proposer: Proposer; readonly successor?: string; readonly reason?: string };
 }
 
 /** The kinds a system run derives; its candidates of these are drawn as
@@ -1720,6 +2396,9 @@ export interface DocumentProposals {
      * alone cannot say which agent it was. BO_0233_001
      */
     readonly proposer: Proposer;
+    /** The run that staged it, when an `agent.run` node says so, and when it
+     * recorded itself — what the run chips are ordered by. BO_0265_014 */
+    readonly run?: { readonly runId: string; readonly stagedAt: number };
   }[];
 }
 
@@ -1776,7 +2455,7 @@ async function readDocumentProposalsAgainstTruth(
   const established = new Map(loaded.document.blocks.map((block) => [nodeRef(block.blockId), block]));
   const claims = await readClaims(loaded.document.blocks.map((block) => block.blockId));
   if (claims.outcome !== "success") return claims as GraphOutcome<never>;
-  const groups: { groupId: string; items: ProposedChange[]; stagedBy: string[]; proposer: Proposer }[] = [];
+  const groups: { groupId: string; items: ProposedChange[]; stagedBy: string[]; proposer: Proposer; run?: { runId: string; stagedAt: number } }[] = [];
   let unanswered = 0;
 
   // Only a group that reaches this document is read: its touched set — one
@@ -1877,17 +2556,23 @@ async function readDocumentProposalsAgainstTruth(
             kind: "insert",
             blockId: bareId(target),
             block: toBlock(node, ""),
+            ...refinedByOf(node),
+            ...withdrawalOf(node),
           });
         }
         if (relation.type === RETIRED && established.has(target)) {
           const block = established.get(target) as BlockView;
           named.add(target);
+          // A removal's withdrawal marks sit on the group's anchor of the
+          // retired block, which the core keeps an anchor. BO_0286_008
+          const anchor = staged.get(target);
           items.push({
             itemId: itemId(groupId, "remove", [relation.id, block.containmentId]),
             groupId,
             kind: "remove",
             blockId: block.blockId,
             block: null,
+            ...(anchor === undefined ? {} : withdrawalOf(anchor)),
           });
         }
       }
@@ -1911,6 +2596,8 @@ async function readDocumentProposalsAgainstTruth(
           kind,
           blockId: block.blockId,
           block: proposed,
+          ...refinedByOf(node),
+          ...withdrawalOf(node),
         });
       }
 
@@ -1952,15 +2639,23 @@ async function readDocumentProposalsAgainstTruth(
               : item,
           )
         : items;
+      // The agent's notes on its items, as its run recorded them, keyed by
+      // the member each item's decision covers. BO_0265_011
+      const notes = notesOf(run?.revision.content?.["notes"]);
+      const noted = notes.size === 0 ? marked : marked.map((item) => withNote(item, notes));
+      const runId = run?.revision.content?.["id"];
       // A person's branch is a group named after the document and the person:
       // its proposer is that person, whatever the stamps say. BO_0250_016
       return {
         outcome: "success",
         result: {
           groupId,
-          items: marked,
+          items: noted,
           stagedBy,
           proposer: proposerFrom(groupId, [...members.values()]),
+          ...(run !== undefined && typeof runId === "string"
+            ? { run: { runId: runId.replace(/^run:/u, ""), stagedAt: run.revision.createdAt } }
+            : {}),
         },
       };
   };
@@ -1974,11 +2669,89 @@ async function readDocumentProposalsAgainstTruth(
     groups.push(outcome.result);
   }
 
+  // A refined item names the run that refined it; who that was is the
+  // refining run's own provenance node, staged into its own group when it
+  // ended — one read for every refiner, never one per item. A run still
+  // going has no node yet, and its agent is the editor's to take from the
+  // run's activity. BO_0271_010
+  const refiners = new Set(
+    groups.flatMap((group) =>
+      group.items.flatMap((item) => [...(item.refinedBy === undefined ? [] : [item.refinedBy.runId]), ...(item.withdrawal === undefined ? [] : [item.withdrawal.runId])]),
+    ),
+  );
+  if (refiners.size > 0) {
+    const runs = await query({
+      statement: "MATCH (r:agent.run) RETURN GRAPH r INCLUDE CANDIDATES",
+      unbounded: true,
+      purpose: "refining runs",
+    });
+    const proposerOfRun = new Map(
+      (runs.outcome === "success" ? runs.result.nodes : [])
+        .filter((node) => typeof node.revision.content?.["id"] === "string")
+        .map((node) => [(node.revision.content?.["id"] as string).replace(/^run:/u, ""), proposerOf(node.revision.content, [])]),
+    );
+    for (const group of groups) {
+      group.items = group.items.map((item) => {
+        const refiner = item.refinedBy === undefined ? undefined : proposerOfRun.get(item.refinedBy.runId);
+        const withdrawer = item.withdrawal === undefined ? undefined : proposerOfRun.get(item.withdrawal.runId);
+        return {
+          ...item,
+          ...(refiner === undefined || item.refinedBy === undefined ? {} : { refinedBy: { runId: item.refinedBy.runId, proposer: refiner } }),
+          ...(withdrawer === undefined || item.withdrawal === undefined ? {} : { withdrawal: { ...item.withdrawal, proposer: withdrawer } }),
+        };
+      });
+    }
+  }
+
   return {
     outcome: "success",
     result: { documentId, unanswered, groups },
   };
 }
+
+/** The refiner a candidate names, when a run refined it: the stamp the
+ * kernel writes on the candidate it built on (`refinedBy: run:<id>`), read
+ * as the run id, with its agent unknown until the runs are read. BO_0271_010 */
+/** The withdrawal a candidate's marks name, when a run proposed one: the run
+ * id, the successor's item id and the reason, with the agent unknown until
+ * the runs are read. BO_0286_008 */
+const withdrawalOf = (node: { readonly revision: { readonly content?: Record<string, unknown> | null } }): { readonly withdrawal: NonNullable<ProposedChange["withdrawal"]> } | Record<string, never> => {
+  const content = node.revision.content ?? {};
+  const stamp = content["withdrawnBy"];
+  if (typeof stamp !== "string" || stamp === "") return {};
+  const successor = content["withdrawnFor"];
+  const reason = content["withdrawalReason"];
+  return {
+    withdrawal: {
+      runId: stamp.replace(/^run:/u, ""),
+      proposer: { kind: "agent", agent: null, executedBy: "" },
+      ...(typeof successor === "string" && successor !== "" ? { successor } : {}),
+      ...(typeof reason === "string" && reason !== "" ? { reason } : {}),
+    },
+  };
+};
+
+const refinedByOf = (node: { readonly revision: { readonly content?: Record<string, unknown> | null } }): { readonly refinedBy: NonNullable<ProposedChange["refinedBy"]> } | Record<string, never> => {
+  const stamp = node.revision.content?.["refinedBy"];
+  return typeof stamp === "string" && stamp !== ""
+    ? { refinedBy: { runId: stamp.replace(/^run:/u, ""), proposer: { kind: "agent", agent: null, executedBy: "" } } }
+    : {};
+};
+
+/** A run's `notes`, member → note, as the kernel records them. */
+const notesOf = (value: unknown): ReadonlyMap<string, string> =>
+  new Map(
+    value !== null && typeof value === "object"
+      ? Object.entries(value as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1] !== "")
+      : [],
+  );
+
+/** The item with the note its run recorded on one of its members. */
+const withNote = (item: ProposedChange, notes: ReadonlyMap<string, string>): ProposedChange => {
+  const members = parseItemId(item.itemId)?.members ?? [];
+  const note = members.map((member) => notes.get(member)).find((found) => found !== undefined);
+  return note === undefined ? item : { ...item, note };
+};
 
 const sameBlock = (left: BlockView, right: BlockView): boolean =>
   left.kind === right.kind &&
@@ -2256,8 +3029,7 @@ async function blockDrift(groupId: string, member: string): Promise<GraphOutcome
     (before["order"] ?? "") === (current["order"] ?? "") &&
     (before["role"] ?? null) === (current["role"] ?? null) &&
     sameRuns(normalizeRuns((before["runs"] ?? []) as Run[]), normalizeRuns((current["runs"] ?? []) as Run[]));
-  const standing = (value: unknown): Standing =>
-    typeof value === "string" && value !== "" ? (value as Standing) : "neutral";
+  const standing = (value: unknown): Standing => readStanding(value);
   return {
     outcome: "success",
     result: {
@@ -2287,6 +3059,10 @@ export interface AnsweredItem {
   readonly dataRevision: string;
   /** The group after this answer, so a caller learns it closed without asking. */
   readonly groupState: "open" | "closed";
+  /** How many withdrawn items this acceptance rejected as their successor,
+   * and what to tell the reader when one of them could not be. BO_0286_009 */
+  readonly withdrawn?: number;
+  readonly notice?: string;
 }
 
 /**
@@ -2323,6 +3099,24 @@ export async function answerDocumentProposal(input: {
     const taken = await decide("accept", parsed.groupId, nodeRef(input.documentId), `take document ${input.documentId} with ${input.itemId}`);
     if (taken.outcome !== "success") return taken as GraphOutcome<AnsweredItem>;
   }
+  // The works a proposed sentence cites and its own group proposes are
+  // accepted first, so a citation never lands pointing at a work that is
+  // still a proposal. BO_0291_036
+  if (decision === "accept") {
+    const carried = await query({
+      statement: "MATCH (n) WHERE n._proposal = $g RETURN GRAPH n ROOT n INCLUDE CANDIDATES",
+      parameters: { g: parsed.groupId },
+      proposalOverlay: parsed.groupId,
+      unbounded: true,
+      purpose: "works a proposed citation carries",
+    });
+    if (carried.outcome === "storageError") return carried as GraphOutcome<AnsweredItem>;
+    const works = carried.outcome === "success" ? proposedWorksCited(carried.result.nodes, parsed.members, parsed.groupId) : [];
+    for (const work of works) {
+      const taken = await decide("accept", parsed.groupId, work, `work ${bareId(work)} cited by ${input.itemId}`);
+      if (taken.outcome !== "success") return taken as GraphOutcome<AnsweredItem>;
+    }
+  }
   for (const member of parsed.members) {
     let outcome = await decide(decision, parsed.groupId, member, `${parsed.kind} ${input.itemId}`, input.override ?? false);
     // CCGW judges drift by revision, so a block whose standing the reader
@@ -2354,6 +3148,30 @@ export async function answerDocumentProposal(input: {
     }
     if (outcome.outcome !== "success") return outcome as GraphOutcome<AnsweredItem>;
   }
+  // Accepting a successor answers the surplus with it: every withdrawn item
+  // naming this one is rejected in the same press, one member decision each
+  // in its own group. A rejection that fails leaves that item standing with
+  // its mark, said in a notice, and answers nothing else differently.
+  // User decision, 2026-09-23. BO_0286_009
+  let withdrawn = 0;
+  let notice: string | undefined;
+  if (decision === "accept" && input.documentId !== undefined) {
+    const standing = await readDocumentProposalsAgainstTruth(input.documentId);
+    const superseded = standing.outcome === "success" ? standing.result.groups.flatMap((group) => group.items).filter((item) => item.withdrawal?.successor === input.itemId) : [];
+    for (const item of superseded) {
+      const members = parseItemId(item.itemId)?.members ?? [];
+      let failed: string | null = null;
+      for (const member of members) {
+        const rejected = await decide("reject", item.groupId, member, `${item.kind} ${item.itemId}, withdrawn in favour of ${input.itemId}`);
+        if (rejected.outcome !== "success") {
+          failed = rejected.outcome === "validationFailure" ? (rejected.failures[0]?.detail ?? "refused") : rejected.outcome;
+          break;
+        }
+      }
+      if (failed === null) withdrawn += 1;
+      else notice = `${notice === undefined ? "" : notice + " "}A proposal withdrawn in favour of this one could not be rejected and still stands: ${failed}`;
+    }
+  }
   // Rejecting the last item of a started document rejects the document too,
   // so nothing of it is left standing unanswerable. BO_0251_009
   if (decision === "reject" && started === parsed.groupId && input.documentId !== undefined) {
@@ -2376,6 +3194,8 @@ export async function answerDocumentProposal(input: {
   return {
     outcome: "success",
     result: {
+      ...(withdrawn > 0 ? { withdrawn } : {}),
+      ...(notice === undefined ? {} : { notice }),
       itemId: input.itemId,
       answer: input.answer,
       dataRevision: state.outcome === "success" ? String(state.result.resolvedDataRevision) : "",
@@ -2438,7 +3258,7 @@ export async function promoteBlock(input: {
       parameters["pn"] = nodeRef(input.blockId);
       const block: NewBlock = content["_type"] === "divider" ? { kind: "divider" } : { kind: "text", runs, ...(role === null ? {} : { role: role as TextRole }) };
       statement = [
-        `CREATE (p:${blockType(block)} {${properties("p", { id: input.blockId, ...blockContent(block, order) }, parameters, false)}})`,
+        `CREATE (p:${blockType(block)} {${properties("p", { id: input.blockId, ...blockContentFor(block, order) }, parameters, false)}})`,
         `RELATE pd -[pc:${CONTAINS}]-> pn`,
       ].join("; ");
     } else {

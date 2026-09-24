@@ -52,6 +52,7 @@ export const ThemeToggle = component$(() => {
       }}
     >
       <Icon name={THEME_ICONS[choice.value]} />
+      <span class="menu-label">Theme: {choice.value}</span>
     </button>
   );
 });

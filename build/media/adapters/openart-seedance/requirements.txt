@@ -1,0 +1,2 @@
+# Standard library only. Carrier is the `openart` CLI, set up as in
+# scripts/openart-seedream/README.md (install, then `openart login`).

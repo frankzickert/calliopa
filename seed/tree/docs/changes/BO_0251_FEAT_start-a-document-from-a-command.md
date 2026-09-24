@@ -81,7 +81,7 @@ this change.
 - 2026-09-16. Kernel: `docs/system/ui-kernel.md`, *Starting A Document From A Command* —
   `BO_0251_001` intake, `_002` instructions, `_003` one document per started run in the tools,
   `_004` record and terminal event, `_005` verification; pointer in `docs/system/ui-shell.md`.
-- Graph (staged from a checkout at head 1167): `ui.shell` `docs/system/workspace/command-dock.md`
+- Graph (staged from a checkout at head 1167): `ui.shell` `docs/system/workspace/commands-and-runs.md`
   `_006` strip and target, `_007` open-on-end, `_013` verification; `layout.md` `_012` the
   library's proposed entry; `documents` `block-document-model.md` `_008` reading a started document
   and `_011` the listing, `proposed-changes.md` `_009` the node going with the first acceptance,

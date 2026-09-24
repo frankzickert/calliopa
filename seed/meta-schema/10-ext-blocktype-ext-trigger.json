@@ -1,0 +1,24 @@
+{
+  "label": "ext.blocktype ext.trigger",
+  "checkStatement": "MATCH (b:ext.blocktype {id: $id}) RETURN GRAPH b",
+  "checkParameters": {
+    "id": "ext.trigger"
+  },
+  "createStatement": "CREATE (b:ext.blocktype {id: $id, name: $name, properties: $properties, requiredProperties: $requiredProperties, semantics: $semantics, status: $status})",
+  "createParameters": {
+    "id": "ext.trigger",
+    "name": "ext.trigger",
+    "properties": {
+      "contextRoute": "the extension's server route the kernel asks when a queued subject is due; it answers the run's goal, intention, instructions and delivery, or nothing",
+      "id": "member Block id, conventionally \u003cextId\u003e.trigger",
+      "route": "the extension's server route, under /api/x/\u003cextId\u003e/, the kernel posts each committed change to; it answers the subjects to queue, each with its settle time"
+    },
+    "requiredProperties": [
+      "id",
+      "route",
+      "contextRoute"
+    ],
+    "semantics": "Declares that an extension starts runs no person asked for. The kernel keeps the queue, the settle timer and the run slot; the extension decides what a change means. Honoured only while the extension is active and the instance owner has allowed its runs. Never materializes to the working tree. BO_0264",
+    "status": "established"
+  }
+}

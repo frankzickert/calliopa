@@ -49,6 +49,8 @@ const item: ViewContribution = {
 };
 
 export const contributions = declare({
+  // The icon the sections stand under in the library's icon column. CA_0056_010
+  icon: { title: "Publish", name: "paper-plane-tilt" },
   sections: [
     {
       name: "channels",

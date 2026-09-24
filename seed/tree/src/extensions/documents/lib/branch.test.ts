@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { DocumentView } from "../../documents/server/assemble";
-import { acceptanceReading, branchItemsOf, hasDrifted, isRunRecord, memberOf, rejectedEntries, runRecordsOf, standingWords, type Standing } from "./branch";
+import { acceptanceReading, branchItemsOf, hasDrifted, isRunRecord, memberOf, rejectedEntries, runRecordsOf, sessionChipsOf, sessionWords, standingWords, type Standing } from "./branch";
 import { branchOf, enterBranch, leaveBranch, withBranch, withBranchBody } from "../../documents/lib/branch-scope";
 
 /**
@@ -103,19 +103,47 @@ describe("the branch's members and a rejected branch", () => {
       revisionId: "rev-doc",
       title: "Caching",
       blocks: [
-        { kind: "text", blockId: "blk-a", revisionId: "rev-a", containmentId: "c-a", order: "a", role: "paragraph", standing: "neutral", runs: [{ text: "Opening." }] },
-        { kind: "text", blockId: "blk-b", revisionId: "rev-b", containmentId: "c-b", order: "b", role: "paragraph", standing: "neutral", runs: [{ text: "Same." }] },
+        { kind: "text", blockId: "blk-a", revisionId: "rev-a", containmentId: "c-a", order: "a", role: "paragraph", standing: "keep", runs: [{ text: "Opening." }] },
+        { kind: "text", blockId: "blk-b", revisionId: "rev-b", containmentId: "c-b", order: "b", role: "paragraph", standing: "keep", runs: [{ text: "Same." }] },
       ],
     };
     const overlay: DocumentView = {
       ...truth,
       blocks: [
-        { kind: "text", blockId: "blk-a", revisionId: "rev-a2", containmentId: "c-a", order: "a", role: "paragraph", standing: "neutral", runs: [{ text: "Opening, revised in branch." }] },
-        { kind: "text", blockId: "blk-b", revisionId: "rev-b2", containmentId: "c-b", order: "b", role: "paragraph", standing: "neutral", runs: [{ text: "Same." }] },
-        { kind: "text", blockId: "blk-c", revisionId: "rev-c", containmentId: "c-c", order: "c", role: "paragraph", standing: "neutral", runs: [{ text: "Added in branch." }] },
+        { kind: "text", blockId: "blk-a", revisionId: "rev-a2", containmentId: "c-a", order: "a", role: "paragraph", standing: "keep", runs: [{ text: "Opening, revised in branch." }] },
+        { kind: "text", blockId: "blk-b", revisionId: "rev-b2", containmentId: "c-b", order: "b", role: "paragraph", standing: "keep", runs: [{ text: "Same." }] },
+        { kind: "text", blockId: "blk-c", revisionId: "rev-c", containmentId: "c-c", order: "c", role: "paragraph", standing: "keep", runs: [{ text: "Added in branch." }] },
         { kind: "divider", blockId: "blk-d", revisionId: "rev-d", containmentId: "c-d", order: "d" },
       ],
     };
     expect(rejectedEntries(truth, overlay).map((block) => block.blockId)).toEqual(["blk-a", "blk-c"]);
+  });
+});
+
+describe("the session chips", () => {
+  const at = (hours: number, minutes: number) => new Date(2026, 8, 18, hours, minutes).getTime();
+
+  it("Given a session's start, Then its chip reads Proposal · yours and the local time", () => {
+    expect(sessionWords(at(14, 32))).toBe("Proposal · yours · 14:32");
+    expect(sessionWords(at(9, 5))).toBe("Proposal · yours · 09:05");
+  });
+
+  it("Given open sessions, Then one chip each, newest first, answered at once, pressed while the tab works in it, and under the policy accepted by someone else", () => {
+    const sessions = [
+      { branch: "node:branch-doc-1-alice", since: at(9, 5) },
+      { branch: "node:branch-doc-1-alice.2", since: at(14, 32) },
+    ];
+    const hidden = { proposalsOpen: false, shownGroups: [], hiddenGroups: [] };
+    const chips = sessionChipsOf(sessions, "node:branch-doc-1-alice", false, hidden);
+    expect(chips.map((chip) => [chip.key, chip.group, chip.text, chip.ended, chip.shown, chip.working, chip.session, chip.accepts])).toEqual([
+      ["node:branch-doc-1-alice.2", "node:branch-doc-1-alice.2", "Proposal · yours · 14:32", true, false, false, true, undefined],
+      ["node:branch-doc-1-alice", "node:branch-doc-1-alice", "Proposal · yours · 09:05", true, true, true, true, undefined],
+    ]);
+    // Shown as a run's change is: the toggle sets them all, a press one.
+    // CA_0057_014
+    expect(sessionChipsOf(sessions, null, false, { proposalsOpen: false, shownGroups: ["node:branch-doc-1-alice.2"], hiddenGroups: [] }).map((chip) => chip.shown)).toEqual([true, false]);
+    expect(sessionChipsOf(sessions, null, false).every((chip) => chip.shown)).toBe(true);
+    expect(sessionChipsOf(sessions, null, true, hidden).every((chip) => chip.accepts === "others" && !chip.shown && !chip.working)).toBe(true);
+    expect(sessionChipsOf([], null, false)).toEqual([]);
   });
 });

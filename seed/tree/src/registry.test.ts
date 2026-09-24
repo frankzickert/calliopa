@@ -18,6 +18,7 @@ const view = (id: string, targetKinds: readonly string[] = []): ViewContribution
   component,
 });
 const host = { kinds: { "process-result": view("context") } };
+const icon = { title: "A", name: "files" } as const;
 const code = (run: () => unknown): string => {
   try {
     run();
@@ -34,6 +35,7 @@ describe("building the client registry", () => {
       {
         id: "documents",
         contributions: {
+          icon: { title: "Docs", name: "files" },
           sections: [{ name: "documents", title: "Documents", empty: "", kind: "document" }],
           kinds: { document: view("block-editor") },
         },
@@ -55,12 +57,50 @@ describe("building the client registry", () => {
     expect(registry.views.find((v) => v.id === "outline")?.targetKinds).toEqual(["script"]);
   });
 
+  it("stands each extension's sections under its one icon, in contribution order", () => {
+    const section = (name: string) => ({ name, title: name, empty: "" });
+    const registry = buildRegistry(host, [
+      { id: "documents", contributions: { icon: { title: "Docs", name: "files" }, sections: [section("documents")] } },
+      { id: "settings", contributions: { kinds: { settings: view("settings") } } },
+      {
+        id: "publishing",
+        contributions: {
+          icon: { title: "Publish", name: "paper-plane-tilt" },
+          sections: [section("channels"), section("shapes")],
+        },
+      },
+    ]);
+    expect(registry.libraryIcons).toEqual([
+      { id: "documents", title: "Docs", name: "files", sections: ["documents:documents"] },
+      {
+        id: "publishing",
+        title: "Publish",
+        name: "paper-plane-tilt",
+        sections: ["publishing:channels", "publishing:shapes"],
+      },
+    ]);
+  });
+
+  it("refuses sections without an icon, and an icon the table does not hold", () => {
+    const sections = [{ name: "s", title: "", empty: "" }];
+    expect(code(() => buildRegistry(host, [{ id: "a", contributions: { sections } }]))).toBe(
+      "section_icon_missing",
+    );
+    expect(
+      code(() =>
+        buildRegistry(host, [
+          { id: "a", contributions: { icon: { title: "A", name: "no-such-icon" as "files" }, sections } },
+        ]),
+      ),
+    ).toBe("icon_unknown");
+  });
+
   it("refuses two extensions contributing the same section key", () => {
     expect(
       code(() =>
         buildRegistry(host, [
-          { id: "a", contributions: { sections: [{ name: "s", title: "", empty: "" }] } },
-          { id: "a", contributions: { sections: [{ name: "s", title: "", empty: "" }] } },
+          { id: "a", contributions: { icon, sections: [{ name: "s", title: "", empty: "" }] } },
+          { id: "a", contributions: { icon, sections: [{ name: "s", title: "", empty: "" }] } },
         ]),
       ),
     ).toBe("section_collision");
@@ -117,6 +157,42 @@ describe("building the server registry", () => {
     ]);
     expect(registry.readers["documents:documents"]).toBe(reader);
     expect(registry.routes["documents"]?.length).toBe(1);
+  });
+
+  it("keeps one citation resolver and refuses a second by name (BO_0291_030)", () => {
+    const resolve = async () => ({ labels: {} });
+    const registry = buildServerRegistry([
+      { id: "bibliography", contributions: { citations: resolve } },
+      { id: "documents", contributions: {} },
+    ]);
+    expect(registry.citations).toEqual({ extension: "bibliography", resolve });
+    expect(buildServerRegistry([{ id: "documents", contributions: {} }]).citations).toBeUndefined();
+    expect(() =>
+      buildServerRegistry([
+        { id: "bibliography", contributions: { citations: resolve } },
+        { id: "other", contributions: { citations: resolve } },
+      ]),
+    ).toThrow(expect.objectContaining({ code: "citation_resolver_collision" }));
+  });
+
+  it("keys focused work by the qualified target kind, so the shell reaches it from a tab's own kind", () => {
+    // Focused work is the shell's capability and the vocabulary the
+    // extension's, so the shell asks the kind's owner for the child.
+    // CA_0065_001
+    const contribution = {
+      childType: "document",
+      plan: async () => ({ outcome: "success" as const, result: { itemId: "", title: "", statements: [], parameters: {} } }),
+      faces: async () => ({ outcome: "success" as const, result: [] }),
+      blocksOf: async () => ({ outcome: "success" as const, result: [] }),
+    };
+    const registry = buildServerRegistry([
+      { id: "documents", contributions: { focusedWork: { document: contribution } } },
+      { id: "publishing", contributions: {} },
+    ]);
+    expect(registry.focusedWork["documents:document"]).toBe(contribution);
+    // A kind that contributes none opens no focused work, and the shell's
+    // control is not drawn for it.
+    expect(registry.focusedWork["publishing:deliverable"]).toBeUndefined();
   });
 
   it("refuses a handler table naming one method and path twice", () => {
@@ -186,5 +262,41 @@ describe("building the server registry", () => {
     expect(matchRoute(table, "GET", "files/a/b/c.png")?.params).toEqual({ path: "a/b/c.png" });
     expect(matchRoute(table, "GET", "documents/a%20b")?.params).toEqual({ id: "a b" });
     expect(matchRoute(table, "DELETE", "documents")).toBeNull();
+  });
+});
+
+/**
+ * Senders stand in the agent menu beside the agents, and a command is sent to
+ * one the way it is sent to an agent (`BO_0273_035`). Both halves or neither:
+ * a sender nothing answers for would be listed and refuse every send.
+ */
+describe("contributed senders", () => {
+  const sender = {
+    id: "media:higgsfield:seedream_v5_pro",
+    label: "Seedream",
+    icon: "image" as const,
+    selectable: true,
+    reason: null,
+  };
+
+  it("keeps a roster and its send together", () => {
+    const registry = buildServerRegistry([
+      {
+        id: "media",
+        contributions: { senders: async () => [sender], send: async () => ({ ok: true, processId: "p1" }) },
+      },
+    ]);
+    expect(registry.senders).toHaveLength(1);
+    expect(registry.senders[0]?.extension).toBe("media");
+  });
+
+  it("refuses a roster with nothing to answer a send", () => {
+    expect(() =>
+      buildServerRegistry([{ id: "media", contributions: { senders: async () => [sender] } }]),
+    ).toThrow(RegistryError);
+  });
+
+  it("contributes none when neither half is offered", () => {
+    expect(buildServerRegistry([{ id: "media", contributions: {} }]).senders).toHaveLength(0);
   });
 });

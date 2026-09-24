@@ -1,7 +1,7 @@
-import { component$, Slot } from "@builder.io/qwik";
+import { component$, Slot, type JSXOutput } from "@builder.io/qwik";
 
 import { REGISTRY } from "~/registry.gen";
-import type { BlockPlace } from "~/contract";
+import type { BlockPlace, Decorations, DocumentPlace } from "~/contract";
 
 /**
  * The decorations contributed for this extension's blocks (`BO_0256_007`).
@@ -39,23 +39,45 @@ export const BlockDecorations = component$<{
 ));
 
 /**
- * The contributed provider, wrapped around the document's blocks so a
+ * The contributed providers, wrapped around the document's blocks so a
  * decoration set reads the document once and shares it through its own
- * context rather than fetching per block. At most one extension provides for
- * a kind — the registry refuses a second by name — so this is one optional
- * wrapper and not a nest; a second decorating extension is a change that
- * makes it one.
+ * context rather than fetching per block. Every extension that provides for
+ * the kind is mounted, nested in extension order (BO_0289_019): the second
+ * decorating extension was the change that made the one wrapper a nest.
  */
 export const DecorationProvider = component$<{ documentId: string }>(
   ({ documentId }) => {
-    const Provider = sets().find((set) => set.decorations.provider !== undefined)
-      ?.decorations.provider;
-    return Provider === undefined ? (
-      <Slot />
-    ) : (
-      <Provider documentId={documentId}>
-        <Slot />
-      </Provider>
+    const providers = sets().flatMap((set) =>
+      set.decorations.provider === undefined ? [] : [set.decorations.provider],
     );
+    // The nest is composed from the inside out: the projected content, then
+    // each provider around it, the last extension's innermost.
+    let inner: JSXOutput = <Slot />;
+    for (let index = providers.length - 1; index >= 0; index -= 1) {
+      const Provider = providers[index] as NonNullable<Decorations["provider"]>;
+      inner = <Provider documentId={documentId}>{inner}</Provider>;
+    }
+    return inner;
   },
 );
+
+/**
+ * The places drawn once on the document (`BO_0291_031`): after its last
+ * block, what any extension has to say about the document as a whole — the
+ * bibliography's reference list. Drawn in extension order; a tree holding no
+ * such extension draws nothing there.
+ */
+export const DocumentDecorations = component$<{
+  at: DocumentPlace;
+  documentId: string;
+  dataRevision?: number | undefined;
+}>(({ at, documentId, dataRevision }) => (
+  <>
+    {sets().map(({ extension, decorations }) => {
+      const Drawn = decorations.documentPlaces?.[at];
+      return Drawn === undefined ? null : (
+        <Drawn key={`${extension}:${at}`} documentId={documentId} dataRevision={dataRevision} />
+      );
+    })}
+  </>
+));

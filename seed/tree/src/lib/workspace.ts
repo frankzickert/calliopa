@@ -22,11 +22,13 @@ export const DEFAULT_WORKSPACE_STATE: WorkspaceState = {
   tabs: [],
   activeTabId: null,
   layout: {
-    left: "expanded",
-    right: "expanded",
-    dock: "composer",
+    // The library arrives shown with its first icon, and the inspector
+    // hidden until it is asked for. CA_0056_004
+    left: { shown: true },
+    right: { shown: false },
     sections: {},
     filters: {},
+    libraryOrder: [],
   },
   preferredViews: {},
 };

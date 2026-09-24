@@ -84,6 +84,17 @@ fi
 tmp="$(mktemp -d)"
 kernel checkout --tree "$tmp" --ccgw "$base" --pin head --principal "$principal"
 
+# What this install already holds, read from the baseline checkout before the
+# release's tree lands (BO_0283_005). The release decides how an extension
+# *arrives*: its activation answer applies to an extension this install has
+# never seen, and never to one whose switch the owner has already had a chance
+# to set. On a fresh install this list is empty, so the answer applies whole.
+seen_before=""
+for dir in "$tmp"/src/extensions/*/; do
+  [ -d "$dir" ] || continue
+  seen_before="$seen_before $(basename "$dir") "
+done
+
 # Make the release authoritative for what it ships, so a file or an extension
 # it stopped carrying reaches this install as a deletion instead of lingering
 # forever (BO_0197_003). Every *bundled* extension is cleared from the baseline
@@ -141,6 +152,32 @@ else
 fi
 rm -rf "$tmp"
 
+# The release's activation answer (BO_0283_005). `kernel extension deactivate
+# --arriving` writes kernel.extensionstate as the owner — the write the shell's
+# own create and import paths make — so the extension appears in the Extensions
+# section switched off, with its own control to switch it on. --no-promote
+# leaves the pin exactly where the branches above left it. An id this install
+# has already seen is passed over: the owner's switch is theirs. --arriving is
+# what makes the update branch work: there the extension stands in a proposal
+# nobody has accepted, so it is not established and the ordinary verb would
+# refuse it; the state is written ahead of it and takes effect the moment the
+# owner accepts.
+node "$here/ccgw.mjs" list "$here/bundle.json" inactive | while IFS= read -r ext_id; do
+  [ -n "$ext_id" ] || continue
+  case "$seen_before" in
+    *" $ext_id "*)
+      echo "pre-seed: $ext_id is already installed here; leaving its switch alone"
+      continue
+      ;;
+  esac
+  echo "pre-seed: $ext_id arrives switched off"
+  kernel extension deactivate "$ext_id" --arriving --no-promote --ccgw "$base" --principal "$principal"
+done
+
+# The answer is written before the promotion below, not after it: the
+# materializer reads kernel.extensionstate *at the release pin*
+# (extensionstate.ReadAt), so a state written after the pin was promoted would
+# not be seen at it and the extension would arrive switched on after all.
 # Pin promotion (BO_0197_004). A fresh install promotes the imported truth so
 # the kernel serves the shell immediately; build-before-promote applies, so a
 # release that does not build leaves the pin unset and the kernel on its
