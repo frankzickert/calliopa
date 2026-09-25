@@ -53,6 +53,8 @@ export interface ProposedRead {
   documents: ProposedItem[];
   /** BO_0229_011 */
   attachments: BridgeAttachment[];
+  /** The profile the run was guided by, from its record; null for none. BO_0298_031 */
+  profile: { readonly id: string; readonly title: string } | null;
   /** What the run did, in the contract's own words. CA_0058_006 */
   events: RunEvent[];
 }
@@ -118,6 +120,26 @@ export const InspectorPanel = component$<{
         <h3>{detail.title}</h3>
         <p data-process-state={detail.state}>{detail.state}</p>
         <p data-process-step>{detail.step ?? "no step reported"}</p>
+        {/* The profile that guided the run, named where the run's detail is
+            read and nowhere else; a press opens it. BO_0298_031 */}
+        {proposed.processId === detail.id && proposed.profile !== null && (
+          <p class="process-trigger" data-process-profile={proposed.profile.id}>
+            {"Profile: "}
+            <button
+              type="button"
+              data-process-profile-open
+              onClick$={() =>
+                openTarget$({
+                  kind: DOCUMENT_KIND,
+                  itemId: proposed.profile?.id ?? "",
+                  title: proposed.profile?.title ?? "",
+                })
+              }
+            >
+              {proposed.profile.title}
+            </button>
+          </p>
+        )}
         {/* A system run says which extension started it and after which
             change, and opens the document it proposes into. BO_0264_017 */}
         {detail.triggeredBy !== undefined && (

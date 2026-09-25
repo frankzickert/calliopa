@@ -58,7 +58,7 @@ const harness = (input: {
   row?: { readonly marked: Marked; readonly text: string };
 }) =>
   component$(() => {
-    const markingStore = useStore({ marking: input.marking, prompt: null as string | null, byPrompt: {}, report: NO_POINTING });
+    const markingStore = useStore({ marking: input.marking, prompt: null as string | null, byPrompt: {}, report: NO_POINTING, guest: false, ownPrompt: null as string | null });
     const passages = useStore<PassagesStore>({
       selected: {
         blockId: "blk-b",

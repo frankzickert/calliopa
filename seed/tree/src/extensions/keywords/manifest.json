@@ -1,0 +1,20 @@
+{
+  "capabilities": {
+    "ccgwScopes": [
+      "query"
+    ],
+    "renders": [
+      "routes",
+      "views"
+    ]
+  },
+  "category": "bundled",
+  "dependencies": {
+    "doc-block-roles": "\u003e=0.1.0",
+    "documents": "\u003e=0.1.0",
+    "ui.shell": "\u003e=0.1.0"
+  },
+  "entrypoint": "contributions",
+  "id": "keywords",
+  "version": "0.1.0"
+}

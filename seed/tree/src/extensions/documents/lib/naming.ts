@@ -14,9 +14,21 @@
  * nothing is stored about who named it, and the words on the document are the
  * whole of what is known. DO_0012_001
  */
+import { PROFILE_RECORD } from "./profile";
+
 export const UNNAMED_DOCUMENT = "Untitled document";
 
-export const isUnnamed = (title: string): boolean => title === UNNAMED_DOCUMENT;
+/** The name a profile is minted with (`BO_0298_014`): the same rule, its own
+ * words, so a new profile is unnamed the way a new document is. */
+export const UNNAMED_PROFILE = "Untitled profile";
+
+export const isUnnamed = (title: string): boolean => title === UNNAMED_DOCUMENT || title === UNNAMED_PROFILE;
+
+/** The minted name a document of this record is given, and the placeholder
+ * its headline paints while it is unnamed: a profile's for a profile, the
+ * document's for everything else. */
+export const unnamedTitle = (document: { readonly record?: string | undefined } | null | undefined): string =>
+  document?.record === PROFILE_RECORD ? UNNAMED_PROFILE : UNNAMED_DOCUMENT;
 
 /**
  * What the title field holds for a document: nothing at all while it carries

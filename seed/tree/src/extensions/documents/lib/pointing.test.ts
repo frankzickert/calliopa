@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { chipName, fixatedChipName, staleIn } from "~/lib/command-target";
+import { chipName, fixatedChipName, sent, staleIn, type PointedReference } from "~/lib/command-target";
 import { anchorAt } from "~/lib/passage";
 import {
   OPENING_CHARS,
@@ -8,7 +8,7 @@ import {
   pointingOf,
   type PointableBlock,
 } from "./pointing";
-import { addPassage, NO_MARKING, toggleReference } from "./references";
+import { addPassage, NO_MARKING, toggleDocument, toggleReference } from "./references";
 
 const blocks: PointableBlock[] = [
   { blockId: "a", text: "Opening.", standing: "keep" },
@@ -164,5 +164,32 @@ describe("what the report says of what was marked", () => {
     const [inProposal, inRetired] = pointingOf(marking, blocks, new Map([["node:g|insert|node:n", { words: "A rewritten sentence." }]])).references;
     expect(inProposal?.stale).toBe(true);
     expect(inRetired?.stale).toBe(false);
+  });
+});
+
+describe("the report of references across documents (BO_0304_009)", () => {
+  it("Given a block and a passage of another document and a document marked whole, Then each is reported as marked, with its document and title, never stale or rowless", () => {
+    let marking = toggleReference(NO_MARKING, "a");
+    marking = toggleReference(marking, "x", { document: "doc-2", documentTitle: "Second", revisionId: "rev-x", words: "Elsewhere, an opening." });
+    marking = addPassage(marking, "y", words("Rain at dawn.", "Rain"), { document: "doc-2", documentTitle: "Second", revisionId: "rev-y" });
+    marking = toggleDocument(marking, "doc-3", "Third");
+    const report = pointingOf(marking, blocks);
+    expect(report.references).toEqual([
+      { kind: "block", number: 1, blockId: "a", words: "Opening.", stale: false },
+      { kind: "block", number: 2, blockId: "x", words: "Elsewhere, an opening.", stale: false, revisionId: "rev-x", document: "doc-2", documentTitle: "Second" },
+      { kind: "passage", number: 3, blockId: "y", quote: "Rain", words: "Rain", stale: false, revisionId: "rev-y", document: "doc-2", documentTitle: "Second" },
+      { kind: "document", number: 4, document: "doc-3", words: "Third", stale: false, documentTitle: "Third" },
+    ]);
+    // What is sent keeps the document and drops the title; the chip names
+    // the document by its title.
+    expect(report.references.map(sent)).toEqual([
+      { kind: "block", number: 1, blockId: "a" },
+      { kind: "block", number: 2, blockId: "x", revisionId: "rev-x", document: "doc-2" },
+      { kind: "passage", number: 3, blockId: "y", quote: "Rain", revisionId: "rev-y", document: "doc-2" },
+      { kind: "document", number: 4, document: "doc-3" },
+    ]);
+    expect(chipName(report.references[1] as PointedReference)).toBe("Reference 2: “Elsewhere, an opening.” in “Second”");
+    expect(chipName(report.references[3] as PointedReference)).toBe("Reference 4: document “Third”");
+    expect(staleIn(report)).toEqual([]);
   });
 });

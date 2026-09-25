@@ -1,6 +1,6 @@
 # A Manuscript Out Of The Record
 
-Status: wip
+Status: completed
 
 Requested: 2026-09-23; its questions answered by the user the same day. In the user's words:
 *create a change for journal-formatted manuscript out of the state graph — or you are a side
@@ -119,6 +119,23 @@ as tasks at draft.
   manuscript is listed with its process, as an execution's output is, and is never anything but a
   file: it proposes no block and changes no property.
 
+### Answered 2026-09-25
+
+The question implementation found (Found on the way, below) was put to the user on 2026-09-25 and
+answered the same day.
+
+* **A run reaches the typesetting service through the kernel's own tool.** `make_manuscript`
+  joins the kernel toolset beside `read_page`, `search_web` and `fetch_record`; the kernel asks
+  `manuscripts` for the projection through the callback channel, calls the service with its
+  bearer, and stages the kept manuscript in the run's group. The gate stays as `BO_0284_005`
+  left it, with no second exception. This corrects the transfer's fixed line, which had the
+  extension's callback asking the forward, and reads now as bibliography's does. Kernel half
+  `BO_0293_026` (`ui-kernel.md`), extension half `BO_0293_023` reshaped, verification
+  `BO_0293_005`.
+* **The run's half stays in this change.** `BO_0293_Q7` is a decision of this change, so the
+  change completes only after `BO_0293_026`, `BO_0293_023` and `BO_0293_005` land, after the
+  walk; the release note waits for both.
+
 ## Transferred
 
 Promoted to draft by the user on 2026-09-23 and transferred the same day.
@@ -193,10 +210,12 @@ Set to ready by the user on 2026-09-23 and implemented the same day, after `BO_0
   instance checks), `BO_0293_010` (`release-extensions.json` once the extension is at the pin),
   `BO_0293_011` (the release note after the walk), and the functional question below.
 
-### The graph, built on BO_0295 and waiting to be staged
+### The graph, staged 2026-09-24
 
-- `BO_0293_012`–`BO_0293_022` are implemented in a tree built on `BO_0295`'s staged proposal, and
-  stage once that proposal is accepted, since a member holds one open proposal. The work:
+- `BO_0293_012`–`BO_0293_022` are staged from head 2387, after `BO_0295` was accepted, as
+  `node:chg-1720e16fb6496507`: 37 files and 4 members, no deletions. The projected proposal
+  equals the staged tree byte for byte, except the new manifest, which the kernel re-serializes
+  with `>` escaped as every manifest in the graph has it. The work:
   - `documents`: the front matter and `setFrontMatter`, the `abstract` role, the head's fields.
   - The new `manuscripts` extension: the projection, the make and the keeping, the section, the
     page and the bar group.
@@ -220,12 +239,60 @@ Set to ready by the user on 2026-09-23 and implemented the same day, after `BO_0
 - The make keeps the manuscript at the dataRevision the read was made at. It does not check the
   document node's base revision, since editing a block does not move that revision.
 
+### The dry walk, 2026-09-25
+
+- Before the person's walk (`BO_0293_024`), the projection was run read-only over the instance
+  at head 2538 — the served pin's own code, every document holding more than text — and posted
+  to the service as both venues from inside its container: six documents, twelve answers `ok`,
+  among them a numbered equation referred to from a sentence, three citations with locators,
+  tables of two to seven columns and a nine-megabyte picture. The Greenland source and its
+  `.bib` typeset again by hand with `latexmk`, exit 0.
+- Two faults found and fixed in the projection (`server/project.ts`): a citation's locator was
+  handed to Pandoc as one string, and Pandoc 2.17 keeps its leading space, so natbib set
+  `[1,  pp. 233–239]` with two spaces; and a table wider than the line ran off the page in both
+  venues — the tabular is now set in a box and shrunk to the line only when it overflows,
+  without a package, so no venue template changes and no image rebuild is needed.
+- Seen and left as it is: a citation the author inserted mid-sentence with a space before and
+  none after reads *earn [1]every* in the PDF exactly as the editor draws it — the record's,
+  not the manuscript's. No document on the instance carries front matter, an output's picture
+  or a video, so the walk's document has to be made first; the recipe is in the scratchpad.
+- Found by the user walking the head (2026-09-25): the four lines of text with a *Save* each
+  were not usable — an authors line saved before the affiliations it numbered was refused on the
+  notice line and read as a save that did nothing. Decided the same day and done as
+  `BO_0293_025` (`documents`' `block-editor.md`): the affiliations and the keywords are chips,
+  entered with Enter and removable, and the authors a list of rows with a name, an email, the
+  affiliations as checkboxes and the corresponding mark; `front-matter-text.ts` is retired.
+
+### The run's half, 2026-09-25
+
+- `BO_0293_026` landed in the kernel: `make_manuscript` in the toolset (`agenttools/manuscript.go`),
+  asking `manuscripts` for the projection through the callback channel, posting it to the service
+  through `serve/typeset.go`'s `Make`, which keeps the answered files as blobs, and staging the
+  node the extension composes into the run's group through the loop an `ext.tool`'s writes take,
+  now `stageAnswered`. The toolset holds seventeen tools. Proven in `agenttools/manuscript_test.go`
+  and `serve/typeset_test.go`.
+- `BO_0293_023` landed in the graph: the two `kernelCallback` routes, `server/tools.ts`, the
+  skill `manuscripts.making`, and `make.ts` refactored so a press and a run share `figuresOf`,
+  `venueOf` and `manuscriptWrite`. Proven in `server/tools.test.ts` and under the kernel harness in
+  `tests/behavior/manuscripts.test.ts`; the harness's five failures are other changes' (refine
+  phase and work, documents picture and order), as on a pristine tree.
+- The walk (`BO_0293_024`) is folded: the user's two manuscripts, and the kept sources typeset
+  again by hand. The IEEE source stopped at its missing picture, so the figures are now kept
+  beside the source as references to the blocks' own blobs, for a press and a run alike.
+- The instance check's first run (2026-09-25, pin 2903) reached the service and typeset, and the
+  staging was refused: the kept node's statement carried `status: "established"`, the press's
+  truth write, which a proposal-scoped write refuses. The run's write now says no status, so the
+  kernel stages a candidate; the press's still says `established`.
+- `BO_0293_005` verified on 2026-09-25 at pin 2918: the run's record holds `typeset` once, its
+  group holds the IEEE manuscript at revision 2920 by the run's principal with its source and
+  PDF, and the run answered what the venue still needs. The change is complete.
+
 ### Found on the way
 
-- **A run's tool cannot reach the typesetting service as the fixed line says.** A tool's
+- **A run's tool cannot reach the typesetting service as the fixed line said.** A tool's
   callback holds no person's session, and the gate admits a run's grant only on a party's request
-  path. `BO_0293_023` waits on the functional question in `typesetting-service.md`. The same
-  question stands for `bibliography`'s `propose_work`.
+  path. Answered on 2026-09-25 (Answered, above): the kernel's own tool. `bibliography` had met
+  the same question and taken the same way.
 - **`bibliography`'s `addWork` cannot write a work with a hyphenated CSL field.** Fields such as
   `container-title` and `publisher-place` are quoted in backticks, which CCGW's parser refuses
   (`unexpected character '`'`). This is why `works.test.ts` (`BO_0291_032`) is red under the

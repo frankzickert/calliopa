@@ -36,7 +36,8 @@ describe("the body", () => {
 
   it("cites a work by its identity with its locator, and references the cited works as CSL-JSON in first-citation order", () => {
     expect(raw).toContain('"citationId":"w1"');
-    expect(raw).toContain('"citationSuffix":[{"t":"Str","c":", p. 3"}]');
+    // The locator as its own words after the comma, so natbib sets one space (dry walk, 2026-09-25).
+    expect(raw).toContain('"citationSuffix":[{"t":"Str","c":","},{"t":"Space"},{"t":"Str","c":"p."},{"t":"Space"},{"t":"Str","c":"3"}]');
     expect(projected.references.map((reference) => reference["id"])).toEqual(["w1", "w2"]);
     expect(projected.references[0]).toMatchObject({ id: "w1", type: "article-journal", title: "On records" });
   });
@@ -55,15 +56,30 @@ describe("the body", () => {
     expect(raw).toContain("\\\\caption{Readings}\\\\label{tab:tab}");
   });
 
+  it("prints a reference to a heading as its section, to a referred-to paragraph as a remark set apart, and says a gone one (BO_0300_012)", () => {
+    expect(raw).toContain("Section~\\\\ref{h}");
+    expect(raw).toContain("Remark~\\\\ref{par:claim}");
+    expect(raw).toContain("\\\\begin{remark}\\\\label{par:claim}");
+    expect(raw).toContain('"t":"Str","c":"(gone)"');
+    expect(projected.omitted).toContain("A reference to a block outside the reading order (gone).");
+    // The heading keeps the block's identity as its label, which Pandoc writes as \label.
+    expect(projected.ast.blocks[0]).toMatchObject({ t: "Header", c: [1, ["h", [], []], [{ t: "Str", c: "Introduction" }]] });
+  });
+
   it("escapes a table's cells for TeX", () => {
     expect(raw).toContain("a\\\\_b \\\\& c");
+  });
+
+  it("shrinks a table to the line only when it is wider, with a box the source defines itself", () => {
+    expect(raw).toContain("\\\\ifdefined\\\\calliopatable\\\\else\\\\newsavebox{\\\\calliopatable}\\\\fi");
+    expect(raw).toContain("\\\\ifdim\\\\wd\\\\calliopatable>\\\\linewidth\\\\resizebox{\\\\linewidth}{!}{\\\\usebox{\\\\calliopatable}}\\\\else\\\\usebox{\\\\calliopatable}\\\\fi");
   });
 
   it("enters an output's picture as a figure whose caption names the code cell and the revision", () => {
     expect(raw).toContain("{figure-out.png}\\\\caption{The fit. Produced by code cell 1 at revision 2186.}\\\\label{fig:out}");
     expect(projected.files).toEqual([
-      { name: "figure-img.png", objectId: "obj-img" },
-      { name: "figure-out.png", objectId: "obj-out" },
+      { name: "figure-img.png", objectId: "obj-img", mediaType: "image/png" },
+      { name: "figure-out.png", objectId: "obj-out", mediaType: "image/png" },
     ]);
   });
 
@@ -74,14 +90,83 @@ describe("the body", () => {
     expect(supplementary).not.toContain("print(1)");
   });
 
+  it("hands the supplementary code to Pandoc as a code block carrying its language, not as raw LaTeX (BO_0296_020)", () => {
+    const supplementary = (projected.ast.meta as Record<string, { c: unknown }>)["supplementary"];
+    const blocks = JSON.stringify(supplementary);
+    expect(blocks).not.toContain("lstlisting");
+    expect(blocks).toContain(JSON.stringify({ t: "CodeBlock", c: [["", ["python", "numberLines"], []], "plot(x)"] }));
+  });
+
+  it("numbers the supplementary code as the document numbers it: the numberLines class while the switch is on, startFrom where a continued block starts, neither when off (BO_0302_010)", () => {
+    const supplementary = (projection: ReturnType<typeof project>) => JSON.stringify((projection.ast.meta as Record<string, { c: unknown }>)["supplementary"]);
+    // The fixture's document says nothing about its switch, so it is on.
+    expect(supplementary(projected)).toContain(JSON.stringify({ t: "CodeBlock", c: [["", ["python", "numberLines"], []], "plot(x)"] }));
+    const continued = {
+      ...document,
+      blocks: document.blocks.map((block) => (block.kind === "sourcecode" && block.blockId === "code" ? { ...block, continues: true, firstLine: 40 } : block)),
+    };
+    expect(supplementary(project(continued, works, 2186))).toContain(JSON.stringify({ t: "CodeBlock", c: [["", ["python", "numberLines"], [["startFrom", "40"]]], "plot(x)"] }));
+    const off = { ...continued, lineNumbers: false };
+    expect(supplementary(project(off, works, 2186))).toContain(JSON.stringify({ t: "CodeBlock", c: [["", ["python"], []], "plot(x)"] }));
+  });
+
   it("leaves out what a manuscript cannot carry and says each by name, and a discarded block says nothing", () => {
     expect(projected.omitted).toEqual([
+      "A reference to a block outside the reading order (gone).",
       "An output that showed no picture and no table: text output and tracebacks are not manuscript material.",
       "A video: a manuscript is printed.",
       "A divider.",
       "Code cell 2, which produced no figure and no table.",
     ]);
     expect(raw).not.toContain("Discarded");
+  });
+});
+
+describe("a numbered listing", () => {
+  // The fixture's `code` block, numbered by its author, and a sentence
+  // referring to it and to the unnumbered `code2` (BO_0303_016).
+  const numbered = {
+    ...document,
+    blocks: document.blocks.flatMap((block): BlockView[] =>
+      block.blockId === "code"
+        ? [
+            { ...block, numbered: true, caption: "The fit" } as BlockView,
+            { ...common("ref", "g1"), kind: "text", role: "paragraph", standing: "keep", runs: [{ text: "See " }, { text: "", blockRef: "code" }, { text: " and " }, { text: "", blockRef: "code2" }] } as unknown as BlockView,
+          ]
+        : [block],
+    ),
+    listingNumbers: { code: 1 },
+  };
+  const listed = project(numbered, works, 2186);
+  const body = JSON.stringify(listed.ast.blocks);
+  const supplementary = (listed.ast.meta as Record<string, unknown>)["supplementary"];
+
+  it("prints a code block its author numbered where it stands, as a listing float holding the coloured code, captioned and labelled", () => {
+    const at = listed.ast.blocks.findIndex((block) => JSON.stringify(block) === JSON.stringify({ t: "RawBlock", c: ["latex", "\\begin{listing}[htbp]"] }));
+    expect(at).toBeGreaterThan(0);
+    expect(listed.ast.blocks[at + 1]).toEqual({ t: "CodeBlock", c: [["", ["python", "numberLines"], []], "plot(x)"] });
+    expect(listed.ast.blocks[at + 2]).toEqual({ t: "RawBlock", c: ["latex", "\\caption{The fit}\\label{lst:code}\\end{listing}"] });
+    // Where it stands: after the table that precedes it in the reading order.
+    expect(JSON.stringify(listed.ast.blocks.slice(0, at))).toContain("\\begin{table}");
+  });
+
+  it("prints a reference to the listing as Listing~\\ref, and one to a code block nobody numbered as gone", () => {
+    expect(body).toContain("Listing~\\\\ref{lst:code}");
+    expect(body).toContain("(gone)");
+    expect(listed.omitted).toContain("A reference to a code block nobody numbered (code2).");
+  });
+
+  it("names the listing in the provenance line of the figure it produced and prints the code once, with no supplementary section for it", () => {
+    expect(raw).toContain("Produced by code cell 1 at revision 2186.");
+    expect(body).toContain("The fit. Produced by Listing~\\\\ref{lst:code} at revision 2186.");
+    // The listing was the only producing code, so the manuscript has no supplement at all.
+    expect(supplementary).toBeUndefined();
+    expect(listed.omitted).toContain("Code cell 2, which produced no figure and no table.");
+  });
+
+  it("keeps producing code nobody numbered in the supplement", () => {
+    expect(JSON.stringify((projected.ast.meta as Record<string, unknown>)["supplementary"])).toContain("plot(x)");
+    expect(raw).not.toContain("begin{listing}");
   });
 });
 
@@ -107,5 +192,27 @@ describe("the parts", () => {
     expect(JSON.stringify(gone.ast.blocks)).toContain("[source gone]");
     expect(gone.omitted[0]).toContain("nowhere");
     expect(gone.references).toEqual([]);
+  });
+});
+
+describe("the glossary", () => {
+  it("sets every mentioned keyword once, alphabetically, with its definition, under a Glossary heading before the head is built", () => {
+    const withGlossary = project(document, works, 2186, [
+      { title: "Qubit", definition: [{ text: "The unit of " }, { text: "quantum", marks: ["italic"] }, { text: " information." }] },
+      { title: "Entanglement", definition: null },
+    ]);
+    const heading = withGlossary.ast.blocks.findIndex((block) => block["t"] === "Header" && JSON.stringify(block).includes("Glossary"));
+    expect(heading).toBeGreaterThan(0);
+    const list = withGlossary.ast.blocks[heading + 1] as { t: string; c: [unknown[], unknown[][]][] };
+    expect(list.t).toBe("DefinitionList");
+    expect(list.c.map(([term]) => JSON.stringify(term))).toEqual([JSON.stringify([{ t: "Str", c: "Entanglement" }]), JSON.stringify([{ t: "Str", c: "Qubit" }])]);
+    expect(list.c[0]?.[1]).toEqual([[]]);
+    expect(JSON.stringify(list.c[1]?.[1])).toContain('"Emph"');
+    expect(JSON.stringify(list.c[1]?.[1])).toContain("information.");
+  });
+
+  it("carries no glossary when nothing is mentioned", () => {
+    expect(raw).not.toContain("Glossary");
+    expect(raw).not.toContain("DefinitionList");
   });
 });

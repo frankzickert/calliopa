@@ -1,0 +1,112 @@
+/* Keywords (BO_0301): a mention over a block's words, its hover card, the
+ * Keywords section's choices and the foot of a keyword document. Colours are
+ * the theme's tokens only. */
+
+[data-annotation="keyword"] {
+  position: relative;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--text-muted);
+  text-underline-offset: 0.18em;
+  cursor: pointer;
+}
+
+[data-annotation="keyword"]:hover {
+  text-decoration-style: solid;
+  text-decoration-color: var(--accent);
+}
+
+/* The definition on hover, drawn from the wrapper's own words: no script,
+ * nothing for touch, which opens the keyword on a press instead. */
+[data-annotation="keyword"][data-annotation-detail]:hover::after {
+  content: attr(data-annotation-title) " — " attr(data-annotation-detail);
+  position: absolute;
+  left: 0;
+  top: 1.5em;
+  z-index: 4;
+  width: max-content;
+  max-width: min(24rem, 80vw);
+  padding: 0.4rem 0.6rem;
+  font-family: var(--font-ui);
+  font-size: 0.8125rem;
+  font-weight: normal;
+  font-style: normal;
+  line-height: 1.35;
+  text-decoration: none;
+  white-space: normal;
+  color: var(--text);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  pointer-events: none;
+}
+
+.keywords-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.keywords-settings__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.keywords-settings__field select {
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  padding: 0.25rem 0.4rem;
+}
+
+.keywords-mentioned {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.keywords-mentioned__heading {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.keywords-mentioned__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.keywords-mentioned__document {
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.keywords-mentioned__document:hover {
+  text-decoration: underline;
+}
+
+.keywords-mentioned__words {
+  margin: 0.1rem 0 0;
+  padding-left: 1rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}

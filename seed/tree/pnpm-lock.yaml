@@ -23,6 +23,12 @@ importers:
       csl-styles:
         specifier: https://codeload.github.com/citation-style-language/styles/tar.gz/8947960dc3c5133a873d77342c77c67300a2bc18
         version: https://codeload.github.com/citation-style-language/styles/tar.gz/8947960dc3c5133a873d77342c77c67300a2bc18
+      highlight.js:
+        specifier: 11.12.0
+        version: 11.12.0
+      snowball-stemmers:
+        specifier: 0.6.0
+        version: 0.6.0
     devDependencies:
       '@builder.io/qwik':
         specifier: 1.20.0
@@ -846,6 +852,10 @@ packages:
   hast-util-whitespace@3.0.0:
     resolution: {integrity: sha512-88JUN06ipLwsnv+dVn+OIYOvAuvBMy/Qoi6O7mQHxdPXpjy+Cd6xRkWwux7DKO+4sYILtLBRIKgsdpS2gQc7qw==}
 
+  highlight.js@11.12.0:
+    resolution: {integrity: sha512-nbfWpyRMcMrPMmDwJB+dhX/eiaPKtc2RB+0QZskqJ3WjRA/FDS0e9hZrx8EC/lbEv8gXy98FcDbNa/dspAaJMg==}
+    engines: {node: '>=12.0.0'}
+
   imagetools-core@9.1.0:
     resolution: {integrity: sha512-xQjs+2vrxLnAjCq+omuNkd5UQTld9/bP8+YT0LyYTlKfuSQtgUBvqhUwGugzSAh6sCdN+LnROMuLswn5hZ9Fhg==}
     engines: {node: '>=20.0.0'}
@@ -1130,6 +1140,9 @@ packages:
 
   siginfo@2.0.0:
     resolution: {integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==}
+
+  snowball-stemmers@0.6.0:
+    resolution: {integrity: sha512-47VTJvsZzEme3VxhbUFc9wR0CX8fYKNMgL7AiBdJcHUrwbmN7htFroeX+8ESIAaoNgwEgwI2wnv1HIcqQqAdcA==}
 
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
@@ -2057,6 +2070,8 @@ snapshots:
     dependencies:
       '@types/hast': 3.0.5
 
+  highlight.js@11.12.0: {}
+
   imagetools-core@9.1.0: {}
 
   inline-style-parser@0.2.7: {}
@@ -2595,6 +2610,8 @@ snapshots:
   shell-quote@1.10.0: {}
 
   siginfo@2.0.0: {}
+
+  snowball-stemmers@0.6.0: {}
 
   source-map-js@1.2.1: {}
 

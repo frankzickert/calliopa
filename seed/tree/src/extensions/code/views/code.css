@@ -48,6 +48,33 @@
   border-inline-start: 2px solid var(--border-muted, currentColor);
 }
 
+/* An error as it streams, in the traceback's colours — the same six theme
+   tokens the output block draws it in once the proposal is read. BO_0296_019 */
+.code-run__error {
+  color: var(--error, inherit);
+}
+
+.code-run__error-exception {
+  color: var(--code-keyword, inherit);
+}
+
+.code-run__error-file {
+  color: var(--code-string, inherit);
+}
+
+.code-run__error-heading,
+.code-run__error-marker {
+  color: var(--code-comment, inherit);
+}
+
+.code-run__error-line {
+  color: var(--code-number, inherit);
+}
+
+.code-run__error-frame {
+  color: var(--code-name, inherit);
+}
+
 .code-runtimes__list {
   margin: 0;
   padding: 0;

@@ -7,11 +7,12 @@ import { Icon } from "~/components/shell/icons";
 import { ReferenceChips } from "~/components/shell/reference-chips";
 import { ViewBridgeContext, type SentCommand } from "~/components/shell/view-bridge";
 import { readyDescriptors, stillUploading, uploadingNames, type AttachmentHolder } from "~/lib/attachments";
-import type { AttachmentDescriptor, RevealTarget } from "~/lib/command-target";
-import { pendingReference, referenceMatches } from "~/lib/command-typeahead";
-import { replaceRange, runsText, type Run } from "~/lib/runs";
+import { DOCUMENT_KIND, type AttachmentDescriptor, type RevealTarget } from "~/lib/command-target";
+import { pendingBlockReference, pendingReference, referenceMatches } from "~/lib/command-typeahead";
+import { replaceRange, replaceRangeWithAtom, runsPoints, type Run } from "~/lib/runs";
 import { BlockDecorations } from "../decorations";
 import { MarkingContext } from "../marking/use-marking";
+import { matchingChoices, type ReferenceChoice } from "../../lib/reference-choices";
 import type { EditorState } from "../block-editor";
 
 /**
@@ -29,9 +30,21 @@ import type { EditorState } from "../block-editor";
 
 /** Where `#` stands before the caret, in the code points the editor counts. */
 function pendingAt(runs: readonly Run[], caret: number): { readonly start: number; readonly typed: string } | null {
-  const points = [...runsText(runs)];
+  // Measured in points, an atom one each, so a citation before the `#` does
+  // not shift the range (BO_0300 walk, 2026-09-25).
+  const points = [...runsPoints(runs)];
   const before = points.slice(0, caret).join("");
   const pending = pendingReference(before, before.length);
+  if (pending === null) return null;
+  return { start: [...before.slice(0, pending.start)].length, typed: pending.typed };
+}
+
+/** The `#` and the words typed after it before the caret, for a reference to
+ * a block of the document (`BO_0300_005`); the same offsets as `pendingAt`. */
+function pendingBlockAt(runs: readonly Run[], caret: number): { readonly start: number; readonly typed: string } | null {
+  const points = [...runsPoints(runs)];
+  const before = points.slice(0, caret).join("");
+  const pending = pendingBlockReference(before, before.length);
   if (pending === null) return null;
   return { start: [...before.slice(0, pending.start)].length, typed: pending.typed };
 }
@@ -54,9 +67,13 @@ export const CommandControl = component$<{
   /** The files the block's command carries: the editor's, kept per block for
    * the page, so a file dropped on the block lands here too. */
   files: AttachmentHolder;
-}>(({ documentId, blockId, editor, pointing, send$, editRuns$, resume$, files }) => {
+  /** The blocks a `#` in this block may refer to (`BO_0300_005`), offered
+   * when the block points at nothing: a block with marks is a prompt, and its
+   * `#` keeps meaning the mark (user decision, 2026-09-25). */
+  references?: readonly ReferenceChoice[];
+}>(({ documentId, blockId, editor, pointing, send$, editRuns$, resume$, files, references }) => {
   const bridge = useContext(ViewBridgeContext);
-  const { store: marking, point$ } = useContext(MarkingContext);
+  const { store: marking, point$, toggleReference$ } = useContext(MarkingContext);
   const notice = useSignal<string | null>(null);
   const menu = useSignal(false);
 
@@ -95,8 +112,23 @@ export const CommandControl = component$<{
     files.attachNotice = null;
   });
 
-  const reveal$ = $((target: RevealTarget) => {
-    bridge.reveal.itemId = documentId;
+  /**
+   * Shows what a chip points at. In this document, the view reveals it. In
+   * another document (`BO_0304_009`), the shell brings that document forward
+   * first — its open tab, or a new one — and the reveal is aimed there: the
+   * view that mounts acts on a reveal aimed at its document that no view has
+   * consumed. A document marked whole is brought forward and nothing more.
+   */
+  const reveal$ = $(async (target: RevealTarget) => {
+    if (target.kind === "document") {
+      await bridge.openTarget$({ kind: DOCUMENT_KIND, itemId: target.document, title: target.documentTitle ?? target.document });
+      return;
+    }
+    const where = target.kind === "takeBack" || target.document === undefined ? documentId : target.document;
+    if (where !== documentId && target.kind !== "takeBack") {
+      await bridge.openTarget$({ kind: DOCUMENT_KIND, itemId: where, title: target.documentTitle ?? where });
+    }
+    bridge.reveal.itemId = where;
     bridge.reveal.target = target;
     bridge.reveal.seq += 1;
   });
@@ -111,19 +143,62 @@ export const CommandControl = component$<{
     await editRuns$(runs, caret, caret);
   });
 
+  /** A reference to a block written where the `#` was typed (`BO_0300_005`):
+   * one atom carrying the block's identity, the `#` and the words after it
+   * taken back, the caret after the atom. */
+  const chooseBlock$ = $(async (target: string) => {
+    if (editor.blockId !== blockId) return;
+    const pending = pendingBlockAt(editor.runs, editor.start);
+    if (pending === null) return;
+    const runs = replaceRangeWithAtom(editor.runs, pending.start, editor.end, { text: "", blockRef: target });
+    const caret = pending.start + 1;
+    await editRuns$(runs, caret, caret);
+  });
+
+  /**
+   * A block chosen from the list in a prompt is marked for the prompt, with
+   * the next number, and named by it where the `#` was typed — the picker
+   * `BO_0304_Q1` deferred, done as marking, so the run keeps its one
+   * vocabulary (user decision, 2026-09-25, `BO_0304_016`). A block already
+   * marked is named by the number it carries.
+   */
+  const chooseBlockAsMark$ = $(async (target: string) => {
+    if (editor.blockId !== blockId) return;
+    const pending = pendingBlockAt(editor.runs, editor.start);
+    if (pending === null) return;
+    const held = marking.marking.references.find((reference) => reference.kind === "block" && reference.blockId === target && reference.document === undefined);
+    const number = held?.number ?? marking.marking.next;
+    if (held === undefined) await toggleReference$(target);
+    const written = `#${number} `;
+    const runs = replaceRange(editor.runs, pending.start, editor.end, written);
+    const caret = pending.start + [...written].length;
+    await editRuns$(runs, caret, caret);
+  });
+
   const editing = editor.blockId === blockId;
-  const pending = editing && editor.start === editor.end ? pendingAt(editor.runs, editor.start) : null;
+  // What the block's `#` means depends on the block (`BO_0300_Q2`): a prompt
+  // — one that points at marks — offers its marks by number and, after them,
+  // the document's blocks, which choosing marks (`BO_0304_016`); any other
+  // block offers the document's blocks and choosing writes a reference.
+  const isPrompt = marking.report.references.length > 0;
+  const pending = editing && isPrompt && editor.start === editor.end ? pendingAt(editor.runs, editor.start) : null;
   const matches = pending === null ? [] : referenceMatches(marking.report.references, pending.typed);
+  const pendingBlock = editing && editor.start === editor.end ? pendingBlockAt(editor.runs, editor.start) : null;
+  // In a prompt a block already marked stands in the list as its mark.
+  const markedBlocks = new Set(marking.report.references.flatMap((reference) => (reference.kind === "block" && reference.document === undefined ? [reference.blockId] : [])));
+  const blockMatches = pendingBlock === null ? [] : matchingChoices(references ?? [], pendingBlock.typed).filter((choice) => !isPrompt || !markedBlocks.has(choice.blockId));
   const sending = bridge.agents.sending;
 
   return (
     // Its presses are its own: a press here reaching the row would read as a
     // press on the block — marking it, or ending pointing from it.
     <div class="block-command" data-block-command={blockId} role="group" aria-label="Command" stoppropagation:click>
-      {matches.length > 0 && (
-        <ul class="block-command__references composer__references" aria-label="Name a reference">
+      {(matches.length > 0 || blockMatches.length > 0) && (
+        // One list: the prompt's marks by number first, then the blocks of
+        // the document it may refer to or mark. BO_0300_005 BO_0304_016
+        <ul class="block-command__references composer__references" aria-label={isPrompt ? "Name a reference" : "Refer to a block"} data-block-reference-list>
           {matches.map((reference) => (
-            <li key={reference.number}>
+            <li key={`mark-${reference.number}`}>
               <button
                 type="button"
                 data-reference-option={reference.number}
@@ -134,6 +209,24 @@ export const CommandControl = component$<{
               >
                 <span class="composer__number">#{reference.number}</span>
                 <q>{reference.words}</q>
+                {(reference.kind === "document" || reference.document !== undefined) && (
+                  <span class="chip__meta">{reference.documentTitle ?? reference.document}</span>
+                )}
+              </button>
+            </li>
+          ))}
+          {blockMatches.map((choice) => (
+            <li key={choice.blockId}>
+              <button
+                type="button"
+                data-block-reference-option={choice.blockId}
+                // The block keeps its caret, as a mark's option does.
+                preventdefault:mousedown
+                onClick$={() => (isPrompt ? chooseBlockAsMark$(choice.blockId) : chooseBlock$(choice.blockId))}
+              >
+                <Icon name={choice.icon} />
+                <span class="composer__number">{choice.label}</span>
+                {choice.glimpse !== "" && <q>{choice.glimpse}</q>}
               </button>
             </li>
           ))}

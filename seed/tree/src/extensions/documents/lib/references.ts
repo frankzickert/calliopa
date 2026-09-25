@@ -41,6 +41,11 @@ export interface Marked {
   readonly words?: string;
   readonly proposer?: string;
   readonly discarded?: boolean;
+  /** The document the reference points into when it is not the prompt's
+   * own, and its title as the reader saw it — absent for the prompt's own
+   * document, so every record before `BO_0304` reads unchanged. BO_0304_007 */
+  readonly document?: string;
+  readonly documentTitle?: string;
 }
 
 export interface BlockReference extends Marked {
@@ -56,7 +61,20 @@ export interface PassageReference extends Marked {
   readonly anchor: PassageAnchor;
 }
 
-export type Reference = BlockReference | PassageReference;
+/** A document marked whole (`BO_0304_007`): named by identity, with its title
+ * as the reader saw it, numbered in the one sequence with the rest. */
+export interface DocumentReference {
+  readonly kind: "document";
+  readonly document: string;
+  readonly documentTitle?: string;
+  readonly number: number;
+  /** Never on a document marked whole; named so a list of references of
+   * every kind reads them without a case. */
+  readonly blockId?: undefined;
+  readonly target?: undefined;
+}
+
+export type Reference = BlockReference | PassageReference | DocumentReference;
 
 /** A prompt block's marking session: what is marked from it, in mark order,
  * and the number the next mark takes, with the mode the surface is in while
@@ -87,18 +105,23 @@ export const legacyMarkingKey = (documentId: string): string =>
 /** Which row a mark stands on: a proposal's item, a retired block, or a
  * block of the document. BO_0263_004 */
 export type RowOf =
-  | { readonly target?: undefined }
-  | { readonly target: "proposal"; readonly item: string }
-  | { readonly target: "retired" };
+  | { readonly target?: undefined; readonly document?: string }
+  | { readonly target: "proposal"; readonly item: string; readonly document?: string }
+  | { readonly target: "retired"; readonly document?: string };
 
 /** The row a reference stands on, as one string: two references on one row
- * are the same pointing. */
-export const rowKey = (blockId: string, at: RowOf | Marked = {}): string =>
-  at.target === "proposal"
-    ? `proposal:${at.item ?? ""}`
-    : at.target === "retired"
-      ? `retired:${blockId}`
-      : blockId;
+ * are the same pointing. A row of another document is told apart by that
+ * document (`BO_0304_007`); a row named with no document is the prompt's
+ * own. */
+export const rowKey = (blockId: string, at: RowOf | Marked = {}): string => {
+  const row =
+    at.target === "proposal"
+      ? `proposal:${at.item ?? ""}`
+      : at.target === "retired"
+        ? `retired:${blockId}`
+        : blockId;
+  return at.document === undefined ? row : `${at.document}//${row}`;
+};
 
 /** The number of the whole-row reference to this row, or null. */
 export const referenceFor = (
@@ -109,6 +132,20 @@ export const referenceFor = (
   marking.references.find(
     (held) => held.kind === "block" && rowKey(held.blockId, held) === rowKey(blockId, at),
   )?.number ?? null;
+
+/** The number of the reference to this document marked whole, or null.
+ * BO_0304_007 */
+export const documentReferenceFor = (marking: Marking, document: string): number | null =>
+  marking.references.find((held) => held.kind === "document" && held.document === document)?.number ?? null;
+
+/** The documents marked whole, with their titles and numbers, in mark order:
+ * what the library and the tab strip show. BO_0304_007 */
+export const documentsMarked = (
+  marking: Marking,
+): readonly { readonly document: string; readonly title: string; readonly number: number }[] =>
+  marking.references.flatMap((held) =>
+    held.kind === "document" ? [{ document: held.document, title: held.documentTitle ?? held.document, number: held.number }] : [],
+  );
 
 /** The passages marked inside this row, in mark order. */
 export const passagesIn = (
@@ -166,6 +203,43 @@ export function toggleReference(
 }
 
 /**
+ * Marks a document whole, or takes the mark back, under the rules of
+ * `toggleReference`: appending numbers in mark order, and unmarking leaving
+ * every standing number where it is. BO_0304_007
+ */
+export function toggleDocument(marking: Marking, document: string, documentTitle?: string): Marking {
+  if (marking.references.some((held) => held.kind === "document" && held.document === document)) {
+    return keeping(
+      marking,
+      marking.references.filter((held) => !(held.kind === "document" && held.document === document)),
+    );
+  }
+  return appending(marking, {
+    kind: "document",
+    document,
+    number: marking.next,
+    ...(documentTitle === undefined ? {} : { documentTitle }),
+  });
+}
+
+/**
+ * Localizes the marks of a pointing session for a guest view of another
+ * document (`BO_0304_008`): the references pointing into `document` stand as
+ * that view's own rows and passages, the rest — the prompt's own document's,
+ * other documents', the documents marked whole — are left out, since no row
+ * of the guest carries them. The numbers are the session's, so what the
+ * guest draws is what the prompt's chips say.
+ */
+export function localizeMarking(marking: Marking, document: string): Marking {
+  const references = marking.references.flatMap((held): Reference[] => {
+    if (held.kind === "document" || held.document !== document) return [];
+    const { document: _document, documentTitle: _title, ...local } = held;
+    return [local as Reference];
+  });
+  return { mode: "command", references, next: marking.next };
+}
+
+/**
  * Marks words inside a block as a passage.
  *
  * Words that cannot be a passage — none, or more than the bound — change
@@ -196,12 +270,14 @@ export function addPassage(
 }
 
 /** The row a marked target stands on. */
-const rowOf = (marked: Marked): RowOf =>
-  marked.target === "proposal"
-    ? { target: "proposal", item: marked.item ?? "" }
+const rowOf = (marked: Marked): RowOf => {
+  const where = marked.document === undefined ? {} : { document: marked.document };
+  return marked.target === "proposal"
+    ? { target: "proposal", item: marked.item ?? "", ...where }
     : marked.target === "retired"
-      ? { target: "retired" }
-      : {};
+      ? { target: "retired", ...where }
+      : where;
+};
 
 /**
  * Points a passage at new words, keeping its number and its place in mark
@@ -261,6 +337,12 @@ export function followDocument(marking: Marking, now: DocumentNow): Marking {
   let changed = false;
   const references: Reference[] = [];
   for (const held of marking.references) {
+    // What points into another document, or at one whole, is what was
+    // marked: this document says nothing about it. BO_0304_007
+    if (held.kind === "document" || held.document !== undefined) {
+      references.push(held);
+      continue;
+    }
     if (held.target === undefined && held.revisionId === undefined && !revisions.has(held.blockId)) {
       changed = true;
       continue;
@@ -316,9 +398,12 @@ function readAnchor(value: unknown): PassageAnchor | null {
   return { quote, prefix, suffix, hint };
 }
 
-/** Whether two references point at the same thing: one row, or the same
- * words of one row. */
+/** Whether two references point at the same thing: one row, the same words
+ * of one row, or one document marked whole. */
 function samePointing(a: Reference, b: Reference): boolean {
+  if (a.kind === "document" || b.kind === "document") {
+    return a.kind === "document" && b.kind === "document" && a.document === b.document;
+  }
   if (rowKey(a.blockId, a) !== rowKey(b.blockId, b)) return false;
   if (a.kind === "block") return b.kind === "block";
   return b.kind === "passage" && a.anchor.quote === b.anchor.quote;
@@ -339,6 +424,8 @@ function readMarkedEntry(held: Record<string, unknown>): Marked | null {
     ...(text("words") === undefined ? {} : { words: text("words") as string }),
     ...(text("proposer") === undefined ? {} : { proposer: text("proposer") as string }),
     ...(held["discarded"] === true ? { discarded: true } : {}),
+    ...(text("document") === undefined ? {} : { document: text("document") as string }),
+    ...(text("documentTitle") === undefined ? {} : { documentTitle: text("documentTitle") as string }),
   };
   return marked;
 }
@@ -350,10 +437,17 @@ function readReference(entry: unknown): Reference | null {
   if (typeof entry !== "object" || entry === null) return null;
   const held = entry as Record<string, unknown>;
   const { blockId, number, kind } = held;
-  if (typeof blockId !== "string" || blockId === "") return null;
   if (typeof number !== "number" || !Number.isInteger(number) || number < 1) {
     return null;
   }
+  // A document marked whole names its document and no block. BO_0304_007
+  if (kind === "document") {
+    const document = held["document"];
+    if (typeof document !== "string" || document === "") return null;
+    const title = held["documentTitle"];
+    return { kind: "document", document, number, ...(typeof title === "string" && title !== "" ? { documentTitle: title } : {}) };
+  }
+  if (typeof blockId !== "string" || blockId === "") return null;
   const marked = readMarkedEntry(held);
   if (marked === null) return null;
   switch (kind) {
@@ -442,13 +536,14 @@ export function serializeMarking(marking: Marking): string | null {
 export function markingFromSent(
   sent: readonly {
     readonly number: number;
-    readonly blockId: string;
+    readonly blockId?: string;
     readonly kind?: string;
     readonly quote?: string;
     readonly target?: string;
     readonly group?: string;
     readonly item?: string;
     readonly revisionId?: string;
+    readonly document?: string;
   }[],
 ): Marking {
   const raw = JSON.stringify({
@@ -458,7 +553,14 @@ export function markingFromSent(
         ...(reference.group === undefined ? {} : { group: reference.group }),
         ...(reference.item === undefined ? {} : { item: reference.item }),
         ...(reference.revisionId === undefined ? {} : { revisionId: reference.revisionId }),
+        ...(reference.document === undefined ? {} : { document: reference.document }),
       };
+      // A document marked whole comes back as one; its title is not in the
+      // run's record, so the chip names it by identity until it is marked
+      // again. BO_0304_007
+      if (reference.kind === "document") {
+        return { kind: "document", number: reference.number, document: reference.document ?? "" };
+      }
       return reference.kind === "passage" && reference.quote !== undefined
         ? { kind: "passage", number: reference.number, blockId: reference.blockId, anchor: { quote: reference.quote, prefix: "", suffix: "", hint: 0 }, ...marked }
         : { kind: "block", number: reference.number, blockId: reference.blockId, ...marked };

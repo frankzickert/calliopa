@@ -1,12 +1,14 @@
-import { component$, useContext } from "@builder.io/qwik";
+import { component$, Slot, useContext } from "@builder.io/qwik";
 
 import { ViewBridgeContext } from "~/components/shell/view-bridge";
 
 import { citationKey, type Citation, type Mark, type TextRole } from "~/lib/runs";
 
 import { citeLabel } from "../lib/citation-label";
-import { referenceLabel } from "../lib/figure-label";
+import { GONE_LABEL, referenceLabel } from "../lib/figure-label";
+import type { Annotation } from "../lib/annotations";
 import { CitedWorksContext } from "./cited-works";
+import type { InlineAnnotations } from "./inline-annotations";
 
 /**
  * How a text block's words are drawn, shared by the block editor's rows and
@@ -43,6 +45,20 @@ export const ROLE_TAG: Readonly<Record<TextRole, BlockTag>> = {
  * to a screen reader that a styled span does not, and the reading presentation
  * is the one a reader actually reads.
  */
+/** Takes the reader to the block a reference points at (`BO_0300_007`,
+ * user decision 2026-09-25): the row scrolled into view and focused, so the
+ * bar is about it, as a press on it would make it. At module scope, so the
+ * handler captures the identity and nothing else. */
+function revealBlock(from: HTMLElement, blockId: string): void {
+  const rows = from.ownerDocument.querySelectorAll<HTMLElement>("[data-block-id]");
+  for (const row of rows) {
+    if (row.getAttribute("data-block-id") !== blockId) continue;
+    row.scrollIntoView({ block: "center" });
+    (row.querySelector<HTMLElement>("[data-block-reading]") ?? row).focus();
+    return;
+  }
+}
+
 export const Marked = component$<{
   text: string;
   marks: readonly Mark[];
@@ -66,11 +82,30 @@ export const Marked = component$<{
   figureRef?: string | undefined;
   tableRef?: string | undefined;
   refNumber?: number | undefined;
-}>(({ text, marks, link, math, svg, equationRef, number, cite, citeNumber, citeMissing, figureRef, tableRef, refNumber }) => {
+  /** A reference to any block of the document (`BO_0300_007`), drawn as the
+   * label the read resolved — its kind and number, a heading's words, a
+   * remark's number — or as gone, and clickable: a press takes the reader to
+   * the block it points at. */
+  blockRef?: string | undefined;
+  refLabel?: string | undefined;
+}>(({ text, marks, link, math, svg, equationRef, number, cite, citeNumber, citeMissing, figureRef, tableRef, refNumber, blockRef, refLabel }) => {
   // An atom stands for one thing rather than for its characters, so it is
   // drawn before the marks are peeled: a mark means nothing over an equation.
   if (cite !== undefined) {
     return <CitedRun work={cite.work} locator={cite.locator} fallback={citeLabel(cite, citeNumber, citeMissing === true)} missing={citeMissing === true} />;
+  }
+  if (blockRef !== undefined) {
+    return (
+      <a
+        href={`#block-${blockRef}`}
+        class={`run-block-ref run-block-ref--link${refLabel === undefined ? " run-block-ref--missing" : ""}`}
+        data-block-ref={blockRef}
+        preventdefault:click
+        onClick$={(_: Event, element: HTMLElement) => revealBlock(element, blockRef)}
+      >
+        {refLabel ?? GONE_LABEL}
+      </a>
+    );
   }
   if (figureRef !== undefined || tableRef !== undefined) {
     const kind = figureRef !== undefined ? "figure" : "table";
@@ -206,6 +241,34 @@ const CitedRun = component$<{ work: string; locator?: string | undefined; fallba
           </span>
         </span>
       )}
+    </span>
+  );
+});
+
+/**
+ * A piece of a block's words under an inline annotation (`BO_0301_015`): the
+ * wrapper carries what annotates it, by kind and identity, for the
+ * annotating extension's stylesheet and hover, and the words inside are
+ * drawn as ever — read back whole, since the wrapper carries no mark. A
+ * press on it is the extension's: it is recorded and never reaches the row,
+ * so no editor opens under it. With no annotation the words are drawn bare.
+ */
+export const Annotated = component$<{ annotation: Annotation | null; store: InlineAnnotations | null }>(({ annotation, store }) => {
+  if (annotation === null) return <Slot />;
+  return (
+    <span
+      class="run-annotated"
+      data-annotation={annotation.kind}
+      data-annotation-id={annotation.id}
+      data-annotation-title={annotation.title}
+      data-annotation-detail={annotation.detail}
+      title={annotation.title}
+      stoppropagation:click
+      onClick$={() => {
+        if (store !== null) store.pressed = { kind: annotation.kind, id: annotation.id, title: annotation.title, at: Date.now() };
+      }}
+    >
+      <Slot />
     </span>
   );
 });

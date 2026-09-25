@@ -43,12 +43,12 @@ const output = (blockId: string, order: string, rest: Record<string, unknown> = 
     ...rest,
   }) as BlockView;
 
-async function mount(blocks: readonly BlockView[], numbers: Partial<Pick<DocumentView, "figureNumbers" | "tableNumbers">> = {}) {
+async function mount(blocks: readonly BlockView[], numbers: Partial<Pick<DocumentView, "figureNumbers" | "tableNumbers" | "listingNumbers">> = {}) {
   const document: DocumentView = { documentId: "doc-1", revisionId: "rev-doc", title: "Figures", blocks: [...blocks], ...numbers };
   const sent: SentCommand[] = [];
   vi.stubGlobal("fetch", documentsApi(document, sent));
   const view = await mountEditor(document);
-  return { view, sent };
+  return { view, sent, document };
 }
 
 /** A page read with a pointer that hovers, as the proposals suite stubs it:
@@ -118,6 +118,54 @@ describe("a figure's caption and number", () => {
   });
 });
 
+const code = (blockId: string, order: string, rest: Record<string, unknown> = {}): BlockView =>
+  ({ kind: "sourcecode", blockId, revisionId: `rev-${blockId}`, containmentId: `c-${blockId}`, order, source: "x = 1", language: "python", ...rest }) as BlockView;
+
+describe("a listing's caption and number (BO_0303_011)", () => {
+  it("draws Listing 1. beneath a numbered code block with its caption in a field while reading", async () => {
+    const { view } = await mount([code("blk-c", "a", { caption: "The setup", numbered: true, number: 1 })], { listingNumbers: { "blk-c": 1 } });
+    const caption = view.root.querySelector('[data-code-block="blk-c"] [data-figure-caption="blk-c"]') as HTMLElement;
+    expect(caption).toBeTruthy();
+    expect(caption.querySelector("[data-figure-number]")?.textContent).toBe("Listing 1.");
+    expect((caption.querySelector("[data-figure-caption-input]") as HTMLInputElement).value).toBe("The setup");
+    await view.idle();
+  });
+
+  it("draws a numbered code block without a caption with its label alone, from the read's map", async () => {
+    const { view } = await mount([code("blk-c", "a", { numbered: true, number: 1 })], { listingNumbers: { "blk-c": 2 } });
+    expect(view.root.querySelector('[data-figure-caption="blk-c"] [data-figure-number]')?.textContent).toBe("Listing 2.");
+    await view.idle();
+  });
+
+  it("writes a caption typed beneath a code block as one setFigure on its base, keeping its ask", async () => {
+    const { view, sent } = await mount([code("blk-c", "a", { numbered: true, number: 1 })], { listingNumbers: { "blk-c": 1 } });
+    const field = view.root.querySelector('[data-figure-caption="blk-c"] [data-figure-caption-input]') as HTMLInputElement;
+    field.value = "The setup";
+    await view.userEvent(field, "change");
+    await view.settle(() => sent.some((entry) => entry.body["command"] === "setFigure"));
+    expect(sent.find((entry) => entry.body["command"] === "setFigure")?.body).toMatchObject({
+      blockId: "blk-c",
+      baseRevisionId: "rev-blk-c",
+      caption: "The setup",
+      numbered: true,
+    });
+    await view.idle();
+  });
+
+  it("offers Number this listing on a hovered code block and sends the ask with the caption kept (BO_0303_012)", async () => {
+    hovering();
+    const { view, sent } = await mount([code("blk-c", "a", { caption: "The setup" })]);
+    await hover(view, "blk-c");
+    await view.settle(() => bar(view.root, "block-number") != null);
+    const toggle = bar(view.root, "block-number") as HTMLElement;
+    expect(toggle.getAttribute("aria-label") ?? toggle.textContent ?? "").toContain("Number this listing");
+    await view.userEvent('[data-bar-action="block-number"]', "click");
+    await view.settle(() => sent.some((entry) => entry.body["command"] === "setFigure"));
+    expect(sent.find((entry) => entry.body["command"] === "setFigure")?.body).toMatchObject({ blockId: "blk-c", numbered: true, caption: "The setup" });
+    await view.idle();
+  });
+});
+
 describe("numbering from the bar", () => {
   it("offers Number this figure on a focused picture and sends the ask with the caption kept", async () => {
     hovering();
@@ -169,25 +217,8 @@ describe("a reference to a figure or a table", () => {
     await view.idle();
   });
 
-  it("offers the numbered figures and tables while a sentence is edited, and writes the chosen one as an atom", async () => {
-    const { view } = await mount(
-      [sentence("blk-p", "a", [{ text: "See" }]), picture("blk-i", "b", { numbered: true, number: 1, caption: "The apparatus" }), table("blk-t", "c", { numbered: true, number: 1 })],
-      { figureNumbers: { "blk-i": 1 }, tableNumbers: { "blk-t": 1 } },
-    );
-    await activateBlock(view, "blk-p");
-    await view.settle(() => bar(view.root, "block-reference-figure") != null);
-    expect(bar(view.root, "block-reference-figure")?.textContent ?? "").toContain("Figure 1");
-    expect(bar(view.root, "block-reference-table")?.textContent ?? "").toContain("Table 1");
-    await view.idle();
-  });
-
-  it("offers neither when the document numbers no figure and no table", async () => {
-    const { view } = await mount([sentence("blk-p", "a", [{ text: "See" }]), picture("blk-i", "b")]);
-    await activateBlock(view, "blk-p");
-    expect(bar(view.root, "block-reference-figure") ?? null).toBeNull();
-    expect(bar(view.root, "block-reference-table") ?? null).toBeNull();
-    await view.idle();
-  });
+  // The bar's reference choices are gone (`BO_0300_006`): a reference is written from `#` in the sentence,
+  // proven in `references.test.ts`.
 
   it("paints a reference on the editing surface with its label as an attribute, and reads it back as the run it was", async () => {
     const { view } = await mount(
@@ -202,5 +233,61 @@ describe("a reference to a figure or a table", () => {
     // the caret counts.
     expect(atom.textContent?.length).toBe(1);
     await view.idle();
+  });
+});
+
+/**
+ * A number is the document's order, answered by every read: when a block is
+ * numbered above one already numbered, the read back after the ask renumbers
+ * the one below, and its own label follows — not only the references to it.
+ * The row is keyed by revision and a derived number changes no revision, so
+ * the label must be drawn from the read's map, never from the block the row
+ * was mounted with. Found by the walk (`BO_0295_014`, 2026-09-25).
+ */
+describe("a number follows the read", () => {
+  it("relabels the table below when a table above it is numbered", async () => {
+    hovering();
+    const above = table("blk-above", "a");
+    const below = table("blk-below", "b", { numbered: true, number: 1 });
+    const { view, sent, document } = await mount([above, below], { tableNumbers: { "blk-below": 1 } });
+    expect(view.root.querySelector('[data-block-id="blk-below"] [data-table-number]')?.textContent).toBe("Table 1.");
+    // The read after the ask answers the new order: the table above is 1 in
+    // the revision the ask wrote, the one below is 2 with its revision
+    // unchanged, since a number is stored nowhere.
+    const renumbered = document as unknown as { blocks: BlockView[]; tableNumbers?: Record<string, number>; figureNumbers?: Record<string, number> };
+    renumbered.blocks = [
+      { ...above, revisionId: "rev-blk-above-2", numbered: true, number: 1 } as BlockView,
+      { ...below, number: 2 } as BlockView,
+    ];
+    renumbered.tableNumbers = { "blk-above": 1, "blk-below": 2 };
+    await hover(view, "blk-above");
+    await view.settle(() => bar(view.root, "block-number") != null);
+    await view.userEvent('[data-bar-action="block-number"]', "click");
+    await view.settle(() => sent.some((entry) => entry.body["command"] === "setFigure" && entry.body["blockId"] === "blk-above"));
+    await view.settle(() => view.root.querySelector('[data-block-id="blk-above"] [data-table-number]') != null);
+    await view.idle();
+    expect(view.root.querySelector('[data-block-id="blk-above"] [data-table-number]')?.textContent).toBe("Table 1.");
+    expect(view.root.querySelector('[data-block-id="blk-below"] [data-table-number]')?.textContent).toBe("Table 2.");
+  });
+
+  it("relabels the figure below when a picture above it is numbered", async () => {
+    hovering();
+    const above = picture("blk-p", "a");
+    const below = picture("blk-q", "b", { caption: "Below", numbered: true, number: 1 });
+    const { view, document } = await mount([above, below], { figureNumbers: { "blk-q": 1 } });
+    expect(view.root.querySelector('[data-figure-caption="blk-q"] [data-figure-number]')?.textContent).toBe("Figure 1.");
+    const renumbered = document as unknown as { blocks: BlockView[]; tableNumbers?: Record<string, number>; figureNumbers?: Record<string, number> };
+    renumbered.blocks = [
+      { ...above, revisionId: "rev-blk-p-2", numbered: true, number: 1 } as BlockView,
+      { ...below, number: 2 } as BlockView,
+    ];
+    renumbered.figureNumbers = { "blk-p": 1, "blk-q": 2 };
+    await hover(view, "blk-p");
+    await view.settle(() => bar(view.root, "block-number") != null);
+    await view.userEvent('[data-bar-action="block-number"]', "click");
+    await view.settle(() => view.root.querySelector('[data-figure-caption="blk-p"] [data-figure-number]') != null);
+    await view.idle();
+    expect(view.root.querySelector('[data-figure-caption="blk-p"] [data-figure-number]')?.textContent).toBe("Figure 1.");
+    expect(view.root.querySelector('[data-figure-caption="blk-q"] [data-figure-number]')?.textContent).toBe("Figure 2.");
   });
 });

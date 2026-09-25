@@ -330,6 +330,134 @@
       }
     },
     {
+      "extension": "doc-block-roles",
+      "nodeId": "node:blockRole",
+      "type": "ext.blocktype",
+      "content": {
+        "id": "blockRole",
+        "name": "blockRole",
+        "optionalProperties": [
+          "description",
+          "retired"
+        ],
+        "permittedChildTypes": [],
+        "properties": {
+          "description": "what a block of this role does, in the person's words",
+          "id": "the block role's identity, a UUID the shell mints; the node id is node:<id>",
+          "name": "the block role's name, as the choice offers it",
+          "order": "the block role's place among the ones its document role offers, a number",
+          "retired": "true once the block role is retired: the choice stops offering it, assignments stay and say so"
+        },
+        "requiredProperties": [
+          "id",
+          "name",
+          "order"
+        ],
+        "semantics": "A block role a document role offers (BO_0299), reached from it by offers: a root node with no parent and no block flag. Retired, never deleted."
+      }
+    },
+    {
+      "extension": "doc-block-roles",
+      "nodeId": "node:documentRole",
+      "type": "ext.blocktype",
+      "content": {
+        "id": "documentRole",
+        "name": "documentRole",
+        "optionalProperties": [
+          "description",
+          "retired"
+        ],
+        "permittedChildTypes": [],
+        "properties": {
+          "description": "what a document of this role is, in the person's words",
+          "id": "the role's identity, a UUID the shell mints; the node id is node:<id>",
+          "name": "the role's name, as the choices offer it",
+          "retired": "true once the role is retired: the choices stop offering it, assignments stay and say so"
+        },
+        "requiredProperties": [
+          "id",
+          "name"
+        ],
+        "semantics": "A document role (BO_0299): a root node with no parent and no block flag, so it is never offered among the kinds a document's block may take. Configured in the app; retired, never deleted."
+      }
+    },
+    {
+      "extension": "doc-block-roles",
+      "nodeId": "node:hasBlockRole",
+      "type": "ext.relationtype",
+      "content": {
+        "id": "hasBlockRole",
+        "name": "hasBlockRole",
+        "semantics": "A block carries a block role: directed from any block in a document's reading order to the blockRole, at most one active per block, the roles extension's rule. Every block kind may carry one (BO_0299_Q8). Written as the person's own truth at once, never proposed. Declared by doc-block-roles under BO_0299_011."
+      }
+    },
+    {
+      "extension": "doc-block-roles",
+      "nodeId": "node:hasDocumentRole",
+      "type": "ext.relationtype",
+      "content": {
+        "id": "hasDocumentRole",
+        "name": "hasDocumentRole",
+        "semantics": "A document carries a document role: directed from the document to the documentRole, at most one active per document, the roles extension's rule, checked by a read before the write. Written as the person's own truth at once, never proposed (BO_0299_Q2, BO_0299_Q6). Declared by doc-block-roles under BO_0299_011."
+      }
+    },
+    {
+      "extension": "doc-block-roles",
+      "nodeId": "node:offers",
+      "type": "ext.relationtype",
+      "content": {
+        "id": "offers",
+        "name": "offers",
+        "semantics": "A document role offers a block role: directed from the documentRole to the blockRole, one document role per block role. Declared by doc-block-roles under BO_0299_011."
+      }
+    },
+    {
+      "extension": "doc-block-roles",
+      "nodeId": "node:doc-block-roles.roles",
+      "type": "ext.skill",
+      "content": {
+        "conventions": {
+          "neverAssign": "You never propose a document role or a block role: read_document_roles answers reads alone, and no item of propose_document_changes sets one. A block whose role is not offered by the current document role, or is retired, is still written by that role; say so in your conclusion if it matters.",
+          "profileSaysHow": "A profile attached to the document may say how a role is written — its own blocks can carry the same roles. Where the profile speaks to a role, follow it; where it is silent, the role's description and its name are the guide.",
+          "readRolesFirst": "Before proposing into a document, call read_document_roles once. The answer carries the document role, and per block in reading order its block role with its description — what a block of that role does, in the person's words.",
+          "roleIsNotTheTypographicRole": "A block's blockRole is not its role in read_document: that one is the typographic role — paragraph, h1, quote. Keep the two apart.",
+          "writeByRole": "A block's block role says what the block is for: write a Hook as a hook, a Closing as a closing that answers the hook. The role's description is the person's own account of it and outranks your idea of the word."
+        },
+        "goal": "Write a document that carries a document role by its roles: each block by the block role the person gave it, the whole by what the document role means, and never assign a role yourself.",
+        "id": "doc-block-roles.roles",
+        "outputContract": "A conclusion naming the document role you wrote under and which block roles the proposed blocks serve; the blocks staged into the run's group; no role assigned or proposed.",
+        "permittedOperations": "read_document_roles to read the document's role and each block's; propose_document_changes to propose the words. Nothing you hold assigns a role, and no item proposes one.",
+        "preconditions": [
+          "read_document_roles answers for the document. If the document carries no document role, write it as you would any document and read nothing more here.",
+          "You can name the block you are writing into; its block role is read by blockId from the answer."
+        ]
+      }
+    },
+    {
+      "extension": "doc-block-roles",
+      "nodeId": "node:doc-block-roles.read_document_roles",
+      "type": "ext.tool",
+      "content": {
+        "description": "The document's role — a Story, an Essay — and each block's block role, in reading order, at your pin: what the person assigned, never a candidate's. Read it before proposing into a document that carries a document role, and write each block by its role: a Hook block is written as a hook. It stages nothing, and you never propose a role — assigning one is the person's act.",
+        "id": "doc-block-roles.read_document_roles",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "document": {
+              "description": "The document, as a record id.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "document"
+          ],
+          "type": "object"
+        },
+        "name": "read_document_roles",
+        "route": "kernel/tools/read_document_roles"
+      }
+    },
+    {
       "extension": "documents",
       "nodeId": "node:BlockKind",
       "type": "ext.blocktype",
@@ -417,7 +545,10 @@
           "affiliations",
           "keywords",
           "venue",
-          "citationStyle"
+          "citationStyle",
+          "profile",
+          "formatCode",
+          "lineNumbers"
         ],
         "permittedChildTypes": [
           "text",
@@ -440,10 +571,13 @@
           "affiliations": "the affiliations the authors name, in order, as words (BO_0293)",
           "authors": "the manuscript's authors, in order, each {name, affiliations?, email?, corresponding?}: affiliations are indexes into the document's affiliations, corresponding is true for the one to write to (BO_0293)",
           "citationStyle": "the document's own citation style, by the id of a style the bibliography ships; absent, the document follows the instance's default (BO_0291_037)",
+          "formatCode": "whether a settled edit of a code block, and an accepted one, is pretty-printed through the code service's formatter: absent or true means on, false means off; switched per document from the bar's Format code toggle, written by the person as their own edit (BO_0296_013)",
           "id": "the document's identity, a UUID the shell mints; the node id is node:<id>",
           "intention": "the marking a reader gave the whole document: the marks value of an established ext.intention declaration; unconstrained here because intention extensions are declared per instance and a permitted set in this declaration would refuse a marking the instance legitimately declares — the agent bridge refuses an unknown intention at run start",
           "keywords": "the manuscript's keywords, in order (BO_0293)",
+          "lineNumbers": "whether each line of a code block is numbered in the document: absent or true means shown, false means hidden; switched per document from the bar's Line numbers toggle, written by the person as their own edit, and nothing of it reaches a run (BO_0302_003)",
           "phase": "the root's phase (BO_0249): proposed — a safe hypothetical environment, the default when absent; accepted — the wider system may rely on it; superseded — another root replaced it, named in supersededBy. The values are an established RootPhase declaration's, unconstrained here for the reason kind is (BO_0256_002)",
+          "profile": "the profile the reader attached to this document: the id of a document carrying record profile, whose established words the kernel supplies to a run started from a command in this document; absent means no profile; written as the person's own act by the profiles extension (BO_0298_010)",
           "record": "the record slot carried over from the previous document type: names a record declaration; no permitted set, per the recorded non-enforcement of BO_0199_002",
           "runtime": "the runtime the document is connected to for running its code blocks, by its id; absent means none. Written by the kernel as the person's own edit (BO_0289)",
           "supersededBy": "the id of the root that superseded this one; present only with phase superseded, written in the same mutation that accepts the successor (BO_0249)",
@@ -581,13 +715,19 @@
         "id": "sourcecode",
         "name": "sourcecode",
         "optionalProperties": [
-          "language"
+          "language",
+          "continues",
+          "caption",
+          "numbered"
         ],
         "permittedChildTypes": [],
         "permittedValues": {},
         "properties": {
+          "caption": "the caption beneath the listing, in words; absent means none (BO_0303_007)",
+          "continues": "whether the block's line numbering continues from the nearest code block above it in the reading order: true continues, absent starts at one; content of the block, set by a person from the block's head, carried forward by a revise of the source, and never set by a tool (BO_0302_004)",
           "id": "the block's identity, a UUID the shell mints; the node id is node:<id>",
           "language": "the language the code is written in, such as python; the runtime's kernel decides what it runs",
+          "numbered": "whether the block is numbered as a listing: true asks for a number, absent means none; the number itself is the document's order — listings counted in reading order apart from figures, tables and equations — and is never stored (BO_0303_007)",
           "order": "the block's place among its siblings, the same key text carries",
           "source": "the code itself, as text"
         },
@@ -780,7 +920,7 @@
           "openProposals": "The document you work in is not settled: other runs' proposals may stand unanswered on its blocks, and read_document answers them (BO_0271). Every block carries proposal — {group, item, proposer, kind, words, refinable, reason} — when another group has proposed against it, and the document carries proposedInserts, the new blocks proposed into it, each with where it would stand. Read them before writing anything new. What stands and needs sharpening is refined in place, never proposed again beside it: a block keeps one open proposal, so a second rewrite of the same block is refused by the core. A refinement is a replace carrying refines: {group, item} — the group and item read_document answered — with the runs and, if it changes, the role; it lands on that proposal's candidate, under that group, and the person answers once. A proposed insert is refined the same way, by its group and item. Stage only what needs changing. Where a standing proposal already says what you would say, leave its words as they are; say that you left it plainly only when there is really nothing to add anywhere. The document's own blocks — accepted text — are left as they are unless the command referenced one (a marked block or passage) or plainly asks for those words to change; every proposal the person has not answered is open matter, accepted words are not. A proposal whose refinable is false is context: read it, build on what it says, never propose against it — its reason says why: a run still going may restage the same block a moment later, another person's branch is theirs, a candidate the system derived is answered by the person alone, a fixated framing is kept, an answered member is settled, and a removal or a move has no words to refine. Your final words say what you refined and whose it was, and what you left standing because it already said it. When the command asks to reconcile, merge or reduce the standing proposals (BO_0286): refine the proposals that stay, so the reconciled words live in them; withdraw the ones those words make surplus with a withdraw item — proposal: {group, item}, successor: the standing item or the index of the item in this call that supersedes it, withdrawalReason: one short line where the successor does not say it — and stage nothing beside them. A withdrawal is a proposal, never an answer: the item stays open with its words, the person rejects it with one press or accepts it anyway, and accepting the successor rejects what it supersedes in the same press. Any withdrawable item may be withdrawn, a removal or a move too, which then leaves the block as it stands. The final words say how many proposals were refined and how many withdrawn, and in whose favour.",
           "prompts": "A block with the prompt standing is a command the reader wrote in the document and sent, not material of it (BO_0267): never rewrite, remove or move it, and do not build on it unless the command asks. When your run was sent from a block, the instructions name it. Every command given in a document is answered by proposing into it: when the command asks a question, the answer is staged directly after the block the command was sent from, as the blocks the reader should read it as (conventions.structure), and your final words say what you staged.",
           "readerAnswersPerItem": "Each item is decided on its own in the editor. Keep an item to one intent, so a reader can accept the heading and reject the rewrite.",
-          "structure": "What you stage arrives as the structure you wrote, never as one block holding all of it (BO_0270). Split the content at its headings: a heading is its own text block with the role it has — h1, h2, h3 — and a block's runs never carry # characters, which nothing renders. Under a heading each paragraph is its own block, and each list item is its own block with its marker as plain text, since no role renders a list; a fenced code block stays one text block, because it is one unit; and a table is a table block — kind table, with its typed columns (text, number, date, boolean) and its rows, one block whole (BO_0287) — never pipes in a paragraph. An equation is an equation block — kind equation, carrying the exact TeX it is set from, optionally a caption and numbered when its author asks for a number (BO_0290) — never TeX in a paragraph; mathematics inside a sentence is a run of that sentence carrying math: true whose text is its TeX, and a reference to a numbered equation is a run carrying equationRef with that equation's identity and no text of its own. A picture carries an optional caption and numbered when its author asks for a figure number, and a table numbered likewise (BO_0295); a reference to a numbered figure — a picture, or an output a person numbered — is a run carrying figureRef with its identity and no text of its own, and to a numbered table a run carrying tableRef. A citation is a run of its sentence carrying cite — {work, locator?}: the identity of a work of the instance's bibliography, and where in it when the claim rests on one place, such as p. 12 — whose text is empty, never a bracketed number or an author and year typed into the words (BO_0291); read_document answers each citation's number, or missing when its work is gone, and how the reader sees it drawn is the document's citation style. Never set a caption or numbered on an output: an output is what an execution produced, and its caption and number are the person's. A number is never written: read_document answers the number the document's order gives each numbered equation, figure and table — figures and tables counted apart — and a reference answers the number it resolves to, or missing when its block is gone or asks for none. A change to a table is a replace of that one block carrying the whole table; where a file stands behind it, read_document says so with its row count and the rows you read are its first hundred, and your replace drops the file, since the cells you propose are the whole table. A paper's abstract is one text block with the role abstract, wherever it stands; a manuscript's authors, affiliations, keywords and venue are the document's own properties, set by a person, and a run proposes none of them (BO_0293). Never invent structure: content that carries no heading is given none, and a one-sentence answer is one block by this rule rather than by an exception. A rewrite carries it too: rewriting a block into content with headings stages the replace beside the inserts in the one group, with the rationale saying the items are one change."
+          "structure": "What you stage arrives as the structure you wrote, never as one block holding all of it (BO_0270). Split the content at its headings: a heading is its own text block with the role it has — h1, h2, h3 — and a block's runs never carry # characters, which nothing renders. Under a heading each paragraph is its own block, and each list item is its own block with its marker as plain text, since no role renders a list; a fenced code block stays one text block, because it is one unit; and a table is a table block — kind table, with its typed columns (text, number, date, boolean) and its rows, one block whole (BO_0287) — never pipes in a paragraph. An equation is an equation block — kind equation, carrying the exact TeX it is set from, optionally a caption and numbered when its author asks for a number (BO_0290) — never TeX in a paragraph; mathematics inside a sentence is a run of that sentence carrying math: true whose text is its TeX, and a reference to a numbered equation is a run carrying equationRef with that equation's identity and no text of its own. A picture carries an optional caption and numbered when its author asks for a figure number, and a table numbered likewise (BO_0295); A code block carries an optional caption and numbered when its author asks for a listing number, counted apart from figures and tables (BO_0303); read_document answers a numbered code block's number, and a reference to it reads Listing N; a reference to a numbered figure — a picture, or an output a person numbered — is a run carrying figureRef with its identity and no text of its own, and to a numbered table a run carrying tableRef. A reference to any block of the document — a section by its heading, a paragraph, or a numbered figure, table or equation — is a run of its sentence carrying blockRef with that block's identity and no text of its own (BO_0300); read_document answers each as its label — Figure 3, Table 1, (2), the heading's words, or Remark N for a paragraph another sentence refers to, which the manuscript then sets apart as a numbered remark — or missing when the block is outside the reading order; prefer blockRef over figureRef, tableRef and equationRef, which remain read for the sentences that carry them. A citation is a run of its sentence carrying cite — {work, locator?}: the identity of a work of the instance's bibliography, and where in it when the claim rests on one place, such as p. 12 — whose text is empty, never a bracketed number or an author and year typed into the words (BO_0291); read_document answers each citation's number, or missing when its work is gone, and how the reader sees it drawn is the document's citation style. Never set a caption or numbered on an output: an output is what an execution produced, and its caption and number are the person's. A number is never written: read_document answers the number the document's order gives each numbered equation, figure, table and listing — each kind counted apart — and a reference answers the number it resolves to, or missing when its block is gone or asks for none. A change to a table is a replace of that one block carrying the whole table; where a file stands behind it, read_document says so with its row count and the rows you read are its first hundred, and your replace drops the file, since the cells you propose are the whole table. A paper's abstract is one text block with the role abstract, wherever it stands; a manuscript's authors, affiliations, keywords and venue are the document's own properties, set by a person, and a run proposes none of them (BO_0293). Never invent structure: content that carries no heading is given none, and a one-sentence answer is one block by this rule rather than by an exception. A rewrite carries it too: rewriting a block into content with headings stages the replace beside the inserts in the one group, with the rationale saying the items are one change."
         },
         "examples": {
           "addAClaim": "propose_document_changes {documentId, rationale, items: [{kind: claim, blockId, text: [{text: 'Cached authorization stays valid for the request.'}]}]}",
@@ -809,6 +949,52 @@
         "outputContract": "One propose_document_changes call per coherent change to one document, with a rationale saying why. Report the group the tool answered and what it stages; never claim the change is accepted. A refusal envelope is an answer: read its diagnostics and adjust the items rather than retrying the same call. A commit command — 'yes, this is the decision', 'treat this as the requirement', 'make this the accepted direction' — is answered by one phase item {kind: \"phase\", phase: \"accepted\"} on the document, whatever block is marked or referenced: the marks say where the decision is stated, not what to change, and a kind item alone is the wrong answer (conventions.commit). A commit's sentence of consequences names the proposals standing unanswered in the document. A refinement is reported as what it refined and whose proposal that was; a standing proposal left as it stands because it already says it is reported as left, not as done (conventions.openProposals). A reconciliation is reported as how many standing proposals were refined and how many withdrawn, and in whose favour, never as new blocks staged beside them.",
         "permittedOperations": "list_documents to find a document by title, and an extension's changes by change — each row carries change and status for a change document; read_document for its blocks in reading order with their identities, kinds, roles and runs, and for a change document its extension and status; read_blocks for only the blocks it names, in reading order and in read_document's shape, which is how the person sees what you look at (BO_0265); propose_document_changes with items of kind replace (runs and/or role for a block), insert (a new text or divider block at a placement), remove (a block leaves the reading order, retired rather than deleted), move (a block to a placement) and status (a change document's status, one of idea, draft, ready, wip, completed, rejected); create_document for a new document with a title, its first block and — for a change of an extension — change naming the extension and a status, idea unless said. Everything stages into this run's proposal group; nothing writes truth. The statement tools remain available for anything beyond documents. — and, since BO_0244, kind (a block's blockKind, none clears it), claim (add a claim to a block, or revise one by claimId), relate (a reason-bearing relation between two claims), reason (a relation's new reason) and derive (the blocks a block rests on). read_document answers each block's blockKind, claims, provenance and derivedFrom, and the document's relations with both ends. Since BO_0249, phase: the root's phase — {kind: \"phase\", phase: proposed | accepted | superseded, supersededBy only with superseded} on the document itself, refused on a change document, whose status is its lifecycle. An agent proposes a phase and never sets it; the reader establishes it from the transition card. Since BO_0271, read_document and read_blocks answer on each block its proposal — the standing proposal another group holds against it: group, item, proposer, kind (rewrite, removal, move), words, refinable and, when not refinable, reason — and the document's proposedInserts, each with its placement; and a replace item may carry refines: {group, item}, landing its runs and role on that proposal's candidate in that group instead of in this run's, which is how a standing proposal is refined (conventions.openProposals). Since BO_0286, withdraw: {kind: \"withdraw\", proposal: {group, item}, successor?: {group, item} | {index}, withdrawalReason?} marks a standing proposal as surplus, on the proposal itself, for the person to reject with one press; read_document answers each standing proposal's withdrawable and, when a run has proposed one, its withdrawnBy — the run, its agent, the successor and the reason (conventions.openProposals).",
         "preconditions": "The run holds the kernel toolset. The document to change exists at the run's pin; read it once with read_document to find your way, then read the blocks you work on with read_blocks before proposing against them — the person sees each block you read marked while you read it — because a replace or a move names a block by the identity those reads answered."
+      }
+    },
+    {
+      "extension": "keywords",
+      "nodeId": "node:keywords.keywords",
+      "type": "ext.skill",
+      "content": {
+        "conventions": {
+          "mentionsAreDerived": "A mention is resolved from the words when the document is read and stored nowhere: you write the words, and the connection follows. Do not add links, marks or brackets to make one.",
+          "neverMark": "You never mark a document as a keyword, give it or its blocks a role, or propose a definition into a keyword's document unless asked to in that document: marking and defining are the person's acts.",
+          "preferTheTitle": "Use the keyword's title in your words rather than an alias, so the mention is drawn and the glossary carries the name the person chose. A plural or a possessive of the title is fine; a different word is not the keyword.",
+          "readKeywordsFirst": "Before proposing into a document, call read_keywords once. Where the document mentions a keyword, its definition is in the answer; where you are about to write a keyword the document does not mention yet, the instance's keywords are listed by name.",
+          "writeByTheDefinition": "Write about a keyword as its definition has it. The definition is the person's own account and outranks your idea of the word; where it is silent, the keyword's document is the next place to read."
+        },
+        "goal": "Write about a keyword as the keyword's own document defines it: read the definition before writing, keep the keyword's title, and never mark a document as a keyword yourself.",
+        "id": "keywords.keywords",
+        "outputContract": "A conclusion naming the keywords the proposed words are about and where their definitions were read; the blocks staged into the run's group; no keyword marked and no role assigned.",
+        "permittedOperations": "read_keywords to read the document's mentions and the instance's keywords; read_document to read a keyword's document whole when its definition is not enough; propose_document_changes to propose the words. Nothing you hold marks a keyword or assigns a role.",
+        "preconditions": [
+          "read_keywords answers for the document. If the instance holds no keywords, write as you would any document and read nothing more here.",
+          "A keyword is a document the person gave the keyword role; its definition and its aliases are blocks of that document under roles the person named."
+        ]
+      }
+    },
+    {
+      "extension": "keywords",
+      "nodeId": "node:keywords.read_keywords",
+      "type": "ext.tool",
+      "content": {
+        "description": "The keywords this document mentions, in reading order at your pin — each mention's block and character range, the keyword's title, its definition and its aliases — and the names of every keyword the instance holds. Read it before writing about a keyword, and write it as its definition has it. It stages nothing, and you never mark a document as a keyword or give it a role — that is the person's act.",
+        "id": "keywords.read_keywords",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "document": {
+              "description": "The document, as a record id.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "document"
+          ],
+          "type": "object"
+        },
+        "name": "read_keywords",
+        "route": "kernel/tools/read_keywords"
       }
     },
     {
@@ -856,6 +1042,28 @@
           "outcome"
         ],
         "semantics": "A manuscript made of a document and kept (BO_0293): a root node with no parent and no block flag, as a work is, so it is never offered among the kinds a document's block may take."
+      }
+    },
+    {
+      "extension": "manuscripts",
+      "nodeId": "node:manuscripts.making",
+      "type": "ext.skill",
+      "content": {
+        "conventions": {
+          "aFileNotABlock": "A run's manuscript is a file of the document: it proposes no block and changes no property. Do not describe it as a change to the document.",
+          "onceIsEnough": "Every manuscript made is kept on the document and listed with your process. Make one, read it, and say what you found; make another only after the document changed.",
+          "readBeforeMaking": "Read the document first. A manuscript with no abstract, no authors or no numbered figure is what the document has, not a fault of the tool: propose the missing block or say what front matter the person has to set, rather than making manuscript after manuscript.",
+          "readTheAnswer": "The answer is the LaTeX source, the log's warnings and what was left out — never the PDF. Read the omitted list first: every line names a block the paper could not carry and why. Then the warnings. Then the source, for what the venue's rules ask that the document does not give.",
+          "sayItInTheDocument": "What the manuscript needs goes into the document as a proposal — a question block under the section it concerns, or the missing block itself — and into your conclusion. Never edit the source: the manuscript is a projection of the record, and the record is what is corrected."
+        },
+        "goal": "Make a manuscript of the document you work in when the person asks for one, or when the document is to be submitted and a reading of it against the venue's rules is wanted; read what came back and say in the document what the manuscript needs.",
+        "id": "manuscripts.making",
+        "outputContract": "A conclusion naming the venue, the outcome, what was left out and what the document needs for the venue; the kept manuscript staged into the run's group with its files; any proposed blocks staged beside it.",
+        "permittedOperations": "make_manuscript, the kernel's, to make and keep a manuscript of a document at your pin for a venue: generic or ieee, else the document's own venue, else generic. read_document to read the front matter and the blocks first. propose_document_changes to say in the document what the manuscript needs. Nothing you hold writes truth.",
+        "preconditions": [
+          "The manuscripts extension is active and the instance has a typesetting service: make_manuscript is listed, and refuses in words when there is no service.",
+          "The document holds what a manuscript is made of at your pin: a title, its front matter, an abstract block, sections, numbered figures and tables, citations from the bibliography. What is not there is not in the manuscript — nothing is typed a second time."
+        ]
       }
     },
     {
@@ -1588,9 +1796,12 @@
     "calliopa-extension",
     "calliopa-refine",
     "code",
+    "doc-block-roles",
     "documents",
+    "keywords",
     "manuscripts",
     "media",
+    "profiles",
     "publishing",
     "relations",
     "settings",

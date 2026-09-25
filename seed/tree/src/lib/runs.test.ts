@@ -16,6 +16,7 @@ import {
   sliceRuns,
   splitRuns,
   type Run,
+  runsPoints,
 } from "./runs";
 
 const plain = (text: string): Run[] => [{ text }];
@@ -439,6 +440,43 @@ describe("figure and table references", () => {
     expect(readRuns([{ text: "", figureRef: "blk-i1", tableRef: "blk-t" }])).toEqual({
       failure: "Run 0 is one reference, mathematics or a citation, never two at once.",
     });
+  });
+});
+
+/**
+ * A reference to any block as an atom (`BO_0300_010`): kept although it
+ * carries no text, one character wide, read back as stored, told apart from a
+ * figure reference to the same block, and refused when it is anything else.
+ */
+describe("a reference to any block", () => {
+  const reference: Run = { text: "", blockRef: "blk-h" };
+
+  it("is kept, counts as one character and is told from the older reference kinds", () => {
+    expect(normalizeRuns([{ text: "see " }, reference, { text: "." }])).toEqual([{ text: "see " }, reference, { text: "." }]);
+    expect(runsLength([{ text: "ab" }, reference])).toBe(3);
+    expect(sameRuns([reference], [reference])).toBe(true);
+    expect(sameRuns([reference], [{ text: "", blockRef: "blk-x" }])).toBe(false);
+    expect(sameRuns([reference], [{ text: "", figureRef: "blk-h" }])).toBe(false);
+  });
+
+  it("reads back as stored, and is refused naming nothing, carrying text, or being two things", () => {
+    expect(readRuns([{ text: "see " }, reference])).toEqual({ runs: [{ text: "see " }, reference] });
+    expect(readRuns([{ text: "", blockRef: "" }])).toEqual({ failure: "Run 0 refers to no block." });
+    expect(readRuns([{ text: "x", blockRef: "blk-h" }])).toEqual({ failure: "Run 0 is a block reference carrying text of its own." });
+    expect(readRuns([{ text: "", blockRef: "blk-h", figureRef: "blk-h" }])).toEqual({
+      failure: "Run 0 is one reference, mathematics or a citation, never two at once.",
+    });
+    expect(readRuns([{ text: "", blockRef: "blk-h", cite: { work: "w" } }])).toEqual({
+      failure: "Run 0 is one reference, mathematics or a citation, never two at once.",
+    });
+  });
+});
+
+describe("runsPoints", () => {
+  it("reads every atom as one point, so an index into it is a run offset", () => {
+    const runs: Run[] = [{ text: "see " }, { text: "", cite: { work: "w" } }, { text: " and " }, { text: "E = mc^2", math: true }, { text: " #me" }];
+    expect(runsPoints(runs)).toBe("see \uFFFC and \uFFFC #me");
+    expect([...runsPoints(runs)].length).toBe(runsLength(runs));
   });
 });
 

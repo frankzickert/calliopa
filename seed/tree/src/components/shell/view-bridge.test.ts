@@ -6,7 +6,7 @@ import {
   type ViewActivity,
   type ViewAnswerAll,
   type ViewToggleRun, ViewBridgeContext, type ViewBridge, type ViewBar,
-  type ViewFocus, type ViewAgents, type ViewComposeBlock, type ViewInspector, type ViewProposed, type ViewReveal } from "./view-bridge";
+  type ViewFocus, type ViewAgents, type ViewComposeBlock, type ViewInspector, type ViewProposed, type ViewReveal, type ViewPointing, type ViewAcross } from "./view-bridge";
 
 /**
  * A contributed view reads the workspace it is mounted in off the bridge:
@@ -30,6 +30,8 @@ const Host = component$<{ workspaceId: string }>(({ workspaceId }) => {
     save: useStore<{ state: null }>({ state: null }),
     proposed: useStore<ViewProposed>({ itemId: null, seq: 0 }),
     reveal: useStore<ViewReveal>({ itemId: null, target: null, seq: 0 }),
+    pointing: useStore<ViewPointing>({ documentId: null, prompt: null, marks: "", documents: [], seq: 0 }),
+    across: useStore<ViewAcross>({ document: null, title: "", seq: 0 }),
     focus: useStore<ViewFocus>({ itemId: null, blockId: null, seq: 0 }),
     activity: useStore<ViewActivity>({ runs: [], seq: 0 }),
     answerAll: useStore<ViewAnswerAll>({ itemId: null, group: null, answer: null, seq: 0 }),

@@ -18,6 +18,9 @@ import {
   reviseEquation,
   setFigure,
   setCitationStyle,
+  setFormatCode,
+  setLineNumbers,
+  setCodeContinues,
   setFrontMatter,
   reviseTable,
   mergeTextBlocks,
@@ -296,8 +299,8 @@ export type DocumentCommand =
       readonly caption?: string;
       readonly numbered?: boolean;
     }
-  /** A picture's or an output's caption and number ask, or a table's ask.
-   * BO_0295_008 */
+  /** A picture's or an output's caption and number ask, a table's ask, or a
+   * code block's caption and ask as a listing. BO_0295_008 BO_0303_008 */
   | {
       readonly command: "setFigure";
       readonly blockId: string;
@@ -307,6 +310,12 @@ export type DocumentCommand =
     }
   /** A document's own citation style, or null for the instance's default. BO_0291_037 */
   | { readonly command: "setCitationStyle"; readonly baseRevisionId: string; readonly style: string | null }
+  /** The document's formatting switch: whether a settled or an accepted code block is pretty-printed. BO_0296_021 */
+  | { readonly command: "setFormatCode"; readonly baseRevisionId: string; readonly on: boolean }
+  /** The document's line-number switch: whether each line of a code block is numbered. BO_0302_007 */
+  | { readonly command: "setLineNumbers"; readonly baseRevisionId: string; readonly on: boolean }
+  /** A code block set to continue its numbering from the code block above it, or not. BO_0302_008 */
+  | { readonly command: "setCodeContinues"; readonly blockId: string; readonly baseRevisionId: string; readonly continues: boolean }
   /** A document's front matter set whole. BO_0293_012 */
   | { readonly command: "setFrontMatter"; readonly baseRevisionId: string; readonly frontMatter: FrontMatter }
   /** A text block turned into a code block in its place. BO_0289_021 */
@@ -565,6 +574,36 @@ export function parseDocumentCommand(
         return { failure: "A citation style is a style's id, or null for the instance's default." };
       }
       return { command: { command: "setCitationStyle", baseRevisionId, style } };
+    }
+    case "setFormatCode": {
+      if (baseRevisionId === null) {
+        return { failure: "Switching code formatting names the revision of the document it is based on." };
+      }
+      const on = input["on"];
+      if (typeof on !== "boolean") {
+        return { failure: "Format code is switched on or off: on is true or false." };
+      }
+      return { command: { command: "setFormatCode", baseRevisionId, on } };
+    }
+    case "setLineNumbers": {
+      if (baseRevisionId === null) {
+        return { failure: "Switching line numbers names the revision of the document it is based on." };
+      }
+      const on = input["on"];
+      if (typeof on !== "boolean") {
+        return { failure: "Line numbers are switched on or off: on is true or false." };
+      }
+      return { command: { command: "setLineNumbers", baseRevisionId, on } };
+    }
+    case "setCodeContinues": {
+      if (blockId === null || baseRevisionId === null) {
+        return { failure: "Continuing a code block's numbering names the block and the revision it is based on." };
+      }
+      const continues = input["continues"];
+      if (typeof continues !== "boolean") {
+        return { failure: "A code block continues its numbering or not: continues is true or false." };
+      }
+      return { command: { command: "setCodeContinues", blockId, baseRevisionId, continues } };
     }
     case "turnIntoCode": {
       if (blockId === null || baseRevisionId === null) {
@@ -1001,6 +1040,12 @@ export function runDocumentCommand(
       });
     case "setCitationStyle":
       return setCitationStyle({ documentId, baseRevisionId: command.baseRevisionId, style: command.style });
+    case "setFormatCode":
+      return setFormatCode({ documentId, baseRevisionId: command.baseRevisionId, on: command.on });
+    case "setLineNumbers":
+      return setLineNumbers({ documentId, baseRevisionId: command.baseRevisionId, on: command.on });
+    case "setCodeContinues":
+      return setCodeContinues({ documentId, blockId: command.blockId, baseRevisionId: command.baseRevisionId, continues: command.continues });
     case "setFrontMatter":
       return setFrontMatter({ documentId, baseRevisionId: command.baseRevisionId, frontMatter: command.frontMatter });
     case "setFigure":

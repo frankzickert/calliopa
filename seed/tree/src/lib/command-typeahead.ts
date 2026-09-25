@@ -28,7 +28,25 @@ export function pendingReference(
   caret: number,
 ): PendingReference | null {
   const before = text.slice(0, caret);
-  const match = /(^|[\s(\[])#(\d*)$/u.exec(before);
+  const match = /(^|[\s(\[\uFFFC])#(\d*)$/u.exec(before);
+  if (match === null) return null;
+  const typed = match[2] ?? "";
+  return { start: caret - typed.length - 1, typed };
+}
+
+/**
+ * A `#` and whatever was typed after it, for a reference to a block of the
+ * document (`BO_0300_005`): at the start or after whitespace or an opening
+ * bracket, running to the caret, any characters but a space or another `#`.
+ * Where `pendingReference` reads the digits of a mark, this reads the words
+ * a block is found by.
+ */
+export function pendingBlockReference(text: string, caret: number): PendingReference | null {
+  const before = text.slice(0, caret);
+  // An atom — a citation, a reference — stands as U+FFFC in the points a
+  // block is measured in, and a `#` may follow one directly, so two
+  // references can stand side by side (BO_0300 walk, 2026-09-25).
+  const match = /(^|[\s(\[\uFFFC])#([^\s#\uFFFC]*)$/u.exec(before);
   if (match === null) return null;
   const typed = match[2] ?? "";
   return { start: caret - typed.length - 1, typed };

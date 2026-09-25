@@ -60,6 +60,32 @@ def png_pixel() -> str:
 PIXEL = png_pixel()
 
 
+def pdf_text(pdf: bytes) -> str:
+    """The words pdflatex wrote into the PDF's content streams, decoded loosely:
+    enough to see an unresolved reference's `??`, not a reader."""
+    import re as _re
+    import zlib
+
+    out: list[str] = []
+    for match in _re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", pdf, _re.S):
+        data = match.group(1)
+        try:
+            data = zlib.decompress(data)
+        except zlib.error:
+            pass
+        # A page's content stream sets its text between BT and ET; a font's
+        # stream, which holds no such operators, is not words.
+        if b"BT" not in data or b"ET" not in data:
+            continue
+        # A font's binary stream can hold those two bytes by chance and then
+        # any pair of characters, `??` included; a content stream pdflatex
+        # writes is printable ASCII throughout.
+        if any(byte > 126 or (byte < 32 and byte not in (9, 10, 13)) for byte in data):
+            continue
+        out.extend(piece.decode("latin-1") for piece in _re.findall(rb"\((.*?)(?<!\\)\)", data, _re.S))
+    return "".join(out)
+
+
 def text(words: str) -> list[dict]:
     """Pandoc inlines for plain words."""
     inlines: list[dict] = []
@@ -221,6 +247,52 @@ class Served(unittest.TestCase):
         self.assertIn("\\IEEEauthorblockN{Ada Lovelace}", answer["tex"])
         self.assertIn("\\bibliographystyle{IEEEtran}", answer["tex"])
         self.assertTrue(base64.b64decode(answer["pdf"]).startswith(b"%PDF"))
+
+    @unittest.skipUnless(ENGINE_PRESENT, "the engine is on the image, not here")
+    def test_a_referred_to_paragraph_is_a_numbered_remark_under_both_venues(self) -> None:
+        """A paragraph another sentence refers to is set apart as Remark 1 by the
+        environment the templates define, and a section is referred to by the
+        label Pandoc gives its header (BO_0300_013)."""
+        extra = [
+            {"t": "Para", "c": text("As") + [{"t": "Space"}, {"t": "RawInline", "c": ["latex", "Section~\\ref{introduction}"]}, {"t": "Space"}] + text("and") + [{"t": "Space"}, {"t": "RawInline", "c": ["latex", "Remark~\\ref{par:claim}"]}, {"t": "Space"}] + text("say.")},
+            {"t": "RawBlock", "c": ["latex", "\\begin{remark}\\label{par:claim}"]},
+            {"t": "Para", "c": text("A paragraph another sentence refers to.")},
+            {"t": "RawBlock", "c": ["latex", "\\end{remark}"]},
+        ]
+        for venue in ("generic", "ieee"):
+            status, answer = self.ask("POST", "/v1/manuscripts", {"venue": venue, "ast": manuscript(extra), "references": REFERENCES, "files": {"pixel.png": PIXEL}})
+            self.assertEqual(status, 200, answer)
+            self.assertEqual(answer["outcome"], "ok", (venue, answer["log"]))
+            self.assertIn("\\newtheorem{remark}{Remark}", answer["tex"])
+            self.assertIn("\\begin{remark}\\label{par:claim}", answer["tex"])
+            words = pdf_text(base64.b64decode(answer["pdf"]))
+            self.assertIn("Remark1", words, venue)
+            self.assertNotIn("??", words, venue)
+
+    @unittest.skipUnless(ENGINE_PRESENT, "the engine is on the image, not here")
+    def test_a_numbered_listing_is_a_captioned_float_under_both_venues(self) -> None:
+        """A code block its author numbers is set in the listing float the
+        templates define, holding Pandoc's own coloured, line-numbered block,
+        captioned and labelled, and a sentence refers to it as Listing 1
+        (BO_0303_006)."""
+        extra = [
+            {"t": "Para", "c": text("As") + [{"t": "Space"}, {"t": "RawInline", "c": ["latex", "Listing~\\ref{lst:code}"]}, {"t": "Space"}] + text("shows.")},
+            {"t": "RawBlock", "c": ["latex", "\\begin{listing}[htbp]"]},
+            {"t": "CodeBlock", "c": [["", ["python", "numberLines"], [["startFrom", "40"]]], "def f(x):\n    return x + 1  # a comment"]},
+            {"t": "RawBlock", "c": ["latex", "\\caption{The function.}\\label{lst:code}\\end{listing}"]},
+        ]
+        for venue in ("generic", "ieee"):
+            status, answer = self.ask("POST", "/v1/manuscripts", {"venue": venue, "ast": manuscript(extra), "references": REFERENCES, "files": {"pixel.png": PIXEL}})
+            self.assertEqual(status, 200, answer)
+            self.assertEqual(answer["outcome"], "ok", (venue, answer["log"]))
+            self.assertIn("\\newfloat{listing}{htbp}{lol}", answer["tex"])
+            self.assertIn("\\begin{listing}[htbp]", answer["tex"])
+            self.assertIn("numbers=left", answer["tex"])
+            self.assertIn("firstnumber=40", answer["tex"])
+            words = pdf_text(base64.b64decode(answer["pdf"]))
+            self.assertIn("AsListing1shows.", words, venue)
+            self.assertIn("Listing1:Thefunction.", words, venue)
+            self.assertNotIn("??", words, venue)
 
     @unittest.skipUnless(ENGINE_PRESENT, "the engine is on the image, not here")
     def test_a_code_block_is_set_in_colour_with_shell_escape_still_off(self) -> None:

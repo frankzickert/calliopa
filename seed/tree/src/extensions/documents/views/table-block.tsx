@@ -60,10 +60,13 @@ const TYPE_LABEL: Readonly<Record<ColumnType, string>> = {
 
 export const TableBlock = component$<{
   block: TableBlockView;
+  /** Its number when the document numbers it, from the read's map rather
+   * than the block, so a table numbered above it relabels this one. BO_0295_014 */
+  number?: number | undefined;
   /** Whether the reader may edit it: a proposed table is drawn as it is. */
   editable: boolean;
   revise$?: ReviseTable;
-}>(({ block, editable, revise$ }) => {
+}>(({ block, number, editable, revise$ }) => {
   const draft = useStore<Draft>(draftOf(block));
 
   // A new revision read back is the table now; a draft of an older one is
@@ -269,9 +272,9 @@ export const TableBlock = component$<{
       )}
       {editable && revise$ !== undefined ? (
         <figcaption class="table-block__caption">
-          {block.number !== undefined && (
-            <span class="figure-caption__label" data-table-number={block.number}>
-              {numberLabel("table", block.number)}
+          {number !== undefined && (
+            <span class="figure-caption__label" data-table-number={number}>
+              {numberLabel("table", number)}
             </span>
           )}
           <input
@@ -284,11 +287,11 @@ export const TableBlock = component$<{
           />
         </figcaption>
       ) : (
-        (draft.caption !== "" || block.number !== undefined) && (
+        (draft.caption !== "" || number !== undefined) && (
           <figcaption class="table-block__caption" data-table-caption>
-            {block.number !== undefined && (
-              <span class="figure-caption__label" data-table-number={block.number}>
-                {numberLabel("table", block.number)}
+            {number !== undefined && (
+              <span class="figure-caption__label" data-table-number={number}>
+                {numberLabel("table", number)}
               </span>
             )}
             {draft.caption}

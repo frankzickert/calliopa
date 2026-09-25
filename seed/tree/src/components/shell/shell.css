@@ -658,6 +658,55 @@
   background: var(--panel-raised);
 }
 
+/* While a pointing stands, a document's row carries *Mark document* at its
+   end, a control of its own beside the row's press, and the number the
+   document carries once marked whole. BO_0304_014 */
+.library-entry-group {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.library-entry-group .library-entry {
+  flex: 1;
+  min-width: 0;
+}
+
+.library-entry__mark,
+.tab__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  height: 1.5rem;
+  padding: 0 0.3rem;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.library-entry__mark {
+  margin-inline-end: 0.5rem;
+}
+
+.library-entry__mark:hover,
+.tab__mark:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.library-entry__mark[aria-pressed="true"],
+.tab__mark[aria-pressed="true"] {
+  border-style: solid;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* Keyboard focus is drawn inside the row, as the side bar draws it, rather
    than as a ring standing out past a row that has no edges of its own. */
 .library-entry:focus-visible,
@@ -961,6 +1010,20 @@
 
 .block-command .chip--attachment[data-attachment-state="refused"] svg {
   color: var(--warning);
+}
+
+/* Where a reference points when that is another document: its title beside
+   the number, cut short rather than widening the line. BO_0304_013 */
+.block-command .chip .chip__document {
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.block-command .chip .chip__document::before {
+  content: "· ";
 }
 
 .block-command .chip__remove {

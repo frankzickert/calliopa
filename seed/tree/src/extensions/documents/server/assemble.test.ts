@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { ReadNode, ReadRelation, ReadResult } from "~/server/ccgw/client";
-import { assembleDocument, assembleRetired } from "./assemble";
+import { assembleDocument, assembleRetired, labelReferences, numberFiguresAndTables } from "./assemble";
+import type { BlockView } from "./assemble";
 import { nodeRef } from "~/server/ccgw/nodes";
 
 const DOCUMENT = "00000000-0000-4000-8000-000000000001";
@@ -218,5 +219,79 @@ describe("assembling the retired list", () => {
       DOCUMENT,
     );
     expect(document?.blocks).toEqual([]);
+  });
+});
+
+/**
+ * What a reference to any block is drawn as (`BO_0300_010`, user decisions
+ * 2026-09-25): resolved after the numbering, by what the block is; the
+ * referred-to paragraphs numbered as remarks among themselves; nothing for a
+ * block outside the reading order or one a paper cannot name.
+ */
+describe("labelling references", () => {
+  const common = (blockId: string, order: string) => ({ blockId, revisionId: `rev-${blockId}`, containmentId: `c-${blockId}`, order });
+  const words = (blockId: string, order: string, role: string, text: string, runs: Record<string, unknown>[] = [], standing = "keep"): BlockView =>
+    ({ ...common(blockId, order), kind: "text", role, standing, runs: [{ text }, ...runs] }) as unknown as BlockView;
+  const blocks: BlockView[] = [
+    words("h", "a", "h2", "The Method"),
+    words("p1", "b", "paragraph", "Nobody refers to this one."),
+    words("p2", "c", "paragraph", "A claim.", [{ text: "", blockRef: "h" }, { text: "", blockRef: "p3" }, { text: "", blockRef: "q" }, { text: "", blockRef: "img" }, { text: "", blockRef: "gone" }, { text: "", blockRef: "abs" }, { text: "", blockRef: "eq" }, { text: "", figureRef: "img2" }]),
+    words("p3", "d", "paragraph", "Referred to."),
+    words("q", "e", "quote", "A quote referred to."),
+    { ...common("img", "f"), kind: "image", objectId: "o", numbered: true, number: 1 } as BlockView,
+    { ...common("img2", "f2"), kind: "image", objectId: "o2", numbered: true, number: 2 } as BlockView,
+    { ...common("eq", "g"), kind: "equation", tex: "x", standing: "keep" } as unknown as BlockView,
+    words("gone", "h", "paragraph", "Discarded.", [], "discarded"),
+    words("abs", "i", "abstract", "An abstract."),
+  ];
+
+  it("labels a heading by its words, a referred-to paragraph and quote as remarks in order, a numbered figure by its number, and leaves the rest without", () => {
+    const { labels, remarks } = labelReferences(blocks, { equations: {}, figures: { img: 1, img2: 2 }, tables: {} });
+    expect(labels).toEqual({ h: "The Method", p3: "Remark 1", q: "Remark 2", img: "Figure 1", img2: "Figure 2" });
+    expect(remarks).toEqual({ p3: 1, q: 2 });
+    // p1 is referred to by nothing, gone is discarded, abs is an abstract, eq is unnumbered.
+    expect(labels["p1"]).toBeUndefined();
+    expect(labels["gone"]).toBeUndefined();
+    expect(labels["abs"]).toBeUndefined();
+    expect(labels["eq"]).toBeUndefined();
+  });
+
+  it("numbers the code blocks that ask as listings in a sequence of their own, labels a reference to one, and leaves an unnumbered code block without (BO_0303_008)", () => {
+    const code = (blockId: string, order: string, rest: Record<string, unknown>): BlockView =>
+      ({ blockId, revisionId: `rev-${blockId}`, containmentId: `c-${blockId}`, order, kind: "sourcecode", source: "x", ...rest }) as unknown as BlockView;
+    const listed = [
+      code("c1", "a", { numbered: true, caption: "The first." }),
+      { blockId: "img", revisionId: "r", containmentId: "c", order: "b", kind: "image", objectId: "o", numbered: true } as unknown as BlockView,
+      code("c0", "c", {}),
+      code("c2", "d", { numbered: true }),
+      { blockId: "p", revisionId: "r", containmentId: "c", order: "e", kind: "text", role: "paragraph", runs: [{ text: "", blockRef: "c2" }, { text: "", blockRef: "c0" }] } as unknown as BlockView,
+    ];
+    const numbered = numberFiguresAndTables(listed);
+    expect(numbered.listings).toEqual({ c1: 1, c2: 2 });
+    expect(numbered.figures).toEqual({ img: 1 });
+    expect(numbered.blocks.map((block: BlockView) => ("number" in block ? block.number : undefined))).toEqual([1, 1, undefined, 2, undefined]);
+    const { labels } = labelReferences(numbered.blocks, { equations: {}, figures: numbered.figures, tables: numbered.tables, listings: numbered.listings });
+    expect(labels).toEqual({ c2: "Listing 2" });
+    expect(labels["c0"]).toBeUndefined();
+  });
+
+  it("answers the listing numbers and a listing's caption with the assembled document", () => {
+    const document = assembleDocument(
+      graphOf([
+        { id: "c1", type: "sourcecode", content: { order: "i", source: "x", numbered: true, caption: "The first." } },
+        text("a", "j", { runs: [{ text: "See " }, { text: "", blockRef: "c1" }] }),
+      ]),
+      DOCUMENT,
+    );
+    expect(document?.listingNumbers).toEqual({ c1: 1 });
+    expect(document?.referenceLabels).toEqual({ c1: "Listing 1" });
+    const listing = document?.blocks.find((block) => block.blockId === "c1");
+    expect(listing).toMatchObject({ kind: "sourcecode", numbered: true, number: 1, caption: "The first." });
+  });
+
+  it("answers the labels and the remarks with the assembled document", () => {
+    const document = assembleDocument(graphOf([text("a", "i", { runs: [{ text: "See " }, { text: "", blockRef: "b" }] }), text("b", "j")]), DOCUMENT);
+    expect(document?.referenceLabels).toEqual({ b: "Remark 1" });
+    expect(document?.remarkNumbers).toEqual({ b: 1 });
   });
 });

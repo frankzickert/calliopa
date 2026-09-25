@@ -176,7 +176,10 @@ export const ProposalBlock = component$<{
   /** A replace of a table that a file stands behind: accepting drops the
    * file, since the cells proposed are the whole table. BO_0287_016 */
   dropsFile?: boolean;
-}>(({ item, proposer, words, destination, answer$, settle$, startDrag$, step$, settleReason$, derived, fixated, governed, use$, standing$, framed, grip, focus$, hoverFocus$, edit$, focused, editing, refinedBy, withdrawal, withdrawing, successor$, dropsFile }) => {
+  /** Whether the document numbers the lines of its code, so a proposed code
+   * block is numbered on its row exactly as an accepted one is. BO_0302_006 */
+  numbersCode?: boolean;
+}>(({ item, proposer, words, destination, answer$, settle$, startDrag$, step$, settleReason$, derived, fixated, governed, use$, standing$, framed, grip, focus$, hoverFocus$, edit$, focused, editing, refinedBy, withdrawal, withdrawing, successor$, dropsFile, numbersCode }) => {
   const root = useSignal<HTMLElement>();
   const reach = useStore<Reach>({ hover: false, engaged: false });
   /** The rest a hover focuses after, as a block row measures it. DO_0006_008 */
@@ -390,13 +393,13 @@ export const ProposalBlock = component$<{
       {ownText ? (
         <ProposalText item={item} block={block} reach={reach} settle$={settle$} mark$={$(() => toggleReference$(item.blockId, marked))} {...(edit$ === undefined ? {} : { edit$ })} />
       ) : ownMedia && block !== null && isMedia(block) ? (
-        <MediaBlock block={block} />
+        <MediaBlock block={block} number={block.number} />
       ) : ownTable && block !== null && isTable(block) ? (
-        <TableBlock block={block} editable={false} />
+        <TableBlock block={block} number={block.number} editable={false} />
       ) : ownCode && block !== null && isCode(block) ? (
-        <CodeBlock block={block} editable={false} />
+        <CodeBlock block={block} editable={false} numbered={numbersCode === true} number={block.number} />
       ) : ownOutput && block !== null && isOutput(block) ? (
-        <OutputBlock block={block} />
+        <OutputBlock block={block} number={block.number} />
       ) : inferredCard ? (
         <PossibleRelation item={item} {...(settleReason$ === undefined ? {} : { settleReason$ })} />
       ) : work ? (

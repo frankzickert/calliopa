@@ -13,6 +13,7 @@ import {
   readRunShape,
   readGestureTarget,
   type Pointing,
+  sent,
 } from "./command-target";
 
 /**
@@ -439,5 +440,61 @@ describe("a gesture's target is the document it was made in (BO_0258_006)", () =
     expect(readGestureTarget({})).toEqual({ ok: false, error: "A gesture names the document it was made in." });
     expect(readGestureTarget({ artifact: "  " }).ok).toBe(false);
     expect(readGestureTarget({ artifact: 7 })).toEqual({ ok: false, error: "The artifact must be a document's identity." });
+  });
+});
+
+describe("references across documents (BO_0304_013)", () => {
+  const source = { block: "blk-p", revisionId: "rev-p" };
+
+  it("Given references into another document and a document marked whole, Then they are read back with their document, and what is only shown is dropped", () => {
+    expect(
+      readCommandTarget({
+        artifact: "doc-1",
+        delivery: "propose",
+        references: [
+          { number: 1, blockId: "blk-a" },
+          { number: 2, blockId: "blk-x", document: " doc-2 ", revisionId: "rev-x" },
+          { number: 3, blockId: "blk-y", kind: "passage", quote: "Rain", document: "doc-2" },
+          { number: 4, kind: "document", document: "doc-3" },
+        ],
+        source,
+      }),
+    ).toEqual({
+      ok: true,
+      target: {
+        artifact: "doc-1",
+        delivery: "propose",
+        references: [
+          { kind: "block", blockId: "blk-a", number: 1 },
+          { kind: "block", blockId: "blk-x", number: 2, revisionId: "rev-x", document: "doc-2" },
+          { kind: "passage", blockId: "blk-y", number: 3, quote: "Rain", document: "doc-2" },
+          { kind: "document", number: 4, document: "doc-3" },
+        ],
+        source,
+      },
+    });
+    const pointed: PointedReference = { kind: "block", number: 2, blockId: "blk-x", words: "Elsewhere.", stale: false, document: "doc-2", documentTitle: "Second" };
+    expect(sent(pointed)).toEqual({ kind: "block", number: 2, blockId: "blk-x", document: "doc-2" });
+    expect(sent({ kind: "document", number: 4, document: "doc-3", words: "Third", stale: false, documentTitle: "Third" })).toEqual({ kind: "document", number: 4, document: "doc-3" });
+    expect(blockCommand("doc-1", source, [pointed]).references).toEqual([{ kind: "block", number: 2, blockId: "blk-x", document: "doc-2" }]);
+  });
+
+  it("Given a document reference naming a block or a quote, or naming no document, Then it is refused by name", () => {
+    const refused = (reference: Record<string, unknown>) => {
+      const read = readCommandTarget({ artifact: "doc-1", delivery: "propose", references: [reference], source });
+      return read.ok ? "accepted" : read.error;
+    };
+    expect(refused({ number: 1, kind: "document", document: "doc-3", blockId: "blk-a" })).toBe("Document reference #1 names a block; a document marked whole names none.");
+    expect(refused({ number: 1, kind: "document", document: "doc-3", quote: "words" })).toBe("Document reference #1 carries a quote; only a passage does.");
+    expect(refused({ number: 1, kind: "document" })).toBe("Document reference #1 names no document.");
+    expect(refused({ number: 1, kind: "document", document: "  " })).toBe("Document reference #1 names no document.");
+    expect(refused({ number: 1, blockId: "blk-a", document: "  " })).toBe("Reference #1 carries a document that names nothing.");
+  });
+
+  it("Given a reveal for a reference into another document, Then the target says which document and its title", () => {
+    expect(revealTarget({ kind: "block", number: 2, blockId: "blk-x", words: "", stale: false, document: "doc-2", documentTitle: "Second" })).toEqual({ kind: "block", blockId: "blk-x", document: "doc-2", documentTitle: "Second" });
+    expect(revealTarget({ kind: "passage", number: 3, blockId: "blk-y", quote: "Rain", words: "Rain", stale: false, document: "doc-2" })).toEqual({ kind: "passage", blockId: "blk-y", number: 3, document: "doc-2" });
+    expect(revealTarget({ kind: "document", number: 4, document: "doc-3", words: "Third", stale: false, documentTitle: "Third" })).toEqual({ kind: "document", document: "doc-3", documentTitle: "Third" });
+    expect(revealTarget({ kind: "block", number: 1, blockId: "blk-a", words: "", stale: false })).toEqual({ kind: "block", blockId: "blk-a" });
   });
 });

@@ -113,3 +113,29 @@ describe("mathematics in a sentence, as it is read", () => {
     await view.idle();
   });
 });
+
+/**
+ * An inline `code` mark takes no syntax colour (`BO_0296_019`, user
+ * decision 2026-09-23): it is the code face and nothing more. The rule fails
+ * the moment a view colours it — a `<code>` in a sentence holding any
+ * element, or any highlighter class, is a colouring.
+ */
+describe("an inline code mark", () => {
+  it("is drawn in the code face and takes no syntax colour", async () => {
+    const document: DocumentView = {
+      documentId: "doc-1",
+      revisionId: "rev-doc",
+      title: "Reading",
+      blocks: [sentence("blk-a", "a", [{ text: "Call " }, { text: "def f(x): return x", marks: ["code"] }, { text: " first." }])],
+    };
+    vi.stubGlobal("fetch", documentsApi(document, []));
+    const view = await mountEditor(document);
+    const row = view.root.querySelector("[data-block-id='blk-a'] [data-block-reading]") as HTMLElement;
+    const code = row.querySelector("code") as HTMLElement;
+    expect(code).toBeTruthy();
+    expect(code.textContent).toBe("def f(x): return x");
+    // Nothing inside it but the reader's own run wrapper: no token, no colour.
+    expect(Array.from(code.querySelectorAll("*")).every((element) => element.tagName === "SPAN" && element.className === "run")).toBe(true);
+    expect(row.querySelector("[class*='hljs']")).toBeFalsy();
+  });
+});

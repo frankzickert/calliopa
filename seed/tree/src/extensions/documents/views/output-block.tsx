@@ -2,6 +2,7 @@ import { component$ } from "@builder.io/qwik";
 
 import type { OutputBlockView, OutputItem } from "../server/assemble";
 import { FigureCaption, type SetFigure } from "./figure-caption";
+import { stripEscapes, tracebackSegments } from "../lib/traceback";
 
 /**
  * What an execution produced (`BO_0289_018`), drawn as it streamed: each
@@ -12,10 +13,6 @@ import { FigureCaption, type SetFigure } from "./figure-caption";
  * run's, and the reader's page is not where it executes.
  */
 
-/** ANSI colour escapes a kernel's traceback carries, stripped for reading. */
-const ANSI = /\u001b\[[0-9;]*m/gu;
-const plain = (line: string): string => line.replace(ANSI, "");
-
 const OUTCOME_WORDS: Readonly<Record<string, string>> = {
   ok: "ran",
   error: "ended with an error",
@@ -24,7 +21,13 @@ const OUTCOME_WORDS: Readonly<Record<string, string>> = {
   "output cap": "was cut at the output cap",
 };
 
-export const OutputBlock = component$<{ block: OutputBlockView; caption$?: SetFigure | undefined }>(({ block, caption$ }) => {
+export const OutputBlock = component$<{
+  block: OutputBlockView;
+  /** Its figure number when the document numbers it, from the read's map
+   * rather than the block, so a figure numbered above it relabels this one. BO_0295_014 */
+  number?: number | undefined;
+  caption$?: SetFigure | undefined;
+}>(({ block, number, caption$ }) => {
   const item = (entry: OutputItem, index: number) => {
     switch (entry.kind) {
       case "stream":
@@ -33,12 +36,25 @@ export const OutputBlock = component$<{ block: OutputBlockView; caption$?: SetFi
             {entry.text}
           </pre>
         );
-      case "error":
+      case "error": {
+        // The traceback in colour — the exception's name, each frame's file,
+        // line and function — found by the lines' shape once the escapes are
+        // stripped, every character kept. BO_0296_019
+        const said = entry.traceback.length > 0 ? entry.traceback.map(stripEscapes).join("\n") : `${entry.name}: ${entry.value}`;
         return (
           <pre key={index} class="output-block__error" data-output-error={entry.name}>
-            {entry.traceback.length > 0 ? entry.traceback.map(plain).join("\n") : `${entry.name}: ${entry.value}`}
+            {tracebackSegments(said).map((segment, at) =>
+              segment.kind === "text" ? (
+                segment.text
+              ) : (
+                <span key={at} class={`output-block__error-${segment.kind}`} data-error-token={segment.kind}>
+                  {segment.text}
+                </span>
+              ),
+            )}
           </pre>
         );
+      }
       case "display":
       case "result": {
         const picture = entry.picture !== undefined ? block.pictures[entry.picture] : undefined;
@@ -104,7 +120,7 @@ export const OutputBlock = component$<{ block: OutputBlockView; caption$?: SetFi
       {/* An output that showed a picture is a figure once a person numbers
           it; its caption is theirs, set after accepting it. BO_0295_010 */}
       {block.pictures.length > 0 && (
-        <FigureCaption blockId={block.blockId} number={block.number} numbered={block.numbered} caption={block.caption} caption$={caption$} />
+        <FigureCaption blockId={block.blockId} number={number} numbered={block.numbered} caption={block.caption} caption$={caption$} />
       )}
     </figure>
   );

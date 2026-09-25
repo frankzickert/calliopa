@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { anchorAt } from "~/lib/passage";
 import {
   addPassage,
+  documentReferenceFor,
+  documentsMarked,
   followDocument,
+  localizeMarking,
   legacyMarkingKey,
   markingFromSent,
   markingKey,
@@ -14,6 +17,7 @@ import {
   removeReference,
   repointPassage,
   serializeMarking,
+  toggleDocument,
   toggleReference,
   type Marking,
 } from "./references";
@@ -379,5 +383,107 @@ describe("marking passages", () => {
     expect(
       marking.references.map((held) => `${held.kind}#${held.number}`),
     ).toEqual(["passage#1", "block#6"]);
+  });
+});
+
+describe("references across documents (BO_0304_007)", () => {
+  const into = (blockId: string, document: string, documentTitle: string) => ({
+    document,
+    documentTitle,
+    revisionId: `rev-${blockId}`,
+    words: `Words of ${blockId}.`,
+  });
+
+  it("Given a block of another document marked, Then it is numbered in the one sequence and told apart from this document's row of the same id", () => {
+    let marking = toggleReference(NO_MARKING, "a");
+    marking = toggleReference(marking, "a", into("a", "doc-2", "Second"));
+
+    expect(marking.references.map((held) => [held.number, held.kind, held.blockId, held.kind === "document" ? undefined : held.document])).toEqual([
+      [1, "block", "a", undefined],
+      [2, "block", "a", "doc-2"],
+    ]);
+    // This document's row carries its own number; the other document's row
+    // is found only with its document named.
+    expect(referenceFor(marking, "a")).toBe(1);
+    expect(referenceFor(marking, "a", { document: "doc-2" })).toBe(2);
+    // Marking the other document's block again takes only that mark back.
+    const fewer = toggleReference(marking, "a", into("a", "doc-2", "Second"));
+    expect(fewer.references.map((held) => held.number)).toEqual([1]);
+  });
+
+  it("Given a passage in another document, Then it stands beside a passage of the same words in this one", () => {
+    const text = "The storm arrives before the lights go out.";
+    const anchor = anchorAt(text, 4, 16);
+    let marking = addPassage(NO_MARKING, "b", anchor);
+    marking = addPassage(marking, "b", anchor, into("b", "doc-2", "Second"));
+    expect(passagesIn(marking, "b").map((held) => held.number)).toEqual([1]);
+    expect(passagesIn(marking, "b", { document: "doc-2" }).map((held) => held.number)).toEqual([2]);
+  });
+
+  it("Given a document marked whole, Then it takes the next number, is listed with its title, and a second press takes it back", () => {
+    let marking = toggleReference(NO_MARKING, "a");
+    marking = toggleDocument(marking, "doc-2", "Second");
+    expect(marking.references[1]).toEqual({ kind: "document", document: "doc-2", documentTitle: "Second", number: 2 });
+    expect(documentReferenceFor(marking, "doc-2")).toBe(2);
+    expect(documentsMarked(marking)).toEqual([{ document: "doc-2", title: "Second", number: 2 }]);
+    marking = toggleDocument(marking, "doc-2");
+    expect(documentReferenceFor(marking, "doc-2")).toBeNull();
+    expect(marking.next).toBe(3);
+  });
+
+  it("Given marks across documents, When the prompt's document is read, Then the references into other documents stay as marked", () => {
+    let marking = toggleReference(NO_MARKING, "gone", { revisionId: "rev-old" });
+    marking = toggleReference(marking, "x", into("x", "doc-2", "Second"));
+    marking = toggleDocument(marking, "doc-3", "Third");
+    const followed = followDocument(marking, now(["a"]));
+    // The own block that left is kept as marked (it names a revision); the
+    // other document's block and the document whole are untouched.
+    expect(followed.references.map((held) => held.number)).toEqual([1, 2, 3]);
+    // A record from before revisions were kept drops only its own block.
+    const before = followDocument(toggleReference(toggleReference(NO_MARKING, "old"), "x", into("x", "doc-2", "Second")), now(["a"]));
+    expect(before.references.map((held) => held.number)).toEqual([2]);
+  });
+
+  it("Given a record with references across documents, Then it is read back whole, and one sent to a run comes back with its document", () => {
+    let marking = toggleReference(NO_MARKING, "a");
+    marking = toggleReference(marking, "x", into("x", "doc-2", "Second"));
+    marking = addPassage(marking, "y", anchorAt("Rain at dawn.", 0, 4), into("y", "doc-2", "Second"));
+    marking = toggleDocument(marking, "doc-3", "Third");
+    const read = parseMarking(serializeMarking(marking));
+    expect(read.references).toEqual(marking.references);
+    expect(read.next).toBe(5);
+
+    const sent = markingFromSent([
+      { number: 1, blockId: "a" },
+      { number: 2, blockId: "x", document: "doc-2" },
+      { number: 3, blockId: "y", kind: "passage", quote: "Rain", document: "doc-2" },
+      { number: 4, kind: "document", document: "doc-3" },
+    ]);
+    expect(sent.references.map((held) => [held.number, held.kind, held.kind === "document" ? held.document : held.document ?? null])).toEqual([
+      [1, "block", null],
+      [2, "block", "doc-2"],
+      [3, "passage", "doc-2"],
+      [4, "document", "doc-3"],
+    ]);
+    // A document marked whole is never kept twice, and a stored entry that
+    // names no document is not a document reference.
+    expect(parseMarking(JSON.stringify({ references: [{ kind: "document", document: "doc-3", number: 1 }, { kind: "document", document: "doc-3", number: 2 }, { kind: "document", number: 3 }] })).references).toHaveLength(1);
+  });
+
+  it("Given a session's marks, When a guest view of another document localizes them, Then it draws only what points into it, under the session's numbers", () => {
+    let marking = toggleReference(NO_MARKING, "p");
+    marking = toggleReference(marking, "a", into("a", "doc-1", "Draft"));
+    marking = addPassage(marking, "b", anchorAt("Rain at dawn.", 0, 4), into("b", "doc-1", "Draft"));
+    marking = toggleReference(marking, "z", into("z", "doc-9", "Ninth"));
+    marking = toggleDocument(marking, "doc-1", "Draft");
+    const local = localizeMarking(marking, "doc-1");
+    expect(local.mode).toBe("command");
+    expect(local.next).toBe(marking.next);
+    expect(local.references.map((held) => [held.number, held.kind, held.blockId, held.kind === "document" ? "whole" : held.document])).toEqual([
+      [2, "block", "a", undefined],
+      [3, "passage", "b", undefined],
+    ]);
+    expect(referenceFor(local, "a")).toBe(2);
+    expect(passagesIn(local, "b").map((held) => held.number)).toEqual([3]);
   });
 });

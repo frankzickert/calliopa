@@ -73,6 +73,8 @@ export interface RegisteredSection extends LibrarySection {
   readonly extension: string;
   /** The qualified kind the section's rows open, when it declared one. */
   readonly opens?: string;
+  /** Whether `opens` names another extension's kind, which the build checks exists. BO_0298_014 */
+  readonly opensOther?: boolean;
 }
 
 /**
@@ -180,11 +182,14 @@ export function buildRegistry(
       if (taken !== undefined) {
         throw new RegistryError("section_collision", `section ${key} is contributed twice`);
       }
+      if (section.kind !== undefined && section.opens !== undefined) {
+        throw new RegistryError("section_opens", `section ${key} names both a kind of its own and one it opens`);
+      }
       sections.push({
         ...section,
         key,
         extension: id,
-        ...(section.kind === undefined ? {} : { opens: qualify(id, section.kind) }),
+        ...(section.opens !== undefined ? { opens: section.opens, opensOther: true } : section.kind === undefined ? {} : { opens: qualify(id, section.kind) }),
       });
     }
     for (const [name, view] of Object.entries(contributions.kinds ?? {})) {
@@ -246,6 +251,14 @@ export function buildRegistry(
         "target_kind_unknown",
         `view ${view.id} presents ${unknown}, which no extension contributes`,
       );
+    }
+  }
+  // A section opening another extension's kind names one that exists, for
+  // the same reason; a bare `kind` of the section's own is left as it always
+  // was, since a section's kind never fenced anything. BO_0298_014
+  for (const section of sections) {
+    if (section.opensOther && kinds[section.opens ?? ""] === undefined) {
+      throw new RegistryError("target_kind_unknown", `section ${section.key} opens ${section.opens}, which no extension contributes`);
     }
   }
   return registry;

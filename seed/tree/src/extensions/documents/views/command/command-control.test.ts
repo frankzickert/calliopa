@@ -230,6 +230,25 @@ describe("pointing from a prompt block", () => {
     await view.settle(() => view.find('[data-block-id="blk-b"] [data-block-editor]')?.textContent === "Tighten #1 ");
     await view.idle();
   });
+
+  it("Given # typed in a prompt, Then the document's blocks are offered after the marks, and choosing one marks it and writes its number (BO_0304_016)", async () => {
+    const view = await mount({ ...draft, blocks: [text("blk-a", "a", "Opening."), text("blk-b", "b", "Tighten #"), text("blk-c", "c", "Closing.")] });
+    await pointFrom(view, "blk-b");
+    await view.userEvent('[data-block-id="blk-c"]', "click");
+    await view.settle(() => view.record.pointing?.references.length === 1);
+    await view.userEvent("[data-pointing-from] [data-block-point]", "click");
+    await view.settle(() => view.find('[data-block-command="blk-b"] [data-reference-option="1"]') !== null);
+    // One list: the mark first, then the blocks not yet marked — the marked
+    // closing block stands as its mark, the opening block as a block.
+    const list = view.find("[data-block-reference-list]");
+    expect(Array.from(list?.querySelectorAll("button") ?? []).map((option) => option.getAttribute("data-reference-option") ?? option.getAttribute("data-block-reference-option"))).toEqual(["1", "blk-a"]);
+    await view.userEvent('[data-block-command="blk-b"] [data-block-reference-option="blk-a"]', "click");
+    await view.settle(() => view.find('[data-block-id="blk-b"] [data-block-editor]')?.textContent === "Tighten #2 ");
+    await view.settle(() => view.record.pointing?.references.length === 2);
+    expect(view.record.pointing?.references.map((reference) => [reference.number, reference.blockId])).toEqual([[1, "blk-c"], [2, "blk-a"]]);
+    expect(view.root.querySelectorAll("[data-block-ref]").length).toBe(0);
+    await view.idle();
+  });
 });
 
 describe("a file dropped on the block being edited", () => {

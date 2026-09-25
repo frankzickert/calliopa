@@ -23,7 +23,13 @@ import { FigureCaption, type SetFigure } from "./figure-caption";
  * its words and says so, and whatever offered it draws its own control there
  * through the `below` place.
  */
-export const MediaBlock = component$<{ block: MediaBlockView; caption$?: SetFigure | undefined }>(({ block, caption$ }) => {
+export const MediaBlock = component$<{
+  block: MediaBlockView;
+  /** A picture's number when the document numbers it, from the read's map
+   * rather than the block, so a picture numbered above it relabels this one. BO_0295_014 */
+  number?: number | undefined;
+  caption$?: SetFigure | undefined;
+}>(({ block, number, caption$ }) => {
   const source = useSignal<string | null>(null);
 
   // A video only. The element cannot be handed the route directly, and the
@@ -62,7 +68,7 @@ export const MediaBlock = component$<{ block: MediaBlockView; caption$?: SetFigu
   // neither.
   const caption =
     block.kind === "image" ? (
-      <FigureCaption blockId={block.blockId} number={block.number} numbered={block.numbered} caption={block.caption} caption$={caption$} />
+      <FigureCaption blockId={block.blockId} number={number} numbered={block.numbered} caption={block.caption} caption$={caption$} />
     ) : null;
 
   if (block.objectId === undefined) {

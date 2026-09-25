@@ -20,11 +20,27 @@ import { Icon, type IconName } from "./icons";
  * (`testing/library-row-host.tsx`). The item is passed whole, never as
  * `item.field`, so a re-read listing reaches the row (`qwik-member-props-freeze`).
  */
+/**
+ * What a row shows of the pointing that stands across the workspace
+ * (`BO_0304_014`): while one stands, a document's row carries *Mark
+ * document*, which marks the document whole for the pointing prompt, and its
+ * number while it is marked. The row's own press keeps opening the document,
+ * since a reader points into a document by going there.
+ */
+export interface RowPointing {
+  /** Whether a pointing stands, so the control is drawn. */
+  readonly active: boolean;
+  /** The number the document carries when marked whole, or null. */
+  readonly number: number | null;
+}
+
 export const LibraryRow = component$<{
   item: LibraryItem;
   current: boolean;
   onOpen$: QRL<(target: OpenTarget) => void>;
-}>(({ item, current, onOpen$ }) => {
+  pointing?: RowPointing | undefined;
+  onMark$?: QRL<(document: string, title: string) => void> | undefined;
+}>(({ item, current, onOpen$, pointing, onMark$ }) => {
   const open = item.open;
   const parts = (
     <>
@@ -57,7 +73,8 @@ export const LibraryRow = component$<{
       </span>
     );
   }
-  return (
+  const marking = pointing?.active === true && open.kind === "documents:document" && onMark$ !== undefined;
+  const row = (
     <button
       type="button"
       class="library-entry"
@@ -66,6 +83,7 @@ export const LibraryRow = component$<{
       data-badge={item.badge}
       data-proposed={item.proposedBy === undefined ? undefined : ""}
       data-current={current ? "true" : undefined}
+      data-reference={marking && pointing.number !== null ? pointing.number : undefined}
       aria-current={current ? "true" : undefined}
       onClick$={() => onOpen$(open)}
     >
@@ -75,6 +93,25 @@ export const LibraryRow = component$<{
           append it to the entry's name. */}
       {current && <span class="library-entry__marker" aria-hidden="true" />}
     </button>
+  );
+  if (!marking) return row;
+  // While a pointing stands, the row carries *Mark document* beside its press
+  // (`BO_0304_Q1`): a control of its own, so the press still opens. BO_0304_014
+  return (
+    <span class="library-entry-group" data-library-marking={item.id}>
+      {row}
+      <button
+        type="button"
+        class="library-entry__mark"
+        data-mark-document={open.itemId}
+        aria-pressed={pointing.number !== null}
+        aria-label={pointing.number === null ? `Mark ${item.label} for the command` : `${item.label}, reference ${pointing.number}`}
+        title={pointing.number === null ? "Mark document" : `Reference ${pointing.number}`}
+        onClick$={() => onMark$(open.itemId, open.title)}
+      >
+        {pointing.number === null ? <Icon name="crosshair-simple" size={12} /> : `#${pointing.number}`}
+      </button>
+    </span>
   );
 });
 

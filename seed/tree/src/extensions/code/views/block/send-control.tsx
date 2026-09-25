@@ -2,6 +2,8 @@ import { $, component$, useContext, useSignal, useStore } from "@builder.io/qwik
 
 import type { BlockDecorationProps } from "~/contract";
 import { branchOf } from "~/extensions/documents/lib/branch-scope";
+import { tracebackSegments } from "~/extensions/documents/lib/traceback";
+import { liveLine, type LiveLine } from "../../lib/live-lines";
 
 import { SessionContext } from "../session/context";
 
@@ -23,7 +25,7 @@ import "../code.css";
  */
 interface Live {
   phase: "idle" | "waiting" | "running" | "done" | "failed";
-  lines: string[];
+  lines: LiveLine[];
   note: string;
   execution: string;
 }
@@ -96,21 +98,15 @@ export const SendControl = component$<BlockDecorationProps>(({ documentId, block
             live.execution = String(event["execution"] ?? "");
             break;
           case "stream":
-            live.lines = [...live.lines, String(event["text"] ?? "")];
-            break;
           case "error":
-            live.lines = [...live.lines, `${String(event["name"] ?? "")}: ${String(event["value"] ?? "")}\n`];
-            break;
           case "display":
-          case "result": {
-            const data = (event["data"] ?? {}) as Record<string, unknown>;
-            const plain = data["text/plain"];
-            live.lines = [...live.lines, typeof plain === "string" ? `${plain}\n` : "a picture\n"];
+          case "result":
+          case "cut": {
+            // An error is its traceback, drawn in colour below. BO_0296_019
+            const shown = liveLine(event);
+            if (shown !== null) live.lines = [...live.lines, shown];
             break;
           }
-          case "cut":
-            live.lines = [...live.lines, `[cut: ${String(event["reason"] ?? "")}]\n`];
-            break;
           case "done": {
             const status = String(event["status"] ?? "");
             session.running = "";
@@ -183,7 +179,23 @@ export const SendControl = component$<BlockDecorationProps>(({ documentId, block
           it while it ran still sees it beside the proposal below. */}
       {live.lines.length > 0 && (
         <pre class="code-run__live" data-code-live>
-          {live.lines.join("")}
+          {live.lines.map((line, at) =>
+            line.kind === "error" ? (
+              <span key={at} class="code-run__error" data-code-live-error>
+                {tracebackSegments(line.text).map((segment, part) =>
+                  segment.kind === "text" ? (
+                    segment.text
+                  ) : (
+                    <span key={part} class={`code-run__error-${segment.kind}`} data-error-token={segment.kind}>
+                      {segment.text}
+                    </span>
+                  ),
+                )}
+              </span>
+            ) : (
+              line.text
+            )
+          )}
         </pre>
       )}
     </div>

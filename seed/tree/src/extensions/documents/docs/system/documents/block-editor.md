@@ -683,6 +683,12 @@ shell's half — the muted row in the drawer and the muted tab label — is
   `contributions.ts`, the headline and the library reader all ask it, so the mint and the three
   surfaces cannot drift apart. Exactly those words are unnamed; a title that merely begins with
   them, or differs in case, is a name.
+- A profile is minted under its own words (`calliopa-bootstrap`'s `BO_0298_014`, found in the
+  walk 2026-09-25): `UNNAMED_PROFILE` in `lib/naming.ts`, unnamed by the same rule, and
+  `unnamedTitle` answers the placeholder a document's headline paints from its `record` — the
+  profile's words for a profile, the document's for everything else — so the view carries
+  `record` and the `profiles` section draws an unnamed profile's row muted as the Documents
+  section does.
 - The headline is a placeholder field (`DO_0012_002`). `.document-title__text` carries
   `data-unnamed` and `data-placeholder`, and `block-editor.css` paints the minted words over the
   empty field — absolutely positioned at the field's own padding, from `--text-muted`, under
@@ -955,10 +961,36 @@ is pretty-printed whenever an edit settles. What the read sets and what a settle
   scrolling inside it, a settled edit is one `reviseCode` on the base revision, and
   `data-code-sending` still gates the send.
 
-- [ ] BO_0296_018 A code block is coloured (`views/code-block.tsx`): the reading view draws the markup the read set and the plain characters when it set none; the writing view carries the colour behind the field by the mechanism above, repainted as the source changes, with the field's behaviour unchanged. Proven in `views/code-block.test.ts` in the render harness, each case shown to fail with its draw site removed: a Python block drawn coloured while reading and while being written; the painted text and the field's text identical character for character, which is what a caret sitting straight depends on; a block with no language and one with an unknown language drawn plain in both; Tab, Escape, the growth and `data-code-sending` still doing what `BO_0289` proved. What only a browser can answer — the caret sitting on the letter it is on, at the end of a long line and after a scroll — is the walk's.
-- [ ] BO_0296_019 The rest of the drawing: the language field offers the languages the highlighter knows while still taking a freely typed word, the way the Runtimes form suggests images (`BO_0289_022`); a proposed code block is coloured on its chip's row exactly as an accepted one is, so accepting changes nothing about how the code looks; an `output` block's error is coloured — its exception name, its file and line, the frames — having had its escape sequences stripped on the way in; an inline `code` mark is drawn in the code face and takes no syntax colour, pinned as a rule that fails the moment a view colours it; and every colour is a theme token answering in light and dark, with no literal colour in any view (`DO_0011`). Proven in `views/code-block.test.ts`, `views/output-block.test.ts` and `views/inline-reading.test.ts`.
-- [ ] BO_0296_021 The switch: *Format code* in the document's bar sets the document's `formatCode`, drawn as the other document-wide controls are, with the state it is in readable at a glance; switching it off leaves every existing block exactly as it stands — it governs what happens next, and reformats nothing retroactively. Proven in `views/bar.test.ts`.
-- [ ] BO_0296_022 Walked by the user on the served build, after the kernel and the stack carry the format route and the formatter (`calliopa-bootstrap`'s `BO_0296_001`–`BO_0296_004`, `BO_0296_010`): a Python block typed badly laid out and tidied when the edit settles, the caret staying where the eye expects while typing a long line; a fragment that does not parse settling untouched and saying nothing; an unknown language word drawn plain; the language guessed when a block is made by *Turn into → Code* on a pasted paragraph; a run's proposed code block coloured on its chip and formatted as it is accepted, with the history showing the acceptance and the format as two revisions; an error's traceback coloured in an output; *Format code* switched off and an edit settling exactly as typed.
+- A code block is coloured (`BO_0296_018`, 2026-09-25, `views/code-block.tsx`): the reading view — a proposal's chip row, a block in command mode — draws the markup the read set and the plain characters, escaped, when it set none. The writing view is the two layers above: a `<pre>` painted from the same characters behind the field, the field above it with its text transparent and its caret and selection kept, both `.code-block__source` so every metric a caret depends on is shared, and the paint following the field's horizontal scroll so a long line keeps its colour under the letters. The paint starts as the read's markup and is repainted as the source or the language changes, from the engine reached through `views/highlight-client.ts`' lazy import — a paint for a source that moved on while the engine worked is dropped, never drawn late — and the field keeps every behaviour it had: Tab indents, Escape settles, it grows with the code, a settled edit is one `reviseCode` on the base revision, and `data-code-sending` still gates the send. `data-code-coloured` says when the block is drawn in colour. Proven in `views/code-block.test.ts` in the render harness: a Python block painted while written with the paint's text identical to the field's character for character, the same block coloured on a proposal's chip row, a repaint from the engine as the source changes, a block with no language and one with an unknown language drawn plain in both shapes, the source's own `<` and `&` kept as characters, and the send gate. What only a browser can answer — the caret sitting on the letter it is on, at the end of a long line and after a scroll — is the walk's.
+- The rest of the drawing (`BO_0296_019`, 2026-09-25): the language field offers the languages the highlighter knows through a `<datalist>` (`lib/code-languages.ts`, pinned against the engine's own list) while still taking a freely typed word, which is kept and draws the block plain; a proposed code block is coloured on its chip's row exactly as an accepted one is, since both draw the read's markup, so accepting changes nothing about how the code looks; an `output` block's error is coloured (`views/output-block.tsx`, `lib/traceback.ts`) — the heading, each frame's file, line and function, the markers and the exception's name, found by the lines' shape once the escapes are stripped, every character kept, no grammar loaded for it, in both shapes a traceback comes in: Python's own (`File "x.py", line 3, in f`) and IPython's, which is what a Jupyter kernel answers (`NameError   Traceback (most recent call last)`, `Cell In[1], line 2`, `File ~/x.py:12, in f(x)`, the pointed `----> 2` line and the dashed rule; walk finding, 2026-09-25) — and the `code` extension's send control draws the same traceback in the same colours as it streams, since that live line is what a person sees first (its `lib/live-lines.ts`; walk finding, 2026-09-25); an inline `code` mark is drawn in the code face and takes no syntax colour, pinned in `views/inline-reading.test.ts` as a rule that fails the moment a `<code>` in a sentence holds a token or a highlighter class; and every colour is one of six theme tokens — `code-keyword`, `code-string`, `code-comment`, `code-number`, `code-name`, `code-type`, `ui.shell`'s `src/lib/theme.ts` — each holding AA against the canvas, the panel and the raised panel in both themes, computed in `theme.test.ts`, with the highlighter's classes mapped onto them in `block-editor.css` and no literal colour in any view (`DO_0011`; the equation popover's literal shadow, the one left, was taken to `color-mix` on the way). Proven in `views/code-block.test.ts`, `views/output-block.test.ts`, `views/inline-reading.test.ts` and `lib/traceback.test.ts`.
+- The switch (`BO_0296_021`, 2026-09-25): *Format code* is a toggle in the bar's document group, first in it, pressed while the document formats and released while it does not, its name saying which — *on, an edit is tidied up when it settles* or *off, an edit is saved exactly as typed* — so the state reads at a glance; pressing it sends `setFormatCode` on the document's base and reads the document back. It governs what happens next and reformats nothing retroactively: every existing block stands exactly as it was. A change document carries no switch. Proven in `views/bar.test.ts`: pressed by default and sending `on: false`, released on a document stored off and sending `on: true`.
+- Walked by the user on the served build on 2026-09-25 (`BO_0296_022`, pins 2592 to 2711, the formatter and the rebuilt code service up on the dogfood stack): a Python block typed badly laid out was tidied when the edit settled with the caret where the eye expects; a fragment that does not parse settled untouched and said nothing; an unknown language word drew plain; a run's proposed code block was coloured on its chip and formatted as it was accepted; *Format code* switched off left an edit exactly as typed. Two points failed first and were fixed the same day: the language was not guessed after *Turn into → Code* on one pasted line, because the guess demanded three keyword hits where a line scores two; and the traceback showed plain, because a Jupyter kernel answers IPython's shape, which the tokenizer did not know, and because the line a person sees first is the send control's live output, which said `name: value` in plain text. Both are truth above.
+
+Under `calliopa-bootstrap`'s `BO_0302` (code blocks carry line numbers), promoted to draft by the
+user on 2026-09-25 and transferred here the same day, a code block shows a number beside each of
+its lines, switched per document from the bar, and a block's head offers to continue its numbering
+from the code block before it. What is stored and what the read resolves is
+[Block Document Model](./block-document-model.md#code-and-its-output); the drawing is here.
+
+* The switch is one control in the document's bar governing every code block in the document,
+  as *Format code* is; a document that has never touched it shows its numbers. User decisions,
+  2026-09-25.
+* The option to continue lives in the block's head, beside the language, shown while the reader
+  may write the block. User decision, 2026-09-25 (`BO_0302_Q4`).
+* With the document's switch off, a block set to continue keeps its setting and its option is
+  still shown; no number is drawn, and switching back on restores the numbering as it was. User
+  decision, 2026-09-25 (`BO_0302_Q5`).
+
+- **A gutter, not a rewrite of the markup.** The highlighter's spans cross line breaks (a
+  multi-line string, a block comment) and the writing view's overlay depends on the paint's text
+  being the field's character for character (`BO_0296_018`), so the numbers stand in a column of
+  their own beside the source and the markup stays what the read set. Lines never wrap, so a
+  source line is a drawn line.
+
+- The gutter (`BO_0302_006`, 2026-09-25, `views/code-block.tsx`): with the document's switch on, a column left of the source holds one number per source line, counting from where the block starts over the source as drawn now — as typed while writing, as read otherwise — in the code face, the muted colour and the source's own line height, so each number sits on its line's baseline; as wide as the block's longest number (`--code-gutter-digits`), so the code does not move as a block grows from nine lines to ten; laid beside the source by a flex body and never scrolling sideways with a long line. The same column serves both shapes — beside the paint-and-field pair while writing, beside the read `<pre>` on a proposal's chip row (`ProposalBlock` carries the document's switch to it) and in command mode — and the overlay's metrics are untouched, since the column stands outside the field. Where a block starts is resolved by the editor, not read off the block (walk finding, 2026-09-25: a row is keyed by its revision and a changed number changes no revision, so the block below kept its old numbers — the frozen-row fault of `BO_0295`): `resolveFirstLines` in `lib/code-lines.ts`, the same rule the read applies, runs over the document's blocks and the line count of each code block as it is being typed (`state.codeLines`, reported by the block on every input), and the row hands the block its `firstLine` apart from the block, so a block below a growing one re-numbers under the caret before the edit settles; a proposal's row, which the editor does not resolve, draws the block's own `firstLine` from the read. The numbers are not text: `aria-hidden`, `user-select: none`, outside the paint and the field, so a block copied out of the document pastes as its source alone. `data-code-numbered` says when the column is drawn and `data-code-first-line` where it starts; with the switch off the column is not drawn and the block is laid out as it was. Proven in `views/code-block.test.ts` in the render harness: a three-line block numbered 1 to 3 in both shapes, a continuing block numbered after the one above it and re-numbered under the caret as a line is typed above with nothing sent, the column outside the paint and the field with the stylesheet's rule pinned, and a document with the switch off drawing no column. What only a browser can answer — a selection dragged across the block pasting the source alone — is the walk's.
+- The switch (`BO_0302_007`, 2026-09-25): *Line numbers* is a toggle in the bar's document group beside *Format code*, second in it, pressed while the document shows numbers and released while it does not, its name saying which — *on, each line of a code block is numbered* or *off, code blocks carry no numbers* — so the state reads at a glance; pressing it sends `setLineNumbers` on the document's base and reads the document back, so every code block redraws with or without its gutter. It governs how every code block in the document is drawn from that moment, existing ones included, since the numbers are drawing and not content; nothing is revised. A change document carries no such switch. Proven in `views/bar.test.ts`: pressed by default and sending `on: false`, released on a document stored off and sending `on: true`, and its place in the trailing order pinned there and in `views/branch/branch.test.ts`.
+- The option (`BO_0302_008`, 2026-09-25, `views/code-block.tsx`): *Continue numbering* is a small toggle in the code block's head before the language field, in the same muted face and heavier while pressed, pressed while the block's `continues` is set, its name saying which; shown while the block is writable whether or not the document's switch is on, and drawn as the word *continues* on a proposal's chip row when set; pressing it sends `setCodeContinues` on the block's base with the flag flipped and the document is read back so the numbers below re-resolve. One press is one write: the control is disabled and `aria-busy` while its write is on its way, a settle of the field in flight lands first, and the editor registers the write as the tab's so every other write waits for it — two presses 1.5 s apart during the walk landed as two writes on one base and left the block with two established revisions on the dogfood instance (walk finding, 2026-09-25; the gateway's half is `calliopa-bootstrap`'s `docs/system/ccgw.md`, Write Compiler, open). `data-code-continues` says when the flag is set. Proven in `views/code-block.test.ts`: the toggle released on a plain block and sending `continues: true` on a press, the word and the number on a chip row, and the toggle pressed and present on a document whose switch is off.
+- Walked by the user on the served build on 2026-09-25 (`BO_0302_009`, pins 2775 and 2828): a Python block numbered while written and read, a second block set to continue picking up after the first, a run's proposed block numbered on its chip, *Line numbers* switched off with the continue option still shown, a block copied without its numbers, and a manuscript with its supplementary code numbered. The two findings of the first pass — the block below keeping its numbers as a line was typed above (the frozen row), and two presses of *Continue numbering* landing as two writes on one base — were fixed the same day and checked again at 2828, the block below now following under the caret and one press being one write.
 
 ## A Manuscript Out Of The Record
 
@@ -972,26 +1004,34 @@ is pretty-printed whenever an edit settles. What the read sets and what a settle
 * Authors, affiliations, keywords and the venue are properties of the `document` node, drawn by
   the editor above the first block; the abstract is a block of the role `abstract`. User
   decision, 2026-09-23 (`BO_0293_Q3`).
-- The head edits the front matter (`BO_0293_016`, landed 2026-09-23). Beneath the title the
-  authors are drawn, each with their affiliations' numbers and the corresponding mark, then the
-  affiliations. Beneath those, a folded *Authors, affiliations, keywords and venue* opens four
-  lines, each a field with its own *Save*:
-  - *Authors* as `Name (1, 2) <email> *; …`: the numbers are the author's affiliations from one,
-    the address optional, the star the corresponding author.
-  - *Affiliations* separated by `;`.
-  - *Keywords* separated by `,`.
-  - *Venue* as a word, since `documents` cannot know the venues; `manuscripts` offers them by
-    name in the bar.
+- The head edits the front matter (`BO_0293_016`, landed 2026-09-23; its fields reshaped under
+  `BO_0293_025`, user decision 2026-09-25 during the walk). Beneath the title the authors are
+  drawn, each with their affiliations' numbers and the corresponding mark, then the affiliations.
+  Beneath those, a folded *Authors, affiliations, keywords and venue* opens the fields
+  (`views/front-matter-head.tsx`, `FrontMatterHead`; the pure edits in `lib/front-matter-edit.ts`):
+  - *Affiliations* and *Keywords* are chips: a word typed into the field beside them and entered
+    with Enter joins the list, each chip has its `×`, and a word already listed is not added
+    twice. Removing an affiliation renumbers every author's affiliations, so no author names a
+    place the document no longer lists.
+  - *Authors* is a list of rows — a name, an email, one checkbox per affiliation the document
+    lists, *corresponding* and `×` — with *Add author* beneath. A row writes when a field settles.
+    A row left wholly blank is not yet an author and writes nothing; a row with an email or an
+    affiliation but no name is refused on the notice line as *Author N has no name yet.*
+  - *Venue* stays a word, written when the field settles, since `documents` cannot know the
+    venues; `manuscripts` offers them by name in the bar.
 
-  `lib/front-matter-text.ts` reads and writes the lines, the authors line both ways, so saving
-  again changes nothing. A save writes the whole front matter with `setFrontMatter` on the
-  document's base, keeping the other parts. A line that does not read is said on the notice line
-  and writes nothing. The transfer placed the fields in the document panel; the panel's fixed
-  line says the inspector contributes no action (`CA_0053`), so they stand in the head, where
-  the user's answer draws the front matter. Proven in `views/front-matter.test.ts` in the render
-  harness: the head drawn and absent, the lines shown, a line saved whole with the rest kept, and
-  a line naming an affiliation the document does not list refused in words. `bar.test.ts`'s
-  check that the inspector contributes no action passes beside it.
+  Every edit writes the whole front matter with `setFrontMatter` on the document's base, keeping
+  the other parts, and the document is read back so the head redraws. The first cut drew four
+  lines of text with a *Save* each (`front-matter-text.ts`, retired): an authors line saved before
+  the affiliations it numbered was refused on the notice line, which read as a save that did
+  nothing to a person not watching it; chips and checkboxes cannot name what is not there. The
+  transfer placed the fields in the document panel; the panel's fixed line says the inspector
+  contributes no action (`CA_0053`), so they stand in the head, where the user's answer draws the
+  front matter. Proven in `views/front-matter.test.ts` in the render harness: the head drawn and
+  absent, the chips and rows shown, an affiliation entered and one removed with the authors
+  renumbered, an author added and named, the corresponding mark set, a nameless row refused in
+  words and the venue written; and in `lib/front-matter-edit.test.ts` for the pure edits.
+  `bar.test.ts`'s check that the inspector contributes no action passes beside it.
 - The role `abstract` is drawn and set (`BO_0293_014`, landed 2026-09-23). The bar's role choice offers *Abstract* under the `article` icon (Phosphor 2.1.1, added to the shell's icon table). An abstract is a `p` carrying `data-role="abstract"`, in the reading row and on the editing surface alike, and the stylesheet sets it apart: inset, a little smaller, *Abstract* above it as a pseudo-element, which the caret's offsets never count. Proven in `views/front-matter.test.ts` in the render harness.
 - The editor moves nothing (`BO_0293_015`, 2026-09-23): an abstract is drawn wherever it stands in the reading order, and the projection is the one place the order changes, taking the abstract to the manuscript's head ([Manuscripts](../../../../manuscripts/docs/system/system.md)).
 
@@ -1006,7 +1046,41 @@ is pretty-printed whenever an edit settles. What the read sets and what a settle
 - *Number this* (`BO_0295_011`, landed 2026-09-23): a toggle under the `hash` icon (Phosphor 2.1.1, added to the shell's icon table) in a group of its own after the Block group, offered on a picture, a table or an accepted output the bar is about and on no proposal — *Number this figure* or *Number this table*, *Stop numbering…* when on — sending `setFigure` with the ask flipped and a picture's caption kept. A picture's, a table's and an output's row become the bar's subject by the pointer's rest on a desktop, as a table's and an equation's already did.
 - The references (`BO_0295_012`, landed 2026-09-23): *Reference a figure* and *Reference a table* in the Text group beside *Reference an equation*, offered only when the document numbers one, each option *Figure 3 — caption*, writing one `figureRef` or `tableRef` atom at the caret. `Marked` draws a reference as *Figure 3* or *Table 2* and a gone one as *(figure gone)* marked `run-block-ref--missing`; the editing surface (`editor-dom.ts`) paints it with its words in `data-block-ref-label`, as a citation's are, so the atom holds only the one character the caret counts, and reads it back as the run it was.
 - Verified in the render harness (`BO_0295_013`, 2026-09-23; `views/figures.test.ts`, eleven cases): the caption line with its label, the label alone, a caption typed saved as one `setFigure` on the base with the ask kept, an output's picture counted as a figure, a table's label, *Number this* on a hovered picture and a hovered table, the references drawn and gone in the reading row, the two bar choices offered and absent, and the surface's atom with its label as an attribute. With the picture's caption, the reading row's reference or the surface's reference removed, three, one and one case fail. The neighbouring suites — media, output, table, bar, equation, references, citations, reading row, editor — pass unchanged, `tsc` is clean and the client builds.
-- [ ] BO_0295_014 The walk, on the dogfood instance served from a pin holding every task above and the rebuilt kernel: two pictures and a code output numbered as figures 1–3 with captions, a table numbered, a sentence referring to figure 2 and the table; a picture inserted above them and the numbers and the references following; one retired and its reference marked missing; a run asked to refer to a figure proposing a reference. Accepted by the user, the faults it found folded here.
+- A number is handed to a block's view from the read's map (`BO_0295_014`, found by the walk on 2026-09-25 and fixed the same day): `BlockRow` passes `figureNumbers[blockId]`, `tableNumbers[blockId]` or `equationNumbers[blockId]` as the `number` of `MediaBlock`, `OutputBlock`, `TableBlock` and `EquationBlock`, and none of the four reads `block.number` any more. The row is keyed by revision and its block is set when the row mounts — a plain row entry's member, which the optimizer hands over immutable — while a number is the document's order and stored nowhere, so numbering a table above an already numbered one changed the lower one's number and no revision: the sentence referring to it said *Table 2* while its own label went on saying *Table 1.* until a reload. The maps are the editor's state, replaced by every read, so every label follows the read the way a reference does. A proposal's face still draws the number its own read answers on the block. Proven in `views/figures.test.ts` (thirteen cases now): a table numbered above a numbered table relabels the one below *Table 2.* with its revision unchanged, and a picture numbered above a numbered picture relabels it *Figure 2.*; both fail without the fix. `views/equation-block.test.ts`'s number case now reads the map as the read answers it.
+- Walked on the dogfood instance at pin 2552 (2026-09-25) by a class-agent probe in its own proposal branch on *Test*, since a probe stages and never establishes: *Number this figure* on the hovered picture drew *Figure 1.* and a caption typed beneath it saved as one `setFigure` with the ask kept; *Add table* and *Number this table* drew *Table 1.*; *Reference a figure* and *Reference a table* offered *Figure 1* and *Table 1* while a sentence was edited and wrote the two atoms, saved as `figureRef` and `tableRef` runs and drawn as their numbers; a table inserted and numbered above them made the sentence say *Table 2* and the read answer 2 (its own label is the fault above); retiring that table drew *(table gone)* and retiring the picture *(figure gone)*; and a Claude Code run asked to refer to the figure read the document, proposed one sentence after the paragraph named with a `figureRef` run, and its proposal drew in the branch. The seven branches the walk left (`branch-c36b3c11…-bo0295` through `.7`) are the owner's to reject.
+- Walked by the owner at pin 2625 (`BO_0295_014`, 2026-09-25, "works"): pictures and a code output numbered as figures in truth with their captions, a table numbered, references written from the bar, a picture inserted above them relabelling the ones below without a reload and the references following, and a retired block's reference saying it is gone. The change is complete.
+
+## References From The Hash
+
+- Under `calliopa-bootstrap`'s `BO_0300`, promoted to draft by the user on 2026-09-25 and
+  transferred here the same day, a reference is written where the sentence is: `#` in the block
+  being edited opens one list of what the document holds, and choosing writes the reference at
+  the caret; a reference may point at any block, a section by its heading and a paragraph as much
+  as a numbered figure, table or equation, and the three bar choices that wrote references go
+  ([Block Document Model](./block-document-model.md#references-from-the-hash); the kernel's half
+  is `calliopa-bootstrap`'s `ui-kernel.md`, *References From The Hash*; the manuscript's is
+  [Manuscripts](../../../../manuscripts/docs/system/system.md)).
+* The three bar choices — *Reference an equation*, *Reference a figure*, *Reference a table* — go;
+  `#` is the one way to write a reference. User decision, 2026-09-25.
+* In a prompt, `#` offers command mode's marks by number and, after them, the document's blocks;
+  choosing a mark writes its number, and choosing a block marks it for the prompt and writes the
+  number it takes. In any other block `#` offers the document's blocks and writes a reference.
+  What is written depends on the block, and nothing new reaches the run. User decisions,
+  2026-09-25 (`BO_0300_Q2`, revised the same day at `BO_0304`'s walk: `BO_0304_016`, after the
+  blocks left a prompt's list as soon as it carried a mark).
+* A reference reads as its kind and number — *Figure 3*, *Table 1*, *(2)*, *Remark 2* — or as
+  the heading's words for a section, exactly as the manuscript prints it, and a click on it takes
+  the reader to the block it points at. Nothing is stored beside the block's identity. User
+  decision, 2026-09-25 (`BO_0300_Q3`).
+* A reference to a block outside the reading order reads as gone and is never removed for it: when
+  the block returns, the reference is live again. User decision, 2026-09-25 (`BO_0300_Q4`).
+
+- The `#` list offers every block (`BO_0300_005`, landed 2026-09-25; `command/command-control.tsx`, `lib/reference-choices.ts`, `ui.shell`'s `lib/command-typeahead.ts`). While a text block is edited, `#` typed at the start or after a space or an opening bracket, and whatever follows it up to the caret (`pendingBlockReference`), opens the list the command control draws below the block: the document's blocks in reading order, the block being edited left out — a heading by its words, a paragraph or quote by its label when it has one and *Paragraph* until it does, with its first forty characters as a glimpse, a numbered figure, table or equation as *Figure 3*, *Table 1*, *(2)* with its caption or source — narrowed to the entries holding every word typed (`referenceChoices`, `matchingChoices`). Choosing writes one `blockRef` atom in place of the `#` and the words, the caret after it. A block that points at marks is a prompt: its list opens with the marks by number, the blocks follow, a block already marked standing as its mark, and choosing a block marks it and writes the number it takes (`chooseBlockAsMark$`, `BO_0300_Q2` as `BO_0304_016` revised it). Not offered, since a paper cannot name them: an abstract, an unnumbered figure, table or equation, code, an output, a video, a divider, a discarded block and a prompt.
+- The three bar choices are gone (`BO_0300_006`, 2026-09-25): *Reference an equation*, *Reference a figure* and *Reference a table* left the Format group with `insertReference$` and `insertBlockReference$`, and `figures.test.ts` lost the two cases that pressed them. The run kinds they wrote stay readable and drawn.
+- A reference is drawn as the read answers it (`BO_0300_007`, 2026-09-25; `block-text.tsx`, `editor-dom.ts`): in the reading row a link, `run-block-ref--link`, whose words are the read's `referenceLabels[target]` — the heading's words, *Remark 2*, *Figure 3* — or *(gone)* marked `run-block-ref--missing` when the read answered none; a press (`revealBlock`) scrolls the target's row into view and focuses it, so the bar is about it (`BO_0300_Q3`). On the editing surface the atom carries `data-block-ref` and its label in `data-block-ref-label`, one character wide, read back as the run it was. A reference whose target left the reading order keeps its run and draws gone, and draws live again when the block returns (`BO_0300_Q4`).
+- Verified (`BO_0300_008`, 2026-09-25): `views/references.test.ts` in the render harness — `#` in a paragraph offering the heading, the other paragraph and the numbered picture with the block itself absent, a choice writing the atom with the `#` taken back, the list narrowed by the words typed, the bar without the three choices, the four drawings in the reading row with a press bringing the target's row into view, and the atom painted on the surface with its label and read back; `lib/reference-choices.test.ts` for the entries and the filter; `command-control.test.ts`'s mark case still passing beside them.
+- Found in the walk and fixed the same day (2026-09-25): the list drew with no background, since the old composer's styles had gone with it, and now stands as a raised panel above the command line that scrolls when the blocks do not fit; and the `#` was measured in `runsText`, which drops every atom, so after a citation the range was one place too far left — a chosen reference ate the words before it and two references could not stand side by side. The `#` is measured in `runsPoints` now, one point per atom (`ui.shell`'s `runs.ts`), and `pendingBlockReference` and `pendingReference` admit a `#` directly after an atom. Cases in `references.test.ts` and `runs.test.ts` pin both.
+- Walked by the user at pin 2848 (`BO_0300_009`, 2026-09-25, "works"), after the two faults the first pass found were fixed: the `#` list as a panel narrowing as words are typed, references to a heading, a figure, an equation and a paragraph written from it and read as the heading's words, *Figure 1*, *(1)* and *Remark 1*, a click reaching the block, the paragraph retired and its reference gone, restored and live, a prompt's `#` still pointing at its marks, the bar without the three choices, and the manuscript setting the paragraph apart as *Remark 1*. The change is complete.
 
 ## A Merge Keeps The Words
 
@@ -1078,3 +1152,64 @@ with the right base revision, so nothing refused it (`DO_0017`, the document *Qc
   mounts its successor, stands as it is: it is what keeps a phone's keyboard from closing between two
   blocks, and nothing has shown it losing anything on its own.
 
+
+## Profiles
+
+Under `calliopa-bootstrap`'s `BO_0298` ([Block Document Model](./block-document-model.md#profiles)
+holds the decisions and the `profiles` extension's work): the bar carries a profile selector the
+`profiles` extension contributes, and this view draws it.
+
+- Nothing was built here (`BO_0298_020`, 2026-09-25): the selector is a group the `profiles` extension's decoration provider writes into the shell's decoration bar, which this bar already draws after its own groups, in reading and in command mode alike and on a profile document as on any other (`ui.shell`'s `BO_0298_030`). The task had named a `bar` document place; the bar draws groups, not components, and the choice action is the dropdown.
+
+## Inline Annotations
+
+- The editor draws what an extension has to say over a range of a block's words while they are
+  read, and stores nothing of it (`BO_0301_015`, landed 2026-09-25): `views/inline-annotations.ts`
+  is a store the editor provides — annotations by the extension that annotates and then by
+  block, a `version` a provider bumps after writing, and the annotation last `pressed` — and
+  `lib/annotations.ts` `annotate` cuts a block's runs at the annotations' edges into pieces, each
+  carrying the annotation over it, an atom never cut and annotated whole. A decoration provider
+  mounted around the document writes its own source and leaves the others'; the keywords
+  extension's mention is the first. The reading row — and the row read in command mode — draws
+  each piece through `Marked` inside `Annotated` (`views/block-text.tsx`): a `span.run-annotated`
+  carrying `data-annotation` (the kind), `data-annotation-id`, `data-annotation-title` and
+  `data-annotation-detail`, with the title as its tooltip, and the words inside drawn as ever.
+  The wrapper carries no mark and `runsFrom` reads through it, so the words read back whole and
+  nothing is written for it; the block being edited is the editor's own element, so annotations
+  leave with the edit and return with the next read.
+- A press on an annotated run is the annotating extension's: the wrapper stops the click before
+  the row, so no editor opens under it, and records the press — kind, identity, title and when —
+  on the store for the extension's provider to act on. The editor opens nothing itself.
+- A piece is a plain object cut at render, which Qwik draws once and never patches, so each
+  piece is keyed on its position, its annotation and its words: a piece whose words or
+  annotation changed is drawn anew. Found at implementation, 2026-09-25, as a stale piece beside
+  a fresh one. Proven in `lib/annotations.test.ts` and, in the editor harness, by the keywords
+  extension's `views/views.test.ts`.
+- [ ] Enter in a block and typing on can leave the editor with a stale base: on 2026-09-25, in the `BO_0299` walk, a block created with its document and split on Enter (a *revise* and a *split* both landing at dataRevision 2752, the split established over the revise) was next saved as *This block changed somewhere else*, and the documents behaviour suite's *inserts, a split, a move, a merge, a retire and a restore* case fails at head under the kernel harness. Not `BO_0299`'s: the role relations touched no block revision. Reproduce with the suite first.
+
+## Code Listings Are Numbered
+
+- Under `calliopa-bootstrap`'s `BO_0303`, promoted to draft by the user on 2026-09-25 and
+  transferred here the same day, the editor numbers a code block on request as a listing, draws
+  its label and a caption beneath it, offers it in the `#` list and draws a reference to it — all
+  the way it does for a figure ([Block Document Model](./block-document-model.md#code-listings-are-numbered);
+  the kernel's half is `calliopa-bootstrap`'s `ui-kernel.md`, *Code Listings Are Numbered*; the
+  manuscript's is [Manuscripts](../../../../manuscripts/docs/system/system.md)).
+* *Number this listing* is the same toggle as *Number this figure*, under the `hash` icon, on a
+  code block the bar is about and on no proposal; the caption is a line beneath the block, as a
+  picture's is; and the `#` list offers a numbered listing as *Listing 2* with its caption's or
+  its first source line's opening words. User request, 2026-09-25: *same behaviour like the
+  other*.
+* A number needs no caption. User decision, 2026-09-25.
+- A reference to a listing needs nothing new: the reading row draws the read's label, *Listing 2*,
+  and *(gone)* for a code block nobody numbers, and a press reveals the block (`BO_0300_007`).
+- The block's number reaches its view from the read's map, never from the row's block
+  (`BO_0295_014`): `BlockRow` passes `listingNumbers[blockId]` as the `number` of `CodeBlock`, so
+  a listing numbered above another relabels it without a reload.
+
+- The caption line (`BO_0303_011`, landed 2026-09-25; `views/code-block.tsx`, `views/figure-caption.tsx`, `lib/figure-label.ts`): beneath a code block, inside its figure after the body, `FigureCaption` with the kind `listing` — *Listing 2.* when the block is numbered, then the caption, a field while the document is read that saves on change as one `setFigure` keeping the ask, the words alone otherwise; a numbered listing without a caption draws its label alone, and a block with neither draws no line on a proposal's chip. `BlockRow` hands `listingNumbers[blockId]` to `CodeBlock` as its `number`, apart from the block, and a proposed code block on a chip draws the number the read gave it where it would land.
+- *Number this listing* (`BO_0303_012`, landed 2026-09-25; `views/block-editor.tsx`): the `hash` group's toggle is offered on a code block the bar is about and on no proposal, beside its three earlier subjects — *Number this listing*, *Stop numbering this listing* when on — sending `setFigure` with the ask flipped and the caption kept.
+- The `#` list offers a numbered listing (`BO_0303_013`, landed 2026-09-25; `lib/reference-choices.ts`): a `sourcecode` block the read labels or that asks for a number enters the list in reading order as *Listing 2* with the opening words of its caption, or of its first non-empty source line when it has none, under the `code` icon; a code block nobody numbers is not offered, as an unnumbered picture is not. The reference itself needs nothing new: the reading row draws the read's label and *(gone)* (`BO_0300_007`).
+- Verified in the render harness (`BO_0303_014`, 2026-09-25; `views/figures.test.ts`, *a listing's caption and number*, and `lib/reference-choices.test.ts`): the caption line beneath a numbered code block with *Listing 1.* and its field, the label alone from the read's map, a caption typed saved as one `setFigure` on the base with the ask kept, *Number this listing* on a hovered code block sending the ask with the caption kept, and the `#` entries with the caption's and with the first line's words and none for an unnumbered block.
+- Walked by the user at pin 2881 (`BO_0303_015`, 2026-09-25, "works"): a code block numbered from the bar, captioned beneath it, referred to from a sentence by `#`. The walk found three things. A tab open from before the pin keeps the old client, so the caption line and the toggle appear on a reload. With both panels open and the browser zoomed, the `#` group stands past the bar's faded right edge, in the bar and off the screen, until the bar is scrolled sideways or a panel closed — the bar's behaviour since it scrolls as one (`CA_0060`), the same for a picture's toggle. And while a paragraph is being edited, resting the pointer on the code row takes nothing (`DO_0006_003`), so the toggle is not reached until the editing is left; the gap that leaves is the task below. A probe in its own branch had shown the same build numbering, captioning and drawing *Listing 1.* on every code row of *Eln* at widths from 600 to 1920 pixels, with the pointer's rest, a click into the source and a tap alike, before the user's walk (`.local/walk-0303/`).
+- [ ] BO_0303_017 A click into a code block's source makes its row the bar's subject. Found in the walk: while a paragraph is being edited, a click straight into a code block's source ends the editing and focuses the source, but the bar is left with no block group at all — fifteen actions, the document's alone — until the pointer leaves the block and comes back, since the pointer's rest that would have focused the row ran while the paragraph was edited and took nothing. A picture's or a table's row takes such a click as its subject; a code block's source should too, so *Number this listing* and the block group stand on the block the reader is typing in.

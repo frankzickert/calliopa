@@ -67,7 +67,11 @@
   field left, and the block's own revise waited for while it says it is sending — then asks the
   kernel's `POST /__kernel/code/execute` for the document and the block, naming no revision, so
   what runs is what the block holds after the person's last edit; the kernel streams `started`,
-  every event and `done`, shown beneath the button while it runs and kept until the next run, the
+  every event and `done`, shown beneath the button while it runs and kept until the next run —
+  an error as its whole traceback, escapes stripped, in the traceback's colours through
+  `documents`' `lib/traceback.ts` (`lib/live-lines.ts`, `BO_0296_019`; walk finding 2026-09-25:
+  the line said `name: value` in plain text while the coloured output stood only on the proposal
+  row) — the
   note afterwards says how it ended and that the output is proposed below, and the control
   dispatches `calliopa:document-proposed`, bubbling from its element, so the editor draws the proposal
   (`BO_0289_023`). *Stop* interrupts the document's session.

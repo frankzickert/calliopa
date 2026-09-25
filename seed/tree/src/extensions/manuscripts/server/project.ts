@@ -1,4 +1,4 @@
-import type { BlockView, DocumentView, OutputBlockView, TableBlockView, TextBlockView } from "~/extensions/documents/server/assemble";
+import { showsLineNumbers, type BlockView, type CodeBlockView, type DocumentView, type OutputBlockView, type TableBlockView, type TextBlockView } from "~/extensions/documents/server/assemble";
 import type { WorkRecord } from "~/extensions/bibliography/lib/work";
 import type { Run } from "~/lib/runs";
 
@@ -42,6 +42,8 @@ type Meta = Record<string, unknown>;
 export interface FigureFile {
   readonly name: string;
   readonly objectId: string;
+  /** The picture's type, for keeping the figure beside the source. */
+  readonly mediaType: string;
 }
 
 export interface Projection {
@@ -74,7 +76,7 @@ export function latexText(text: string): string {
   });
 }
 
-const label = (prefix: "fig" | "tab" | "eq", blockId: string): string => `${prefix}:${blockId}`;
+const label = (prefix: "fig" | "tab" | "eq" | "par" | "lst", blockId: string): string => `${prefix}:${blockId}`;
 
 const words = (text: string): Inline[] => {
   const inlines: Inline[] = [];
@@ -96,7 +98,50 @@ interface Context {
   readonly works: ReadonlyMap<string, WorkRecord>;
   readonly cited: string[];
   readonly omitted: string[];
+  /** The blocks of the reading order, by identity, and the paragraphs a
+   * sentence refers to, which are set apart as remarks (`BO_0300_012`). */
+  readonly reading: ReadonlyMap<string, BlockView>;
+  readonly remarks: ReadonlySet<string>;
 }
+
+const HEADING_ROLES: readonly string[] = ["h1", "h2", "h3"];
+const PROSE_ROLES: readonly string[] = ["paragraph", "quote"];
+
+/**
+ * What a reference to any block prints as (`BO_0300_012`, user decisions
+ * 2026-09-25): a numbered figure, table or equation as its number, a heading
+ * as `Section~\\ref` of the label Pandoc gives the header from the block's
+ * identity, a paragraph or quote as `Remark~\\ref` of the remark it is set in;
+ * a block outside the reading order, or one a paper cannot name, is said
+ * gone and named in what was left out.
+ */
+function blockReference(target: string, context: Context): Inline {
+  const block = context.reading.get(target);
+  const gone = (why: string): Inline => {
+    context.omitted.push(why);
+    return { t: "Str", c: "(gone)" };
+  };
+  if (block === undefined) return gone(`A reference to a block outside the reading order (${target}).`);
+  switch (block.kind) {
+    case "text":
+      if (HEADING_ROLES.includes(block.role)) return { t: "RawInline", c: ["latex", `Section~\\ref{${block.blockId}}`] };
+      if (context.remarks.has(block.blockId)) return { t: "RawInline", c: ["latex", `Remark~\\ref{${label("par", block.blockId)}}`] };
+      return gone(`A reference to a block a paper cannot name (${target}, ${block.role}).`);
+    case "equation":
+      return context.document.equationNumbers?.[block.blockId] === undefined ? gone(`A reference to an unnumbered equation (${target}).`) : { t: "RawInline", c: ["latex", `\\eqref{${label("eq", block.blockId)}}`] };
+    case "image":
+    case "output":
+      return context.document.figureNumbers?.[block.blockId] === undefined ? gone(`A reference to an unnumbered figure (${target}).`) : { t: "RawInline", c: ["latex", `Figure~\\ref{${label("fig", block.blockId)}}`] };
+    case "table":
+      return context.document.tableNumbers?.[block.blockId] === undefined ? gone(`A reference to an unnumbered table (${target}).`) : { t: "RawInline", c: ["latex", `Table~\\ref{${label("tab", block.blockId)}}`] };
+    case "sourcecode":
+      // A numbered code block is a listing in the body (`BO_0303_016`).
+      return context.document.listingNumbers?.[block.blockId] === undefined ? gone(`A reference to a code block nobody numbered (${target}).`) : { t: "RawInline", c: ["latex", `Listing~\\ref{${label("lst", block.blockId)}}`] };
+    default:
+      return gone(`A reference to a ${block.kind} block, which a paper cannot name (${target}).`);
+  }
+}
+
 
 function inlinesOf(runs: readonly Run[], context: Context): Inline[] {
   const inlines: Inline[] = [];
@@ -109,7 +154,11 @@ function inlinesOf(runs: readonly Run[], context: Context): Inline[] {
         continue;
       }
       if (!context.cited.includes(run.cite.work)) context.cited.push(run.cite.work);
-      const suffix = run.cite.locator !== undefined && run.cite.locator !== "" ? [{ t: "Str", c: `, ${run.cite.locator}` }] : [];
+      // The locator is natbib's post-note and goes in as its own words after
+      // the comma: the image's Pandoc (2.17) keeps the leading space of a
+      // suffix written as one string, and natbib then set `[1,  p. 3]` with two
+      // spaces (found in the dry walk of 2026-09-25).
+      const suffix = run.cite.locator !== undefined && run.cite.locator !== "" ? [{ t: "Str", c: "," }, { t: "Space" }, ...words(run.cite.locator)] : [];
       inlines.push({
         t: "Cite",
         c: [[{ citationId: run.cite.work, citationPrefix: [], citationSuffix: suffix, citationMode: { t: "NormalCitation" }, citationNoteNum: 0, citationHash: 0 }], [{ t: "Str", c: `[@${run.cite.work}]` }]],
@@ -131,6 +180,10 @@ function inlinesOf(runs: readonly Run[], context: Context): Inline[] {
       inlines.push(number === undefined ? { t: "Str", c: "(table gone)" } : { t: "RawInline", c: ["latex", `Table~\\ref{${label("tab", run.tableRef)}}`] });
       continue;
     }
+    if (run.blockRef !== undefined) {
+      inlines.push(blockReference(run.blockRef, context));
+      continue;
+    }
     if (run.math === true) {
       inlines.push({ t: "Math", c: [{ t: "InlineMath" }, run.text] });
       continue;
@@ -148,12 +201,13 @@ function inlinesOf(runs: readonly Run[], context: Context): Inline[] {
 
 /** A float's caption: numbered with its label when the document numbers the
  * block, else unnumbered, else none; the provenance line last, when there is
- * one. */
+ * one — already LaTeX, since it may carry a `\\ref` to the listing that
+ * produced the block (`BO_0303_016`). */
 function captionOf(caption: string | undefined, numbered: boolean, labelled: string, provenance?: string): string {
   // The caption ends as a sentence before the provenance line follows it.
   const said = caption !== undefined && caption.trim() !== "" ? caption.trim() : "";
   const sentence = said !== "" && provenance !== undefined && !/[.!?]$/u.test(said) ? `${said}.` : said;
-  const parts = [sentence !== "" ? latexText(sentence) : "", provenance !== undefined ? latexText(provenance) : ""].filter((part) => part !== "");
+  const parts = [sentence !== "" ? latexText(sentence) : "", provenance ?? ""].filter((part) => part !== "");
   const text = parts.join(" ");
   if (numbered) return `\\caption{${text}}\\label{${labelled}}`;
   if (text !== "") return `\\caption*{${text}}`;
@@ -164,6 +218,11 @@ function figureBlock(name: string, caption: string): Block {
   return { t: "RawBlock", c: ["latex", `\\begin{figure}[htbp]\\centering\\includegraphics[width=\\linewidth,height=0.4\\textheight,keepaspectratio]{${name}}${caption}\\end{figure}`] };
 }
 
+/** A table, shrunk to the line only when it is wider: the tabular is set in
+ * a box and measured, and one that overflows is scaled down while a narrow
+ * one keeps its size. The box is the source's own, so no venue template
+ * loads a package for it. A seven-column table had run off the page in both
+ * venues (dry walk, 2026-09-25). */
 function tableBlock(columns: readonly { readonly name: string; readonly type?: string }[], rows: readonly (readonly string[])[], caption: string): Block {
   const align = columns.map((column) => (column.type === "number" ? "r" : "l")).join("");
   const line = (cells: readonly string[]): string => `${cells.map((cell) => latexText(cell)).join(" & ")}\\\\`;
@@ -174,7 +233,9 @@ function tableBlock(columns: readonly { readonly name: string; readonly type?: s
     ...rows.map((row) => line(columns.map((_, at) => row[at] ?? ""))),
     "\\bottomrule",
   ].join("\n");
-  return { t: "RawBlock", c: ["latex", `\\begin{table}[htbp]\\centering${caption}\n\\begin{tabular}{${align}}\n${body}\n\\end{tabular}\n\\end{table}`] };
+  const tabular = `\\begin{tabular}{${align}}\n${body}\n\\end{tabular}`;
+  const fitted = `\\ifdefined\\calliopatable\\else\\newsavebox{\\calliopatable}\\fi\n\\sbox{\\calliopatable}{${tabular}}\n\\ifdim\\wd\\calliopatable>\\linewidth\\resizebox{\\linewidth}{!}{\\usebox{\\calliopatable}}\\else\\usebox{\\calliopatable}\\fi`;
+  return { t: "RawBlock", c: ["latex", `\\begin{table}[htbp]\\centering${caption}\n${fitted}\n\\end{table}`] };
 }
 
 /** An HTML table an output showed — the shape a data frame renders as — read
@@ -205,13 +266,30 @@ const isText = (block: BlockView): block is TextBlockView => block.kind === "tex
  * at, named in each provenance line; `works` holds the bibliography's works
  * the document cites, by identity.
  */
-export function project(document: DocumentView, works: ReadonlyMap<string, WorkRecord>, revision: number): Projection {
-  const context: Context = { document, works, cited: [], omitted: [] };
+/** One entry of the glossary (`BO_0301_020`): a keyword the document
+ * mentions, with its definition's runs, or none. */
+export interface GlossaryEntry {
+  readonly title: string;
+  readonly definition: readonly Run[] | null;
+}
+
+export function project(document: DocumentView, works: ReadonlyMap<string, WorkRecord>, revision: number, glossary: readonly GlossaryEntry[] = []): Projection {
   const blocks: Block[] = [];
   const abstract: Block[] = [];
   const supplementary: Block[] = [];
   const files: FigureFile[] = [];
   const reading = document.blocks.filter((block) => !("standing" in block) || (block.standing !== "discarded" && block.standing !== "prompt"));
+  // The paragraphs a sentence refers to, set apart as remarks so a reference
+  // has a number to point at (`BO_0300_012`, user decision 2026-09-25):
+  // the read's own answer when it gave one, else derived here the same way.
+  const referred = new Set<string>();
+  for (const block of reading) if (block.kind === "text") for (const run of block.runs) if (run.blockRef !== undefined) referred.add(run.blockRef);
+  const remarks = new Set<string>(
+    document.remarkNumbers !== undefined
+      ? Object.keys(document.remarkNumbers)
+      : reading.filter((block) => block.kind === "text" && PROSE_ROLES.includes(block.role) && referred.has(block.blockId)).map((block) => block.blockId),
+  );
+  const context: Context = { document, works, cited: [], omitted: [], reading: new Map(reading.map((block) => [block.blockId, block])), remarks };
   const codeCell = new Map<string, number>();
   reading.filter((block) => block.kind === "sourcecode").forEach((block, at) => codeCell.set(block.blockId, at + 1));
   // The code blocks whose output enters as a figure or a table, and what it
@@ -220,7 +298,15 @@ export function project(document: DocumentView, works: ReadonlyMap<string, WorkR
 
   const outputFigure = (output: OutputBlockView): Block | null => {
     const cell = codeCell.get(output.of);
-    const provenance = cell === undefined ? `Produced by code no longer in the document, at revision ${revision}.` : `Produced by code cell ${cell} at revision ${revision}.`;
+    // Code its author numbered is a listing in the body, so the line names
+    // it and the supplement carries no copy (`BO_0303_Q2`).
+    const listing = document.listingNumbers?.[output.of];
+    const provenance =
+      cell === undefined
+        ? latexText(`Produced by code no longer in the document, at revision ${revision}.`)
+        : listing === undefined
+          ? latexText(`Produced by code cell ${cell} at revision ${revision}.`)
+          : `Produced by Listing~\\ref{${label("lst", output.of)}} at revision ${revision}.`;
     const picture = output.pictures[0];
     if (picture !== undefined) {
       const extension = FIGURE_TYPES[picture.mediaType];
@@ -229,7 +315,7 @@ export function project(document: DocumentView, works: ReadonlyMap<string, WorkR
         return null;
       }
       const name = `figure-${output.blockId}.${extension}`;
-      files.push({ name, objectId: picture.objectId });
+      files.push({ name, objectId: picture.objectId, mediaType: picture.mediaType });
       const number = document.figureNumbers?.[output.blockId];
       produced.set(output.of, [...(produced.get(output.of) ?? []), number === undefined ? "an unnumbered figure" : `Figure ${number}`]);
       return figureBlock(name, captionOf(output.caption, number !== undefined, label("fig", output.blockId), provenance));
@@ -256,13 +342,13 @@ export function project(document: DocumentView, works: ReadonlyMap<string, WorkR
             blocks.push({ t: "Header", c: [Number(block.role.slice(1)), [block.blockId, [], []], inlines] });
             break;
           case "quote":
-            blocks.push({ t: "BlockQuote", c: [{ t: "Para", c: inlines }] });
+            blocks.push(...remarked(block.blockId, { t: "BlockQuote", c: [{ t: "Para", c: inlines }] }, context));
             break;
           case "abstract":
             abstract.push({ t: "Para", c: inlines });
             break;
           default:
-            if (inlines.length > 0) blocks.push({ t: "Para", c: inlines });
+            if (inlines.length > 0) blocks.push(...remarked(block.blockId, { t: "Para", c: inlines }, context));
         }
         break;
       }
@@ -284,7 +370,7 @@ export function project(document: DocumentView, works: ReadonlyMap<string, WorkR
           break;
         }
         const name = `figure-${block.blockId}.${extension}`;
-        files.push({ name, objectId: block.objectId });
+        files.push({ name, objectId: block.objectId, mediaType: block.mediaType ?? "" });
         const number = document.figureNumbers?.[block.blockId];
         blocks.push(figureBlock(name, captionOf(block.caption, number !== undefined, label("fig", block.blockId))));
         break;
@@ -304,8 +390,19 @@ export function project(document: DocumentView, works: ReadonlyMap<string, WorkR
         else context.omitted.push("An output that showed no picture and no table: text output and tracebacks are not manuscript material.");
         break;
       }
-      case "sourcecode":
+      case "sourcecode": {
+        // A code block its author numbers prints where it stands, as a
+        // listing float holding the coloured code, captioned and labelled
+        // (`BO_0303_016`, user decision 2026-09-25); the rest is supplement
+        // or left out, below.
+        if (document.listingNumbers?.[block.blockId] === undefined) break;
+        blocks.push(
+          { t: "RawBlock", c: ["latex", "\\begin{listing}[htbp]"] },
+          codeBlockOf(block, document),
+          { t: "RawBlock", c: ["latex", `${captionOf(block.caption, true, label("lst", block.blockId))}\\end{listing}`] },
+        );
         break;
+      }
       case "video":
         context.omitted.push("A video: a manuscript is printed.");
         break;
@@ -323,6 +420,8 @@ export function project(document: DocumentView, works: ReadonlyMap<string, WorkR
   // code that produced neither is said by name.
   for (const block of reading) {
     if (block.kind !== "sourcecode") continue;
+    // A numbered listing stands in the body and prints once (`BO_0303_Q2`).
+    if (document.listingNumbers?.[block.blockId] !== undefined) continue;
     const what = produced.get(block.blockId);
     const cell = codeCell.get(block.blockId) ?? 0;
     if (what === undefined) {
@@ -331,8 +430,22 @@ export function project(document: DocumentView, works: ReadonlyMap<string, WorkR
     }
     supplementary.push(
       { t: "RawBlock", c: ["latex", `\\subsection*{Code cell ${cell}${block.language !== undefined ? ` (${latexText(block.language)})` : ""}, producing ${latexText(what.join(" and "))}}`] },
-      { t: "RawBlock", c: ["latex", `\\begin{lstlisting}\n${block.source}\n\\end{lstlisting}`] },
+      codeBlockOf(block, document),
     );
+  }
+
+  // The glossary (`BO_0301_020`): every keyword the document mentions, once,
+  // alphabetically by title, its definition as the entry — a definition list
+  // in the AST, so every venue's template carries it without a package the
+  // service would have to add — under a heading before the references,
+  // which the template sets last. Nothing with nothing mentioned.
+  if (glossary.length > 0) {
+    const entries = [...glossary].sort((left, right) => left.title.localeCompare(right.title));
+    blocks.push({ t: "Header", c: [1, ["glossary", ["unnumbered"], []], words("Glossary")] });
+    blocks.push({
+      t: "DefinitionList",
+      c: entries.map((entry) => [words(entry.title), [entry.definition === null || entry.definition.length === 0 ? [] : [{ t: "Para", c: inlinesOf(entry.definition, context) }]]]),
+    });
   }
 
   const head: Meta = { title: meta(document.title) };
@@ -359,6 +472,39 @@ export function project(document: DocumentView, works: ReadonlyMap<string, WorkR
 
   const references = context.cited.map((workId) => cslOf(workId, works.get(workId) as WorkRecord));
   return { ast: { "pandoc-api-version": [...PANDOC_API_VERSION], meta: head, blocks }, references, files, omitted: context.omitted };
+}
+
+/**
+ * Code, as code: a CodeBlock carrying the language as its class, so Pandoc's
+ * own highlighter sets it in colour through the macros the venues' templates
+ * carry, with shell escape still off; a block with no language is set
+ * plainly rather than refused (`BO_0296_020`). Numbered as the document
+ * numbers it (`BO_0302_010`): the numberLines class while the document's
+ * switch is on, and startFrom where a continued block starts, so the print
+ * says what the screen says. The same block in the body, as a listing, and
+ * in the supplement (`BO_0303_016`).
+ */
+function codeBlockOf(block: CodeBlockView, document: DocumentView): Block {
+  return {
+    t: "CodeBlock",
+    c: [
+      [
+        "",
+        [...(block.language === undefined ? [] : [block.language]), ...(showsLineNumbers(document) ? ["numberLines"] : [])],
+        showsLineNumbers(document) && (block.firstLine ?? 1) !== 1 ? [["startFrom", String(block.firstLine)]] : [],
+      ],
+      block.source,
+    ],
+  };
+}
+
+/** A paragraph or quote a sentence refers to, set apart as a numbered,
+ * labelled remark — the venues' templates define the environment — so the
+ * reference prints as *Remark N* and the reader finds it (`BO_0300_012`);
+ * any other block passes through. */
+function remarked(blockId: string, block: Block, context: Context): Block[] {
+  if (!context.remarks.has(blockId)) return [block];
+  return [{ t: "RawBlock", c: ["latex", `\\begin{remark}\\label{${label("par", blockId)}}`] }, block, { t: "RawBlock", c: ["latex", "\\end{remark}"] }];
 }
 
 /** A work as CSL-JSON, keyed by its identity, which is the citation's key. */

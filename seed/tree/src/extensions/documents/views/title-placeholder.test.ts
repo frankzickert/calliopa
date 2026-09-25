@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DocumentView } from "../server/assemble";
-import { UNNAMED_DOCUMENT } from "../lib/naming";
+import { UNNAMED_DOCUMENT, UNNAMED_PROFILE } from "../lib/naming";
 import { documentsApi, mountEditor, type SentCommand } from "./testing/editor-harness";
 
 /**
@@ -38,6 +38,17 @@ const mount = async (document: DocumentView) => {
   };
   return { ...view, sent, title, renames, type };
 };
+
+describe("the title of a profile nobody has named", () => {
+  it("Given an unnamed profile, Then the field is empty under the profile's minted name as its placeholder", async () => {
+    const view = await mount({ ...unnamed, documentId: "prof-unnamed", title: UNNAMED_PROFILE, record: "profile" });
+    expect(view.title.textContent).toBe("");
+    expect(view.title.getAttribute("data-unnamed")).toBe("true");
+    expect(view.title.getAttribute("data-placeholder")).toBe(UNNAMED_PROFILE);
+    expect(view.root.querySelector("h2.document-title")?.textContent).toContain(UNNAMED_PROFILE);
+    await view.idle();
+  });
+});
 
 describe("the title of a document nobody has named", () => {
   it("Given an unnamed document, Then the field is empty under the minted name as its placeholder, and the heading is still named", async () => {

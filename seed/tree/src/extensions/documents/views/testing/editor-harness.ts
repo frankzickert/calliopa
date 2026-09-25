@@ -22,6 +22,8 @@ import {
   type ViewProposed,
   type ViewFocus,
   type ViewReveal,
+  type ViewPointing,
+  type ViewAcross,
   type ViewDrop,
   type ViewActivity,
   type ViewAnswerAll,
@@ -74,6 +76,14 @@ export interface BridgeRecord {
   /** What the next press on `[data-harness-reveal]` asks the view to show,
    * as a chip in the composer asks it. CA_0039_005 */
   reveal: RevealTarget | null;
+  /** The pointing that stands across the workspace, as the shell holds it:
+   * what the view mounts into, and what it writes. A test presets it to
+   * mount the view as another prompt's guest, and reads it back to see what
+   * the view wrote for the session. BO_0304_008 */
+  session?: ViewPointing;
+  /** The last *Mark document* pressed, as the shell hands it over; the view
+   * clears its document once applied. BO_0304_008 */
+  across?: ViewAcross;
   /** The words a view asked the composer to start with. CA_0046_006 */
   compose?: string;
   /** The block the shell asks the view to focus once it shows, as a return
@@ -469,6 +479,11 @@ export function documentsApi(
         } as DocumentView;
         return answer({ documentId: document.documentId, revisionId, dataRevision: "1" });
       }
+      if (body["command"] === "setFrontMatter") {
+        // The head follows what it wrote, as the read-back carries it. BO_0293_025
+        current = { ...current, revisionId, frontMatter: body["frontMatter"] as DocumentView["frontMatter"] } as DocumentView;
+        return answer({ documentId: document.documentId, revisionId, dataRevision: "1" });
+      }
       if (body["command"] === "placeProposal") {
         return answer({ itemId: body["itemId"], order: "placed" });
       }
@@ -606,7 +621,7 @@ export const tabFor = (document: DocumentView): Tab => ({
  * is rendered here rather than handed in, because a component may not
  * capture a function (`BO_0138`).
  */
-export const editorHarness = (tab: Tab, record: BridgeRecord) =>
+export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: RevealTarget) =>
   component$(() => {
     const drag = useStore({ overId: null, drop: null });
     const inspector = useStore<ViewInspector>({
@@ -634,7 +649,15 @@ export const editorHarness = (tab: Tab, record: BridgeRecord) =>
     const decorationBar = useStore<ViewBar>({ groups: [] });
     const save = useStore<{ state: null }>({ state: null });
     const proposed = useStore<ViewProposed>({ itemId: null, seq: 0 });
-    const reveal = useStore<ViewReveal>({ itemId: null, target: null, seq: 0 });
+    const reveal = useStore<ViewReveal>(
+      pendingReveal === undefined ? { itemId: null, target: null, seq: 0 } : { itemId: tab.itemId, target: pendingReveal, seq: 1 },
+    );
+    const pointing = useStore<ViewPointing>(record.session ?? { documentId: null, prompt: null, marks: "", documents: [], seq: 0 });
+    const across = useStore<ViewAcross>(record.across ?? { document: null, title: "", seq: 0 });
+    // The stores themselves, so a test reads what the view wrote and writes
+    // what the shell would. BO_0304_008
+    record.session = pointing;
+    record.across = across;
     const activity = useStore<ViewActivity>({ runs: [], seq: 0 });
     const answerAll = useStore<ViewAnswerAll>({ itemId: null, group: null, answer: null, seq: 0 });
     const toggleRun = useStore<ViewToggleRun>({ itemId: null, key: null, seq: 0 });
@@ -653,6 +676,8 @@ export const editorHarness = (tab: Tab, record: BridgeRecord) =>
       save,
       proposed,
       reveal,
+      pointing,
+      across,
       activity,
       answerAll,
       toggleRun,
@@ -878,6 +903,13 @@ export async function mountEditor(
      * first render; a test that holds a read open to prove the page does not
      * wait on it says no. DO_0001_003 */
     readonly awaitReads?: boolean;
+    /** The pointing that stands as the view mounts, as the shell would hold
+     * it: another document's, to mount the view as its guest, or this
+     * document's, to mount the prompt's view again. BO_0304_008 */
+    readonly session?: ViewPointing;
+    /** A reveal aimed at this document that no view has consumed, as a chip
+     * pressed from another document leaves it. BO_0304_009 */
+    readonly reveal?: RevealTarget;
   } = {},
 ) {
   // The editor's counts and proposals are read by a visible task, after the
@@ -903,10 +935,11 @@ export async function mountEditor(
     retargets: [],
     blockControls: [],
     ...(options.focusOn === undefined ? {} : { focusOn: options.focusOn }),
+    ...(options.session === undefined ? {} : { session: options.session }),
   };
   const dom = await createDOM();
   const tab: Tab = { ...tabFor(document), ...(options.route === undefined ? {} : { route: options.route }) };
-  await dom.render(jsx(editorHarness(tab, record), {}));
+  await dom.render(jsx(editorHarness(tab, record, options.reveal), {}));
   const root = dom.screen as unknown as HTMLElement;
   const settle = async (until: () => boolean = () => true) => {
     for (let tick = 0; tick < 50; tick++) {

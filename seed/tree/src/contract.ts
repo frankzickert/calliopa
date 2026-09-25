@@ -97,6 +97,11 @@ export interface LibrarySection {
   readonly empty: string;
   /** The bare kind the section's rows open, so the shell re-reads the section when a tab of that kind changes. */
   readonly kind?: string;
+  /** The qualified kind of another extension the section's rows open — `documents:document`
+   * for a section listing documents of its own — so the shell re-reads it when a tab of that
+   * kind changes, as it re-reads that kind's own sections. Refused when nothing contributes the
+   * kind. One of `kind` and `opens`, never both. BO_0298_014 */
+  readonly opens?: string;
   /** The create control's accessible name; absent means no control. */
   readonly createLabel?: string;
   /** Creates one item and answers what to open, or `null` when nothing was made. */

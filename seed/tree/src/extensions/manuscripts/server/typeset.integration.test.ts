@@ -67,6 +67,9 @@ describe.skipIf(url === undefined)("the projection, typeset by the real service"
       expect(body.tex).toMatch(/\\citep\[[^\]]*p\.[^\]]*3\]\{w1\}/u);
       expect(body.bib).toContain("w1");
       expect(body.tex).toContain("Supplementary Material");
+      // A referred-to paragraph set apart as a remark, and a section referred to (BO_0300_012).
+      expect(body.tex).toContain("\\begin{remark}\\label{par:claim}");
+      expect(body.tex).toContain("Section~\\ref{h}");
       if (process.env["CALLIOPA_TYPESET_TEST_KEEP"] !== undefined) {
         const { writeFileSync } = await import("node:fs");
         writeFileSync(`${process.env["CALLIOPA_TYPESET_TEST_KEEP"]}/fixture-${venue}.pdf`, Buffer.from(body.pdf ?? "", "base64"));

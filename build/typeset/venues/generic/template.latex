@@ -6,6 +6,16 @@
 \usepackage[utf8]{inputenc}
 \usepackage{lmodern}
 \usepackage{amsmath,amssymb}
+% A paragraph another sentence refers to is set apart as a numbered remark,
+% so the reference has a number to point at (BO_0300_013). LaTeX's own
+% \newtheorem, no package.
+\newtheorem{remark}{Remark}
+% A code block its author numbers is a listing: a float of its own, holding
+% the coloured code Pandoc sets, captioned and labelled so a sentence refers
+% to it as Listing N (BO_0303_006). float.sty is texlive-latex-recommended's.
+\usepackage{float}
+\newfloat{listing}{htbp}{lol}
+\floatname{listing}{Listing}
 \usepackage{graphicx}
 \usepackage{longtable,booktabs,array}
 \usepackage{caption}

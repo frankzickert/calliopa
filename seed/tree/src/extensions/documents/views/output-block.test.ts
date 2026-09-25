@@ -60,3 +60,62 @@ describe("an output in a document", () => {
     expect(file.getAttribute("download")).toBe("out.csv");
   });
 });
+
+/** An error's traceback in colour (`BO_0296_019`): the exception's name,
+ * each frame's file, line and function, with the escapes stripped first and
+ * every character kept. */
+describe("an error in colour", () => {
+  const TRACEBACK = [
+    "\u001b[31mTraceback (most recent call last):\u001b[39m",
+    '  File "/tmp/cell.py", line 2, in <module>',
+    "    1 / 0",
+    "\u001b[1mZeroDivisionError\u001b[0m: division by zero",
+  ];
+  const errored = (): DocumentView => ({
+    documentId: "doc-1",
+    revisionId: "rev-doc",
+    title: "Notebook",
+    blocks: [
+      {
+        kind: "sourcecode",
+        blockId: "blk-c",
+        revisionId: "rev-c",
+        containmentId: "c-c",
+        order: "a",
+        source: "1 / 0",
+        language: "python",
+      },
+      {
+        kind: "output",
+        blockId: "blk-e",
+        revisionId: "rev-e",
+        containmentId: "c-e",
+        order: "b",
+        of: "blk-c",
+        outcome: "error",
+        items: [{ kind: "error", name: "ZeroDivisionError", value: "division by zero", traceback: TRACEBACK }],
+        pictures: [],
+        files: [],
+      },
+    ],
+  });
+
+  it("colours the exception, the file, the line and the frame, and reads as the plain traceback", async () => {
+    const document = errored();
+    vi.stubGlobal("fetch", documentsApi(document, []));
+    const view = await mountEditor(document);
+    const error = view.root.querySelector("[data-output-error='ZeroDivisionError']") as HTMLElement;
+    expect(error.textContent).toBe(
+      ["Traceback (most recent call last):", '  File "/tmp/cell.py", line 2, in <module>', "    1 / 0", "ZeroDivisionError: division by zero"].join("\n"),
+    );
+    const tokens = Array.from(error.querySelectorAll("[data-error-token]")).map((token) => [token.getAttribute("data-error-token"), token.textContent]);
+    expect(tokens).toEqual([
+      ["heading", "Traceback (most recent call last):"],
+      ["file", '"/tmp/cell.py"'],
+      ["line", "2"],
+      ["frame", "<module>"],
+      ["exception", "ZeroDivisionError"],
+    ]);
+    expect(error.textContent).not.toContain("\u001b");
+  });
+});

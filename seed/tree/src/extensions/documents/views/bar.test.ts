@@ -438,7 +438,61 @@ describe("the bar before editing", () => {
       Array.from(
         view.root.querySelectorAll('.view-bar__trailing [data-bar-action]'),
       ).map((control) => control.getAttribute("data-bar-action")),
-    ).toEqual(["take-back-standing", "delete-document"]);
+    ).toEqual(["format-code", "line-numbers", "take-back-standing", "delete-document"]);
+  });
+
+  it("Given a document read, Then Format code stands pressed in the document group, and pressing it switches the document off (BO_0296_021)", async () => {
+    const view = await mount();
+    const control = () => bar(view.root, "format-code");
+    expect(control()?.getAttribute("aria-pressed")).toBe("true");
+    expect(control()?.getAttribute("aria-label")).toContain("on");
+    expect(control()?.querySelector("[data-icon]")?.getAttribute("data-icon")).toBe("code");
+    await view.userEvent('[data-bar-action="format-code"]', "click");
+    await view.settle(() => view.sent.some((command) => command.body["command"] === "setFormatCode"));
+    const switched = view.sent.filter((command) => command.body["command"] === "setFormatCode").map((command) => command.body);
+    expect(switched).toEqual([{ command: "setFormatCode", baseRevisionId: "rev-doc", on: false }]);
+  });
+
+  it("Given a document read, Then Line numbers stands pressed beside Format code, and pressing it switches the document off (BO_0302_007)", async () => {
+    const view = await mount();
+    const control = () => bar(view.root, "line-numbers");
+    expect(control()?.getAttribute("aria-pressed")).toBe("true");
+    expect(control()?.getAttribute("aria-label")).toContain("on");
+    await view.userEvent('[data-bar-action="line-numbers"]', "click");
+    await view.settle(() => view.sent.some((command) => command.body["command"] === "setLineNumbers"));
+    expect(view.sent.filter((command) => command.body["command"] === "setLineNumbers").map((command) => command.body)).toEqual([
+      { command: "setLineNumbers", baseRevisionId: "rev-doc", on: false },
+    ]);
+  });
+
+  it("Given a document whose line numbers are off, Then Line numbers reads released and pressing it switches them on", async () => {
+    const off = { ...draft, lineNumbers: false };
+    const sent: SentCommand[] = [];
+    vi.stubGlobal("fetch", documentsApi(off, sent));
+    const view = await mountEditor(off);
+    last = view;
+    expect(bar(view.root, "line-numbers")?.getAttribute("aria-pressed")).toBe("false");
+    expect(bar(view.root, "line-numbers")?.getAttribute("aria-label")).toContain("off");
+    await view.userEvent('[data-bar-action="line-numbers"]', "click");
+    await view.settle(() => sent.some((command) => command.body["command"] === "setLineNumbers"));
+    expect(sent.filter((command) => command.body["command"] === "setLineNumbers").map((command) => command.body)).toEqual([
+      { command: "setLineNumbers", baseRevisionId: "rev-doc", on: true },
+    ]);
+  });
+
+  it("Given a document whose formatting is off, Then Format code reads released and pressing it switches it on", async () => {
+    const off = { ...draft, formatCode: false };
+    const sent: SentCommand[] = [];
+    vi.stubGlobal("fetch", documentsApi(off, sent));
+    const view = await mountEditor(off);
+    last = view;
+    expect(bar(view.root, "format-code")?.getAttribute("aria-pressed")).toBe("false");
+    expect(bar(view.root, "format-code")?.getAttribute("aria-label")).toContain("off");
+    await view.userEvent('[data-bar-action="format-code"]', "click");
+    await view.settle(() => sent.some((command) => command.body["command"] === "setFormatCode"));
+    expect(sent.filter((command) => command.body["command"] === "setFormatCode").map((command) => command.body)).toEqual([
+      { command: "setFormatCode", baseRevisionId: "rev-doc", on: true },
+    ]);
   });
 
   it("Given a focused block, When its role is turned, Then it is revised from the revision the document holds", async () => {

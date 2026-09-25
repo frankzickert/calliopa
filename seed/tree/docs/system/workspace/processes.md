@@ -108,3 +108,12 @@ Short requests and long-running processes are different primitives.
   once, and the picture filled it within a poll of the Execution entry reading completed. A
   generation takes the better part of a minute, so the box stands empty that long before the
   fill; the entry's state is what says when to expect the picture.
+
+## The Run Used A Profile
+
+- Under `calliopa-bootstrap`'s `BO_0298`
+  ([Block Document Model](../../../src/extensions/documents/docs/system/documents/block-document-model.md#profiles)
+  in `documents`): a run started from a document with a profile attached is guided by it, and the
+  record says so (`calliopa-bootstrap`'s `ui-kernel.md` `BO_0298_002`). The person sees it in the
+  run's detail and nowhere else; the chip stays as it is. User decision, 2026-09-25 (`BO_0298_Q10`).
+- The process detail names the profile (`BO_0298_031`, landed 2026-09-25): `GET /api/processes/:id/profile` reads the run through `runForProcess` and `readBridgeRun` and answers the record's `profile` — `{id, title}` — or `null` for a run with none and for a process that is not a run; the shell reads it beside the proposals and the attachments when the selection changes (`ProposedRead.profile`), and the detail draws one line under the step, *Profile: «title»* (`data-process-profile`), whose press (`data-process-profile-open`) opens the profile document in the document tab as `data-process-item` opens what a run proposes into. `BridgeRun` carries the field. Proven in `process-selection.test.ts` through the inspector host: the line with its title for a run guided by one, and nothing for a run with none.

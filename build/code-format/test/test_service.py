@@ -6,12 +6,14 @@ BO_0296_001
 """
 
 import json
+import os
+import tempfile
 import unittest
 import urllib.error
 import urllib.request
 
 from lib.caps import Caps
-from server import Service
+from server import Service, read_bearer
 
 BEARER = "a-test-bearer"
 
@@ -100,6 +102,27 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("python", body["languages"])
         self.assertIn("typescript", body["languages"])
+
+
+class BearerTest(unittest.TestCase):
+    """Where the bearer comes from (BO_0296_010): the entrypoint's environment
+    first, the file otherwise, and a start with neither refused in words."""
+
+    def test_given_the_entrypoint_handed_it_then_the_environment_wins_over_the_file(self):
+        self.assertEqual(read_bearer("/nonexistent", {"CALLIOPA_CODE_FORMAT_BEARER": " handed "}), "handed")
+
+    def test_given_no_environment_then_the_file_is_read(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".bearer", delete=False) as handle:
+            handle.write("from-file\n")
+        try:
+            self.assertEqual(read_bearer(handle.name, {}), "from-file")
+        finally:
+            os.unlink(handle.name)
+
+    def test_given_neither_then_the_start_is_refused_in_words(self):
+        with self.assertRaises(SystemExit) as refused:
+            read_bearer("/nonexistent", {})
+        self.assertIn("no bearer at /nonexistent", str(refused.exception))
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ import {
   type PanelWidths,
 } from "~/lib/layout";
 import { danglingNumbers } from "~/lib/command-typeahead";
-import { LibraryRow } from "./library-row";
+import { LibraryRow, type RowPointing } from "./library-row";
 import { LicenceWarning, PersonMenu } from "./header-disclosure";
 import { CloseAllTabs, HeaderMenu, HeaderModeToggle, TabEdge } from "./header-menu";
 import type { FocusedWork } from "~/server/focused-work";
@@ -163,6 +163,8 @@ import {
   type RunChip,
   type ViewFocus,
   type ViewReveal,
+  type ViewPointing,
+  type ViewAcross,
 } from "./view-bridge";
 import { chipsFor } from "~/lib/run-chips";
 import {
@@ -264,6 +266,13 @@ function scrollerAt(x: number, y: number): HTMLElement {
   }
   return (document.scrollingElement as HTMLElement | null) ?? document.documentElement;
 }
+
+/** What a row or a tab shows of the pointing that stands: whether one does,
+ * and the number this document carries when marked whole. BO_0304_014 */
+const rowPointing = (pointing: ViewPointing, document: string | null): RowPointing => ({
+  active: pointing.documentId !== null,
+  number: document === null ? null : (pointing.documents.find((marked) => marked.document === document)?.number ?? null),
+});
 
 export const Shell = component$<{
   workspace: WorkspaceRecord;
@@ -371,6 +380,10 @@ export const Shell = component$<{
   const runProposed = useStore<ViewProposed>({ itemId: null, seq: 0 });
   /** The last chip the reader pressed, for the view showing its document. CA_0039_004 */
   const reveal = useStore<ViewReveal>({ itemId: null, target: null, seq: 0 });
+  /** The pointing that stands across the workspace, and the last *Mark
+   * document* pressed while it stands. BO_0304_014 */
+  const pointing = useStore<ViewPointing>({ documentId: null, prompt: null, marks: "", documents: [], seq: 0 });
+  const across = useStore<ViewAcross>({ document: null, title: "", seq: 0 });
   /** The reader's runs aimed at documents, as they go. BO_0265_007
    * BO_0269_014 */
   const activity = useStore<ViewActivity>({ runs: [], seq: 0 });
@@ -410,7 +423,7 @@ export const Shell = component$<{
     tabs: workspace.tabs,
     activeTabId: workspace.activeTabId,
   });
-  const proposed = useStore<ProposedRead>({ processId: null, documents: [], attachments: [], events: [] });
+  const proposed = useStore<ProposedRead>({ processId: null, documents: [], attachments: [], profile: null, events: [] });
   /**
    * The runs of the document in the active tab, for the inspector's
    * *Execution* section: read when the tab changes, when a run this shell
@@ -835,19 +848,25 @@ export const Shell = component$<{
     proposed.processId = selected;
     proposed.documents = [];
     proposed.attachments = [];
+    proposed.profile = null;
     proposed.events = [];
     if (selected === null) return;
 
-    const [response, attached] = await Promise.all([
+    const [response, attached, guided] = await Promise.all([
       fetch(`/api/processes/${selected}/proposals`),
       // What the run was sent with, from its own record. BO_0229_011
       fetch(`/api/processes/${selected}/attachments`),
+      // The profile that guided it, from the same record. BO_0298_031
+      fetch(`/api/processes/${selected}/profile`),
     ]);
     if (response.ok && selectedProcess(registry.selection, tabs.activeTabId) === selected) {
       proposed.documents = (await response.json()) as ProposedItem[];
     }
     if (attached.ok && selectedProcess(registry.selection, tabs.activeTabId) === selected) {
       proposed.attachments = (await attached.json()) as BridgeAttachment[];
+    }
+    if (guided.ok && selectedProcess(registry.selection, tabs.activeTabId) === selected) {
+      proposed.profile = (await guided.json()) as { id: string; title: string } | null;
     }
   });
   /**
@@ -1025,6 +1044,16 @@ export const Shell = component$<{
     mobile.sheet = null;
     await applyTabs$(openTab(tabs, tab));
   });
+  /**
+   * *Mark document*, pressed on a library row or a tab while a pointing stands
+   * (`BO_0304_014`): the shell hands the press to the mounted document view,
+   * which applies it to the session's marks and clears it.
+   */
+  const markDocument$ = $((document: string, title: string) => {
+    across.document = document;
+    across.title = title;
+    across.seq += 1;
+  });
   /** Re-reads one section through the host's library route. BO_0202_005 */
   const refreshSection$ = $(async (key: string) => {
     const section = REGISTRY.sections.find((candidate) => candidate.key === key);
@@ -1163,6 +1192,8 @@ export const Shell = component$<{
     }),
     proposed: runProposed,
     reveal,
+    pointing,
+    across,
     activity,
     answerAll,
     toggleRun,
@@ -1473,6 +1504,27 @@ export const Shell = component$<{
                     />
                   )}
                 </button>
+                {/* While a pointing stands, a document's tab carries *Mark
+                    document* beside its close, and its number while marked
+                    whole (`BO_0304_Q1`, `BO_0304_014`). */}
+                {pointing.documentId !== null && documentOf(tab) !== null && (
+                  <button
+                    type="button"
+                    class="tab-action tab__mark"
+                    data-mark-document={tab.itemId ?? undefined}
+                    data-reference={rowPointing(pointing, tab.itemId).number ?? undefined}
+                    aria-pressed={rowPointing(pointing, tab.itemId).number !== null}
+                    aria-label={
+                      rowPointing(pointing, tab.itemId).number === null
+                        ? `Mark ${tab.title} for the command`
+                        : `${tab.title}, reference ${rowPointing(pointing, tab.itemId).number}`
+                    }
+                    title={rowPointing(pointing, tab.itemId).number === null ? "Mark document" : `Reference ${rowPointing(pointing, tab.itemId).number}`}
+                    onClick$={() => markDocument$(tab.itemId ?? "", tab.title)}
+                  >
+                    {rowPointing(pointing, tab.itemId).number === null ? <Icon name="crosshair-simple" size={12} /> : `#${rowPointing(pointing, tab.itemId).number}`}
+                  </button>
+                )}
                 <button
                   type="button"
                   class="tab-action tab__close"
@@ -1682,7 +1734,13 @@ export const Shell = component$<{
                           const current = item.open !== undefined && active?.itemId === item.open.itemId;
                           return (
                             <li key={item.id}>
-                              <LibraryRow item={item} current={current} onOpen$={openTarget$} />
+                              <LibraryRow
+                                item={item}
+                                current={current}
+                                onOpen$={openTarget$}
+                                pointing={rowPointing(pointing, item.open?.itemId ?? null)}
+                                onMark$={markDocument$}
+                              />
                             </li>
                           );
                         })}

@@ -13,7 +13,7 @@ Every row names the licence file this table was checked against, at the pinned v
 where the publisher tags one. Verified 2026-09-08; the interface's own dependency added
 and checked 2026-09-23, and the code formatter's four tools added and checked on the built
 image the same day; `citeproc` and the Citation Style Language styles and locales added and
-checked 2026-09-24.
+checked 2026-09-24; `highlight.js` added and checked 2026-09-25.
 
 ## Images you pull
 
@@ -90,6 +90,7 @@ its publisher.
 | Package | Publisher | Pin | Licence | Checked against |
 |---|---|---|---|---|
 | `@mathjax/src` (a runtime dependency; sets the mathematics in documents) | The MathJax Consortium | `4.1.3`, exact in the lockfile | Apache-2.0 | https://github.com/mathjax/MathJax-src/blob/master/LICENSE |
+| `highlight.js` (a runtime dependency; colours the code in documents, on the server as a document is read and in the browser while a code block is written; its `lib/common` bundle of thirty-six languages, with the grammars the package itself carries) | Ivan Sagalaev and contributors | `11.12.0`, exact in the lockfile | BSD-3-Clause | https://github.com/highlightjs/highlight.js/blob/11.12.0/LICENSE, and the `LICENSE` file in the installed package |
 | `citeproc` (`citeproc-js`, a runtime dependency; sets citations and reference lists in the chosen style, on the server, unmodified) | Frank Bennett | `2.4.63`, exact in the lockfile | AGPL-3.0-or-later, taken from its dual licence CPAL-1.0 or AGPL-3.0-or-later; the npm registry's metadata reads AGPL-1.0, which its `LICENSE` file does not say | https://github.com/Juris-M/citeproc-js/blob/master/LICENSE |
 | `csl-styles` (the Citation Style Language styles, fetched by pnpm as the repository's GitHub tarball; the bibliography uses IEEE, APA and Chicago author-date, unmodified) | The Citation Style Language project and the styles' authors | commit `8947960dc3c5133a873d77342c77c67300a2bc18` of `citation-style-language/styles`, exact in the lockfile | CC-BY-SA-3.0 | https://github.com/citation-style-language/styles/blob/master/README.md |
 | `csl-locales` (the Citation Style Language locales, fetched the same way; the bibliography uses `en-US`, unmodified) | The Citation Style Language project | commit `a89adece41013402236e2c9020972d7e931fbab8` of `citation-style-language/locales`, exact in the lockfile | CC-BY-SA-3.0 | https://github.com/citation-style-language/locales/blob/master/README.md |

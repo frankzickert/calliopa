@@ -92,6 +92,16 @@ export function validateDocument(value: unknown): string | null {
   // The front matter a manuscript's head projects. BO_0293_012
   const frontMatter = readFrontMatter(content);
   if ("failure" in frontMatter) return frontMatter.failure;
+  // The formatting switch: whether a settled or an accepted code block is
+  // pretty-printed, on unless stored off. BO_0296_013
+  if (content["formatCode"] !== undefined && typeof content["formatCode"] !== "boolean") {
+    return "A document's formatCode is true or false: whether its code blocks are formatted when an edit settles.";
+  }
+  // The line-number switch: whether each line of a code block is numbered,
+  // shown unless stored off. BO_0302_003
+  if (content["lineNumbers"] !== undefined && typeof content["lineNumbers"] !== "boolean") {
+    return "A document's lineNumbers is true or false: whether each line of its code blocks is numbered.";
+  }
   return null;
 }
 
@@ -198,7 +208,12 @@ export function validateCode(value: unknown): string | null {
   if (content["runs"] !== undefined) return "A code block carries its source, not runs.";
   if (typeof content["source"] !== "string") return "A code block's source is the code itself, as text.";
   if (content["language"] !== undefined && typeof content["language"] !== "string") return "A code block's language is a word.";
-  return null;
+  // Whether the block continues its numbering from the code block above it. BO_0302_004
+  if (content["continues"] !== undefined && typeof content["continues"] !== "boolean") {
+    return "A code block's continues is true or false: whether its line numbering continues from the code block above it.";
+  }
+  // A listing's caption and its number's ask, as a picture's. BO_0303_007
+  return validateNumbering(content, "A code block");
 }
 
 /**

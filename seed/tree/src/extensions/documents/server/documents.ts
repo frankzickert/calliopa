@@ -16,7 +16,9 @@ import {
 } from "~/server/ccgw/client";
 import { branchGroupOf, currentBranch, outsideBranch } from "~/server/ccgw/branch-scope";
 import type { GraphOutcome, NonEmpty } from "~/server/outcome";
-import { assembleDocument, assembleRetired, blocksOf, CONTAINS, RETIRED, toBlock, type BlockView, type DocumentView } from "./assemble";
+import { assembleDocument, assembleRetired, blocksOf, CONTAINS, RETIRED, formatsCode, placeCodeLines, toBlock, type BlockView, type DocumentView } from "./assemble";
+import { formatSource } from "./format";
+import { guessLanguage } from "~/extensions/documents/lib/highlight";
 import { bareId, contentOf, nodeRef, typeOf } from "~/server/ccgw/nodes";
 import type { BlobReference } from "~/server/ccgw/blobs";
 import { sameRuns } from "~/lib/runs";
@@ -42,6 +44,7 @@ import {
   type RelationView,
 } from "./work";
 import { childrenOf, focusOf } from "~/server/focused-work";
+import { PROFILE_RECORD, type ProfileSelection, type ProfileSummary } from "../lib/profile";
 import { DOCUMENT_TARGET_KIND } from "./focus";
 import { reachesDocument } from "./reach";
 import {
@@ -287,12 +290,20 @@ const equationContent = (block: NewEquationBlock, order: string): Record<string,
   ...(block.source !== undefined ? { source: block.source } : {}),
 });
 
-/** What a new block stores, exported so it can be proven on its own. */
-const codeContent = (block: NewCodeBlock, order: string): Record<string, unknown> => ({
-  order,
-  source: block.source,
-  ...(block.language !== undefined && block.language.trim() !== "" ? { language: block.language.trim() } : {}),
-});
+/**
+ * What a new block stores, exported so it can be proven on its own. A block
+ * created without a language gets the highlighter's guess, once, as an
+ * ordinary value a person can change; nothing re-guesses it afterwards, and a
+ * guess the highlighter will not make leaves the field empty. BO_0296_017
+ */
+const codeContent = (block: NewCodeBlock, order: string): Record<string, unknown> => {
+  const named = block.language !== undefined && block.language.trim() !== "" ? block.language.trim() : guessLanguage(block.source);
+  return {
+    order,
+    source: block.source,
+    ...(named === null ? {} : { language: named }),
+  };
+};
 
 export const blockContentFor = (block: NewBlock, order: string): Record<string, unknown> =>
   isMedia(block)
@@ -677,6 +688,9 @@ const properties = (
 export async function createDocument(input: {
   readonly title: string;
   readonly block?: NewBlock;
+  /** The record slot, set in the same statement — `profile` for a profile
+   * (`BO_0298_012`); absent for an ordinary document. */
+  readonly record?: string;
 }): Promise<GraphOutcome<CreatedDocument>> {
   const block = input.block ?? { kind: "text" as const };
   const documentId = randomUUID();
@@ -685,7 +699,7 @@ export async function createDocument(input: {
     dref: nodeRef(documentId),
     bref: nodeRef(blockId),
   };
-  const content: Record<string, unknown> = { id: documentId, title: input.title };
+  const content: Record<string, unknown> = { id: documentId, title: input.title, ...(input.record === undefined ? {} : { record: input.record }) };
   const statement = [
     `CREATE (d:${DOCUMENT_TYPE} {${properties("d", content, parameters, true)}})`,
     `CREATE (b:${blockType(block)} {${properties("b", { id: blockId, ...blockContentFor(block, orderBetween("", "")) }, parameters, true)}})`,
@@ -752,6 +766,8 @@ export async function listDocuments(): Promise<GraphOutcome<readonly ListedDocum
     if (typeOf(node) !== DOCUMENT_TYPE) continue;
     if (node.revision.status !== "established") continue;
     if (containedIds.has(node.id) || seen.has(node.id)) continue;
+    // A profile lists in the Profiles category and nowhere else. BO_0298_011
+    if (contentOf(node)["record"] === PROFILE_RECORD) continue;
     seen.add(node.id);
     const title = contentOf(node)["title"];
     summaries.push({
@@ -774,6 +790,7 @@ export async function listDocuments(): Promise<GraphOutcome<readonly ListedDocum
       typeOf(node) === DOCUMENT_TYPE &&
       node.revision.status === "candidate" &&
       typeof node.revision.content?.["_proposal"] === "string" &&
+      node.revision.content?.["record"] !== PROFILE_RECORD &&
       !seen.has(node.id) &&
       !containedIds.has(node.id),
   );
@@ -1035,6 +1052,98 @@ export async function setCitationStyle(input: {
 }
 
 /**
+ * The document's formatting switch set (`BO_0296_013`, `BO_0296_021`): off
+ * stores `false`, on clears the property so the default — on — holds again.
+ * It governs what happens next, a settle or an acceptance, and reformats
+ * nothing that already stands. Written on the document's base as the
+ * citation style is, by the person's own edit.
+ */
+export async function setFormatCode(input: {
+  readonly documentId: string;
+  readonly baseRevisionId: string;
+  readonly on: boolean;
+}): Promise<GraphOutcome<WrittenDocument>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  if (loaded.document.revisionId !== input.baseRevisionId) {
+    return conflict(input.documentId, input.baseRevisionId, loaded.document.revisionId);
+  }
+  return commit(
+    "SET d.formatCode = $on",
+    { dNodeId: nodeRef(input.documentId), on: input.on ? null : false },
+    `${input.on ? "switch on" : "switch off"} formatting code in document ${input.documentId}`,
+    async (dataRevision, revisionOf) => ({
+      documentId: input.documentId,
+      revisionId: await revisionOf(input.documentId),
+      dataRevision,
+    }),
+  );
+}
+
+/**
+ * The document's line-number switch set (`BO_0302_003`, `BO_0302_007`): off
+ * stores `false`, on clears the property so the default — shown — holds
+ * again. It governs how every code block is drawn from now on, existing
+ * ones included, since the numbers are drawing and not content; nothing is
+ * revised. Written on the document's base as the formatting switch is, by
+ * the person's own edit.
+ */
+export async function setLineNumbers(input: {
+  readonly documentId: string;
+  readonly baseRevisionId: string;
+  readonly on: boolean;
+}): Promise<GraphOutcome<WrittenDocument>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  if (loaded.document.revisionId !== input.baseRevisionId) {
+    return conflict(input.documentId, input.baseRevisionId, loaded.document.revisionId);
+  }
+  return commit(
+    "SET d.lineNumbers = $on",
+    { dNodeId: nodeRef(input.documentId), on: input.on ? null : false },
+    `${input.on ? "show" : "hide"} line numbers in document ${input.documentId}`,
+    async (dataRevision, revisionOf) => ({
+      documentId: input.documentId,
+      revisionId: await revisionOf(input.documentId),
+      dataRevision,
+    }),
+  );
+}
+
+/**
+ * A code block set to continue its numbering from the code block above it,
+ * or not (`BO_0302_004`, `BO_0302_008`): content of the block, written on the
+ * block's base as the reader's own edit through a write of its own — never a
+ * `reviseCode`, so a settled edit of the source stays the one whole-block
+ * revision it is and the send gate is untouched. Set stores `true`; unset
+ * clears the property. The read resolves where the block then starts.
+ */
+export async function setCodeContinues(input: {
+  readonly documentId: string;
+  readonly blockId: string;
+  readonly baseRevisionId: string;
+  readonly continues: boolean;
+}): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  const located = locate(loaded.document, input.blockId, input.baseRevisionId);
+  if ("failure" in located) return located.failure;
+  if (located.block.kind !== "sourcecode") {
+    return refuse("blockKind", `Block ${input.blockId} is a ${located.block.kind} block and holds no code.`);
+  }
+  return commit(
+    "SET b.continues = $continues",
+    { bNodeId: nodeRef(input.blockId), continues: input.continues ? true : null },
+    `${input.continues ? "continue" : "restart"} line numbering of code ${input.blockId}`,
+    async (dataRevision, revisionOf) => ({
+      blockId: input.blockId,
+      revisionId: await revisionOf(input.blockId),
+      dataRevision,
+    }),
+  );
+}
+
+/**
  * One block of a document with everything it contains. A block holds no
  * children until a container block type exists, so today this is the block
  * itself, read without pulling in its siblings.
@@ -1151,8 +1260,9 @@ export async function turnIntoCode(input: {
     dref2: nodeRef(input.documentId),
     oref: nodeRef(input.blockId),
   };
+  // The language guessed once, here, where the block is made. BO_0296_017
   const statement = [
-    `CREATE (b:sourcecode {${properties("b", { id: blockId, order: located.block.order, source }, parameters, true)}})`,
+    `CREATE (b:sourcecode {${properties("b", { id: blockId, ...codeContent({ kind: "sourcecode", source }, located.block.order) }, parameters, true)}})`,
     `RELATE dref -[c1:${CONTAINS}]-> bref`,
     "CLOSE c",
     `RELATE dref2 -[r:${RETIRED}]-> oref`,
@@ -1350,8 +1460,11 @@ export async function setFigure(input: {
   const located = locate(loaded.document, input.blockId, input.baseRevisionId);
   if ("failure" in located) return located.failure;
   const kind = located.block.kind;
-  if (kind !== "image" && kind !== "output" && kind !== "table") {
-    return refuse("blockKind", `Block ${input.blockId} is a ${kind} block, and only a picture, an output or a table is numbered as a figure or a table.`);
+  // A code block is numbered as a listing, with a caption of its own, the way
+  // a picture is — one write of the two properties, never through the source
+  // revise (`BO_0303_008`).
+  if (kind !== "image" && kind !== "output" && kind !== "table" && kind !== "sourcecode") {
+    return refuse("blockKind", `Block ${input.blockId} is a ${kind} block, and only a picture, an output, a table or a code block is numbered as a figure, a table or a listing.`);
   }
   const numbered = input.numbered === true ? true : null;
   if (kind === "table") {
@@ -1398,9 +1511,13 @@ export async function reviseCode(input: {
     return refuse("blockKind", `Block ${input.blockId} is a ${located.block.kind} block and holds no code.`);
   }
   const language = input.language === undefined || input.language.trim() === "" ? null : input.language.trim();
+  // A settled edit is pretty-printed before it is written, while the
+  // document's switch is on; what cannot be formatted is written exactly as
+  // typed, and nothing is said. BO_0296_015
+  const source = formatsCode(loaded.document) ? await formatSource(input.source, language ?? undefined) : input.source;
   return commit(
     "SET b.source = $source, b.language = $language",
-    { bNodeId: nodeRef(input.blockId), source: input.source, language },
+    { bNodeId: nodeRef(input.blockId), source, language },
     `revise code ${input.blockId}`,
     async (dataRevision, revisionOf) => ({
       blockId: input.blockId,
@@ -2555,7 +2672,9 @@ async function readDocumentProposalsAgainstTruth(
             groupId,
             kind: "insert",
             blockId: bareId(target),
-            block: toBlock(node, ""),
+            // A proposed code block is numbered from the reading it would
+            // join: the code block above its place. BO_0302_005
+            block: placeCodeLines(toBlock(node, ""), loaded.document.blocks),
             ...refinedByOf(node),
             ...withdrawalOf(node),
           });
@@ -3148,6 +3267,15 @@ export async function answerDocumentProposal(input: {
     }
     if (outcome.outcome !== "success") return outcome as GraphOutcome<AnsweredItem>;
   }
+  // An accepted code block is formatted in a revision of its own: the
+  // acceptance above promoted the staged revision unchanged, and the
+  // formatted text lands as the next revision, authored by the accepter, so
+  // *accepted* keeps meaning *this text, agreed*. A block whose formatted
+  // source is what was proposed writes nothing more; a document with the
+  // switch off accepts code as it came. BO_0296_016
+  if (decision === "accept" && input.documentId !== undefined) {
+    await formatAccepted(input.documentId, parsed.members);
+  }
   // Accepting a successor answers the surplus with it: every withdrawn item
   // naming this one is rejected in the same press, one member decision each
   // in its own group. A rejection that fails leaves that item standing with
@@ -3202,6 +3330,30 @@ export async function answerDocumentProposal(input: {
       groupState: open ? "open" : "closed",
     },
   };
+}
+
+/**
+ * The code blocks among an accepted item's members, formatted through the
+ * kernel and written as one further revision each where the text changed.
+ * A failure of that write leaves the accepted text standing, unformatted,
+ * and is not the acceptance's to report: what was agreed to is in the
+ * document either way. BO_0296_016
+ */
+async function formatAccepted(documentId: string, members: readonly string[]): Promise<void> {
+  const loaded = await loadDocument(documentId);
+  if (!loaded.ok || !formatsCode(loaded.document)) return;
+  const accepted = new Set(members.map((member) => bareId(member)));
+  for (const block of loaded.document.blocks) {
+    if (block.kind !== "sourcecode" || !accepted.has(block.blockId) || block.language === undefined) continue;
+    const formatted = await formatSource(block.source, block.language);
+    if (formatted === block.source) continue;
+    await commit(
+      "SET b.source = $source",
+      { bNodeId: nodeRef(block.blockId), source: formatted },
+      `format code ${block.blockId} as accepted`,
+      async (dataRevision) => dataRevision,
+    );
+  }
 }
 
 export interface PromotedBlock {
@@ -3279,4 +3431,110 @@ export async function promoteBlock(input: {
       },
     };
   });
+}
+
+/**
+ * Profiles (`BO_0298_010`–`BO_0298_012`): the `profile` property of the
+ * `document` declaration names the profile attached to a document — the id
+ * of a document carrying `record: profile` — and these are the writes and
+ * reads the `profiles` extension's routes are made of. A selection is the
+ * person's own act, established at once as truth whatever branch the tab is
+ * in (`BO_0298_Q7`), never a proposal; the kernel reads the property at a
+ * run's start (`calliopa-bootstrap`'s `ui-kernel.md`, Profiles).
+ */
+
+/** One document node's content as established, or null when the pin holds none. */
+async function documentContent(id: string): Promise<GraphOutcome<Record<string, unknown> | null>> {
+  const read = await outsideBranch(() =>
+    query({ statement: `MATCH (d:${DOCUMENT_TYPE}) RETURN GRAPH d`, roots: [nodeRef(id)], unbounded: true, purpose: "document node" }),
+  );
+  if (read.outcome === "noResult") return { outcome: "success", result: null };
+  if (read.outcome !== "success") return read as GraphOutcome<never>;
+  const node = read.result.nodes.find((candidate) => candidate.id === nodeRef(id) && typeOf(candidate) === DOCUMENT_TYPE);
+  return { outcome: "success", result: node === undefined || node.revision.status !== "established" ? null : contentOf(node) };
+}
+
+const isProfile = (content: Record<string, unknown> | null): content is Record<string, unknown> =>
+  content !== null && content["record"] === PROFILE_RECORD;
+
+const profileOf = (id: string, content: Record<string, unknown>): ProfileSummary => ({
+  id,
+  title: typeof content["title"] === "string" ? content["title"] : "",
+});
+
+const byProfileTitle = (left: ProfileSummary, right: ProfileSummary): number => {
+  const a = left.title.toLowerCase();
+  const b = right.title.toLowerCase();
+  return a < b ? -1 : a > b ? 1 : 0;
+};
+
+/** Every profile of the instance, by title. */
+export async function listProfiles(): Promise<GraphOutcome<readonly ProfileSummary[]>> {
+  const read = await outsideBranch(() =>
+    query({
+      statement: `MATCH (d:${DOCUMENT_TYPE} {record: $record}) RETURN GRAPH d`,
+      parameters: { record: PROFILE_RECORD },
+      unbounded: true,
+      purpose: "profiles",
+    }),
+  );
+  if (read.outcome === "noResult") return { outcome: "success", result: [] };
+  if (read.outcome !== "success") return read as GraphOutcome<never>;
+  const listed: ProfileSummary[] = [];
+  for (const node of read.result.nodes) {
+    if (typeOf(node) !== DOCUMENT_TYPE || node.revision.status !== "established") continue;
+    const content = contentOf(node);
+    if (!isProfile(content)) continue;
+    listed.push(profileOf(bareId(node.id), content));
+  }
+  return { outcome: "success", result: listed.sort(byProfileTitle) };
+}
+
+/** What a document's `profile` names, resolved: the profile, none, or an id
+ * the graph no longer holds as a profile. */
+async function selectionOf(content: Record<string, unknown>): Promise<GraphOutcome<ProfileSelection>> {
+  const named = content["profile"];
+  if (typeof named !== "string" || named === "") return { outcome: "success", result: { profile: null, gone: null } };
+  const profile = await documentContent(named);
+  if (profile.outcome !== "success") return profile as GraphOutcome<never>;
+  return {
+    outcome: "success",
+    result: isProfile(profile.result) ? { profile: profileOf(named, profile.result), gone: null } : { profile: null, gone: named },
+  };
+}
+
+/** The document's selection as it stands. */
+export async function readProfileSelection(documentId: string): Promise<GraphOutcome<ProfileSelection>> {
+  const document = await documentContent(documentId);
+  if (document.outcome !== "success") return document as GraphOutcome<never>;
+  if (document.result === null) return { outcome: "noResult", detail: `No document ${documentId}.` };
+  return selectionOf(document.result);
+}
+
+/**
+ * The person's selection written: a profile by its id, or null for *No
+ * profile*. An id that is not an established document carrying
+ * `record: profile` is refused before anything is written, in words.
+ */
+export async function setProfile(input: {
+  readonly documentId: string;
+  readonly profile: string | null;
+}): Promise<GraphOutcome<ProfileSelection>> {
+  const document = await documentContent(input.documentId);
+  if (document.outcome !== "success") return document as GraphOutcome<never>;
+  if (document.result === null) return { outcome: "noResult", detail: `No document ${input.documentId}.` };
+  let chosen: ProfileSummary | null = null;
+  if (input.profile !== null) {
+    const profile = await documentContent(input.profile);
+    if (profile.outcome !== "success") return profile as GraphOutcome<never>;
+    if (!isProfile(profile.result)) {
+      return { outcome: "validationFailure", failures: [{ operation: null, rule: "profile", detail: `${input.profile} is not a profile: a profile is a document carrying record ${PROFILE_RECORD}.` }] };
+    }
+    chosen = profileOf(input.profile, profile.result);
+  }
+  const written = await outsideBranch(() =>
+    write("SET d.profile = $profile", { dNodeId: nodeRef(input.documentId), profile: input.profile }, `attach profile ${input.profile ?? "none"} to document ${input.documentId}`),
+  );
+  if (written.outcome !== "success") return written as GraphOutcome<never>;
+  return { outcome: "success", result: { profile: chosen, gone: null } };
 }

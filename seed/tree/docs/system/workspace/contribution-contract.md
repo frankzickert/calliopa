@@ -28,6 +28,16 @@
 
 - A citation resolver is a server contribution (`BO_0291_030`, landed 2026-09-24, under `calliopa-bootstrap`'s `BO_0291`): `ServerContributions.citations?: (request: CitationRequest) => Promise<CitationAnswer>`, handed the document, its cited works in their numbered order and each citation's work and locator, and answering an in-text label per citation keyed by `citationKey` of `~/lib/runs`, and — as `CitationStyles` — the style applied, the instance's default and the styles a document may choose, by id and name (`BO_0291_037`). `buildServerRegistry` keeps at most one, refusing a second by name (`citation_resolver_collision`), and `resolveCitations` of `~/server/registry` asks it — `null` when none is offered. `documents`' read asks it for a document that cites anything, so the labels arrive with the document as `citationLabels` and nothing re-flows once it is drawn; with no resolver, or one that answers nothing, the bare number is the label (`documents`' `BO_0291_025`). The `bibliography` extension is its first and only provider (`BO_0291_020`). Proven in `src/registry.test.ts`.
 - A document place (`BO_0291_031`, landed 2026-09-23, under `calliopa-bootstrap`'s `BO_0291`): `DocumentPlace` = `end` in `src/contract.ts`, and `Decorations.documentPlaces`, a component per place handed `DocumentPlaceProps` — the document's identity and the data revision it was read at, so a place that reads for itself reads again when the document changes. An extension contributes it beside its block places without being the kind's provider, and places from several extensions are drawn in extension order, as block places are. `documents` draws `end` once after a document's last block (`views/decorations.tsx`, `DocumentDecorations`) and knows nothing of what fills it; the bibliography's reference list is its first (`documents`' `BO_0291_027`).
+- A section may open another extension's kind (`BO_0298_014`, found in the walk 2026-09-25):
+  `LibrarySection.opens`, a qualified kind such as `documents:document`, in place of the bare
+  `kind` a section's own extension contributes — one of the two, never both
+  (`section_opens`) — and refused by name when nothing contributes it (`target_kind_unknown`),
+  while a bare `kind` stays as it always was. The shell re-reads such a section when a tab of
+  that kind is renamed or goes, as it re-reads that kind's own sections; before it, a Profiles
+  row kept a profile's old title until the next reload. `profiles` is the first to use it;
+  `calliopa-refine`'s Investigations section, whose rows open documents too, still names a bare
+  `kind` and is not re-read on a rename.
+
 ## Consumers
 
 - The library renders `REGISTRY.sections` in contribution order: each section's header with its toggle keyed `<ext>:<section>` in the layout and its create control when contributed, and a body that is the uniform row — label, badge, the current marker, opening the row's target in the view remembered for it — or the contributed component mounted with the reader's answer. The shell's listeners capture the section's key, never the section: a contribution carries a QRL and a component, and the shell reaches both through the registry module rather than serializing them into a listener. After a create, a rename or a target gone, the sections whose rows open that kind are re-read through `/api/library/…` ([Tabs](./tabs.md), `BO_0202_003`, `BO_0202_005`).
@@ -149,3 +159,12 @@
   by name (`decoration_provider_collision`, gone). The decoration bar is one store per shell, so a
   provider writing a group to it replaces its own group alone and keeps the others', as
   `calliopa-refine`'s *Work* and `code`'s *Code* now do.
+
+## A Control In The View Bar
+
+- Under `calliopa-bootstrap`'s `BO_0298`, an extension may put a control in the bar at the top of
+  a document tab. The change is profiles — reusable instruction documents attached to a document
+  from a selector in its bar
+  ([Block Document Model](../../../src/extensions/documents/docs/system/documents/block-document-model.md#profiles)
+  in `documents`); this is the slot it needs, and the slot names no extension.
+- The contract grew nothing (`BO_0298_030`, 2026-09-25): the slot was already there. A decoration provider of the `document` kind writes its own group into the decoration bar (`BO_0274_004`), the bar draws it after the view's groups, and a `choice` action is a dropdown the shell draws — which is how `profiles`' selector stands in every document's bar beside `calliopa-refine`'s *Work*, `code`'s *Code* and `manuscripts`' *Manuscript* ([Profiles](../../../src/extensions/profiles/docs/system/system.md)). The task had named a `bar` document place, which a group of actions made unnecessary.

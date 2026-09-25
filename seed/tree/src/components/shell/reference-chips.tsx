@@ -55,6 +55,14 @@ export const ReferenceChips = component$<{
           >
             {reference.stale && <Icon name="warning" />}#{reference.number}
             {reference.what !== undefined && <span class="chip__meta">{WHAT[reference.what]}</span>}
+            {/* Where it points when that is another document, by that
+                document's title (`BO_0304_Q4`); a document marked whole by
+                its title alone. BO_0304_013 */}
+            {(reference.kind === "document" || reference.document !== undefined) && (
+              <span class="chip__meta chip__document" data-chip-document={reference.document}>
+                {reference.documentTitle ?? reference.document}
+              </span>
+            )}
           </button>
         );
         return (

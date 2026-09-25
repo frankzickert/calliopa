@@ -98,3 +98,16 @@ describe("the selected process, held per tab", () => {
     expect(activity.closest("[data-process-id]")?.getAttribute("data-process-id")).toBe("p1");
   });
 });
+
+describe("a run guided by a profile", () => {
+  it("Given its detail, Then it names the profile where the run's detail is read, and a run with none says nothing", async () => {
+    const { root, row, userEvent } = await mount();
+    await userEvent(row("p1"), "click");
+    const line = root.querySelector("[data-process-profile]") as HTMLElement | null;
+    expect(line?.getAttribute("data-process-profile")).toBe("prof-1");
+    expect(line?.textContent?.replace(/\s+/gu, " ").trim()).toBe("Profile: Blog post");
+    expect(line?.querySelector("[data-process-profile-open]")?.textContent).toBe("Blog post");
+    await userEvent(row("p2"), "click");
+    expect(root.querySelector("[data-process-profile]")).toBeFalsy();
+  });
+});

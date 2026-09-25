@@ -6,6 +6,7 @@ import {
   namedNumbers,
   pendingReference,
   referenceMatches,
+  pendingBlockReference,
 } from "./command-typeahead";
 
 const references: PointedReference[] = [
@@ -61,5 +62,18 @@ describe("numbers the command's words name", () => {
   it("Given a number whose mark was taken back, Then it dangles, and a standing one does not", () => {
     expect(danglingNumbers("tighten #2 and #12", references)).toEqual([]);
     expect(danglingNumbers("tighten #2 and #5", references)).toEqual([5]);
+  });
+});
+
+describe("naming a block by typing # and its words", () => {
+  it("Given # and letters typed after a space, Then a block reference is pending with the letters, and a # inside a word is none", () => {
+    expect(pendingBlockReference("see #meth", 9)).toEqual({ start: 4, typed: "meth" });
+    expect(pendingBlockReference("(#", 2)).toEqual({ start: 1, typed: "" });
+    expect(pendingBlockReference("see #2", 6)).toEqual({ start: 4, typed: "2" });
+    expect(pendingBlockReference("issue#4", 7)).toBeNull();
+    // Directly after an atom — a citation or another reference — a # is pending too.
+    expect(pendingBlockReference("see \uFFFC#", 6)).toEqual({ start: 5, typed: "" });
+    expect(pendingBlockReference("see \uFFFC#fig", 9)).toEqual({ start: 5, typed: "fig" });
+    expect(pendingBlockReference("see # two", 9)).toBeNull();
   });
 });

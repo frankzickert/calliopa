@@ -2119,6 +2119,58 @@ hr[data-block-divider] {
   pointer-events: auto;
 }
 
+/* The list a `#` opens (BO_0300_005; restyled after the walk, 2026-09-25): a
+   raised panel above the command line, scrolling when the document has more
+   blocks than fit, each entry one row — its icon, the label the reference
+   will read as, and a glimpse of the block's words. */
+.block-command__references {
+  list-style: none;
+  margin: 0 0 0.375rem;
+  padding: 0.25rem;
+  min-width: min(24rem, 90vw);
+  max-width: min(38rem, 95vw);
+  max-height: min(14rem, 40vh);
+  overflow-y: auto;
+  color: var(--text);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.block-command__references li {
+  margin: 0;
+}
+.block-command__references button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  padding: 0.375rem 0.5rem;
+  cursor: pointer;
+}
+.block-command__references button:hover,
+.block-command__references button:focus-visible {
+  background: var(--panel);
+  outline: none;
+}
+.block-command__references .composer__number {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.block-command__references q {
+  quotes: none;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* One chip holds the whole line: the agent, Point from this block and Attach
  * files, then what the command carries, then Send and its caret at the end —
  * a single border around buttons of one size, each an icon named by its
@@ -2530,14 +2582,80 @@ hr[data-block-divider] {
   cursor: pointer;
   opacity: 0.75;
 }
-.document-front__line {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 0.25rem 0.5rem;
+.document-front__part {
+  display: block;
   margin-top: 0.5rem;
 }
 .document-front__label {
-  grid-column: 1 / -1;
+  display: block;
+  opacity: 0.75;
+}
+/* The chips (BO_0293_025): each affiliation and keyword a chip with its
+   remove, the field that adds one standing last among them. */
+.document-front__chips,
+.document-front__authors {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+}
+.document-front__chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.375rem;
+}
+.document-front__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.125rem;
+  padding: 0.1rem 0.125rem 0.1rem 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.document-front__chip > button,
+.document-front__author > button {
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 0.375rem;
+  line-height: 1.2;
+  font-size: 1rem;
+}
+.document-front__chips input {
+  min-width: 14rem;
+}
+/* The author rows: a name, an email, the affiliations as checkboxes, the
+   corresponding mark and the remove, wrapping on a narrow column. */
+.document-front__authors {
+  display: grid;
+  gap: 0.375rem;
+}
+.document-front__author {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+}
+.document-front__author input[type="text"],
+.document-front__author input[type="email"] {
+  min-width: 10rem;
+  flex: 1 1 10rem;
+}
+.document-front__author-affiliations {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.5rem;
+}
+.document-front__author label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  white-space: nowrap;
+}
+.document-front__venue input {
+  min-width: 14rem;
 }
 
 /* An abstract (BO_0293_014): set apart from the prose around it — its label
@@ -2664,6 +2782,21 @@ hr[data-block-divider] {
   color: var(--text-muted);
   font-style: italic;
 }
+/* A reference to any block (BO_0300_007): drawn as the read's label — a
+   heading's words, a remark's number, a figure's — and a link in the reading
+   row, since a press takes the reader to the block it points at. */
+.run-block-ref--link {
+  color: var(--accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+.run-block-ref--link:hover,
+.run-block-ref--link:focus-visible {
+  text-decoration: underline;
+}
+.run-block-ref--link.run-block-ref--missing {
+  color: var(--text-muted);
+}
 
 /* A citation (BO_0291_025): the work's number in the document, one atom the
    caret steps over, muted until the read numbers it and marked when its work
@@ -2735,11 +2868,147 @@ hr[data-block-divider] {
   overflow-x: auto;
 }
 
+/* The writing view's two layers (BO_0296_018): the paint behind, the field
+   above with its text transparent and its caret and selection kept. Both are
+   .code-block__source, so every metric a caret depends on is shared. */
+.code-block__field {
+  position: relative;
+}
+
+.code-block__paint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.code-block__input {
+  position: relative;
+  color: transparent;
+  caret-color: var(--text, currentColor);
+}
+
+.code-block__input::selection {
+  color: transparent;
+  background: var(--selection, transparent);
+}
+
+/* Every colour code is drawn in is one of the six theme tokens
+   (BO_0296_019); the classes are the highlighter's. */
+.code-block .hljs-keyword,
+.code-block .hljs-selector-tag,
+.code-block .hljs-doctag,
+.code-block .hljs-template-tag,
+.output-block__error-exception {
+  color: var(--code-keyword, inherit);
+}
+
+.code-block .hljs-string,
+.code-block .hljs-regexp,
+.code-block .hljs-addition,
+.code-block .hljs-quote,
+.code-block .hljs-link,
+.output-block__error-file {
+  color: var(--code-string, inherit);
+}
+
+.code-block .hljs-comment,
+.code-block .hljs-meta,
+.output-block__error-heading,
+.output-block__error-marker {
+  color: var(--code-comment, inherit);
+}
+
+.code-block .hljs-number,
+.code-block .hljs-literal,
+.code-block .hljs-symbol,
+.code-block .hljs-bullet,
+.code-block .hljs-deletion,
+.output-block__error-line {
+  color: var(--code-number, inherit);
+}
+
+.code-block .hljs-title,
+.code-block .hljs-attr,
+.code-block .hljs-attribute,
+.code-block .hljs-name,
+.code-block .hljs-property,
+.code-block .hljs-variable,
+.output-block__error-frame {
+  color: var(--code-name, inherit);
+}
+
+.code-block .hljs-type,
+.code-block .hljs-title.class_,
+.code-block .hljs-built_in,
+.code-block .hljs-selector-class,
+.code-block .hljs-selector-id,
+.code-block .hljs-tag,
+.code-block .hljs-section {
+  color: var(--code-type, inherit);
+}
+
+.code-block .hljs-emphasis {
+  font-style: italic;
+}
+
+.code-block .hljs-strong {
+  font-weight: 600;
+}
+
 .code-block__failure {
   margin: 0;
   padding: 0 0.5rem 0.5rem;
   font-size: 0.8125rem;
   color: var(--text-danger, inherit);
+}
+
+/* The gutter of line numbers (BO_0302_006): a column beside the source, one
+   number per line, in the source's face and line height so each number sits
+   on its line's baseline; as wide as its longest number, never moving the
+   code as the block grows; not text — unselectable and hidden from
+   assistive technology — so a block copied out pastes as its source alone.
+   The body lays the gutter and the source side by side; the source keeps
+   its own width, so the overlay's metrics are untouched. */
+.code-block__body {
+  display: flex;
+  align-items: stretch;
+}
+
+.code-block__body > .code-block__field,
+.code-block__body > .code-block__source--read {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.code-block__gutter {
+  flex: 0 0 auto;
+  width: calc(var(--code-gutter-digits, 1) * 1ch + 1rem);
+  padding-inline: 0.5rem 0.25rem;
+  text-align: end;
+  color: var(--text-muted, inherit);
+  border-inline-end: 1px solid var(--border-muted, currentColor);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* The continuation switch in the block's head (BO_0302_008), in the head's
+   muted face; pressed, it says so by weight alone, so no colour is spent. */
+.code-block__continue {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0 0.25rem;
+  margin-inline-end: auto;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.code-block__continue[aria-pressed="true"],
+.code-block__continue--shown {
+  opacity: 1;
+  font-weight: 600;
 }
 
 .output-block {
@@ -2800,7 +3069,7 @@ hr[data-block-divider] {
   background: var(--surface, Canvas);
   border: 1px solid var(--border-muted, currentColor);
   border-radius: 0.375rem;
-  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 0.18);
+  box-shadow: 0 0.5rem 1.5rem color-mix(in srgb, var(--text) 18%, transparent);
   display: grid;
   gap: 0.375rem;
   left: 0;

@@ -47,6 +47,28 @@ describe("building the client registry", () => {
     expect(registry.extensions).toEqual(["documents"]);
   });
 
+  it("lets a section open another extension's kind, and refuses one nothing contributes or one naming both", () => {
+    const registry = buildRegistry(host, [
+      { id: "documents", contributions: { icon: { title: "Docs", name: "files" }, sections: [], kinds: { document: view("block-editor") } } },
+      { id: "profiles", contributions: { icon: { title: "Profiles", name: "compass" }, sections: [{ name: "profiles", title: "Profiles", empty: "", opens: "documents:document" }], kinds: {} } },
+    ]);
+    expect(registry.sections.find((section) => section.key === "profiles:profiles")?.opens).toBe("documents:document");
+    expect(
+      code(() =>
+        buildRegistry(host, [
+          { id: "profiles", contributions: { icon: { title: "Profiles", name: "compass" }, sections: [{ name: "profiles", title: "Profiles", empty: "", opens: "documents:document" }], kinds: {} } },
+        ]),
+      ),
+    ).toBe("target_kind_unknown");
+    expect(
+      code(() =>
+        buildRegistry(host, [
+          { id: "profiles", contributions: { icon: { title: "Profiles", name: "compass" }, sections: [{ name: "profiles", title: "Profiles", empty: "", kind: "x", opens: "documents:document" }], kinds: { x: view("v") } } },
+        ]),
+      ),
+    ).toBe("section_opens");
+  });
+
   it("gives a kind's default view that kind, and a further view the kinds it names", () => {
     const shared = view("context");
     const registry = buildRegistry(

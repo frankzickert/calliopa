@@ -58,6 +58,10 @@ export interface BridgeRun {
   readonly source?: { readonly block: string; readonly revisionId: string };
   readonly touched?: readonly string[];
   readonly references?: readonly SentMark[];
+  /** The profile the run start read from the document the command was sent
+   * from, by id and title; the words it received are the profile as
+   * established at `pin`. Absent when none was attached. BO_0298_002 */
+  readonly profile?: { readonly id: string; readonly title: string };
   readonly archived?: boolean;
   readonly startedAt?: number;
 }

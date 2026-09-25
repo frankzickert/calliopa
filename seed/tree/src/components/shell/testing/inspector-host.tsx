@@ -55,7 +55,7 @@ export const InspectorHost = component$(() => {
     tabs: [tab("a"), tab("b")],
     activeTabId: "a",
   });
-  const proposed = useStore<ProposedRead>({ processId: null, documents: [], attachments: [], events: [] });
+  const proposed = useStore<ProposedRead>({ processId: null, documents: [], attachments: [], profile: null, events: [] });
   const read = useStore<ExecutionRead>({ itemId: null, runs: [], error: null });
   const answerAll = useStore<ViewAnswerAll>({ itemId: null, group: null, answer: null, seq: 0 });
   const toggleRun = useStore<ViewToggleRun>({ itemId: null, key: null, seq: 0 });
@@ -69,6 +69,8 @@ export const InspectorHost = component$(() => {
         : (registry.selection.byTab[tabs.activeTabId] ?? null),
     );
     proposed.processId = selected;
+    // The run behind p1 was guided by a profile; p2's was not. BO_0298_031
+    proposed.profile = selected === "p1" ? { id: "prof-1", title: "Blog post" } : null;
     proposed.events =
       selected === null
         ? []

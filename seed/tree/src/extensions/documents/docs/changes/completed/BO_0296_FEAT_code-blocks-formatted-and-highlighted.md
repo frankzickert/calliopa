@@ -1,6 +1,6 @@
 # Code Blocks Are Formatted And Highlighted
 
-Status: wip
+Status: completed
 
 Requested: 2026-09-23. In the user's words: *i want code-blocks formatted and highlighted.* A code
 block in a document is plain text today, in a monospace face and nothing more, which is the one
@@ -171,6 +171,46 @@ dependency and `BO_0296_012` its boundary rule; `documents`' `block-document-mod
 Decided lines, the acceptance rule and `BO_0296_013`–`BO_0296_017` and `BO_0296_020`;
 its `block-editor.md` gains the overlay mechanism and `BO_0296_018`, `BO_0296_019`, `BO_0296_021`
 and the walk `BO_0296_022`; and this document stands as a member of `documents` at `draft`.
+
+## Implemented
+
+The repository half landed on 2026-09-23 (`BO_0296_001`–`BO_0296_004`, `BO_0296_006`,
+`BO_0296_007`), the manuscript's colour on 2026-09-24 (`BO_0296_008`), and the rest on
+2026-09-25, in this repository and in one proposal in the graph:
+
+- **The highlighter is `highlight.js` 11.12.0** (BSD-3-Clause), its `lib/common` bundle, wrapped
+  once in `documents`' `lib/highlight.ts` and reached from the browser only through
+  `views/highlight-client.ts`' lazy import (`BO_0296_011`, `BO_0296_012`). It was chosen over
+  `shiki` — the transfer's recommendation — because it guesses a language, emits class names
+  rather than colours, is synchronous and one module for both sites, and carries one licence; the
+  reason for `shiki`, agreeing on grammars with Pygments, went with the `minted` decision. Measured
+  on a real build: one client chunk of 166,415 bytes, referenced by `import(…)` alone.
+- **The read colours, the settle formats, the acceptance formats in a revision of its own, the
+  language is guessed once, and the switch is `formatCode` on the document** (`BO_0296_013`–
+  `BO_0296_017`), with the kernel harness's fixture mirroring the declaration.
+- **The drawing**: a painted `<pre>` behind a transparent field, the read's markup on a proposal's
+  chip row, the traceback's parts coloured by their shape, the inline `code` mark pinned
+  uncoloured, six `code-*` theme tokens each holding AA on every ground, a `<datalist>` of the
+  languages, and *Format code* as a toggle first in the bar's document group (`BO_0296_018`,
+  `BO_0296_019`, `BO_0296_021`). The equation popover's literal shadow, the one literal colour
+  left in the tree, was taken to `color-mix` on the way, so the theme-token check is green.
+- **The manuscript hands code to Pandoc as a `CodeBlock`** with its language as a class
+  (`BO_0296_020`), so the templates' macros colour it under `-no-shell-escape`.
+- **The formatter comes up** (`BO_0296_010`, the fix): the entrypoint starts as root, reads the
+  bearer, and drops to `formatter` with `setpriv`; proven on the built image with a
+  `0600 root:root` bearer. Its appearance on the dogfood instance waits for the user's rebuild.
+- **`THIRD-PARTY.md` names the highlighter** (`BO_0296_023`).
+
+- **Walked and closed on 2026-09-25**: the user walked `BO_0296_022` on pins 2592 to 2711 and said
+  *works*; two findings were fixed on the way — the guess after *Turn into → Code* now takes what
+  one pasted line scores, and a traceback is coloured in IPython's shape and on the send control's
+  live line, not only on the proposal row. The formatter's instance check (`BO_0296_010`) passed
+  after the user brought `code-format` up and rebuilt `code`, and the release note stands under
+  *Added* (`BO_0296_009`).
+
+Two suites are red at head before and after this change and are not this change's:
+`documents`' `views/never-waits.test.ts` (a timing case) and `calliopa-refine`'s
+`views/depth/block-depth.test.ts`.
 
 ## Depends On
 

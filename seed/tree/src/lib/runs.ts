@@ -44,6 +44,13 @@ export interface Run {
   readonly figureRef?: string;
   /** A reference to a numbered table of the same document, by identity. */
   readonly tableRef?: string;
+  /** A reference to any block of the same document, by identity
+   * (`BO_0300_010`): a section by its heading, a paragraph, or a numbered
+   * figure, table or equation. No text of its own — it is drawn as the label
+   * the read resolves for the block, which is the block's kind and number, a
+   * heading's words or *Remark N* for a paragraph referred to, and as gone
+   * when the block is outside the reading order. */
+  readonly blockRef?: string;
   /** A citation of a work of the instance's bibliography (`BO_0291_012`): the
    * work's identity and an optional locator such as a page. The run carries no
    * text of its own — it is drawn as the work's number in the document, which
@@ -87,6 +94,7 @@ export const isAtom = (entry: Run): boolean =>
   entry.equationRef !== undefined ||
   entry.figureRef !== undefined ||
   entry.tableRef !== undefined ||
+  entry.blockRef !== undefined ||
   entry.cite !== undefined;
 
 /** Whether a run is an atom that carries no text of its own — every reference
@@ -95,6 +103,7 @@ const isEmptyAtom = (entry: Run): boolean =>
   entry.equationRef !== undefined ||
   entry.figureRef !== undefined ||
   entry.tableRef !== undefined ||
+  entry.blockRef !== undefined ||
   entry.cite !== undefined;
 
 /** The attributes an atom carries, copied whenever a run is rebuilt. */
@@ -103,6 +112,7 @@ const atomOf = (entry: Run): Partial<Run> => ({
   ...(entry.equationRef !== undefined ? { equationRef: entry.equationRef } : {}),
   ...(entry.figureRef !== undefined ? { figureRef: entry.figureRef } : {}),
   ...(entry.tableRef !== undefined ? { tableRef: entry.tableRef } : {}),
+  ...(entry.blockRef !== undefined ? { blockRef: entry.blockRef } : {}),
   ...(entry.cite !== undefined ? { cite: citationOf(entry.cite) } : {}),
 });
 
@@ -172,6 +182,20 @@ export function normalizeRuns(runs: readonly Run[]): Run[] {
 /** The text a run list holds, in order. */
 export function runsText(runs: readonly Run[]): string {
   return runs.map((entry) => entry.text).join("");
+}
+
+/** The one character an atom stands for in every offset these primitives deal
+ * in, when a run list is read as a string of code points (`BO_0300_005`):
+ * the object replacement character, which no one types. */
+export const ATOM_POINT = "\uFFFC";
+
+/** The run list as one code point per position — each atom as `ATOM_POINT`,
+ * every other character as itself — so an index into it is the same offset
+ * `runsLength`, `splitRuns` and `replaceRange` count. `runsText` drops the
+ * atoms and so cannot measure a caret (found in the BO_0300 walk, 2026-09-25:
+ * a `#` after a citation was measured one place too far left). */
+export function runsPoints(runs: readonly Run[]): string {
+  return runs.map((entry) => (isAtom(entry) ? ATOM_POINT : entry.text)).join("");
 }
 
 /** How many characters a run list holds. */
@@ -445,6 +469,7 @@ export function sameRuns(left: readonly Run[], right: readonly Run[]): boolean {
         entry.equationRef === other.equationRef &&
         entry.figureRef === other.figureRef &&
         entry.tableRef === other.tableRef &&
+        entry.blockRef === other.blockRef &&
         sameCitation(entry.cite, other.cite) &&
         sameMarks(entry, other)
       );
@@ -518,9 +543,12 @@ export function readRuns(
     // no text of its own, and nothing else a run can be.
     const figureRef = entry["figureRef"];
     const tableRef = entry["tableRef"];
+    // A reference to any block (`BO_0300_010`), read as the two are.
+    const blockRef = entry["blockRef"];
     for (const [key, value, what] of [
       ["figureRef", figureRef, "figure"],
       ["tableRef", tableRef, "table"],
+      ["blockRef", blockRef, "block"],
     ] as const) {
       if (value === undefined) continue;
       if (typeof value !== "string" || value.trim() === "") {
@@ -529,7 +557,7 @@ export function readRuns(
       if (entry["text"] !== "") {
         return { failure: `Run ${index} is a ${what} reference carrying text of its own.` };
       }
-      const others = [math, equationRef, entry["cite"], key === "figureRef" ? tableRef : figureRef];
+      const others = [math, equationRef, entry["cite"], ...[figureRef, tableRef, blockRef].filter((_, at) => ["figureRef", "tableRef", "blockRef"][at] !== key)];
       if (others.some((other) => other !== undefined)) {
         return { failure: `Run ${index} is one reference, mathematics or a citation, never two at once.` };
       }
@@ -571,6 +599,7 @@ export function readRuns(
         : {}),
       ...(figureRef !== undefined ? { figureRef: figureRef as string } : {}),
       ...(tableRef !== undefined ? { tableRef: tableRef as string } : {}),
+      ...(blockRef !== undefined ? { blockRef: blockRef as string } : {}),
       ...(citation !== undefined ? { cite: citation } : {}),
     });
   }

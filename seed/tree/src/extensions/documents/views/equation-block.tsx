@@ -20,11 +20,14 @@ import { EquationPopover, type EquationDraft } from "./equation-popover";
  */
 export const EquationBlock = component$<{
   block: EquationBlockView;
+  /** Its number when the document numbers it, from the read's map rather
+   * than the block, so an equation numbered above it relabels this one. BO_0295_014 */
+  number?: number | undefined;
   /** Editing the equation, when the reader may: a press opens the popover and
    * closing it saves. Absent, the block is read-only — a proposal's face, a
    * change document's member. `BO_0290_016` */
   revise$?: QRL<(blockId: string, draft: EquationDraft) => void> | undefined;
-}>(({ block, revise$ }) => {
+}>(({ block, number, revise$ }) => {
   const editing = useSignal(false);
 
   /**
@@ -92,9 +95,9 @@ export const EquationBlock = component$<{
         {/* The number stands outside the scrolling box, so a long equation
             never scrolls its own number out of sight. It is the document's
             order, resolved on every read and stored nowhere. */}
-        {block.number !== undefined && (
-          <span class="equation-block__number" data-equation-number={block.number}>
-            ({block.number})
+        {number !== undefined && (
+          <span class="equation-block__number" data-equation-number={number}>
+            ({number})
           </span>
         )}
       </div>

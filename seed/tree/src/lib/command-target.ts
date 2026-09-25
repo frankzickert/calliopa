@@ -55,6 +55,11 @@ export interface MarkedTarget {
   readonly group?: string;
   readonly item?: string;
   readonly revisionId?: string;
+  /** The document the reference points into when it is not the command's
+   * own: the identity the document tools take. Absent, the reference is of
+   * the command's document, as every caller before `BO_0304` sent it.
+   * BO_0304_013 */
+  readonly document?: string;
 }
 
 export type SentReference = MarkedTarget &
@@ -69,6 +74,16 @@ export type SentReference = MarkedTarget &
         readonly number: number;
         readonly blockId: string;
         readonly quote: string;
+      }
+    /** A document marked whole: the run is told its title and identity and
+     * reads it with `read_document` (`BO_0304_Q3`). BO_0304_013 */
+    | {
+        readonly kind: "document";
+        readonly number: number;
+        readonly document: string;
+        /** Never on a document marked whole; named so a list of references
+         * of every kind reads `blockId` without a case. */
+        readonly blockId?: undefined;
       }
   );
 
@@ -91,6 +106,10 @@ export type PointedReference = SentReference & {
   readonly proposer?: string;
   readonly since?: string;
   readonly rowless?: boolean;
+  /** The title of the document a reference points into, when it is not the
+   * command's own, for the chip to say which (`BO_0304_Q4`). Shown, never
+   * sent: the kernel reads the title from the graph. BO_0304_013 */
+  readonly documentTitle?: string;
 };
 
 /** A fixated block as the command control shows it. The kernel reads what is
@@ -144,16 +163,22 @@ export const sent = (reference: PointedReference): SentReference => {
     ...(reference.group === undefined ? {} : { group: reference.group }),
     ...(reference.item === undefined ? {} : { item: reference.item }),
     ...(reference.revisionId === undefined ? {} : { revisionId: reference.revisionId }),
+    ...(reference.document === undefined ? {} : { document: reference.document }),
   };
-  return reference.kind === "passage"
-    ? {
+  switch (reference.kind) {
+    case "document":
+      return { kind: "document", number: reference.number, document: reference.document };
+    case "passage":
+      return {
         kind: "passage",
         number: reference.number,
         blockId: reference.blockId,
         quote: reference.quote,
         ...marked,
-      }
-    : { kind: "block", number: reference.number, blockId: reference.blockId, ...marked };
+      };
+    default:
+      return { kind: "block", number: reference.number, blockId: reference.blockId, ...marked };
+  }
 };
 
 /**
@@ -323,23 +348,29 @@ function readSource(value: unknown): CommandSource | string {
 }
 
 const MALFORMED_REFERENCES =
-  "References must be a list of {number, blockId}, a passage also carrying kind and quote.";
+  "References must be a list of {number, blockId}, a passage also carrying kind and quote, a document marked whole its kind and document.";
 
 /** One reference read back from a body, or the refusal naming what is wrong
  * with it. An entry with no kind is a block reference, as `BO_0226` sent
- * them. BO_0227_008 */
+ * them. BO_0227_008 A document marked whole names its document and no block
+ * (`BO_0304_013`). */
 function readReference(entry: unknown): SentReference | string {
   if (typeof entry !== "object" || entry === null) return MALFORMED_REFERENCES;
-  const { number, blockId, kind, quote } = entry as Record<string, unknown>;
+  const { number, blockId, kind, quote, document } = entry as Record<string, unknown>;
+  if (typeof number !== "number" || !Number.isInteger(number) || number < 1) {
+    return MALFORMED_REFERENCES;
+  }
+  if (kind === "document") {
+    if (typeof document !== "string" || document.trim() === "") {
+      return `Document reference #${number} names no document.`;
+    }
+    if (blockId !== undefined) return `Document reference #${number} names a block; a document marked whole names none.`;
+    if (quote !== undefined) return `Document reference #${number} carries a quote; only a passage does.`;
+    return { kind: "document", number, document: document.trim() };
+  }
   const marked = readMarked(entry as Record<string, unknown>, number);
   if (typeof marked === "string") return marked;
-  if (
-    typeof number !== "number" ||
-    !Number.isInteger(number) ||
-    number < 1 ||
-    typeof blockId !== "string" ||
-    blockId.trim() === ""
-  ) {
+  if (typeof blockId !== "string" || blockId.trim() === "") {
     return MALFORMED_REFERENCES;
   }
   switch (kind) {
@@ -364,12 +395,12 @@ function readReference(entry: unknown): SentReference | string {
  * name its group and item, and a proposal or a retired block with no revision.
  * BO_0263_007 */
 function readMarked(entry: Record<string, unknown>, number: unknown): MarkedTarget | string {
-  const { target, group, item, revisionId } = entry;
+  const { target, group, item, revisionId, document } = entry;
   const named = (value: unknown) => (typeof value === "string" && value.trim() !== "" ? value.trim() : undefined);
   if (target !== undefined && target !== "proposal" && target !== "retired") {
     return `Reference #${String(number)} points at neither a block, a proposal nor a retired block.`;
   }
-  for (const [name, value] of [["group", group], ["item", item], ["revisionId", revisionId]] as const) {
+  for (const [name, value] of [["group", group], ["item", item], ["revisionId", revisionId], ["document", document]] as const) {
     if (value !== undefined && named(value) === undefined) {
       return `Reference #${String(number)} carries a ${name} that names nothing.`;
     }
@@ -388,6 +419,7 @@ function readMarked(entry: Record<string, unknown>, number: unknown): MarkedTarg
     ...(named(group) === undefined ? {} : { group: named(group) as string }),
     ...(named(item) === undefined ? {} : { item: named(item) as string }),
     ...(named(revisionId) === undefined ? {} : { revisionId: named(revisionId) as string }),
+    ...(named(document) === undefined ? {} : { document: named(document) as string }),
   };
 }
 
@@ -446,7 +478,7 @@ export function proposedFor(
  * words. CA_0039_004
  */
 export type RevealTarget =
-  | { readonly kind: "block"; readonly blockId: string }
+  | { readonly kind: "block"; readonly blockId: string; readonly document?: string; readonly documentTitle?: string }
   /** A rowless reference's chip × asks the view, which alone holds the
    * marks, to take it back by its number. BO_0263_007 */
   | { readonly kind: "takeBack"; readonly number: number }
@@ -454,14 +486,31 @@ export type RevealTarget =
       readonly kind: "passage";
       readonly blockId: string;
       readonly number: number;
-    };
+      /** The document the passage is in when it is not the command's own:
+       * the chip's press brings it forward first. BO_0304_013 */
+      readonly document?: string;
+      readonly documentTitle?: string;
+    }
+  /** A document marked whole: the chip's press brings it forward. BO_0304_013 */
+  | { readonly kind: "document"; readonly document: string; readonly documentTitle?: string };
 
 export const revealTarget = (
   shown: PointedReference | FixatedBlock,
-): RevealTarget =>
-  "kind" in shown && shown.kind === "passage"
-    ? { kind: "passage", blockId: shown.blockId, number: shown.number }
-    : { kind: "block", blockId: shown.blockId };
+): RevealTarget => {
+  if (!("kind" in shown)) return { kind: "block", blockId: shown.blockId };
+  const where = {
+    ...(shown.document === undefined ? {} : { document: shown.document }),
+    ...(shown.documentTitle === undefined ? {} : { documentTitle: shown.documentTitle }),
+  };
+  switch (shown.kind) {
+    case "document":
+      return { kind: "document", document: shown.document, ...where };
+    case "passage":
+      return { kind: "passage", blockId: shown.blockId, number: shown.number, ...where };
+    default:
+      return { kind: "block", blockId: shown.blockId, ...where };
+  }
+};
 
 /** The shell's last reveal request: which document, what to show, and a
  * count that rises with every press. */
@@ -504,7 +553,13 @@ export function chipName(reference: PointedReference): string {
           ? "discarded block, "
           : "";
   const since = reference.since === undefined ? "" : `, since ${reference.since}`;
-  return `Reference ${reference.number}${reference.stale ? ", stale" : ""}: ${what}“${reference.words}”${since}`;
+  // Where it points when that is another document, by that document's title
+  // (`BO_0304_Q4`); a document marked whole is named as one. BO_0304_013
+  if (reference.kind === "document") {
+    return `Reference ${reference.number}: document “${reference.documentTitle ?? reference.document}”`;
+  }
+  const where = reference.document === undefined ? "" : ` in “${reference.documentTitle ?? reference.document}”`;
+  return `Reference ${reference.number}${reference.stale ? ", stale" : ""}: ${what}“${reference.words}”${since}${where}`;
 }
 
 /** A rowless reference's ×: it has no row in the document left to press. */

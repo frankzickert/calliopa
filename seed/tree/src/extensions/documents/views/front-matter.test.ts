@@ -4,11 +4,13 @@ import type { BlockView, DocumentView } from "../server/assemble";
 import { activateBlock, documentsApi, mountEditor, type SentCommand } from "./testing/editor-harness";
 
 /**
- * A manuscript's head in the editor (`BO_0293_014`, `BO_0293_016`): the
- * authors and affiliations beneath the title; the four lines beneath them, each
- * saved whole with `setFrontMatter` on the document's base — the inspector
- * contributes no action (CA_0053); and
- * the abstract drawn as a paragraph of its own role while read and edited.
+ * A manuscript's head in the editor (`BO_0293_014`, `BO_0293_016`,
+ * `BO_0293_025`): the authors and affiliations beneath the title; the fields
+ * beneath them — chips for the affiliations and the keywords, a row per
+ * author, the venue as a word — each settled edit writing the whole front
+ * matter with `setFrontMatter` on the document's base, since the inspector
+ * contributes no action (CA_0053); and the abstract drawn as a paragraph of
+ * its own role while read and edited.
  */
 const text = (blockId: string, order: string, words: string, role: "paragraph" | "abstract" = "paragraph"): BlockView => ({
   kind: "text",
@@ -36,6 +38,9 @@ async function mount(frontMatter: DocumentView["frontMatter"], blocks: readonly 
 }
 
 const field = (root: HTMLElement, id: string) => (root.querySelector(`[data-front-field="${id}"]`) ?? null) as HTMLInputElement | null;
+const chips = (root: HTMLElement, part: string) => [...root.querySelectorAll(`[data-front-chip="${part}"] > span`)].map((chip) => chip.textContent ?? "");
+const input = (root: HTMLElement, selector: string) => root.querySelector(selector) as HTMLInputElement;
+const written = (sent: SentCommand[]) => sent.filter((entry) => entry.body["command"] === "setFrontMatter").map((entry) => entry.body);
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -61,52 +66,95 @@ describe("the manuscript's head beneath the title", () => {
   });
 });
 
-describe("the front matter's lines in the document's head", () => {
-  it("shows each line as the document carries it", async () => {
+describe("the front matter's fields in the document's head", () => {
+  it("shows the affiliations and keywords as chips, each author as a row and the venue as a word", async () => {
     const { view } = await mount({
       authors: [{ name: "Ada Lovelace", affiliations: [0], email: "ada@example.org", corresponding: true }],
       affiliations: ["Analytical Engines Ltd"],
       keywords: ["provenance", "typesetting"],
       venue: "ieee",
     });
-    await view.settle(() => field(view.root, "authors") != null);
-    expect(field(view.root, "authors")?.value).toBe("Ada Lovelace (1) <ada@example.org> *");
-    expect(field(view.root, "affiliations")?.value).toBe("Analytical Engines Ltd");
-    expect(field(view.root, "keywords")?.value).toBe("provenance, typesetting");
+    await view.settle(() => view.root.querySelector('[data-front-author-name="0"]') != null);
+    expect(chips(view.root, "affiliations")).toEqual(["1Analytical Engines Ltd"]);
+    expect(chips(view.root, "keywords")).toEqual(["provenance", "typesetting"]);
+    expect(input(view.root, '[data-front-author-name="0"]').value).toBe("Ada Lovelace");
+    expect(input(view.root, '[data-front-author-email="0"]').value).toBe("ada@example.org");
+    expect(input(view.root, '[data-front-author-affiliation="0:0"]').checked).toBe(true);
+    expect(input(view.root, '[data-front-author-corresponding="0"]').checked).toBe(true);
     expect(field(view.root, "venue")?.value).toBe("ieee");
     await view.idle();
   });
 
-  it("saves a line as the whole front matter on the document's base, keeping the other lines", async () => {
-    const { view, sent } = await mount({ affiliations: ["Analytical Engines Ltd"], venue: "ieee" });
-    await view.settle(() => field(view.root, "authors") != null);
-    const authors = field(view.root, "authors") as HTMLInputElement;
-    authors.value = "Ada Lovelace (1) *; Charles Babbage";
-    await view.userEvent(authors, "input");
-    await view.userEvent('[data-front-save="authors"]', "click");
-    await view.settle(() => sent.some((entry) => entry.body["command"] === "setFrontMatter"));
-    expect(sent.find((entry) => entry.body["command"] === "setFrontMatter")?.body).toEqual({
+  it("enters an affiliation with Enter, writing the whole front matter on the document's base and keeping the rest", async () => {
+    const { view, sent } = await mount({ authors: [{ name: "Ada Lovelace", affiliations: [0] }], affiliations: ["Analytical Engines Ltd"], venue: "ieee" });
+    await view.settle(() => field(view.root, "affiliations") != null);
+    const entry = field(view.root, "affiliations") as HTMLInputElement;
+    entry.value = " Difference Works ";
+    await view.userEvent(entry, "input");
+    await view.userEvent(entry, "keydown", { key: "Enter" });
+    await view.settle(() => written(sent).length > 0);
+    expect(written(sent)[0]).toEqual({
       command: "setFrontMatter",
       baseRevisionId: "rev-doc",
-      frontMatter: {
-        affiliations: ["Analytical Engines Ltd"],
-        venue: "ieee",
-        authors: [{ name: "Ada Lovelace", affiliations: [0], corresponding: true }, { name: "Charles Babbage" }],
-      },
+      frontMatter: { authors: [{ name: "Ada Lovelace", affiliations: [0] }], affiliations: ["Analytical Engines Ltd", "Difference Works"], venue: "ieee" },
     });
     await view.idle();
   });
 
-  it("writes nothing for an authors line naming an affiliation the document does not list, and says why", async () => {
+  it("removes an affiliation from its chip and renumbers the authors", async () => {
+    const { view, sent } = await mount({
+      authors: [{ name: "Ada Lovelace", affiliations: [0, 1] }, { name: "Charles Babbage", affiliations: [0] }],
+      affiliations: ["Analytical Engines Ltd", "Difference Works"],
+    });
+    await view.settle(() => view.root.querySelector('[data-front-remove="affiliations"][data-front-at="0"]') != null);
+    await view.userEvent('[data-front-remove="affiliations"][data-front-at="0"]', "click");
+    await view.settle(() => written(sent).length > 0);
+    expect(written(sent)[0]?.["frontMatter"]).toEqual({ affiliations: ["Difference Works"], authors: [{ name: "Ada Lovelace", affiliations: [0] }, { name: "Charles Babbage" }] });
+    await view.idle();
+  });
+
+  it("adds an author as a row that writes once it is named, and marks one corresponding", async () => {
+    const { view, sent } = await mount({ affiliations: ["Analytical Engines Ltd"] });
+    await view.settle(() => view.root.querySelector("[data-front-author-add]") != null);
+    await view.userEvent("[data-front-author-add]", "click");
+    await view.settle(() => view.root.querySelector('[data-front-author-name="0"]') != null);
+    expect(written(sent)).toEqual([]);
+    const name = input(view.root, '[data-front-author-name="0"]');
+    name.value = "Grace Hopper";
+    await view.userEvent(name, "change");
+    await view.settle(() => written(sent).length > 0);
+    expect(written(sent)[0]?.["frontMatter"]).toEqual({ affiliations: ["Analytical Engines Ltd"], authors: [{ name: "Grace Hopper" }] });
+    await view.settle(() => view.root.querySelector('[data-front-author-corresponding="0"]') != null);
+    const corresponding = input(view.root, '[data-front-author-corresponding="0"]');
+    corresponding.checked = true;
+    await view.userEvent(corresponding, "change");
+    await view.settle(() => written(sent).length > 1);
+    expect(written(sent)[1]?.["frontMatter"]).toEqual({ affiliations: ["Analytical Engines Ltd"], authors: [{ name: "Grace Hopper", corresponding: true }] });
+    await view.idle();
+  });
+
+  it("refuses a row with an email but no name in words, and writes nothing", async () => {
     const { view, sent } = await mount({});
-    await view.settle(() => field(view.root, "authors") != null);
-    const authors = field(view.root, "authors") as HTMLInputElement;
-    authors.value = "Ada Lovelace (2)";
-    await view.userEvent(authors, "input");
-    await view.userEvent('[data-front-save="authors"]', "click");
+    await view.settle(() => view.root.querySelector("[data-front-author-add]") != null);
+    await view.userEvent("[data-front-author-add]", "click");
+    await view.settle(() => view.root.querySelector('[data-front-author-email="0"]') != null);
+    const email = input(view.root, '[data-front-author-email="0"]');
+    email.value = "grace@example.org";
+    await view.userEvent(email, "change");
     await view.settle();
-    expect(sent.some((entry) => entry.body["command"] === "setFrontMatter")).toBe(false);
-    expect(view.root.textContent ?? "").toContain("Ada Lovelace names affiliation 2, and the document lists none.");
+    expect(written(sent)).toEqual([]);
+    expect(view.root.textContent ?? "").toContain("Author 1 has no name yet.");
+    await view.idle();
+  });
+
+  it("writes the venue when its field settles", async () => {
+    const { view, sent } = await mount({ keywords: ["provenance"] });
+    await view.settle(() => field(view.root, "venue") != null);
+    const venue = field(view.root, "venue") as HTMLInputElement;
+    venue.value = "ieee";
+    await view.userEvent(venue, "change");
+    await view.settle(() => written(sent).length > 0);
+    expect(written(sent)[0]?.["frontMatter"]).toEqual({ keywords: ["provenance"], venue: "ieee" });
     await view.idle();
   });
 });

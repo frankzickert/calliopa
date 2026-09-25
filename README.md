@@ -86,9 +86,9 @@ stack, on a network of their own that reaches the internet and nothing of the
 install.
 
 Beside it, `code-format` holds four code formatters and nothing else — no socket, no
-credential, no way out. It is what lays out the code in a document when you finish an
-edit, and it exists as a container of its own so that the source you type is never
-parsed by the service that holds the docker socket.
+credential, no way out. It is what the code service lays code out with, and it exists as a
+container of its own so that the source you type is never parsed by the service that holds
+the docker socket.
 
 Another service, `bibliography`, is the Zotero translation server, built from its
 repository at a pinned commit: it is what fills in a source's record from a DOI, an
@@ -98,6 +98,14 @@ Another, `typeset`, is Pandoc with TeX Live from Debian: it is what turns a docu
 a manuscript, the LaTeX source with its references and the PDF typeset from them. It runs
 on your machine, reaches nothing outside the stack, and is the largest image the install
 builds, about 1.3 GB.
+
+Two more are how the stack reaches the public web, so that no agent has to reach it for you.
+`search` is SearXNG, a web search engine running in your install: an agent searches through it
+with no account and no key, and nothing of a search leaves your machine but the query itself.
+`capture` is a headless browser that renders a public page to a PDF, a full-page screenshot and
+its text when an agent reads one. Both open public addresses only — anything on your machine,
+your network, a VPN address or the stack's own services is refused by name — and neither holds a
+credential or publishes a port.
 
 Re-running the installer is always safe: it repairs what is missing and never
 overwrites your configuration, secrets, or data. From an existing checkout,

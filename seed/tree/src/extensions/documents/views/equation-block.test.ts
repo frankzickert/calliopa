@@ -36,12 +36,13 @@ const equation = (
 
 const SET = '<mjx-container class="MathJax" jax="SVG"><svg><path d="M1 1"></path></svg></mjx-container>';
 
-async function mount(blocks: readonly BlockView[]) {
+async function mount(blocks: readonly BlockView[], numbers: Pick<DocumentView, "equationNumbers"> = {}) {
   const document: DocumentView = {
     documentId: "doc-1",
     revisionId: "rev-doc",
     title: "Mathematics",
     blocks: [...blocks],
+    ...numbers,
   };
   vi.stubGlobal("fetch", documentsApi(document, []));
   return mountEditor(document);
@@ -82,7 +83,9 @@ describe("an equation in a document", () => {
   });
 
   it("draws its number outside the box the equation scrolls in", async () => {
-    const view = await mount([equation("blk-b", "b", { tex: "x", svg: SET, numbered: true, number: 3 })]);
+    // The read answers the number on the block and in the document's map
+    // alike; the row draws it from the map (BO_0295_014).
+    const view = await mount([equation("blk-b", "b", { tex: "x", svg: SET, numbered: true, number: 3 })], { equationNumbers: { "blk-b": 3 } });
     const drawn = view.root.querySelector("[data-equation]") as HTMLElement;
     const number = drawn.querySelector("[data-equation-number]") as HTMLElement;
     expect(number.getAttribute("data-equation-number")).toBe("3");

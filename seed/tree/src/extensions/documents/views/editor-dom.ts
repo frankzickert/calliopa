@@ -1,7 +1,7 @@
 import { MARKS, isAtom, normalizeRuns, type Mark, type Run } from "~/lib/runs";
 
 import { citeLabel } from "../lib/citation-label";
-import { referenceLabel } from "../lib/figure-label";
+import { GONE_LABEL, referenceLabel } from "../lib/figure-label";
 import { linePlace, type LinePlace } from "../lib/lines";
 
 /**
@@ -53,6 +53,7 @@ const CITE_LABEL_ATTRIBUTE = "data-cite-label";
 const FIGURE_REF_ATTRIBUTE = "data-figure-ref";
 const TABLE_REF_ATTRIBUTE = "data-table-ref";
 const BLOCK_REF_LABEL_ATTRIBUTE = "data-block-ref-label";
+const BLOCK_REF_ATTRIBUTE = "data-block-ref";
 
 /** What an atom is drawn from: the markup its source was set as, and the
  * number a reference resolves to. Both are the read's, since the browser does
@@ -66,6 +67,10 @@ export interface AtomContent {
   /** The number a figure or a table reference resolves to (`BO_0295_012`). */
   readonly figureNumberOf?: (blockId: string) => number | undefined;
   readonly tableNumberOf?: (blockId: string) => number | undefined;
+  /** What a reference to any block is drawn as (`BO_0300_007`): the label
+   * the read resolved, or nothing when the block is outside the reading
+   * order. */
+  readonly referenceLabelOf?: (blockId: string) => string | undefined;
 }
 
 /** Paints one atom: the element the caret steps over, carrying what it stands
@@ -112,6 +117,13 @@ function paintAtom(
     const number = figure ? content.figureNumberOf?.(target) : content.tableNumberOf?.(target);
     element.className = number === undefined ? "run-block-ref run-block-ref--missing" : "run-block-ref";
     element.setAttribute(BLOCK_REF_LABEL_ATTRIBUTE, referenceLabel(figure ? "figure" : "table", number));
+  } else if (entry.blockRef !== undefined) {
+    // A reference to any block (`BO_0300_007`), labelled from an attribute
+    // as the two above are; gone when the read resolved nothing for it.
+    element.setAttribute(BLOCK_REF_ATTRIBUTE, entry.blockRef);
+    const label = content.referenceLabelOf?.(entry.blockRef);
+    element.className = label === undefined ? "run-block-ref run-block-ref--missing" : "run-block-ref";
+    element.setAttribute(BLOCK_REF_LABEL_ATTRIBUTE, label ?? GONE_LABEL);
   } else if (entry.equationRef !== undefined) {
     element.setAttribute(REFERENCE_ATTRIBUTE, entry.equationRef);
     element.className = "run-equation-ref";
@@ -230,6 +242,11 @@ export function runsFrom(element: HTMLElement): Run[] {
     const tableRef = element.getAttribute(TABLE_REF_ATTRIBUTE);
     if (tableRef !== null) {
       runs.push({ text: "", tableRef });
+      return;
+    }
+    const blockRef = element.getAttribute(BLOCK_REF_ATTRIBUTE);
+    if (blockRef !== null) {
+      runs.push({ text: "", blockRef });
       return;
     }
     const citedWork = element.getAttribute(CITE_WORK_ATTRIBUTE);

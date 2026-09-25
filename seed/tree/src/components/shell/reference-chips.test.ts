@@ -124,3 +124,28 @@ describe("the chips of what was marked", () => {
     expect(revealed()).toEqual({ target: { kind: "takeBack", number: 1 }, seq: 1 });
   });
 });
+
+describe("chips for references across documents (BO_0304_013)", () => {
+  it("Given a reference into another document and a document marked whole, Then each chip carries that document's title after its number", async () => {
+    const { find, root, userEvent, revealed } = await mount({
+      references: [
+        { kind: "block", number: 1, blockId: "a", words: "Opening.", stale: false },
+        { kind: "block", number: 2, blockId: "x", words: "Elsewhere.", stale: false, document: "doc-2", documentTitle: "Second" },
+        { kind: "document", number: 3, document: "doc-3", words: "Third", stale: false, documentTitle: "Third" },
+      ],
+      fixated: [],
+    });
+    await userEvent("[data-report]", "click");
+    expect(find('[data-chip="1"] [data-chip-document]')).toBeNull();
+    expect(find('[data-chip="2"] [data-chip-document="doc-2"]')?.textContent).toBe("Second");
+    expect(find('[data-chip="2"]')?.getAttribute("aria-label")).toBe("Reference 2: “Elsewhere.” in “Second”");
+    expect(find('[data-chip="3"] [data-chip-document="doc-3"]')?.textContent).toBe("Third");
+    expect(find('[data-chip="3"]')?.getAttribute("aria-label")).toBe("Reference 3: document “Third”");
+    // Pressing says which document the view is to bring forward.
+    await userEvent('[data-chip="2"]', "click");
+    expect(revealed().target).toEqual({ kind: "block", blockId: "x", document: "doc-2", documentTitle: "Second" });
+    await userEvent('[data-chip="3"]', "click");
+    expect(revealed().target).toEqual({ kind: "document", document: "doc-3", documentTitle: "Third" });
+    expect(root.querySelectorAll("[data-chip]").length).toBe(3);
+  });
+});

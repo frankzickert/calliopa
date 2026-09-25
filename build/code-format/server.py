@@ -15,6 +15,7 @@ from __future__ import annotations
 import hmac
 import json
 import os
+from collections.abc import Mapping
 import signal
 import sys
 import threading
@@ -30,7 +31,13 @@ from lib.formatters import format_source, languages  # noqa: E402
 MAX_JSON_BYTES = 8 * 1024**2
 
 
-def read_bearer(path: str) -> str:
+def read_bearer(path: str, environ: Mapping[str, str] | None = None) -> str:
+    """The bearer as the entrypoint hands it in the environment — it read the
+    file as root before dropping to the formatter user (BO_0296_010) — or,
+    run without the entrypoint, read from the file."""
+    handed = (environ if environ is not None else os.environ).get("CALLIOPA_CODE_FORMAT_BEARER", "").strip()
+    if handed:
+        return handed
     try:
         with open(path, encoding="utf-8") as handle:
             bearer = handle.read().strip()

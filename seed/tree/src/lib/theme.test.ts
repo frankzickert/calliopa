@@ -78,3 +78,31 @@ describe("the proposal colours", () => {
     }
   }
 });
+
+/**
+ * Code is drawn in six colours over whichever ground the block sits on, so
+ * each is held to 4.5:1 against the canvas, the panel and the raised panel in
+ * both themes — computed, as the proposal colours are. BO_0296_019
+ */
+describe("the code colours", () => {
+  const luminance = (hex: string): number => {
+    const channels = [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16) / 255);
+    const [r, g, b] = channels.map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)) as [number, number, number];
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrast = (a: string, b: string): number => {
+    const [high, low] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+    return (high + 0.05) / (low + 0.05);
+  };
+
+  for (const name of ["dark", "light"] as const) {
+    for (const token of ["code-keyword", "code-string", "code-comment", "code-number", "code-name", "code-type"] as const) {
+      it(`Given the ${name} theme, Then ${token} reads on every ground`, () => {
+        const theme = themes[name];
+        for (const ground of ["canvas", "panel", "panel-raised"] as const) {
+          expect(contrast(theme[token], theme[ground]), `${token} on ${ground}`).toBeGreaterThanOrEqual(4.5);
+        }
+      });
+    }
+  }
+});

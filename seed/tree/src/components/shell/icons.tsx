@@ -77,6 +77,8 @@ import type { ChangeStatus } from "~/lib/library";
  * already here. Under `documents`' `DO_0010`. DO_0010_011
  */
 export type IconName =
+  | "compass"
+  | "tag"
   | "lightning"
   | "hourglass-medium"
   | "git-branch"
@@ -155,6 +157,11 @@ export type IconName =
   | "article";
 
 const PATHS: Readonly<Record<IconName, string>> = {
+  // The Profiles category's icon (`profiles`' BO_0298_014), regular weight, unaltered.
+  // The Roles category's icon (`doc-block-roles`' BO_0299_012), regular weight, unaltered.
+  tag: "M243.31,136,144,36.69A15.86,15.86,0,0,0,132.69,32H40a8,8,0,0,0-8,8v92.69A15.86,15.86,0,0,0,36.69,144L136,243.31a16,16,0,0,0,22.63,0l84.68-84.68a16,16,0,0,0,0-22.63Zm-96,96L48,132.69V48h84.69L232,147.31ZM96,84A12,12,0,1,1,84,72,12,12,0,0,1,96,84Z",
+  compass:
+    "M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216ZM172.42,72.84l-64,32a8.05,8.05,0,0,0-3.58,3.58l-32,64A8,8,0,0,0,80,184a8.1,8.1,0,0,0,3.58-.84l64-32a8.05,8.05,0,0,0,3.58-3.58l32-64a8,8,0,0,0-10.74-10.74ZM138,138,97.89,158.11,118,118l40.15-20.07Z",
   // Phosphor 2.1.1 regular, unaltered: the abstract's role. BO_0293_014
   article: "M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40Zm0,160H40V56H216V200ZM184,96a8,8,0,0,1-8,8H80a8,8,0,0,1,0-16h96A8,8,0,0,1,184,96Zm0,32a8,8,0,0,1-8,8H80a8,8,0,0,1,0-16h96A8,8,0,0,1,184,128Zm0,32a8,8,0,0,1-8,8H80a8,8,0,0,1,0-16h96A8,8,0,0,1,184,160Z",
   // Phosphor 2.1.1 regular, unaltered: numbering a figure or a table. BO_0295_011

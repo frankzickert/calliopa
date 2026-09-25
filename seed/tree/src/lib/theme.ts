@@ -28,6 +28,17 @@ export const THEME_TOKENS = [
   "proposal-hermes-edge",
   "proposal-person",
   "proposal-person-edge",
+  // The six colours code is drawn in — keywords, strings, comments, numbers
+  // and literals, names of functions and variables, types and tags — one set
+  // for every language, so a document's code reads the same whatever it is
+  // written in. Each holds AA against the canvas, the panel and the raised
+  // panel in both themes, which `theme.test.ts` computes. BO_0296_019
+  "code-keyword",
+  "code-string",
+  "code-comment",
+  "code-number",
+  "code-name",
+  "code-type",
 ] as const;
 
 type ThemeToken = (typeof THEME_TOKENS)[number];
@@ -61,6 +72,12 @@ const dark: Theme = {
   "proposal-hermes-edge": "#a585dc",
   "proposal-person": "#262b33",
   "proposal-person-edge": "#8a95a2",
+  "code-keyword": "#c792ea",
+  "code-string": "#8bd49c",
+  "code-comment": "#8a94a0",
+  "code-number": "#f2b84b",
+  "code-name": "#82aaff",
+  "code-type": "#7fd7e0",
 };
 
 const light: Theme = {
@@ -87,6 +104,12 @@ const light: Theme = {
   "proposal-hermes-edge": "#7652bd",
   "proposal-person": "#eceff3",
   "proposal-person-edge": "#66717e",
+  "code-keyword": "#7a3ea0",
+  "code-string": "#1f7a3d",
+  "code-comment": "#5c6670",
+  "code-number": "#8a5a00",
+  "code-name": "#1f5fbf",
+  "code-type": "#0b6b7a",
 };
 
 export const themes: Readonly<Record<ResolvedTheme, Theme>> = { dark, light };

@@ -201,7 +201,7 @@ describe("the proposal toggle", () => {
     // *Take back* leads the trailing group: it is drawn whenever the bar is,
     // since a standing is most often set on a block that is not active.
     // CA_0058_011
-    expect(actions("document")).toEqual(["take-back-standing", "delete-document"]);
+    expect(actions("document")).toEqual(["format-code", "line-numbers", "take-back-standing", "delete-document"]);
     expect(view.toggle()?.getAttribute("aria-label") ?? view.toggle()?.textContent).toContain("Work in a proposal");
     expect(view.pressed()).toBe(false);
     expect(view.root.querySelector("[data-document-branch]")).toBeFalsy();

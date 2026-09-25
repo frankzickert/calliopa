@@ -96,3 +96,46 @@ describe("a proposed document in the library", () => {
     expect(JSON.parse(find("[data-opened]")?.textContent ?? "null")).toEqual(open("doc-started", "Onboarding checklist"));
   });
 });
+
+describe("Mark document while a pointing stands (BO_0304_014)", () => {
+  const mountPointing = async () => {
+    const dom = await createDOM();
+    await dom.render(
+      jsx(LibraryRowHost, {
+        items,
+        pointing: {
+          "doc-plain": { active: true, number: null },
+          "doc-started": { active: true, number: 3 },
+        },
+      }),
+    );
+    const root = dom.screen as unknown as HTMLElement;
+    await dom.userEvent("[data-load]", "click");
+    const find = (selector: string) => (root.querySelector(selector) as HTMLElement | null) ?? null;
+    return { ...dom, root, find };
+  };
+
+  it("Given a pointing, Then a document's row carries the control, pressed and numbered once the document is marked whole, and rows told nothing carry none", async () => {
+    const { find, userEvent } = await mountPointing();
+    const plain = find('[data-mark-document="doc-plain"]');
+    expect(plain?.getAttribute("aria-pressed")).toBe("false");
+    expect(plain?.getAttribute("aria-label")).toBe("Mark Notes for the command");
+    const started = find('[data-mark-document="doc-started"]');
+    expect(started?.getAttribute("aria-pressed")).toBe("true");
+    expect(started?.textContent).toBe("#3");
+    expect(started?.getAttribute("aria-label")).toBe("Onboarding checklist, reference 3");
+    expect(find('[data-item-id="doc-started"]')?.getAttribute("data-reference")).toBe("3");
+    expect(find('[data-mark-document="doc-person"]')).toBeNull();
+    // The press marks; the row's own press still opens.
+    await userEvent('[data-mark-document="doc-plain"]', "click");
+    expect(JSON.parse(find("[data-marked]")?.textContent ?? "null")).toEqual({ document: "doc-plain", title: "Notes" });
+    expect(JSON.parse(find("[data-opened]")?.textContent ?? "null")).toBeNull();
+    await userEvent('[data-item-id="doc-plain"]', "click");
+    expect(JSON.parse(find("[data-opened]")?.textContent ?? "null")).toEqual(open("doc-plain", "Notes"));
+  });
+
+  it("Given no pointing, Then no row carries the control", async () => {
+    const { find } = await mount();
+    expect(find("[data-mark-document]")).toBeNull();
+  });
+});

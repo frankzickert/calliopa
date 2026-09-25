@@ -52,12 +52,34 @@ export function pointingOf(
 ): Pointing {
   const held = new Map(blocks.map((block) => [block.blockId, block]));
   const references = marking.references.map((reference): PointedReference => {
+    // A document marked whole: its title is what the chip says, and the
+    // run is told its identity (`BO_0304_Q3`). BO_0304_009
+    if (reference.kind === "document") {
+      return {
+        kind: "document",
+        number: reference.number,
+        document: reference.document,
+        words: reference.documentTitle ?? reference.document,
+        stale: false,
+        ...(reference.documentTitle === undefined ? {} : { documentTitle: reference.documentTitle }),
+      };
+    }
     const sentFields = {
       ...(reference.target === undefined ? {} : { target: reference.target }),
       ...(reference.group === undefined ? {} : { group: reference.group }),
       ...(reference.item === undefined ? {} : { item: reference.item }),
       ...(reference.revisionId === undefined ? {} : { revisionId: reference.revisionId }),
+      ...(reference.document === undefined ? {} : { document: reference.document }),
     };
+    // A reference into another document is told as it was marked: this
+    // view's blocks say nothing about it, so it is never stale or rowless
+    // here, and its words are the ones kept at marking. BO_0304_009
+    if (reference.document !== undefined) {
+      const where = reference.documentTitle === undefined ? {} : { documentTitle: reference.documentTitle };
+      return reference.kind === "passage"
+        ? { kind: "passage", number: reference.number, blockId: reference.blockId, quote: reference.anchor.quote, words: reference.anchor.quote, stale: false, ...sentFields, ...where }
+        : { kind: "block", number: reference.number, blockId: reference.blockId, words: openingWords(reference.words ?? ""), stale: false, ...sentFields, ...where };
+    }
     const shown = standingOf(reference, held, items);
     const shownFields = {
       ...(shown.what === undefined ? {} : { what: shown.what }),
@@ -103,7 +125,7 @@ export function pointingOf(
  * row is left to carry its number, and the words that stand where it was
  * marked — null once they have gone. */
 function standingOf(
-  reference: Reference,
+  reference: Exclude<Reference, { kind: "document" }>,
   held: ReadonlyMap<string, PointableBlock>,
   items: ReadonlyMap<string, OpenItem> | null,
 ): {

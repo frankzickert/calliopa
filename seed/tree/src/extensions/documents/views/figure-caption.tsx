@@ -1,6 +1,6 @@
 import { component$, type QRL } from "@builder.io/qwik";
 
-import { numberLabel } from "../lib/figure-label";
+import { type NumberedKind, numberLabel } from "../lib/figure-label";
 
 /**
  * Sets a picture's or an output's caption and its number's ask, or a table's
@@ -16,22 +16,25 @@ export type SetFigure = QRL<
  * numbered, then its caption — a field while the document is read and the row
  * hands over the command, the words alone otherwise. A number needs no
  * caption, so a numbered figure without one draws its label alone; a block
- * with neither draws nothing unless it can be captioned here.
+ * with neither draws nothing unless it can be captioned here. A code block's
+ * caption line is the same, labelled *Listing 2.* (`BO_0303_011`).
  */
 export const FigureCaption = component$<{
   blockId: string;
+  /** What the number is labelled as; a figure unless said otherwise. */
+  kind?: NumberedKind | undefined;
   number?: number | undefined;
   numbered?: boolean | undefined;
   caption?: string | undefined;
   caption$?: SetFigure | undefined;
-}>(({ blockId, number, numbered, caption, caption$ }) => {
+}>(({ blockId, kind, number, numbered, caption, caption$ }) => {
   const words = caption ?? "";
   if (caption$ === undefined && words === "" && number === undefined) return null;
   return (
     <figcaption class="figure-caption" data-figure-caption={blockId}>
       {number !== undefined && (
         <span class="figure-caption__label" data-figure-number={number}>
-          {numberLabel("figure", number)}
+          {numberLabel(kind ?? "figure", number)}
         </span>
       )}
       {caption$ !== undefined ? (

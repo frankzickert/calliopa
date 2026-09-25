@@ -5,13 +5,17 @@
  * never disagree. A reference whose block is gone from the document, or asks
  * for no number, says so in words — never a stale number and never nothing.
  */
-export type NumberedKind = "figure" | "table";
+export type NumberedKind = "figure" | "table" | "listing";
 
-const NAME: Readonly<Record<NumberedKind, string>> = { figure: "Figure", table: "Table" };
+const NAME: Readonly<Record<NumberedKind, string>> = { figure: "Figure", table: "Table", listing: "Listing" };
 
 /** The label a reference run is drawn as. */
 export const referenceLabel = (kind: NumberedKind, number: number | undefined): string =>
   number === undefined ? `(${kind} gone)` : `${NAME[kind]} ${number}`;
+
+/** What a reference to a block outside the reading order is drawn as
+ * (`BO_0300_007`): never a stale label and never nothing. */
+export const GONE_LABEL = "(gone)";
 
 /** The label a numbered figure or table carries before its caption. */
 export const numberLabel = (kind: NumberedKind, number: number): string => `${NAME[kind]} ${number}.`;

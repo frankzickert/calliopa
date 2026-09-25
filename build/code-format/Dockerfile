@@ -42,10 +42,13 @@ RUN chmod +x entrypoint.sh
 
 # The formatters run in an empty directory owned by nobody, so a config file
 # cannot be picked up from a working directory and nothing written by a
-# formatter outlives the request.
+# formatter outlives the request. The container starts as root so the
+# entrypoint can read the bearer the bootstrap writes 0600 root:root, and
+# drops to `formatter` with setpriv (util-linux, on the base image) before the
+# server runs. BO_0296_010
 RUN useradd --system --create-home --home-dir /home/formatter formatter \
-    && mkdir -p /work && chown formatter:formatter /work
-USER formatter
+    && mkdir -p /work && chown formatter:formatter /work \
+    && setpriv --version >/dev/null
 ENV HOME=/home/formatter
 
 EXPOSE 8093

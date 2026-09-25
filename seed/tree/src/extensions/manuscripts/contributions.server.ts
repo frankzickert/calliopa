@@ -9,13 +9,15 @@ import { isRecordId } from "~/server/uuid";
 import type { ManuscriptView } from "./lib/manuscript";
 import { makeManuscript, readVenues } from "./server/make";
 import { listManuscripts, readManuscript } from "./server/manuscripts";
+import { keptForKernel, projectForKernel, ToolRefusal, type ToolCall } from "./server/tools";
 
 /**
  * The server half of `manuscripts` (`BO_0293_021`): the venues the
  * typesetting service carries, the make — a person's press, projecting the
  * document and keeping what came back — the kept manuscripts, all or a
- * document's, and each one's files streamed back typed and named. Only server
- * code imports this module.
+ * document's, each one's files streamed back typed and named, and the two
+ * routes the kernel calls for a run's `make_manuscript` (`BO_0293_023`). Only
+ * server code imports this module.
  */
 
 /** What the Manuscripts section is handed: the kept manuscripts, or that the
@@ -109,6 +111,44 @@ const routes: readonly ApiRoute[] = [
       event.send(200, bytes);
     },
   },
+  {
+    // What the kernel calls for a run's make_manuscript (BO_0293_023): the
+    // document projected at the run's pin, ready for the service. Answered
+    // only with the callback secret, as every kernelCallback route is.
+    method: "POST",
+    path: "kernel/manuscripts/project",
+    kernelCallback: true,
+    handle: async (event) => {
+      try {
+        event.json(200, await projectForKernel(await toolCallOf(event.request)));
+      } catch (error) {
+        if (error instanceof ToolRefusal) throw new HttpError(422, error.message);
+        throw error;
+      }
+    },
+  },
+  {
+    // The kept manuscript composed from what the service answered and the
+    // files the kernel put, as statements the kernel stages into the run's
+    // group. BO_0293_023
+    method: "POST",
+    path: "kernel/manuscripts/kept",
+    kernelCallback: true,
+    handle: async (event) => {
+      try {
+        event.json(200, keptForKernel(await toolCallOf(event.request)));
+      } catch (error) {
+        if (error instanceof ToolRefusal) throw new HttpError(422, error.message);
+        throw error;
+      }
+    },
+  },
 ];
+
+/** What the kernel posted: the input and the run. */
+async function toolCallOf(request: Request): Promise<ToolCall> {
+  const body = record(await request.json().catch(() => ({})));
+  return { input: record(body["input"]), run: (body["run"] ?? { id: "", group: "", pin: 0 }) as ToolCall["run"] };
+}
 
 export const contributions = declare({ routes, readers });

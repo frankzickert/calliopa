@@ -4,13 +4,14 @@ import type { DocumentView } from "~/extensions/documents/server/assemble";
 import { readDocument } from "~/extensions/documents/server/documents";
 import type { WorkRecord } from "~/extensions/bibliography/lib/work";
 import { readWork } from "~/extensions/bibliography/server/works";
+import { mentionsOf } from "~/extensions/keywords/server/keywords";
 import { blobHash, blobReference, objectIdOfHash, putBlob, readBlob } from "~/server/ccgw/blobs";
 import { commit } from "~/server/ccgw/script";
 import { call } from "~/server/kernel/client";
 import type { GraphOutcome } from "~/server/outcome";
 
 import { MANUSCRIPT_TYPE, isOutcome, type Outcome, type Venue } from "../lib/manuscript";
-import { project, type Projection } from "./project";
+import { project, type GlossaryEntry, type Projection } from "./project";
 
 /**
  * A manuscript made and kept (`BO_0293_021`): the document read, its cited
@@ -96,20 +97,42 @@ export async function citedWorks(document: DocumentView): Promise<Map<string, Wo
   return works;
 }
 
-/** Sends a projection to the service and reads its answer, or a refusal. */
-export async function typeset(projection: Projection, venue: string, transport: Transport = call): Promise<{ readonly typeset: Typeset } | { readonly failure: string }> {
+/**
+ * The projection's figures read from the store: base64 as the service takes
+ * them, and as blob references with the names the source includes them by,
+ * kept beside the source so the LaTeX a person downloads typesets by hand
+ * and a venue takes it whole (found by the walk, 2026-09-25: an IEEE source
+ * typeset again by hand stopped at its missing picture). No new bytes: each
+ * reference is the block's own blob. Shared by a press and a run's
+ * manuscript (`BO_0293_023`).
+ */
+export async function figuresOf(projection: Projection): Promise<{ readonly files: Record<string, string>; readonly kept: Record<string, unknown>[] } | { readonly failure: string }> {
   const files: Record<string, string> = {};
+  const kept: Record<string, unknown>[] = [];
   for (const file of projection.files) {
     try {
-      files[file.name] = Buffer.from(await readBlob(blobHash(file.objectId))).toString("base64");
+      const bytes = await readBlob(blobHash(file.objectId));
+      files[file.name] = Buffer.from(bytes).toString("base64");
+      kept.push({ ...blobReference(file.objectId, file.mediaType, bytes.byteLength), filename: file.name });
     } catch {
       return { failure: `the picture ${file.name} could not be read from the store` };
     }
   }
+  return { files, kept };
+}
+
+/** The venue a manuscript is made for: the one asked, else the document's
+ * own, else the generic article. */
+export const venueOf = (document: DocumentView, asked?: string): string => asked ?? document.frontMatter?.venue ?? "generic";
+
+/** Sends a projection to the service and reads its answer, or a refusal. */
+export async function typeset(projection: Projection, venue: string, transport: Transport = call): Promise<{ readonly typeset: Typeset; readonly figures: Record<string, unknown>[] } | { readonly failure: string }> {
+  const figures = await figuresOf(projection);
+  if ("failure" in figures) return figures;
   const answered = await transport(`${FORWARD}/v1/manuscripts`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ venue, ast: projection.ast, references: projection.references, files }),
+    body: JSON.stringify({ venue, ast: projection.ast, references: projection.references, files: figures.files }),
   });
   if (!answered.ok) return { failure: await words(answered) };
   const body = (await answered.json()) as Partial<Typeset>;
@@ -122,6 +145,7 @@ export async function typeset(projection: Projection, venue: string, transport: 
       ...(typeof body.pdf === "string" ? { pdf: body.pdf } : {}),
       log: Array.isArray(body.log) ? body.log.filter((line): line is string => typeof line === "string") : [],
     },
+    figures: figures.kept,
   };
 }
 
@@ -131,6 +155,23 @@ async function keep(bytes: Uint8Array, mediaType: string, filename: string): Pro
   const objectId = objectIdOfHash(stored.result.hash);
   if (objectId === null) return refuse("store", `the store answered no object for ${filename}`);
   return { outcome: "success", result: { ...blobReference(objectId, mediaType, stored.result.size), filename } };
+}
+
+/**
+ * The glossary a manuscript carries (`BO_0301_020`): every keyword the
+ * document mentions at its revision, read through the keywords extension's
+ * own module under the declared dependency, each with its definition. A
+ * read that does not answer — the extension switched off, no keyword role
+ * chosen — is no glossary, and the manuscript says nothing about one.
+ */
+export async function glossaryOf(document: DocumentView): Promise<GlossaryEntry[]> {
+  try {
+    const read = await mentionsOf(document.documentId, document.dataRevision === undefined ? {} : { dataRevision: document.dataRevision });
+    if (read.outcome !== "success") return [];
+    return Object.values(read.result.keywords).map((keyword) => ({ title: keyword.title, definition: keyword.definition }));
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -146,9 +187,9 @@ export async function makeManuscript(input: {
   const read = await readDocument(input.documentId);
   if (read.outcome !== "success") return read as GraphOutcome<never>;
   const document = read.result;
-  const venue = input.venue ?? document.frontMatter?.venue ?? "generic";
+  const venue = venueOf(document, input.venue);
   const revision = document.dataRevision ?? 0;
-  const projection = project(document, await citedWorks(document), revision);
+  const projection = project(document, await citedWorks(document), revision, await glossaryOf(document));
   const answered = await typeset(projection, venue, input.transport ?? call);
   if ("failure" in answered) return refuse("typesetting", answered.failure);
   const made = answered.typeset;
@@ -163,24 +204,68 @@ export async function makeManuscript(input: {
     if (file.outcome !== "success") return file as GraphOutcome<never>;
     files.push(file.result);
   }
+  files.push(...answered.figures);
 
   const manuscriptId = randomUUID();
+  const write = manuscriptWrite({
+    manuscriptId,
+    documentId: input.documentId,
+    title: document.title,
+    revision,
+    venue,
+    files,
+    made: new Date().toISOString(),
+    by: input.by,
+    outcome: made.outcome,
+    log: made.log,
+    omitted: projection.omitted,
+  }, "established");
   return commit(
-    `CREATE (m:${MANUSCRIPT_TYPE} {id: $m_id, of: $m_of, title: $m_title, revision: $m_revision, venue: $m_venue, files: $m_files, made: $m_made, by: $m_by, outcome: $m_outcome, log: $m_log, omitted: $m_omitted, status: "established"})`,
-    {
-      m_id: manuscriptId,
-      m_of: input.documentId,
-      m_title: document.title,
-      m_revision: revision,
-      m_venue: venue,
-      m_files: files,
-      m_made: new Date().toISOString(),
-      m_by: input.by,
-      m_outcome: made.outcome,
-      m_log: made.log,
-      m_omitted: projection.omitted,
-    },
+    write.statement,
+    write.parameters,
     `make a ${venue} manuscript of ${document.title === "" ? input.documentId : document.title}`,
     async (dataRevision, revisionOf) => ({ manuscriptId, revisionId: await revisionOf(manuscriptId), outcome: made.outcome, dataRevision }),
   );
+}
+
+/** What a kept manuscript is made of, as one `manuscript` node. */
+export interface ManuscriptFacts {
+  readonly manuscriptId: string;
+  readonly documentId: string;
+  readonly title: string;
+  readonly revision: number;
+  readonly venue: string;
+  readonly files: readonly Record<string, unknown>[];
+  readonly made: string;
+  readonly by: string;
+  readonly outcome: Outcome;
+  readonly log: readonly string[];
+  readonly omitted: readonly string[];
+}
+
+/**
+ * The one write that keeps a manuscript: a press commits it as truth, with
+ * `established` said, and a run's `make_manuscript` has the kernel stage it
+ * into the run's group (`BO_0293_023`) with no status, since a
+ * proposal-scoped write stages a candidate and refuses an explicit
+ * `established` (found by the instance check, 2026-09-25). Both keep the
+ * same node.
+ */
+export function manuscriptWrite(facts: ManuscriptFacts, status?: "established"): { readonly statement: string; readonly parameters: Record<string, unknown> } {
+  return {
+    statement: `CREATE (m:${MANUSCRIPT_TYPE} {id: $m_id, of: $m_of, title: $m_title, revision: $m_revision, venue: $m_venue, files: $m_files, made: $m_made, by: $m_by, outcome: $m_outcome, log: $m_log, omitted: $m_omitted${status === undefined ? "" : `, status: "${status}"`}})`,
+    parameters: {
+      m_id: facts.manuscriptId,
+      m_of: facts.documentId,
+      m_title: facts.title,
+      m_revision: facts.revision,
+      m_venue: facts.venue,
+      m_files: facts.files,
+      m_made: facts.made,
+      m_by: facts.by,
+      m_outcome: facts.outcome,
+      m_log: facts.log,
+      m_omitted: facts.omitted,
+    },
+  };
 }

@@ -4,9 +4,11 @@ import { addWork, readWork, retireWork } from "~/extensions/bibliography/server/
 import { createDocument, fillMediaBlock, insertBlock, readDocument, setFigure, setFrontMatter } from "~/extensions/documents/server/documents";
 import { blobHash, blobReference, objectIdOfHash, putBlob, readBlob } from "~/server/ccgw/blobs";
 import { readGraphEnv } from "~/server/ccgw/env";
+import { commit } from "~/server/ccgw/script";
 
 import { makeManuscript, type Transport } from "../../server/make";
 import { listManuscripts, readManuscript } from "../../server/manuscripts";
+import { keptForKernel, projectForKernel } from "../../server/tools";
 
 /**
  * A manuscript made and kept over the one graph (`BO_0293_021`): a document
@@ -92,6 +94,74 @@ describe.skipIf(!configured)("a manuscript over CCGW", () => {
     expect(ok<{ of: string }[]>(await listManuscripts(created.documentId))).toEqual([]);
   });
 
+  it("answers the kernel a run's projection at its pin and composes the kept manuscript as a press writes it", async () => {
+    // The run's half (BO_0293_023): the projection the kernel posts to the
+    // service, read at the run's pin, and the node the kernel stages from
+    // the outcome — the same node a press keeps.
+    const created = ok<{ documentId: string }>(await createDocument({ title: "A run's manuscript" }));
+    const documentId = created.documentId;
+    const head = ok<{ revisionId: string }>(await readDocument(documentId));
+    ok(await setFrontMatter({ documentId, baseRevisionId: head.revisionId, frontMatter: { authors: [{ name: "Ada Lovelace" }], affiliations: [], keywords: [], venue: "ieee" } }));
+    await settle();
+    ok(await insertBlock({ documentId, block: { kind: "text", role: "abstract", runs: [{ text: "A run can make a manuscript." }] }, placement: { at: "end" } }));
+    ok(await insertBlock({ documentId, block: { kind: "text", role: "h1", runs: [{ text: "Method" }] }, placement: { at: "end" } }));
+    ok(await insertBlock({ documentId, block: { kind: "video" }, placement: { at: "end" } }));
+    const picture = ok<{ blockId: string; revisionId: string }>(await insertBlock({ documentId, block: { kind: "image" }, placement: { at: "end" } }));
+    await settle();
+    const bytes = png();
+    const stored = ok<{ hash: string; size: number }>(await putBlob(bytes));
+    ok(
+      await fillMediaBlock({ documentId, blockId: picture.blockId, baseRevisionId: picture.revisionId, reference: blobReference(objectIdOfHash(stored.hash) as string, "image/png", stored.size), width: 2, height: 2 }),
+    );
+    await settle();
+    const pinned = ok<{ dataRevision?: number }>(await readDocument(documentId));
+    const pin = pinned.dataRevision ?? 0;
+    expect(pin).toBeGreaterThan(0);
+    // The document moves on after the pin; the run's projection does not.
+    ok(await insertBlock({ documentId, block: { kind: "text", role: "h1", runs: [{ text: "Later" }] }, placement: { at: "end" } }));
+    await settle();
+
+    const run = { id: "arun-test", group: "node:run-test", pin, person: "ann", principal: "claude" };
+    const projected = await projectForKernel({ input: { document: documentId }, run });
+    expect(projected).toMatchObject({ document: documentId, title: "A run's manuscript", venue: "ieee", revision: pin });
+    expect(projected.request.venue).toBe("ieee");
+    expect(JSON.stringify(projected.request.ast)).toContain("Method");
+    expect(JSON.stringify(projected.request.ast)).not.toContain("Later");
+    expect(projected.omitted.join(" ")).toMatch(/video/u);
+    expect(Object.keys(projected.request.files)).toEqual([`figure-${picture.blockId}.png`]);
+    expect(projected.figures).toEqual([{ ...blobReference(objectIdOfHash(stored.hash) as string, "image/png", bytes.byteLength), filename: `figure-${picture.blockId}.png` }]);
+    expect((await projectForKernel({ input: { document: documentId, venue: "generic" }, run })).venue).toBe("generic");
+
+    const source = ok<{ hash: string; size: number }>(await putBlob(new TextEncoder().encode("\\documentclass{article}")));
+    const kept = keptForKernel({
+      input: {
+        document: documentId,
+        title: projected.title,
+        venue: projected.venue,
+        revision: projected.revision,
+        outcome: "failed",
+        log: ["! Undefined control sequence."],
+        omitted: projected.omitted,
+        files: [{ ...blobReference(objectIdOfHash(source.hash) as string, "text/x-tex", source.size), filename: "manuscript.tex" }],
+        figures: projected.figures,
+      },
+      run,
+    });
+    const [write] = kept.stage ?? [];
+    expect(write).toBeDefined();
+    expect(write?.statement).not.toContain("status");
+    // The kernel stages this into the run's group; here it is written as
+    // the acceptance would establish it, so the node reads back.
+    const written = ok<{ manuscriptId: string }>(
+      await commit(`${write?.statement.slice(0, -2) ?? ""}, status: "established"})`, write?.parameters ?? {}, "a run's manuscript, kept", async () => ({ manuscriptId: (kept.result as { manuscriptId: string }).manuscriptId })),
+    );
+    const read = ok<{ of: string; venue: string; revision: number; by: string; outcome: string; files: { filename: string }[]; omitted: string[] }>(await readManuscript(written.manuscriptId));
+    expect(read).toMatchObject({ of: documentId, venue: "ieee", revision: pin, by: "claude", outcome: "failed" });
+    expect(read.files.map((file) => file.filename)).toEqual(["manuscript.tex", `figure-${picture.blockId}.png`]);
+    expect(read.omitted.join(" ")).toMatch(/video/u);
+    expect(ok<{ manuscriptId: string }[]>(await listManuscripts(documentId)).map((entry) => entry.manuscriptId)).toContain(written.manuscriptId);
+  });
+
   it.skipIf(service === undefined)("makes an IEEE manuscript by the real service and keeps it with its files", async () => {
     // No hyphenated CSL field: the bibliography's addWork cannot write one yet
     // (its backtick-quoted keys do not parse), which its own suite reports.
@@ -143,7 +213,7 @@ describe.skipIf(!configured)("a manuscript over CCGW", () => {
     );
     expect(kept).toMatchObject({ of: documentId, venue: "ieee", by: "suite", outcome: "ok" });
     expect(kept.revision).toBe(read.dataRevision);
-    expect(kept.files.map((file) => file.filename).sort()).toEqual(["manuscript.pdf", "manuscript.tex", "references.bib"]);
+    expect(kept.files.map((file) => file.filename).sort()).toEqual([`figure-${picture.blockId}.png`, "manuscript.pdf", "manuscript.tex", "references.bib"]);
     const pdf = kept.files.find((file) => file.filename === "manuscript.pdf");
     expect(new TextDecoder().decode((await readBlob(blobHash(pdf?.objectId ?? ""))).subarray(0, 4))).toBe("%PDF");
     const tex = new TextDecoder().decode(await readBlob(blobHash(kept.files.find((file) => file.filename === "manuscript.tex")?.objectId ?? "")));

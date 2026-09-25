@@ -389,6 +389,38 @@ export interface ViewReveal {
 }
 
 /**
+ * The pointing that stands across the workspace: which prompt is pointing,
+ * from which document, and the marks it has so far — so pointing follows the
+ * reader across tabs (`BO_0304_Q1`). Only the active tab's view is mounted,
+ * so the marks cannot live in the prompt's view while the reader is in
+ * another document; they live here while the pointing stands. The view that
+ * points writes it and every view reads it: a view the session does not
+ * name is its guest, marking for it. `marks` is the record as the pointing
+ * view serializes it, opaque to the shell; `documents` are the documents
+ * marked whole, which the library and the tab strip show. `seq` rises on
+ * every change. BO_0304_014
+ */
+export interface ViewPointing {
+  documentId: string | null;
+  prompt: string | null;
+  marks: string;
+  documents: readonly { readonly document: string; readonly title: string; readonly number: number }[];
+  seq: number;
+}
+
+/**
+ * The last *Mark document* pressed on a library row or a tab while a pointing
+ * stands, for the mounted document view — the one that points, or its guest
+ * — to apply to the session's marks, `reveal`'s shape for `reveal`'s reason.
+ * The view clears `document` once it has applied it. BO_0304_014
+ */
+export interface ViewAcross {
+  document: string | null;
+  title: string;
+  seq: number;
+}
+
+/**
  * A block the view is asked to focus once it shows a target: coming back to
  * a parent from its focused work lands on the block that was opened, with
  * its depth. Page-only, never the workspace record — focus is never
@@ -544,6 +576,10 @@ export interface ViewBridge {
   /** The last chip the reader pressed in the composer, asking the view to
    * show its area. CA_0039_004 */
   readonly reveal: ViewReveal;
+  /** The pointing that stands across the workspace. BO_0304_014 */
+  readonly pointing: ViewPointing;
+  /** The last *Mark document* pressed while it stands. BO_0304_014 */
+  readonly across: ViewAcross;
   /** The reader's run aimed at a target, while it goes. BO_0265_007 */
   readonly activity: ViewActivity;
   /** Reports the open run groups on a target for the composer's chips.

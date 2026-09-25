@@ -21,10 +21,8 @@ import {
 } from "../lib/disposition";
 import { anchorAt } from "~/lib/passage";
 import { passagesIn, passageState, referenceFor } from "../lib/references";
-import { referenceLabel } from "../lib/figure-label";
 import type { FrontMatter } from "../lib/front-matter";
-import { authorsText, listOf, readAuthors, withPart } from "../lib/front-matter-text";
-import { isUnnamed, shownTitle, UNNAMED_DOCUMENT } from "../lib/naming";
+import { isUnnamed, shownTitle, unnamedTitle } from "../lib/naming";
 import { proposedFor, revealFor, type AttachmentDescriptor } from "~/lib/command-target";
 import type { SentCommand } from "~/components/shell/view-bridge";
 import { CommandControl } from "./command/command-control";
@@ -79,7 +77,8 @@ import { emptyTable, type TableColumn } from "../lib/table";
 import { carriesMath, mathAtCaret, mathInText } from "../lib/dollar-math";
 import { CitePopover } from "./cite-popover";
 import { LocatorPopover } from "./locator-popover";
-import { CodeBlock, type ReviseCode } from "./code-block";
+import { CodeBlock, type ContinueCode, type ReportCodeLines, type ReviseCode } from "./code-block";
+import { resolveFirstLines } from "../lib/code-lines";
 import { OutputBlock } from "./output-block";
 import { delimiterFor, looksLikeGrid, parsePastedGrid, parseTable, sniffDelimiter } from "../lib/table-parse";
 import type { BlobReference } from "~/server/ccgw/blobs";
@@ -136,7 +135,7 @@ import { PassageNumbers } from "./passages/passage-numbers";
 import { revealedPassage, showArea } from "./reveal";
 import { selectedWords } from "./passages/selection";
 import { PassagesContext, usePassages } from "./passages/use-passages";
-import { Marked, ROLE_TAG, type BlockTag } from "./block-text";
+import { Marked, ROLE_TAG, type BlockTag, Annotated } from "./block-text";
 import { ProposalBlock, isInferredRelation } from "./proposals/proposal-block";
 import {
   destinationOf,
@@ -168,8 +167,12 @@ import { StandingContext, standingOf, useStanding } from "./standing/use-standin
 import { EditorSurfaceContext } from "./editor-surface";
 import { DecorationProvider, DocumentDecorations } from "./decorations";
 import { CitedWorksContext, type CitedWorks } from "./cited-works";
+import { InlineAnnotationsContext, annotationsOn, type InlineAnnotations } from "./inline-annotations";
+import { annotate } from "../lib/annotations";
 import { citeLabel } from "../lib/citation-label";
 import { BranchLine, type BranchAsk } from "./branch/branch-line";
+import { FrontMatterHead } from "./front-matter-head";
+import { referenceChoices, type ReferenceChoice } from "../lib/reference-choices";
 import { sessionChipsOf, type ProposalSession } from "../lib/branch";
 import { branchOf } from "../lib/branch-scope";
 import { newBlockId } from "../lib/block-id";
@@ -370,14 +373,6 @@ const ROLE_LABEL: Readonly<Record<TextRole, string>> = {
   abstract: "Abstract",
 };
 
-/** The words each line of the document's head is asked with. BO_0293_016 */
-const FRONT_LABEL: Readonly<Record<"authors" | "affiliations" | "keywords" | "venue", string>> = {
-  authors: "Authors — Name (1, 2) <email> *; …",
-  affiliations: "Affiliations — one; two; …",
-  keywords: "Keywords — one, two, …",
-  venue: "Venue",
-};
-
 const MARK_LABEL: Readonly<Record<Mark, string>> = {
   bold: "Bold",
   italic: "Italic",
@@ -541,11 +536,7 @@ const knownKeys = (state: DocumentState): string[] =>
     ...(state.proposals?.groups ?? []).flatMap((group) => group.items.map((item) => item.block?.order ?? "")),
   ].filter((key) => key !== "");
 
-interface DocumentState {
-  /** The front matter's lines as the panel's fields hold them while typed;
-   * null for a line not being edited, which then shows the document's own.
-   * BO_0293_016 */
-  frontDraft?: { authors: string | null; affiliations: string | null; keywords: string | null; venue: string | null };
+export interface DocumentState {
   /** Counts saves refused because documents came under separation of
    * duties; the branch line enters the proposal on each. BO_0212_011 */
   policyRefusals?: number;
@@ -553,6 +544,10 @@ interface DocumentState {
    * leaving the block lets the block go before the retry runs. BO_0212_011 */
   policyRefused?: { readonly blockId: string; readonly baseRevisionId: string; readonly runs: Run[]; readonly role: TextRole } | undefined;
   document: DocumentView | null;
+  /** The line count of each code block as it is being written, keyed by
+   * block, so the blocks below it re-number under the caret (`BO_0302_006`);
+   * a block absent here counts as the read holds it. */
+  codeLines: Record<string, number>;
   retired: BlockView[];
   retiredOpen: boolean;
   /** Whether the blocks the reader set aside as discarded are drawn where
@@ -756,6 +751,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   const bridge = useContext(ViewBridgeContext);
   const state = useStore<DocumentState>({
     document: null,
+    codeLines: {},
     retired: [],
     retiredOpen: false,
     discardedOpen: false,
@@ -776,7 +772,11 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     editingItemId: null,
     loaded: 0,
     proposedSeen: bridge.proposed.seq,
-    revealSeen: bridge.reveal.seq,
+    // A reveal aimed at this document that no view has consumed — a chip
+    // pressed for a reference into it from another document's prompt, which
+    // brought this document forward — is acted on as this view mounts.
+    // BO_0304_009
+    revealSeen: bridge.reveal.itemId === tab.itemId && bridge.reveal.target !== null ? bridge.reveal.seq - 1 : bridge.reveal.seq,
     activitySeen: bridge.activity.seq,
     runActivities: [],
     liveGroups: [],
@@ -1360,6 +1360,11 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   // the document cites anything and again when it changes. BO_0291_026
   const citedWorks = useStore<CitedWorks>({ byWork: {}, numbers: {}, missing: [], labels: {} });
   useContextProvider(CitedWorksContext, citedWorks);
+  // What an extension has to say over a block's words while it is read — a
+  // keyword's mention — written by its provider and drawn by the reading
+  // rows; a press on one is the extension's. BO_0301_015
+  const inlineAnnotations = useStore<InlineAnnotations>({ sources: {}, version: 0, pressed: null });
+  useContextProvider(InlineAnnotationsContext, inlineAnnotations);
   // The document's numbering, handed to the editing surface and to the
   // proposals drawn beside it. BO_0291_025
   useTask$(({ track }) => {
@@ -1590,6 +1595,24 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     });
   });
 
+  /**
+   * The prompt the pointing session names, edited again once the document
+   * is read: coming back to the prompt's tab after marking in another
+   * document finds the prompt being edited and pointing, as it was left —
+   * while pointing, the prompt stays edited (`BO_0267_023`), and the view
+   * that mounts into a standing pointing keeps that true (`BO_0304_018`,
+   * the second walk's finding, 2026-09-25). Not on every change of the marks:
+   * only the session's document and prompt are tracked.
+   */
+  useTask$(async ({ track }) => {
+    track(() => state.loaded);
+    const named = track(() => bridge.pointing.documentId);
+    const prompt = track(() => bridge.pointing.prompt);
+    if (state.document === null || documentId === null || named !== documentId || prompt === null) return;
+    if (state.activeBlockId === prompt || !state.document.blocks.some((block) => block.blockId === prompt)) return;
+    await activate$(prompt, "end");
+  });
+
   /** The block the shell asked this view to land on, focused once the
    * document is read — a return along the route. CA_0047_004 */
   useTask$(({ track }) => {
@@ -1778,40 +1801,22 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   );
 
   /**
-   * One line of the front matter saved from the panel (`BO_0293_016`): the
-   * line read into its part, the whole front matter written on the document's
-   * base with `setFrontMatter`, the document read back. A line that does not
-   * read is said on the notice line and nothing is written.
+   * The whole front matter written from the head (`BO_0293_016`,
+   * `BO_0293_025`) on the document's base, the document read back so the head
+   * redraws; a refusal goes to the notice line and writes nothing. Answers
+   * whether it was written, so a chip's field is cleared only then.
    */
-  const saveFrontLine$ = $(async (part: "authors" | "affiliations" | "keywords" | "venue") => {
-    if (documentId === null || state.document === null) return;
-    const draft = state.frontDraft?.[part] ?? null;
-    if (draft === null) return;
-    const current: FrontMatter = state.document.frontMatter ?? {};
-    let next: FrontMatter;
-    if (part === "authors") {
-      const read = readAuthors(draft, current.affiliations?.length ?? 0);
-      if ("failure" in read) {
-        state.notice = read.failure;
-        return;
-      }
-      next = withPart(current, { authors: read.authors });
-    } else if (part === "affiliations") {
-      next = withPart(current, { affiliations: listOf(draft, ";") });
-    } else if (part === "keywords") {
-      next = withPart(current, { keywords: listOf(draft, ",") });
-    } else {
-      next = withPart(current, { venue: draft.trim() });
-    }
+  const saveFront$ = $(async (next: FrontMatter): Promise<boolean> => {
+    if (documentId === null || state.document === null) return false;
     await writesSettled(tab.id);
     const outcome = await sendCommand(documentId, { command: "setFrontMatter", baseRevisionId: state.document.revisionId, frontMatter: next });
     if (outcome.outcome !== "success") {
       state.notice = describeOutcome(outcome);
-      return;
+      return false;
     }
     state.notice = null;
-    if (state.frontDraft !== undefined) state.frontDraft = { ...state.frontDraft, [part]: null };
     await readBack$(null);
+    return true;
   });
 
   /**
@@ -1832,6 +1837,73 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     }
     state.notice = null;
     await readBack$(null);
+  });
+
+  /**
+   * The document's formatting switch, *Format code* in the bar
+   * (`BO_0296_021`): written on the document's base with `setFormatCode`
+   * and the document read back. It governs what happens next — a settle, an
+   * acceptance — and reformats nothing that already stands.
+   */
+  const setFormatCode$ = $(async (on: boolean) => {
+    if (documentId === null || state.document === null) return;
+    await writesSettled(tab.id);
+    const outcome = await sendCommand(documentId, { command: "setFormatCode", baseRevisionId: state.document.revisionId, on });
+    if (outcome.outcome !== "success") {
+      state.notice = describeOutcome(outcome);
+      return;
+    }
+    state.notice = null;
+    await readBack$(null);
+  });
+
+  /**
+   * The document's line-number switch, *Line numbers* in the bar
+   * (`BO_0302_007`): written on the document's base with `setLineNumbers`
+   * and the document read back, so every code block redraws with or
+   * without its gutter. Drawing only: nothing is revised.
+   */
+  const setLineNumbers$ = $(async (on: boolean) => {
+    if (documentId === null || state.document === null) return;
+    await writesSettled(tab.id);
+    const outcome = await sendCommand(documentId, { command: "setLineNumbers", baseRevisionId: state.document.revisionId, on });
+    if (outcome.outcome !== "success") {
+      state.notice = describeOutcome(outcome);
+      return;
+    }
+    state.notice = null;
+    await readBack$(null);
+  });
+
+  /** A code block set to continue its numbering from the code block above
+   * it, or not (`BO_0302_008`): a write of its own on the block's base, then
+   * the document read back so the numbers below re-resolve. */
+  const setCodeContinues$: ContinueCode = $(async (blockId: string, baseRevisionId: string, continues: boolean): Promise<string | null> => {
+    if (documentId === null) return "No document.";
+    await writesSettled(tab.id);
+    // Registered as this tab's write on its way, so a second press and every
+    // other write wait for it rather than land beside it: two writes on one
+    // base in flight together left a block with two established revisions
+    // on the dogfood instance (walk finding, 2026-09-25).
+    let done = () => {};
+    const sending = new Promise<void>((resolve) => { done = resolve; });
+    inFlight.set(tab.id, sending);
+    try {
+      const outcome = await sendCommand(documentId, { command: "setCodeContinues", blockId, baseRevisionId, continues });
+      if (outcome.outcome !== "success") return describeOutcome(outcome);
+      state.notice = null;
+      await readBack$(null);
+      return null;
+    } finally {
+      if (inFlight.get(tab.id) === sending) inFlight.delete(tab.id);
+      done();
+    }
+  });
+
+  /** A code block's line count as typed, so the numbering below it follows
+   * the caret rather than the settle. BO_0302_006 */
+  const reportCodeLines$: ReportCodeLines = $((blockId: string, count: number) => {
+    if (state.codeLines[blockId] !== count) state.codeLines[blockId] = count;
   });
 
   /**
@@ -2086,38 +2158,6 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     const tex = chosen.trim() === "" ? "x" : chosen;
     const next = replaceRangeWithAtom(editor.runs, editor.start, editor.end, { text: tex, math: true });
     // An atom is one character wide, so the caret lands just after it.
-    const at = runsLength(sliceRuns(editor.runs, 0, Math.min(editor.start, editor.end))) + 1;
-    await apply$(next, at, at);
-    await scheduleSave$();
-  });
-
-  /**
-   * A reference to a numbered equation, put where the caret stands
-   * (`BO_0290_025`). It carries the equation identity and no text of its own:
-   * what it is drawn as is the number the read resolves, so it follows its
-   * equation when the numbering shifts and nothing here stores one.
-   */
-  const insertReference$ = $(async (blockId: string) => {
-    if (editor.blockId === null || blockId === "") return;
-    await remember$();
-    const next = replaceRangeWithAtom(editor.runs, editor.start, editor.end, {
-      text: "",
-      equationRef: blockId,
-    });
-    const at = runsLength(sliceRuns(editor.runs, 0, Math.min(editor.start, editor.end))) + 1;
-    await apply$(next, at, at);
-    await scheduleSave$();
-  });
-
-  /**
-   * A reference to a numbered figure or table, put where the caret stands
-   * (`BO_0295_012`), the way an equation reference is: the block's identity
-   * and no text of its own, drawn as the number the read resolves.
-   */
-  const insertBlockReference$ = $(async (key: "figureRef" | "tableRef", blockId: string) => {
-    if (editor.blockId === null || blockId === "") return;
-    await remember$();
-    const next = replaceRangeWithAtom(editor.runs, editor.start, editor.end, { text: "", [key]: blockId });
     const at = runsLength(sliceRuns(editor.runs, 0, Math.min(editor.start, editor.end))) + 1;
     await apply$(next, at, at);
     await scheduleSave$();
@@ -3326,66 +3366,9 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
         keepsSelection: true,
         run$: $(() => toggleMark$(mark)),
       }));
-      // Only the numbered equations can be named, since a reference is drawn
-      // as a number; with none, the control is not offered. BO_0290_025
-      const numbered = Object.entries(state.document?.equationNumbers ?? {})
-        .map(([blockId, number]) => ({ blockId, number }))
-        .sort((left, right) => left.number - right.number);
-      if (numbered.length > 0) {
-        format.push({
-          kind: "choice",
-          id: "block-reference-equation",
-          label: "Reference an equation",
-          value: "",
-          options: numbered.map(({ blockId, number }) => {
-            const held = state.document?.blocks.find((candidate) => candidate.blockId === blockId);
-            const source = held !== undefined && held.kind === "equation" ? held.tex : "";
-            const glimpse = source.length > 24 ? `${source.slice(0, 24)}…` : source;
-            return { value: blockId, label: `(${number}) ${glimpse}`.trim(), icon: "equals" as const };
-          }),
-          run$: $((chosen: string) => {
-            void insertReference$(chosen);
-          }),
-        });
-      }
-      // The numbered figures and tables, each offered as its label and the
-      // opening of its caption; with none, the control is not offered.
-      // BO_0295_012
-      const labelled = (numbers: Readonly<Record<string, number>> | undefined, kind: "figure" | "table") =>
-        Object.entries(numbers ?? {})
-          .sort(([, left], [, right]) => left - right)
-          .map(([blockId, number]) => {
-            const held = state.document?.blocks.find((candidate) => candidate.blockId === blockId);
-            const caption = held !== undefined && "caption" in held && typeof held.caption === "string" ? held.caption : "";
-            const glimpse = caption.length > 24 ? `${caption.slice(0, 24)}…` : caption;
-            return { value: blockId, label: `${referenceLabel(kind, number)} ${glimpse === "" ? "" : `— ${glimpse}`}`.trim(), icon: kind === "figure" ? ("image" as const) : ("table" as const) };
-          });
-      const figures = labelled(state.document?.figureNumbers, "figure");
-      if (figures.length > 0) {
-        format.push({
-          kind: "choice",
-          id: "block-reference-figure",
-          label: "Reference a figure",
-          value: "",
-          options: figures,
-          run$: $((chosen: string) => {
-            void insertBlockReference$("figureRef", chosen);
-          }),
-        });
-      }
-      const tables = labelled(state.document?.tableNumbers, "table");
-      if (tables.length > 0) {
-        format.push({
-          kind: "choice",
-          id: "block-reference-table",
-          label: "Reference a table",
-          value: "",
-          options: tables,
-          run$: $((chosen: string) => {
-            void insertBlockReference$("tableRef", chosen);
-          }),
-        });
-      }
+      // A reference is written from `#` in the sentence, never from the bar
+      // (`BO_0300_006`, user decision 2026-09-25): the three choices that
+      // stood here are gone.
       format.push({
         kind: "button",
         id: "block-inline-equation",
@@ -3557,10 +3540,11 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       // A picture, a table or an accepted output asks for a number here: a
       // toggle on the block the bar is about, the caption kept as it stands.
       // A proposal is answered first, so none is offered on one. BO_0295_011
+      // A code block asks for a listing number the same way (BO_0303_012).
       const numberable = subject;
-      if (item === undefined && numberable !== undefined && (numberable.kind === "image" || numberable.kind === "table" || numberable.kind === "output")) {
+      if (item === undefined && numberable !== undefined && (numberable.kind === "image" || numberable.kind === "table" || numberable.kind === "output" || numberable.kind === "sourcecode")) {
         const on = numberable.numbered === true;
-        const kind = numberable.kind === "table" ? "table" : "figure";
+        const kind = numberable.kind === "table" ? "table" : numberable.kind === "sourcecode" ? "listing" : "figure";
         groups.push({
           id: "number",
           label: "Number",
@@ -3689,11 +3673,41 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
               run$: chooseCitationStyle$,
             },
           ];
+    // Whether a settled or an accepted code block is pretty-printed: on
+    // unless the document switched it off, readable at a glance as the
+    // toggle's pressed state. BO_0296_021
+    const formatCode: ViewAction[] =
+      state.document === null || (state.document as { change?: string }).change !== undefined
+        ? []
+        : [
+            {
+              kind: "toggle",
+              id: "format-code",
+              label: "Format code",
+              icon: "code",
+              name: state.document.formatCode === false ? "Format code: off, an edit is saved exactly as typed" : "Format code: on, an edit is tidied up when it settles",
+              on: state.document.formatCode !== false,
+              run$: setFormatCode$,
+            },
+            // Whether each line of a code block is numbered: shown unless
+            // the document switched it off, readable at a glance as the
+            // toggle's pressed state. BO_0302_007
+            {
+              kind: "toggle",
+              id: "line-numbers",
+              label: "Line numbers",
+              icon: "list",
+              name: state.document.lineNumbers === false ? "Line numbers: off, code blocks carry no numbers" : "Line numbers: on, each line of a code block is numbered",
+              on: state.document.lineNumbers !== false,
+              run$: setLineNumbers$,
+            },
+          ];
     groups.push({
       id: "document",
       label: "Document",
       trailing: true,
       actions: [
+      ...formatCode,
       ...citationStyle,
       // Taking a saved change of standing back is its own named action, never
       // the undo keystroke: it writes the previous value. It stands in the
@@ -4218,8 +4232,17 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
    */
   useVisibleTask$(({ track, cleanup }) => {
     track(() => bridge.reveal.seq);
+    // A reveal pending as the view mounts — a chip pressed from another
+    // document's prompt, which brought this one forward — waits for the
+    // document: it is neither acted on nor consumed until there are rows to
+    // show it in. BO_0304_009
+    track(() => state.loaded);
     const looked = revealFor(bridge.reveal, state.revealSeen, documentId);
+    if (looked.target !== null && looked.target.kind !== "takeBack" && state.document === null) return;
     state.revealSeen = looked.seen;
+    // Consumed: a view mounting later for this document does not act on it
+    // again. BO_0304_009
+    if (looked.target !== null) bridge.reveal.target = null;
     const element = root.value;
     // A rowless reference's chip × takes it back: the view alone holds the
     // marks. BO_0263_007
@@ -4385,6 +4408,10 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   const placed = placedOf(doc?.blocks ?? []);
   // The rows drawn, and the first and last that have a place: where the
   // grips' arrows stop. BO_0263_013
+  // Where each code block's numbering starts, over the document as read
+  // and the line counts being typed, so a block below a growing one
+  // re-numbers under the caret. BO_0302_006
+  const codeFirstLines = doc === null ? {} : resolveFirstLines(doc.blocks, state.codeLines);
   const drawn = doc === null ? [] : drawnRows(state, doc, ownBranch);
   const places = drawn.flatMap((row) => {
     const position = positionOf(row);
@@ -4512,14 +4539,14 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                   wrote. The heading takes its accessible name from the same
                   words, standing beside the empty field rather than in it, so
                   an unnamed document is still a named heading. DO_0012_002 */}
-              {isUnnamed(doc.title) && <span class="visually-hidden">{UNNAMED_DOCUMENT}</span>}
+              {isUnnamed(doc.title) && <span class="visually-hidden">{unnamedTitle(doc)}</span>}
               <span
                 class="document-title__text"
                 ref={titleField}
                 data-document-title
                 data-unnamed={isUnnamed(doc.title) ? "true" : "false"}
-                data-placeholder={UNNAMED_DOCUMENT}
-                aria-placeholder={UNNAMED_DOCUMENT}
+                data-placeholder={unnamedTitle(doc)}
+                aria-placeholder={unnamedTitle(doc)}
                 role="textbox"
                 aria-labelledby="document-title-label"
                 contentEditable="true"
@@ -4605,43 +4632,13 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                 )}
               </p>
             )}
-            {/* The manuscript's head, edited where it is drawn: four lines,
-                each saved on its own with the whole front matter. The
+            {/* The manuscript's head, edited where it is drawn: chips for the
+                affiliations and the keywords, a row per author, the venue as
+                a word, each settled edit writing the whole front matter. The
                 inspector contributes no action (CA_0053), so the fields
                 stand above the first block, where the user's answer to
-                BO_0293_Q3 draws the head. BO_0293_016 */}
-            <details class="document-front" data-document-front>
-              <summary>Authors, affiliations, keywords and venue</summary>
-              {(["authors", "affiliations", "keywords", "venue"] as const).map((part) => {
-                const front = doc.frontMatter ?? {};
-                const shown =
-                  part === "authors"
-                    ? authorsText(front.authors)
-                    : part === "affiliations"
-                      ? (front.affiliations ?? []).join("; ")
-                      : part === "keywords"
-                        ? (front.keywords ?? []).join(", ")
-                        : (front.venue ?? "");
-                return (
-                  <label key={part} class="document-front__line">
-                    <span class="document-front__label">{FRONT_LABEL[part]}</span>
-                    <input
-                      data-front-field={part}
-                      value={state.frontDraft?.[part] ?? shown}
-                      onInput$={(_: Event, element: HTMLInputElement) => {
-                        state.frontDraft = { ...(state.frontDraft ?? { authors: null, affiliations: null, keywords: null, venue: null }), [part]: element.value };
-                      }}
-                      onKeyDown$={(event: KeyboardEvent) => {
-                        if (event.key === "Enter") void saveFrontLine$(part);
-                      }}
-                    />
-                    <button type="button" data-front-save={part} onClick$={() => saveFrontLine$(part)}>
-                      Save
-                    </button>
-                  </label>
-                );
-              })}
-            </details>
+                BO_0293_Q3 draws the head. BO_0293_016 BO_0293_025 */}
+            <FrontMatterHead editor={state} save$={saveFront$} />
             {/* The person's branch on this document: entering and leaving
                 it, accepting it by its standing, and what a rejected one
                 held. BO_0250_020 */}
@@ -4735,6 +4732,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                             entry.item.block.file === undefined &&
                             doc.blocks.some((held) => held.blockId === entry.item.blockId && held.kind === "table" && held.file !== undefined)
                           }
+                          numbersCode={doc.lineNumbers !== false}
                           proposer={groupOf(entry.item.groupId)?.proposer ?? UNKNOWN_PROPOSER}
                           words={itemWords(entry.item, runEvents, groupOf(entry.item.groupId)?.proposer)}
                           refinedBy={refinerOf(entry.item, state.runActivities)}
@@ -4810,8 +4808,13 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                         }`}
                         block={entry.block}
                         equationNumbers={state.document?.equationNumbers}
+                        codeFirstLines={codeFirstLines}
+                        lines$={reportCodeLines$}
                         figureNumbers={state.document?.figureNumbers}
                         tableNumbers={state.document?.tableNumbers}
+                        listingNumbers={state.document?.listingNumbers}
+                        referenceLabels={state.document?.referenceLabels}
+                        references={referenceChoices(state.document ?? { blocks: [] }, state.activeBlockId)}
                         setFigure$={setFigure$}
                         citationNumbers={state.document?.citationNumbers}
                         missingWorks={state.document?.missingWorks}
@@ -4854,6 +4857,8 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                         reviseInline$={reviseInline$}
                         reviseLocator$={reviseLocator$}
                         reviseCode$={reviseCode$}
+                        continueCode$={setCodeContinues$}
+                        numbersCode={state.document?.lineNumbers !== false}
                         importTable$={importTable$}
                         pasteGrid$={pasteGrid$}
                       />
@@ -4868,6 +4873,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                             state.editingItemId === item.itemId ? "editing" : (item.block?.revisionId ?? "")
                           }`}
                           item={item}
+                          numbersCode={doc.lineNumbers !== false}
                           proposer={groupOf(item.groupId)?.proposer ?? UNKNOWN_PROPOSER}
                           words={itemWords(item, runEvents, groupOf(item.groupId)?.proposer)}
                           refinedBy={refinerOf(item, state.runActivities)}
@@ -5007,10 +5013,23 @@ const BlockRow = component$<{
    * reference run in a sentence is drawn as its equation number. Derived on
    * every read and stored nowhere. BO_0290_015 */
   equationNumbers?: Readonly<Record<string, number>> | undefined;
+  /** Where each code block's numbering starts, resolved by the editor over
+   * the document and what is being typed (`BO_0302_006`); handed apart from
+   * the block, whose row a changed number does not remount. */
+  codeFirstLines?: Readonly<Record<string, number>> | undefined;
+  /** A code block's line count as typed. BO_0302_006 */
+  lines$: ReportCodeLines;
   /** The number each numbered figure and table carries, so a reference run is
    * drawn as its figure's or table's number. BO_0295_012 */
   figureNumbers?: Readonly<Record<string, number>> | undefined;
   tableNumbers?: Readonly<Record<string, number>> | undefined;
+  /** The number each numbered code block carries as a listing. BO_0303_011 */
+  listingNumbers?: Readonly<Record<string, number>> | undefined;
+  /** What a reference to any block is drawn as, by the block's identity, and
+   * the blocks the `#` list offers the sentence being edited. BO_0300_005
+   * BO_0300_007 */
+  referenceLabels?: Readonly<Record<string, string>> | undefined;
+  references?: readonly ReferenceChoice[] | undefined;
   /** Sets a picture's or an output's caption and its number's ask. BO_0295_010 */
   setFigure$: SetFigure;
   /** The number each cited work carries in this document, and the works
@@ -5070,6 +5089,10 @@ const BlockRow = component$<{
   reviseLocator$: QRL<(at: number, locator: string) => void>;
   /** A code block revised whole. BO_0289_018 */
   reviseCode$: ReviseCode;
+  /** A code block set to continue its numbering, or not. BO_0302_008 */
+  continueCode$: ContinueCode;
+  /** Whether the document numbers the lines of its code. BO_0302_007 */
+  numbersCode: boolean;
   /** A .csv or .tsv dropped on the row while reading. BO_0287_013 */
   importTable$: QRL<(file: File, afterBlockId: string | null) => Promise<void>>;
   /** A grid pasted into the empty block being edited. BO_0287_012 */
@@ -5085,8 +5108,13 @@ const BlockRow = component$<{
     focus$,
     hoverFocus$,
     equationNumbers,
+    codeFirstLines,
+    lines$,
     figureNumbers,
     tableNumbers,
+    listingNumbers,
+    referenceLabels,
+    references,
     setFigure$,
     citationNumbers,
     missingWorks,
@@ -5120,6 +5148,8 @@ const BlockRow = component$<{
     reviseInline$,
     reviseLocator$,
     reviseCode$,
+    continueCode$,
+    numbersCode,
     importTable$,
     pasteGrid$,
   }) => {
@@ -5143,6 +5173,9 @@ const BlockRow = component$<{
     // And what the scale says: the block's standing, and the passages marked
     // in it with whether each still matches its words.
     const { store: standingStore, setStanding$ } = useContext(StandingContext);
+    const inlineAnnotations = useContext(InlineAnnotationsContext, null);
+    // Read here so the row draws again when a provider writes. BO_0301_015
+    const annotations = isText(block) && inlineAnnotations !== null && inlineAnnotations.version >= 0 ? annotationsOn(inlineAnnotations, block.blockId) : [];
     const standing = standingOf(block, standingStore);
     const text = isText(block) ? runsText(block.runs) : "";
     const facts = {
@@ -5357,23 +5390,29 @@ const BlockRow = component$<{
 
         {block.kind === "divider" && <hr data-block-divider />}
 
+        {/* A numbered block's number is handed to its view from the read's
+            map, never read off the block: the row is keyed by revision and its
+            block is set when the row mounts (`_wrapProp` of a plain row entry),
+            while a number is the document's order, stored nowhere, so a block
+            numbered above this one changes its number and no revision. The
+            map is the editor's state, which every read replaces. BO_0295_014 */}
         {/* A picture or a moving picture. It carries no authored text and takes
             no text editor, as a divider does not. BO_0273_011 */}
         {(block.kind === "image" || block.kind === "video") && (
-          <MediaBlock block={block} caption$={block.kind === "image" && mode === "reading" ? setFigure$ : undefined} />
+          <MediaBlock block={block} number={figureNumbers?.[block.blockId]} caption$={block.kind === "image" && mode === "reading" ? setFigure$ : undefined} />
         )}
 
         {/* A table: its cells edited in place while reading, each edit one
             whole-block revise; in command mode it is read. BO_0287_011 */}
         {block.kind === "table" && (
-          <TableBlock block={block} editable={mode === "reading"} revise$={reviseTable$} />
+          <TableBlock block={block} number={tableNumbers?.[block.blockId]} editable={mode === "reading"} revise$={reviseTable$} />
         )}
 
         {/* A display equation. It arrives already typeset from the server,
             carries no authored text and takes no text editor, as a divider
             does not; editing it is the popover. BO_0290_014 */}
         {block.kind === "equation" && (
-          <EquationBlock block={block} revise$={mode === "reading" ? reviseEquation$ : undefined} />
+          <EquationBlock block={block} number={equationNumbers?.[block.blockId]} revise$={mode === "reading" ? reviseEquation$ : undefined} />
         )}
 
         {/* Code: typed in place while reading, each settled edit one
@@ -5382,13 +5421,23 @@ const BlockRow = component$<{
             staged is read. BO_0289_018 */}
         {block.kind === "sourcecode" && (
           <>
-            <CodeBlock block={block} editable={mode === "reading"} revise$={reviseCode$} />
+            <CodeBlock
+              block={block}
+              editable={mode === "reading"}
+              numbered={numbersCode}
+              firstLine={codeFirstLines?.[block.blockId]}
+              number={listingNumbers?.[block.blockId]}
+              caption$={mode === "reading" ? setFigure$ : undefined}
+              lines$={lines$}
+              revise$={reviseCode$}
+              continue$={continueCode$}
+            />
             {mode === "reading" && (
               <BlockDecorations at="run" documentId={documentId} blockId={block.blockId} revisionId={block.revisionId} active={active} />
             )}
           </>
         )}
-        {block.kind === "output" && <OutputBlock block={block} caption$={mode === "reading" ? setFigure$ : undefined} />}
+        {block.kind === "output" && <OutputBlock block={block} number={figureNumbers?.[block.blockId]} caption$={mode === "reading" ? setFigure$ : undefined} />}
 
         {block.kind === "unsupported" && (
           <p
@@ -5412,9 +5461,12 @@ const BlockRow = component$<{
         {isText(block) && !active && mode === "command" && (
           <div class="block-marking" data-block-marking {...markingControl}>
           <Tag class="block-text" data-block-reading data-role={block.role}>
-            {block.runs.map((entry, at) => (
+            {/* Keyed on the piece's words: a piece is a plain object cut at
+                render, which Qwik draws once and never patches, so a piece
+                whose words or annotation changed is drawn anew. BO_0301_015 */}
+            {annotate(block.runs, annotations).map(({ run: entry, annotation }, at) => (
+              <Annotated key={`${at}:${annotation === null ? "" : annotation.id}:${entry.text}`} annotation={annotation} store={inlineAnnotations}>
               <Marked
-                key={at}
                 text={entry.text}
                 marks={entry.marks ?? []}
                 link={entry.link}
@@ -5431,10 +5483,13 @@ const BlockRow = component$<{
                       ? tableNumbers?.[entry.tableRef]
                       : undefined
                 }
+                blockRef={entry.blockRef}
+                refLabel={entry.blockRef === undefined ? undefined : referenceLabels?.[entry.blockRef]}
                 cite={entry.cite}
                 citeNumber={entry.cite === undefined ? undefined : citationNumbers?.[entry.cite.work]}
                 citeMissing={entry.cite === undefined ? undefined : missingWorks?.includes(entry.cite.work) === true}
               />
+              </Annotated>
             ))}
           </Tag>
           </div>
@@ -5520,9 +5575,12 @@ const BlockRow = component$<{
               void activate$(block.blockId, "end");
             }}
           >
-            {block.runs.map((entry, at) => (
+            {/* Keyed on the piece's words: a piece is a plain object cut at
+                render, which Qwik draws once and never patches, so a piece
+                whose words or annotation changed is drawn anew. BO_0301_015 */}
+            {annotate(block.runs, annotations).map(({ run: entry, annotation }, at) => (
+              <Annotated key={`${at}:${annotation === null ? "" : annotation.id}:${entry.text}`} annotation={annotation} store={inlineAnnotations}>
               <Marked
-                key={at}
                 text={entry.text}
                 marks={entry.marks ?? []}
                 link={entry.link}
@@ -5539,10 +5597,13 @@ const BlockRow = component$<{
                       ? tableNumbers?.[entry.tableRef]
                       : undefined
                 }
+                blockRef={entry.blockRef}
+                refLabel={entry.blockRef === undefined ? undefined : referenceLabels?.[entry.blockRef]}
                 cite={entry.cite}
                 citeNumber={entry.cite === undefined ? undefined : citationNumbers?.[entry.cite.work]}
                 citeMissing={entry.cite === undefined ? undefined : missingWorks?.includes(entry.cite.work) === true}
               />
+              </Annotated>
             ))}
           </Tag>
         )}
@@ -5594,6 +5655,7 @@ const BlockRow = component$<{
             equationNumbers={equationNumbers}
             figureNumbers={figureNumbers}
             tableNumbers={tableNumbers}
+            referenceLabels={referenceLabels}
             mathSvg={isText(block) ? block.mathSvg : undefined}
             missingWorks={missingWorks}
             input$={input$}
@@ -5652,6 +5714,7 @@ const BlockRow = component$<{
             editRuns$={editRuns$}
             resume$={$(() => activate$(block.blockId, "end"))}
             files={filesOf(commandFiles, block.blockId)}
+            references={references ?? []}
           />
         )}
       </div>
@@ -5719,6 +5782,8 @@ const ActiveBlockText = component$<{
   /** The citation the reader pressed, given the locator its popover was
    * closed with. BO_0291_034 */
   reviseLocator$: QRL<(at: number, locator: string) => void>;
+  /** What a reference to any block is drawn as on the surface. BO_0300_007 */
+  referenceLabels?: Readonly<Record<string, string>> | undefined;
 }>((props) => {
   const {
     tag,
@@ -5729,6 +5794,7 @@ const ActiveBlockText = component$<{
     equationNumbers,
     figureNumbers,
     tableNumbers,
+    referenceLabels,
     mathSvg,
     input$,
     select$,
@@ -5777,6 +5843,7 @@ const ActiveBlockText = component$<{
       numberOf: (blockId) => equationNumbers?.[blockId],
       figureNumberOf: (blockId) => figureNumbers?.[blockId],
       tableNumberOf: (blockId) => tableNumbers?.[blockId],
+      referenceLabelOf: (blockId) => referenceLabels?.[blockId],
       citationOf: (work, locator) => ({
         ...(citationNumbers?.[work] === undefined ? {} : { number: citationNumbers[work] }),
         ...(missingWorks?.includes(work) === true ? { missing: true } : {}),
@@ -5798,6 +5865,7 @@ const ActiveBlockText = component$<{
         numberOf: (blockId) => equationNumbers?.[blockId],
         figureNumberOf: (blockId) => figureNumbers?.[blockId],
         tableNumberOf: (blockId) => tableNumbers?.[blockId],
+        referenceLabelOf: (blockId) => referenceLabels?.[blockId],
         citationOf: (work, locator) => ({
           ...(citationNumbers?.[work] === undefined ? {} : { number: citationNumbers[work] }),
           ...(missingWorks?.includes(work) === true ? { missing: true } : {}),

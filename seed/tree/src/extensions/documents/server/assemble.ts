@@ -3,10 +3,13 @@ import { readFrontMatter, type FrontMatter } from "../lib/front-matter";
 import type { CitationStyles } from "~/contract";
 import type { Proposer } from "~/extensions/documents/lib/proposals";
 import { byOrder, isOrderKey } from "~/lib/order";
+import { runsText } from "~/lib/runs";
 import type { ReadNode, ReadResult } from "~/server/ccgw/client";
 import { bareId, contentOf, nodeRef, typeOf } from "~/server/ccgw/nodes";
 import { isBlobReference, objectIdOfHash } from "~/server/ccgw/blobs";
 import { isTypeset, typeset } from "~/extensions/documents/lib/mathjax";
+import { lineCount } from "~/extensions/documents/lib/code-lines";
+import { highlightSource } from "~/extensions/documents/lib/highlight";
 import { readColumns, readRows, type TableColumn, type TableRow } from "~/extensions/documents/lib/table";
 import {
   ACCEPTED_AT_PROPERTY,
@@ -179,6 +182,29 @@ export interface CodeBlockView extends BlockCommon {
   readonly kind: "sourcecode";
   readonly source: string;
   readonly language?: string;
+  /** The source in its language's colours, set here rather than where it is
+   * drawn (`BO_0296_014`), as an equation's markup is: it holds only
+   * `<span class="hljs-…">` elements and escaped text, so a reader downloads
+   * a coloured document and no highlighter. Absent when the block names no
+   * language or one the engine does not know, and the view draws the plain
+   * characters. */
+  readonly markup?: string;
+  /** Whether the block's line numbering continues from the nearest code
+   * block above it (`BO_0302_004`): content of the block, present only when
+   * set. */
+  readonly continues?: boolean;
+  /** The number of the block's first line (`BO_0302_005`), resolved by the
+   * read in reading order — one, or the line after the code block above it
+   * when the block continues. Absent on a view built without the pass, and
+   * read as one. */
+  readonly firstLine?: number;
+  /** A listing's caption (`BO_0303_008`); a number needs none. */
+  readonly caption?: string;
+  /** The author's ask for a listing number, and — when they asked — the
+   * number the document's order gives it, counted apart from figures, tables
+   * and equations; derived on every read and stored nowhere. */
+  readonly numbered?: boolean;
+  readonly number?: number;
 }
 
 /** One thing an execution streamed, as the output block holds it: text on a
@@ -246,6 +272,9 @@ export interface DocumentView {
   /** The dataRevision the acceptance was made at, absent for a root that was
    * never accepted: what is accepted is derived from it (`BO_0274_005`). */
   readonly acceptedAt?: number;
+  /** The record slot — `profile` for a profile — so the headline paints the
+   * minted name the document was given (`BO_0298_014`). */
+  readonly record?: string;
   readonly blocks: readonly BlockView[];
   /** The number each numbered equation carries, by block identity, for the
    * whole document: what a reference run is drawn as. Derived on every read
@@ -257,6 +286,18 @@ export interface DocumentView {
   /** The number of every numbered figure and table, by identity. BO_0295_008 */
   readonly figureNumbers?: Readonly<Record<string, number>>;
   readonly tableNumbers?: Readonly<Record<string, number>>;
+  /** The number of every numbered code block, a listing, by identity, in a
+   * sequence of its own. BO_0303_008 */
+  readonly listingNumbers?: Readonly<Record<string, number>>;
+  /** What a reference to each referred-to block is drawn as (`BO_0300_010`),
+   * by the block's identity: its kind and number, a heading's words, or
+   * *Remark N* for a paragraph another sentence refers to; a block outside
+   * the reading order has no entry and its reference draws as gone. Derived
+   * on every read and stored nowhere. */
+  readonly referenceLabels?: Readonly<Record<string, string>>;
+  /** The number each paragraph referred to carries as a remark, in reading
+   * order among themselves, for the manuscript to set them apart by. */
+  readonly remarkNumbers?: Readonly<Record<string, number>>;
   /** The number each cited work carries in this document, by the work's
    * identity, in first-citation order over the reading order: what a
    * citation run is drawn as. Derived on every read and stored nowhere
@@ -269,6 +310,14 @@ export interface DocumentView {
   /** The document's own citation style, by the style's id, when it chose
    * one; absent, it follows the instance's default. BO_0291_037 */
   readonly citationStyle?: string;
+  /** Whether a settled edit of a code block, and an accepted one, is
+   * pretty-printed: the document's switch, on unless it was switched off
+   * (`BO_0296_013`). Present only as stored, so absent reads as on. */
+  readonly formatCode?: boolean;
+  /** Whether each line of a code block is numbered: the document's switch,
+   * on unless it was switched off (`BO_0302_003`). Present only as stored,
+   * so absent reads as on. */
+  readonly lineNumbers?: boolean;
   /** The style its citations are drawn in and the styles it may choose, as
    * the citation resolver answers them: present when the document cites
    * anything and a resolver answers. BO_0291_037 */
@@ -430,11 +479,16 @@ export function toBlock(node: ReadNode, containmentId: string): BlockView {
 
   if (semanticType === "sourcecode" && typeof content["source"] === "string") {
     const language = content["language"];
+    const named = typeof language === "string" && language !== "" ? language : undefined;
+    const markup = named === undefined ? null : highlightSource(content["source"], named);
     return {
       ...common,
       kind: "sourcecode",
       source: content["source"],
-      ...(typeof language === "string" && language !== "" ? { language } : {}),
+      ...(named === undefined ? {} : { language: named }),
+      ...(markup === null ? {} : { markup }),
+      ...(content["continues"] === true ? { continues: true } : {}),
+      ...captionedOf(content),
     };
   }
 
@@ -641,11 +695,15 @@ export function numberFiguresAndTables(blocks: readonly BlockView[]): {
   readonly blocks: BlockView[];
   readonly figures: Readonly<Record<string, number>>;
   readonly tables: Readonly<Record<string, number>>;
+  /** The listings: the code blocks that ask, a sequence of their own. BO_0303_008 */
+  readonly listings: Readonly<Record<string, number>>;
 } {
   const figures: Record<string, number> = {};
   const tables: Record<string, number> = {};
+  const listings: Record<string, number> = {};
   let nextFigure = 1;
   let nextTable = 1;
+  let nextListing = 1;
   const numbered = blocks.map((block): BlockView => {
     if (block.kind === "table") {
       if (block.numbered !== true) return block;
@@ -657,9 +715,126 @@ export function numberFiguresAndTables(blocks: readonly BlockView[]): {
       figures[block.blockId] = nextFigure;
       return { ...block, number: nextFigure++ };
     }
+    if (block.kind === "sourcecode") {
+      if (block.numbered !== true) return block;
+      listings[block.blockId] = nextListing;
+      return { ...block, number: nextListing++ };
+    }
     return block;
   });
-  return { blocks: numbered, figures, tables };
+  return { blocks: numbered, figures, tables, listings };
+}
+
+/** The roles a heading reference is drawn by its words for, and the roles a
+ * referred-to block becomes a remark for (`BO_0300_Q1`). */
+const HEADING_ROLES: readonly string[] = ["h1", "h2", "h3"];
+const PROSE_ROLES: readonly string[] = ["paragraph", "quote"];
+
+/** Whether a block is in the order a reader reads: not discarded and not a
+ * prompt. A retired block never reaches this view. */
+const inReadingOrder = (block: BlockView): boolean => !("standing" in block) || (block.standing !== "discarded" && block.standing !== "prompt");
+
+/**
+ * What every reference is drawn as (`BO_0300_010`), after the numbering: for
+ * each block a `blockRef` of the reading order names — and each the three
+ * older keys name — its label: `Figure 3`, `Table 1` or `(2)` when it is a
+ * numbered figure, table or equation; a heading's words; `Remark N` for a
+ * paragraph or a quote, the referred-to ones numbered in reading order among
+ * themselves, as the manuscript sets them apart (user decision, 2026-09-25).
+ * A numbered code block is `Listing N` (`BO_0303_008`). A block outside the
+ * reading order, an unnumbered float, equation or code block, an abstract
+ * and any other kind take no label, so a reference to one draws as gone,
+ * never as a stale label.
+ */
+export function labelReferences(
+  blocks: readonly BlockView[],
+  numbers: {
+    readonly equations: Readonly<Record<string, number>>;
+    readonly figures: Readonly<Record<string, number>>;
+    readonly tables: Readonly<Record<string, number>>;
+    readonly listings?: Readonly<Record<string, number>>;
+  },
+): { readonly labels: Readonly<Record<string, string>>; readonly remarks: Readonly<Record<string, number>> } {
+  const reading = blocks.filter(inReadingOrder);
+  const targets = new Set<string>();
+  for (const block of reading) {
+    if (block.kind !== "text") continue;
+    for (const run of block.runs) {
+      for (const target of [run.blockRef, run.figureRef, run.tableRef, run.equationRef]) if (target !== undefined) targets.add(target);
+    }
+  }
+  const remarks: Record<string, number> = {};
+  let nextRemark = 1;
+  for (const block of reading) {
+    if (block.kind === "text" && PROSE_ROLES.includes(block.role) && targets.has(block.blockId)) remarks[block.blockId] = nextRemark++;
+  }
+  const labels: Record<string, string> = {};
+  for (const target of targets) {
+    const block = reading.find((candidate) => candidate.blockId === target);
+    if (block === undefined) continue;
+    let label: string | undefined;
+    switch (block.kind) {
+      case "text":
+        if (HEADING_ROLES.includes(block.role)) label = runsText(block.runs).trim() || "Section";
+        else if (remarks[block.blockId] !== undefined) label = `Remark ${remarks[block.blockId]}`;
+        break;
+      case "equation":
+        label = numbers.equations[block.blockId] === undefined ? undefined : `(${numbers.equations[block.blockId]})`;
+        break;
+      case "image":
+      case "output":
+        label = numbers.figures[block.blockId] === undefined ? undefined : `Figure ${numbers.figures[block.blockId]}`;
+        break;
+      case "table":
+        label = numbers.tables[block.blockId] === undefined ? undefined : `Table ${numbers.tables[block.blockId]}`;
+        break;
+      case "sourcecode":
+        label = numbers.listings?.[block.blockId] === undefined ? undefined : `Listing ${numbers.listings[block.blockId]}`;
+        break;
+      default:
+        break;
+    }
+    if (label !== undefined) labels[target] = label;
+  }
+  return { labels, remarks };
+}
+
+/**
+ * Where each code block's numbering starts (`BO_0302_005`), resolved in
+ * reading order and stored nowhere: a block that does not continue starts at
+ * one; a block that continues starts after the last line of the nearest code
+ * block above it, whatever stands between them and whatever its language; a
+ * chain of continuing blocks counts on; a continuing block with no code block
+ * above it starts at one. So a block removed or moved re-numbers the ones
+ * below on the next read, and nothing but the flag is ever written.
+ */
+export function numberCodeLines(blocks: readonly BlockView[]): BlockView[] {
+  let nextLine = 1;
+  return blocks.map((block): BlockView => {
+    if (block.kind !== "sourcecode") return block;
+    const firstLine = block.continues === true ? nextLine : 1;
+    nextLine = firstLine + lineCount(block.source);
+    return { ...block, firstLine };
+  });
+}
+
+/**
+ * Where a code block not yet in the reading would start (`BO_0302_005`): a
+ * proposed block takes its number from the reading it would join, the code
+ * block above its place — the nearest established code block whose order
+ * sorts before the proposed block's — and starts at one when it does not
+ * continue or nothing stands above it.
+ */
+export function placeCodeLines(block: BlockView, established: readonly BlockView[]): BlockView {
+  if (block.kind !== "sourcecode") return block;
+  if (block.continues !== true) return { ...block, firstLine: 1 };
+  // The established blocks in reading order, the proposed one among them
+  // by its order key; what stands above it is what sorts before it.
+  const placed = byOrder([...established, block]);
+  const at = placed.indexOf(block);
+  const above = placed.slice(0, at).filter((other): other is CodeBlockView => other.kind === "sourcecode");
+  const nearest = above.length === 0 ? undefined : above[above.length - 1];
+  return { ...block, firstLine: nearest === undefined ? 1 : (nearest.firstLine ?? 1) + lineCount(nearest.source) };
 }
 
 /**
@@ -703,6 +878,14 @@ export function numberCitations(
  * that does not is left out of the read rather than drawn wrong. BO_0293_012 */
 /** The document property naming its citation style. BO_0291_037 */
 export const CITATION_STYLE_PROPERTY = "citationStyle";
+/** The document property holding its formatting switch. BO_0296_013 */
+export const FORMAT_CODE_PROPERTY = "formatCode";
+/** Whether the document formats code: on unless the switch is stored off. */
+export const formatsCode = (document: { readonly formatCode?: boolean }): boolean => document.formatCode !== false;
+/** The document property holding its line-number switch. BO_0302_003 */
+export const LINE_NUMBERS_PROPERTY = "lineNumbers";
+/** Whether the document numbers the lines of its code: on unless the switch is stored off. */
+export const showsLineNumbers = (document: { readonly lineNumbers?: boolean }): boolean => document.lineNumbers !== false;
 
 const frontMatterOf = (content: Record<string, unknown>): { frontMatter?: FrontMatter } => {
   const read = readFrontMatter(content);
@@ -725,7 +908,9 @@ export function assembleDocument(
   const acceptedAt = content[ACCEPTED_AT_PROPERTY];
   const equations = numberEquations(blocksOf(graph, documentId, CONTAINS));
   const figures = numberFiguresAndTables(equations.blocks);
-  const citations = numberCitations(figures.blocks, options.knownWorks);
+  const code = numberCodeLines(figures.blocks);
+  const citations = numberCitations(code, options.knownWorks);
+  const references = labelReferences(code, { equations: equations.numbers, figures: figures.figures, tables: figures.tables, listings: figures.listings });
   return {
     documentId: bareId(node.id),
     revisionId: node.revision.id,
@@ -733,9 +918,12 @@ export function assembleDocument(
     ...(isPhase(phase) && phase !== "proposed" ? { phase } : {}),
     ...(typeof supersededBy === "string" && supersededBy !== "" ? { supersededBy } : {}),
     ...(typeof acceptedAt === "number" ? { acceptedAt } : {}),
+    ...(typeof content["record"] === "string" && content["record"] !== "" ? { record: content["record"] as string } : {}),
     ...frontMatterOf(content),
     ...(typeof content[CITATION_STYLE_PROPERTY] === "string" && content[CITATION_STYLE_PROPERTY] !== "" ? { citationStyle: content[CITATION_STYLE_PROPERTY] as string } : {}),
-    blocks: figures.blocks,
+    ...(typeof content[FORMAT_CODE_PROPERTY] === "boolean" ? { formatCode: content[FORMAT_CODE_PROPERTY] as boolean } : {}),
+    ...(typeof content[LINE_NUMBERS_PROPERTY] === "boolean" ? { lineNumbers: content[LINE_NUMBERS_PROPERTY] as boolean } : {}),
+    blocks: code,
     // The numbers a reference run is drawn as, for the whole document: a
     // reference names an equation of its own document and nothing else.
     // BO_0290_011
@@ -743,6 +931,12 @@ export function assembleDocument(
     // The numbers a figure or a table reference is drawn as. BO_0295_008
     ...(Object.keys(figures.figures).length > 0 ? { figureNumbers: figures.figures } : {}),
     ...(Object.keys(figures.tables).length > 0 ? { tableNumbers: figures.tables } : {}),
+    // The numbers a listing reference is drawn as. BO_0303_008
+    ...(Object.keys(figures.listings).length > 0 ? { listingNumbers: figures.listings } : {}),
+    // What a reference to any block is drawn as, and which paragraphs are
+    // remarks for being referred to. BO_0300_010
+    ...(Object.keys(references.labels).length > 0 ? { referenceLabels: references.labels } : {}),
+    ...(Object.keys(references.remarks).length > 0 ? { remarkNumbers: references.remarks } : {}),
     // The numbers a citation run is drawn as, and the works it cannot be:
     // resolved here so every view answers the same number. BO_0291_013
     ...(Object.keys(citations.numbers).length > 0 ? { citationNumbers: citations.numbers } : {}),
