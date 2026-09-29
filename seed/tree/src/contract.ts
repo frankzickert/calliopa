@@ -95,6 +95,8 @@ export interface LibrarySection {
   readonly title: string;
   /** What the body says while the list is empty. */
   readonly empty: string;
+  /** Give this section its own library icon; otherwise it uses the extension icon. */
+  readonly icon?: LibraryIcon;
   /** The bare kind the section's rows open, so the shell re-reads the section when a tab of that kind changes. */
   readonly kind?: string;
   /** The qualified kind of another extension the section's rows open — `documents:document`
@@ -138,10 +140,10 @@ export interface SettingsSection {
 }
 
 /**
- * The one icon an extension's library sections stand under in the library's
- * icon column: its title, named on the button and shown as its tooltip, and
- * a Phosphor name from the shell's icon table. Required of an extension that
- * contributes sections; the registry refuses one without it. CA_0056_008
+ * An icon library sections stand under in the library's icon column: its
+ * title, named on the button and shown as its tooltip, and a Phosphor name
+ * from the shell's icon table. An extension provides a default icon and a
+ * section may override it to get a standalone entry. CA_0056_008 CA_0070_004
  */
 export interface LibraryIcon {
   readonly title: string;
@@ -150,7 +152,7 @@ export interface LibraryIcon {
 
 export interface ClientContributions {
   readonly sections?: readonly LibrarySection[];
-  /** The icon the sections stand under. CA_0056_008 */
+  /** The default icon for sections without their own icon. CA_0056_008 */
   readonly icon?: LibraryIcon;
   /** Sections of the settings tab. BO_0264_016 */
   readonly settingsSections?: readonly SettingsSection[];

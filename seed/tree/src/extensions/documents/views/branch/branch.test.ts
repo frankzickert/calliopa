@@ -197,7 +197,8 @@ describe("the proposal toggle", () => {
     // The two acts that decide what the document is lead the bar, the
     // toggle first and the decision extension's *Establish…* merged in after
     // it through the decoration bar. DO_0010_001 DO_0010_013 BO_0274_004
-    expect(actions("work")).toEqual(["work-in-proposal", "establish"]);
+    // The working mode's two toggles lead the group. BO_0306_010
+    expect(actions("work")).toEqual(["working-mode-field", "working-mode-work", "work-in-proposal", "establish"]);
     // *Take back* leads the trailing group: it is drawn whenever the bar is,
     // since a standing is most often set on a block that is not active.
     // CA_0058_011

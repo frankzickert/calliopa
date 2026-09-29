@@ -2,6 +2,18 @@ import { describe, expect, it } from "vitest";
 
 import { parseDocumentCommand } from "./api";
 
+describe("turning text and image blocks into one another", () => {
+  const target = { blockId: "blk-a", baseRevisionId: "rev-a" };
+  it("reads the conversion commands with the block revision and text role", () => {
+    expect(parseDocumentCommand({ command: "turnIntoImage", ...target })).toEqual({ command: { command: "turnIntoImage", ...target } });
+    expect(parseDocumentCommand({ command: "turnImageIntoText", ...target, role: "h2" })).toEqual({ command: { command: "turnImageIntoText", ...target, role: "h2" } });
+  });
+  it("refuses a missing base revision and a role outside the text vocabulary", () => {
+    expect(parseDocumentCommand({ command: "turnIntoImage", blockId: "blk-a" })).toHaveProperty("failure");
+    expect(parseDocumentCommand({ command: "turnImageIntoText", ...target, role: "banner" })).toHaveProperty("failure");
+  });
+});
+
 /** The standing command as the documents API parses it. BO_0227_010 */
 describe("a setDisposition command", () => {
   const base = {
@@ -75,6 +87,26 @@ describe("a split command", () => {
         failure: "A split's tail is named by a block identity.",
       });
     }
+  });
+});
+
+describe("merging admonition children", () => {
+  const command = {
+    command: "mergeAdmonitionChild",
+    parentBlockId: "callout",
+    intoBlockId: "child-a",
+    intoBaseRevisionId: "rev-a",
+    blockId: "child-b",
+    baseRevisionId: "rev-b",
+  };
+
+  it("reads the container, adjacent child identities, and both base revisions", () => {
+    expect(parseDocumentCommand(command)).toEqual({ command });
+  });
+
+  it("refuses a missing child identity or base revision", () => {
+    expect("failure" in parseDocumentCommand({ ...command, blockId: undefined })).toBe(true);
+    expect("failure" in parseDocumentCommand({ ...command, intoBaseRevisionId: undefined })).toBe(true);
   });
 });
 

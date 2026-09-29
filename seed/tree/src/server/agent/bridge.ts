@@ -174,6 +174,9 @@ export function startBridgeRun(input: {
    * points at. The kernel has taken the field since `BO_0142_006` and refuses
    * an intention whose extension is switched off. BO_0258_006 */
   readonly intention?: string;
+  /** The working mode the person chose for the document, which the kernel
+   * records on the run and names in its instructions. BO_0306_017 */
+  readonly mode?: { readonly field: string; readonly work: string };
 }): Promise<BridgeReply<BridgeRun>> {
   const target = input.target ?? null;
   return ask(
@@ -184,6 +187,7 @@ export function startBridgeRun(input: {
       body: JSON.stringify({
         ...(input.goal === "" ? {} : { goal: input.goal }),
         ...(input.intention === undefined || input.intention === "" ? {} : { intention: input.intention }),
+        ...(input.mode === undefined ? {} : { mode: input.mode }),
         context: input.context ?? "",
         agent: input.agent ?? "",
         ...(input.speed === undefined ? {} : { speed: input.speed }),

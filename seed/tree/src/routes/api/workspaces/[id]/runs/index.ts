@@ -1,6 +1,6 @@
 import type { RequestHandler } from "@builder.io/qwik-city";
 import { api } from "~/server/api";
-import { readAttachments, readCommandTarget, readGestureTarget, readRunShape } from "~/lib/command-target";
+import { readAttachments, readCommandTarget, readGestureTarget, readMode, readRunShape } from "~/lib/command-target";
 import { writeAttachments } from "~/server/agent/attachments";
 import { conductRun, followRun } from "~/server/agent/conductor";
 import { senderExtension, sendToSender } from "~/server/registry";
@@ -40,6 +40,7 @@ export const onPost: RequestHandler = (event) =>
       attachments?: unknown;
       source?: unknown;
       intention?: unknown;
+      mode?: unknown;
     };
     const goal = typeof body.goal === "string" ? body.goal.trim() : "";
     // The shape decides which target is read: a gesture names the document it
@@ -103,6 +104,7 @@ export const onPost: RequestHandler = (event) =>
       return;
     }
 
+    const mode = readMode(body.mode);
     const started = await conductRun({
       workspaceId: event.params.id ?? "",
       goal,
@@ -117,6 +119,9 @@ export const onPost: RequestHandler = (event) =>
       // name, which is the check a gesture needs when refinement is off.
       // BO_0264_006 BO_0258_006
       ...(intention === "" ? {} : { intention }),
+      // The working mode in force on the document the run came from, which
+      // the kernel refuses by name when it is not one. BO_0306_017
+      ...(mode === undefined ? {} : { mode }),
     });
     if (!started.ok) {
       event.json(started.reason === "conflict" ? 409 : started.reason === "refused" ? 400 : started.reason === "forbidden" ? 403 : 502, {

@@ -41,6 +41,7 @@ const Host = component$<{ workspaceId: string }>(({ workspaceId }) => {
     setSelection$: noop,
     setPointing$: noop,
     setBranch$: noop,
+    setMode$: noop,
     setTitle$: noop,
     setSaveState$: noop,
     targetGone$: noop,

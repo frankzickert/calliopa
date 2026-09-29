@@ -1,5 +1,6 @@
 import { AGENT_FACES } from "~/lib/agent-menu";
 import { replaceRange, runsLength, type Run } from "~/lib/runs";
+import { readWorkingMode, type WorkingMode } from "./working-mode";
 
 /**
  * Who proposed a change, and what the reader sees of it: a face on the
@@ -22,12 +23,17 @@ export type Proposer =
       readonly agent: string | null;
       /** What the run recorded as having reasoned, e.g. `claude-code (claude-sonnet-5)`. */
       readonly executedBy: string;
+      /** The working mode the run served and where what it staged strayed
+       * from it, as the kernel judged at its end; a run without a mode has
+       * neither. BO_0306_014 */
+      readonly mode?: WorkingMode;
+      readonly drift?: readonly string[];
     }
   | { readonly kind: "person"; readonly name: string }
   /** The kernel's own run (`trigger: "system"` on its `agent.run` node):
    * attributed to the system, with the agent it reasoned on named beside,
    * so a refinement's proposal is never mistaken for a command's. BO_0245 */
-  | { readonly kind: "system"; readonly agent: string | null; readonly executedBy: string };
+  | { readonly kind: "system"; readonly agent: string | null; readonly executedBy: string; readonly mode?: WorkingMode; readonly drift?: readonly string[] };
 
 const AGENT_ACCOUNT = /^agent:/;
 
@@ -50,14 +56,34 @@ export function proposerOf(
     const executedBy = typeof run["executedBy"] === "string" ? run["executedBy"] : "";
     let agent = typeof run["agent"] === "string" && run["agent"] !== "" ? run["agent"] : null;
     if (agent === "claude-code" && executedBy.startsWith("provider")) agent = "provider";
-    if (run["trigger"] === "system") return { kind: "system", agent, executedBy };
-    return { kind: "agent", agent, executedBy };
+    const served = servedMode(run);
+    if (run["trigger"] === "system") return { kind: "system", agent, executedBy, ...served };
+    return { kind: "agent", agent, executedBy, ...served };
   }
   const people = stagedBy.filter((name) => !AGENT_ACCOUNT.test(name));
   if (people.length > 0 && people.length === stagedBy.length) {
     return { kind: "person", name: people.join(", ") };
   }
   return { kind: "agent", agent: null, executedBy: "" };
+}
+
+/** The mode an `agent.run` says its run served, and its drift, when it names
+ * one. BO_0306_014 */
+function servedMode(run: Readonly<Record<string, unknown>>): { mode?: WorkingMode; drift?: readonly string[] } {
+  const mode = readWorkingMode(run["mode"]);
+  if (mode === null) return {};
+  const drift = Array.isArray(run["drift"]) ? run["drift"].filter((reason): reason is string => typeof reason === "string" && reason !== "") : [];
+  return { mode, drift };
+}
+
+/** The mode a proposer's run served, when it served one. */
+export const modeOf = (proposer: Proposer): WorkingMode | undefined => (proposer.kind === "person" ? undefined : proposer.mode);
+
+/** Where the run strayed from its mode, in the chip's one line, or null when it
+ * fit or served none. BO_0306_014 */
+export function driftLine(proposer: Proposer): string | null {
+  if (proposer.kind === "person" || proposer.drift === undefined || proposer.drift.length === 0) return null;
+  return `Strayed from the mode: ${proposer.drift.join("; ")}`;
 }
 
 /** The colour a proposer's block takes: one theme token pair per proposer. */

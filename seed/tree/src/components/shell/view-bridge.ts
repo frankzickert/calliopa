@@ -7,6 +7,7 @@ import type {
   CommandSource,
   Pointing,
   RevealTarget,
+  WorkingMode,
 } from "~/lib/command-target";
 import type { SelectableRuntime } from "~/lib/connections";
 import type { Speed } from "~/lib/agent-menu";
@@ -571,6 +572,9 @@ export interface ViewBridge {
   /** Records the branch a document's tab works in, or none, so the composer's
    * strip says the run proposes into it and the run names it. BO_0250_010 */
   readonly setBranch$: QRL<(itemId: string, branch: string | null) => void>;
+  /** Records the working mode in force on a document, or none, so every run
+   * the document starts carries it. BO_0306_017 */
+  readonly setMode$: QRL<(itemId: string, mode: WorkingMode | null) => void>;
   /** The last run aimed at a target that ended. BO_0226_007 */
   readonly proposed: ViewProposed;
   /** The last chip the reader pressed in the composer, asking the view to

@@ -4,6 +4,22 @@ import {
   type AttachmentDescriptor,
 } from "./command-target";
 
+/** A pattern can keep an existing URL or refer to a content-addressed image. */
+export type PatternImage = string | {
+  readonly _kind: "blob";
+  readonly hash: string;
+  readonly mediaType: string;
+  readonly size: number;
+  readonly filename?: string;
+};
+
+/** The shell-origin path for a Garage blob, or an existing URL value. */
+export function patternImageSource(image: PatternImage | null | undefined): string | undefined {
+  if (typeof image === "string") return image || undefined;
+  if (image?._kind !== "blob" || !/^sha256:[0-9a-f]{64}$/u.test(image.hash)) return undefined;
+  return `/api/blobs/${encodeURIComponent(image.hash.slice("sha256:".length))}`;
+}
+
 /**
  * The files the command bar holds for the next command (`BO_0229_010`): each
  * uploaded the moment it is chosen and shown as a chip until *Run* sends it or

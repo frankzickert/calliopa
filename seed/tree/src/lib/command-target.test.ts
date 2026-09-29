@@ -12,6 +12,7 @@ import {
   type PointedReference,
   readRunShape,
   readGestureTarget,
+  readMode,
   type Pointing,
   sent,
 } from "./command-target";
@@ -496,5 +497,18 @@ describe("references across documents (BO_0304_013)", () => {
     expect(revealTarget({ kind: "passage", number: 3, blockId: "blk-y", quote: "Rain", words: "Rain", stale: false, document: "doc-2" })).toEqual({ kind: "passage", blockId: "blk-y", number: 3, document: "doc-2" });
     expect(revealTarget({ kind: "document", number: 4, document: "doc-3", words: "Third", stale: false, documentTitle: "Third" })).toEqual({ kind: "document", document: "doc-3", documentTitle: "Third" });
     expect(revealTarget({ kind: "block", number: 1, blockId: "blk-a", words: "", stale: false })).toEqual({ kind: "block", blockId: "blk-a" });
+  });
+});
+
+describe("the working mode a run body carries", () => {
+  it("Given two words, Then they are the mode; the kernel judges whether they are poles (BO_0306_017)", () => {
+    expect(readMode({ field: "explore", work: "create" })).toEqual({ field: "explore", work: "create" });
+    expect(readMode({ field: "wander", work: "create" })).toEqual({ field: "wander", work: "create" });
+  });
+
+  it("Given anything else, Then there is no mode", () => {
+    for (const value of [undefined, null, "explore", ["explore", "create"], { field: "explore" }, { field: 1, work: "create" }]) {
+      expect(readMode(value)).toBeUndefined();
+    }
   });
 });

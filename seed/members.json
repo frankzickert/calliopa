@@ -141,9 +141,13 @@
       "content": {
         "conventions": {
           "atomicProposal": "One extension change is one proposal group: every staged revision and relation belongs to the same group and is accepted or rejected as a unit. Never trickle per-file proposals; a half-applied extension state must never be materializable.",
+          "consolidate": "Working mode consolidate: narrow the field. Name what now seems durable, merge duplicates by refining the proposal that stands (refines) rather than adding beside it, withdraw weaker or surplus framings with a successor (withdraw), state the consequences of what is kept, and prepare the decision the person takes. Close at least as much as you open: a consolidating run that adds more new blocks than it withdraws or refines is judged as having strayed. (BO_0306)",
+          "create": "Working mode create: write. Stage in small reviewable units — one proposal per coherent change, each answerable on its own — and make the assumptions each rests on visible in its note or its words, so the person can accept, reject or refine one without taking the whole drift of the run. (BO_0306)",
+          "explore": "Working mode explore (the run's instructions name it when the person chose it): widen the field. Surface alternatives rather than one answer, preserve ambiguity the material has not settled, ask the sharper question, and keep each candidate cheap to discard — say in its note that it is a candidate. Present nothing as settled: no phase transition, no status change, and settled words are left standing rather than rewritten. Adding several proposals is proportionate here. (BO_0306)",
           "humanWritesCostAConfirmation": "Every human-class write from the shell parks at the kernel bridge and waits for a confirmation on the kernel's own origin — no human mutation travels from the app origin to CCGW. Budget one cross-origin confirmation per write. That is proportionate for occasional truth like creating a channel and disproportionate for continuous editing, so a surface that writes on every keystroke needs a different shape than one that writes on a button.",
           "oneOpenProposalPerBlock": "A block carries at most one open proposal: every block type declares singleOpenCandidate, so a candidate of a block another open group already holds a candidate of is refused by the core — there is no second candidate to stage beside the first. Work bearing on such a block builds on the candidate that stands, staged into that group as a refinement (the document tools' refines; conventions.openProposals of ui.shell.documents), rather than opening a competing one, so the person answers once. Nothing here answers a proposal: accepting and rejecting stay the person's (proofsAreNotProposals). (BO_0271)",
           "proofsAreNotProposals": "Never stage a proposal whose intended outcome is rejection. A proof-only group is indistinguishable from a real one at the review surface — the rationale is rendered as ordinary text — so after a run of proposals that all deserved acceptance, one that did not will be accepted by the same motion. Construct demonstrations so the refusal is the whole proof and stop there: a refused mutation stages nothing and opens no group. Acceptance is the one non-delegable human action in the architecture and its entire value is the attention behind it, so anything that produces frequent near-identical almost-always-correct proposals is spending that attention down.",
+          "understand": "Working mode understand: read more than you write. Trace definitions and dependencies, tell established material from open proposals, and answer with a map of what follows from what — relations with their reasons, and short explanatory blocks placed where the command asks. Leave the document's own blocks alone unless the command referenced them: rewriting, removing or moving an unreferenced established block is judged as having strayed. (BO_0306)",
           "valuesTravelAsParameters": "How a statement says values, which the grammar will not let you guess:\n- Every value beyond a scalar travels beside the statement in the tool call's parameters field, which is one JSON object written as text — for example parameters: \"{\\\"bid\\\": \\\"art-x.b1\\\", \\\"runs\\\": [{\\\"text\\\": \\\"...\\\"}]}\". The statement writes $name where a value belongs; lists and objects have no literal form inside the statement itself, and runs: [{text: ...}] inline is a parse error every time.\n- Every $name in the statement must have a key in that JSON object. An empty parameters value beside a parameterized statement is always wrong, and resending a refused statement without filling it changes nothing.\n- A script is one or more statements separated by semicolons; CREATE ... RELATE ... in one breath is a parse error at RELATE. Aliases scope per statement but parameters are request-global, so one parameters object serves the whole script: the canonical block write is CREATE (n:Text {id: $bid, runs: $runs, order: $order}); RELATE childRef -[r:CONTAINS]-> parentRef, with bid, runs, order, childRef and parentRef all keys of the one JSON object.\n- RELATE endpoint refs resolve from parameters — <ref>NodeId first, then <ref> — and those values carry the node: prefix (childRef: \"node:art-x.b1\"), even though the id property inside CREATE content is bare. The ref names an existing node; the id property mints one.\n- When syntax is uncertain, calliopa_explain compiles a statement without executing it. Explain and correct rather than retrying a refusal unchanged — the diagnostics name what they want.",
           "whereRequirementsLive": "An extension's requirements and open work live in its own docs/ members (docs/system/**/*.md under the live-line protocol), read through calliopa_query like its code. An extension's changes are its own docs/changes/ members (BO_0254): docs/changes/<PREFIX>_NNNN_TYPE_<short-name>.md in its subtree, finished ones under docs/changes/completed/, each carrying its status in a Status: line from idea, draft, ready, wip, completed, rejected. They are written and revised the way every other docs member is — from a checkout, in the proposal that carries the code — and rendered read-only in the shell's Extensions section. A run working from the composer holds no checkout and so writes none. A run that changes an extension's behaviour also updates its docs in the same proposal group and keeps its change document's Status: line honest — wip when it claims ready work, completed when the work is done; only a person establishes draft or ready, and acceptance is what establishes any status. (BO_0201, BO_0254)",
           "workVocabulary": "Documents carry a decision vocabulary (BO_0244): a text block may have a kind, and reason-bearing relations connect blocks. Two rules, whichever tool writes them: a relation is proposed with a reason naming the condition that connects its ends — never that they seem related — and with origin inferred or derived, since a run never declares; and each end names a block by blockId, of this document or another, never a retired or discarded one, and never the same block twice. A relation anchored a claim until BO_0288; claim and asserts are calliopa-refine's vocabulary now and no kernel tool reads or writes them. Propose these through propose_document_changes (items kind, relate, reason, derive), never by statement, so review sees them as the editor would have written them.",
@@ -505,6 +509,65 @@
     },
     {
       "extension": "documents",
+      "nodeId": "node:admonition",
+      "type": "ext.blocktype",
+      "content": {
+        "block": true,
+        "id": "admonition",
+        "name": "admonition",
+        "optionalProperties": [
+          "runs"
+        ],
+        "permittedChildTypes": [
+          "text"
+        ],
+        "properties": {
+          "id": "the block identity, a UUID the shell mints",
+          "order": "the block order among document siblings",
+          "patternId": "the reusable admonition pattern identity",
+          "runs": "the editable formatted content of the callout"
+        },
+        "requiredProperties": [
+          "id",
+          "order",
+          "patternId"
+        ],
+        "runProperties": [
+          "runs"
+        ],
+        "semantics": "A callout block referencing a reusable admonition pattern. Its presentation follows that pattern, so editing a pattern updates every callout that references it. Ordered child text blocks are contained through CONTAINS."
+      }
+    },
+    {
+      "extension": "documents",
+      "nodeId": "node:admonition_pattern",
+      "type": "ext.blocktype",
+      "content": {
+        "block": false,
+        "id": "admonition_pattern",
+        "name": "admonition_pattern",
+        "optionalProperties": [
+          "image",
+          "footline"
+        ],
+        "permittedChildTypes": [],
+        "properties": {
+          "color": "the six-digit hex accent and body tint color",
+          "footline": "optional bottom-right callout text",
+          "id": "the reusable pattern identity",
+          "image": "optional image URL shown overlapping the callout edge",
+          "name": "the pattern name shown in the manager"
+        },
+        "requiredProperties": [
+          "id",
+          "name",
+          "color"
+        ],
+        "semantics": "Reusable callout presentation data referenced by admonition blocks across documents."
+      }
+    },
+    {
+      "extension": "documents",
       "nodeId": "node:divider",
       "type": "ext.blocktype",
       "content": {
@@ -558,7 +621,8 @@
           "table",
           "equation",
           "sourcecode",
-          "output"
+          "output",
+          "admonition"
         ],
         "permittedValues": {
           "citationStyle": [
@@ -638,13 +702,15 @@
           "height",
           "source",
           "caption",
-          "numbered"
+          "numbered",
+          "captionRuns"
         ],
         "permittedChildTypes": [],
         "permittedValues": {},
         "properties": {
           "alt": "what the picture shows, in words: the block's accessible name, and what the editor draws while there are no bytes yet",
           "caption": "words under it, optional; a number needs none (BO_0295)",
+          "captionRuns": "link-capable caption text as runs, with formatting marks removed when text turns into a picture",
           "height": "the drawn height in pixels, advisory, written when the bytes are uploaded. The blob reference carries no dimensions, so a block that wants its layout reserved before the bytes arrive stores them itself",
           "id": "the block's identity, a UUID the shell mints; the node id is node:<id>",
           "numbered": "the author's ask for a number: true asks, absent asks none. The number itself is the document's order — figures (pictures and numbered outputs) and tables counted apart, in reading order — derived on every read and never stored (BO_0295)",
@@ -657,8 +723,10 @@
           "id",
           "order"
         ],
-        "runProperties": [],
-        "semantics": "A picture. A leaf block, containable through CONTAINS and ordered by its order key like every block. It carries no authored text and takes no text editor. The bytes live in Garage behind CCGW and are reached only through the blob reference, which is the sole identity and integrity carrier; mediaType, size, width, height and alt are advisory. The block type belongs to this extension rather than to whatever makes the bytes, so a picture stays a picture when a generator is switched off (BO_0273, user decision 2026-09-21)."
+        "runProperties": [
+          "captionRuns"
+        ],
+        "semantics": "A picture. A leaf block, containable through CONTAINS and ordered by its order key like every block. It carries no authored body text; optional captionRuns carry unformatted caption text and links, while caption remains the legacy plain-text figure caption. The bytes live in Garage behind CCGW and are reached only through the blob reference, which is the sole identity and integrity carrier; mediaType, size, width, height and alt are advisory. The block type belongs to this extension rather than to whatever makes the bytes, so a picture stays a picture when a generator is switched off (BO_0273, user decision 2026-09-21; DO_0019)."
       }
     },
     {

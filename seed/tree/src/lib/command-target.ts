@@ -190,6 +190,27 @@ export const sent = (reference: PointedReference): SentReference => {
 export interface CommandAim {
   pointing: Record<string, Pointing>;
   branch?: Record<string, string>;
+  /** The working mode each document's view says is in force. BO_0306_017 */
+  mode?: Record<string, WorkingMode>;
+}
+
+/**
+ * The working mode a person chose for a document, which every run the
+ * document starts carries: explore or consolidate, understand or create. The
+ * view that holds the choice says what the poles are; the kernel refuses a
+ * value outside them by name, so the shell only carries the two words.
+ * BO_0306_017
+ */
+export interface WorkingMode {
+  readonly field: string;
+  readonly work: string;
+}
+
+/** A run body's mode, when it carries one as two words; anything else is none. */
+export function readMode(value: unknown): WorkingMode | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const { field, work } = value as { field?: unknown; work?: unknown };
+  return typeof field === "string" && typeof work === "string" ? { field, work } : undefined;
 }
 
 /** The document a tab shows, or null for a tab that is not a document. */

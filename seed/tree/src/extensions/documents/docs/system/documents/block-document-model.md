@@ -21,6 +21,8 @@
 
 ## Vocabulary
 
+- An admonition is a container block carrying a saved `patternId` and ordered child text blocks, each a graph node attached through `CONTAINS`. The graph stores named patterns with a name, six-digit hex color, optional Garage image blob reference and optional footline. A pattern may be referenced from any document; a pattern edit changes every callout that reads it. The color supplies the accent and pale body tint.
+
 - The semantic node types are `document`, `text`, and `divider`. The semantic relation types are the core's `CONTAINS` and the shell's `retired`, both directed from the document to the block.
 - The vocabulary is declared in the graph as `ui.shell`'s own members, established under `BO_0207_011`: `ext.blocktype` Blocks `document`, `text` and `divider`, and the `ext.relationtype` Block `retired`, each attached to the manifest by `partOf`. CCGW's Validation enforces them on every write that names the type: the required properties, the `role` permitted set, the run shape of `runs`, and one open candidate per node. Containment is the core's code-registered `CONTAINS` relation, so no containment type is declared; the `order` key lives on the block, as the core's block model keeps it.
 - What the core does not enforce for these types stays the shell's: exactly one active containment parent, no containment cycle, and which block types a document may contain are checked by the shell before it writes, because Validation reads `permittedChildTypes` only to judge a breaking redefinition and the single-parent and cycle rules are the production cell's page endpoints' alone.
@@ -311,6 +313,11 @@ Under `calliopa-bootstrap`'s `BO_0288`, promoted to ready by the user on 2026-09
 
 ## Implementation
 
+- Admonition patterns are graph-backed named records with a color, an optional top-level blob reference in `image`, and an optional footline. The documents blob route uploads image bytes through CCGW to Garage immediately before the pattern write, so the reference keeps the bytes for pinned graph history. An admonition block references a pattern and owns ordered text child blocks. Pattern identities can be referenced from any document, and editing a pattern updates every callout that refers to it. Previously stored external image URLs remain readable until replaced or removed (`CA_0070_006`).
+- An admonition child merge writes the surviving child's combined runs, closes the absorbed child's `contains` relation and retires that child from the document in one graph write. The surviving child's identity and sibling order remain; assertions on the absorbed child move to the survivor as they do in a top-level text merge.
+- The graph declaration names the reusable pattern type `admonition_pattern`, while each pattern record keeps its user-facing label in `name`. The `admonition` container declaration permits ordered `text` children; both declarations travel as documents members (`CA_0070_001`, `BO_0302_001`).
+- `turnIntoAdmonition` replaces a text block with a callout at the same sibling order, preserving its runs and role as the first ordered text child; it validates the chosen saved pattern before writing. `setAdmonitionPattern` changes the reference on an existing callout (`CA_0071_002`).
+
 - The four declarations are `ui.shell` members staged through `kernel commit --members` from a clean checkout at dataRevision 31 (`BO_0207_011`): `document` requiring `id` and `title`, with `intention` and `record` optional and `text` and `divider` as permitted children; `text` as a block requiring `id`, `order` and `runs`, with `role` optional and permitted `paragraph`, `h1`, `h2`, `h3`, `quote`, `runs` its run property; `divider` as a block requiring `id` and `order`; and the `retired` relation type. Every node type keeps at most one open candidate. Their names are exact and do not shadow the core's `Document` type, because the shadow rule compares names exactly.
 - `src/lib/order.ts` mints fractional order keys. `orderBetween` returns a base-36 key strictly between two bounds, where an empty bound means no bound on that side, so one call opens a document, appends after the last sibling, inserts ahead of the first, or splits an adjacent pair by lengthening the key. It refuses bounds that are equal, reversed, outside the alphabet, or leave no room beneath them, rather than returning a key that would not sort where the caller asked. `byOrder` returns siblings in ascending string order without mutating the input and keeps the given order among equal keys (`CA_0007_001`).
 - `src/server/documents/vocabulary.ts` carries the run primitives — the permitted role and mark sets, run normalization, and the split that keeps every character — and the content validators the command parser applies before a request reaches the graph. The graph's own declarations (`BO_0207_011`) are what a write is validated against; the TypeScript fragment it still registers into `calliopaGraphSchema` serves the production module alone until `BO_0207_019`. Normalization drops empty runs, orders marks, and joins adjacent runs carrying the same marks and link, so two edits meaning the same thing compare equal (`CA_0007_002`).
@@ -347,26 +354,34 @@ Under `calliopa-bootstrap`'s `BO_0288`, promoted to ready by the user on 2026-09
 ## Pictures And Moving Pictures
 
 - Under `calliopa-bootstrap`'s `BO_0273`, promoted to ready by the user on 2026-09-21 and
-  transferred here the same day, a document can hold a picture and a moving picture. The making is
+  transferred here the same day, a document can hold a picture and a moving picture. Generation is
   the `media` extension's and the service behind it is the fixed layer's
   (`calliopa-bootstrap`'s `docs/system/media-service.md`); the block, its vocabulary and its
   presentation are this extension's, so a picture stays a picture when the generator is switched
   off.
-* The block types belong to `documents`, not to the extension that makes their content. A pasted,
-  dropped or generated picture is the same block, and a block type owned by a generator would
-  become unsupported content in every document the moment its owner switched the generator off.
+* The block types belong to `documents`, not to the extension that makes their content. An
+  uploaded, pasted, dropped or generated picture is the same block, and a block type owned by a
+  generator would become unsupported content in every document the moment its owner switched the
+  generator off.
   User decision, 2026-09-21.
 - The two types are declared (`BO_0273_008`). `image` and `video` are `ext.blocktype` members of
   this extension, staged through `kernel commit --members` as the work vocabulary was
   (`BO_0244_006`): each requires `id` and `order` and permits `reference`, `alt`, `width`, `height`
-  and `source`, and `document` permits them as children beside `text` and `divider` — a widening,
+  and `source`; `image` additionally permits a string `caption`, link-capable `captionRuns` and
+  `numbered`. `document` permits both types as children beside `text` and `divider` — a widening,
   which is an ordinary change. Two types rather than one, because an image and a video differ in
   how they are drawn and separate names keep these types apart from the `media` extension that
   makes their content.
 - `reference` is the core's blob reference, an object bearing `_kind: "blob"` at a top-level
   content property, which is what makes it a live reference (`calliopa-bootstrap`'s
   `docs/system/binary-content.md`). It is the sole identity and integrity carrier; `mediaType`,
-  `size`, `alt`, `width` and `height` are advisory. **Its absence is the pending state** — a
+  `size`, `alt`, `width` and `height` are advisory. Its absence means the block is pending: an
+  image may be awaiting a person's upload or a generator, and a video may be awaiting a generator.
+- Image blocks optionally carry `captionRuns` (`DO_0019_001`): text runs that may keep links but have
+  no formatting marks. Turning a text block into Image writes those runs at the image's existing
+  order and retires the text block; turning the image into a text role restores the runs and retires
+  the image. Older string captions also become plain text runs when turned into text. The image
+  declaration, image validator, document read and `setFigure` write carry this field.
 
 ## Code And Its Output
 
@@ -475,16 +490,18 @@ Numbered*.
   itself through a `below` decoration. Nothing here reads it.
 - How these two are drawn, the pending state included, is [Block Editor View](./block-editor.md#pictures-and-moving-pictures).
 - A media block is written like any other (`BO_0273_017`): `NewMediaBlock` joins `NewBlock`, so
-  `insertBlock` and the document's first block take one, and `blockContentFor` writes `reference`,
+  `insertBlock`, the editor's `Add image` command and the document's first block take one, and
+  `blockContentFor` writes `reference`,
   `alt`, `width`, `height` and `source` — every one optional, because a block with no reference is
-  a generation not made yet and nothing has to be written to say so. Empty words are left out, as
-  an absent role is. Creating one is this extension's, since the type is; what makes the bytes is
-  the `media` extension's. Proven in `server/media-content.test.ts`, each behaviour shown to fail
-  with the media branch removed.
-- A proposed picture is filled rather than replaced (`BO_0273_017`). `fillMediaBlock` sets the
-  reference, the box and `source` on the block that is already standing, keeping its identity and
-  its place — so the reader answers the proposal in front of them rather than a second one
-  appearing beside it. An absent dimension clears the property, as an absent role does; a block
+  pending and nothing has to be written to say so. Empty words are left out, as an absent role is.
+  Creating one is this extension's, since the type is; the `media` extension makes generated bytes,
+  and a person's upload supplies uploaded bytes through CCGW.
+  Proven in `server/media-content.test.ts`, each behaviour shown to fail with the media branch
+  removed.
+- A pending media block is filled rather than replaced (`BO_0273_017`, `DO_0018_001`).
+  `fillMediaBlock` sets the reference, box and `source` on the block already standing, keeping its
+  identity and place — so an upload or generation fills the reader's existing block rather than a
+  second one appearing beside it. An absent dimension clears the property, as an absent role does; a block
   that is not a media block is refused, since the reference would be inert data on a type that
   does not recognize it. Proven in `tests/behavior/documents.test.ts`, over the one graph through
   the kernel harness, with the harness fixture's vocabulary carrying the two types.

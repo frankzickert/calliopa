@@ -139,6 +139,17 @@ describe("a row with no words to read", () => {
     expect(inserted(view)).toMatchObject({ placement: { between: ["b", "d"] } });
   });
 
+  it("Given a focused row, When Add image is pressed, Then an empty image block is inserted directly below it", async () => {
+    const view = await mount("doc-below-image", [text("blk-a", "a", "Opening."), table("blk-t", "b"), text("blk-c", "d", "Closing.")], false);
+    await view.userEvent('[data-block-id="blk-t"]', "focusin");
+    await view.settle();
+    await view.userEvent('[data-bar-action="block-add-image"]', "click");
+    await view.settle(() => view.sent.some((command) => command.body["command"] === "insert"));
+
+    expect(inserted(view)).toMatchObject({ block: { kind: "image" }, placement: { between: ["b", "d"] } });
+    expect(view.sent.some((command) => command.body["command"] === "answerProposal")).toBe(false);
+  });
+
   it("Given a text block, Then its row is not a second stop in tab order: its words are", async () => {
     const view = await mount("doc-below-6", [text("blk-a", "a", "Opening.")], false);
     expect(view.root.querySelector('[data-block-id="blk-a"]')?.getAttribute("tabindex") ?? null).toBeNull();

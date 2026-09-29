@@ -60,7 +60,7 @@ export const isPhase = (value: unknown): value is Phase =>
 
 /** The block types this build understands. A stored type outside this set is
  * unsupported content: shown as such and never silently dropped. */
-export const BLOCK_TYPES = ["text", "divider"] as const;
+export const BLOCK_TYPES = ["text", "divider", "admonition"] as const;
 export type BlockType = (typeof BLOCK_TYPES)[number];
 
 export interface DocumentContent {
@@ -196,6 +196,11 @@ export function validateImage(value: unknown): string | null {
   const order = validateOrder(content);
   if (order !== null) return order;
   if (content["runs"] !== undefined) return "A picture carries a caption, not runs.";
+  if (content["captionRuns"] !== undefined) {
+    const runs = readRuns(content["captionRuns"]);
+    if ("failure" in runs) return `A picture's caption runs are invalid: ${runs.failure}`;
+    if (runs.runs.some((run) => (run.marks?.length ?? 0) > 0)) return "A picture's caption runs carry links but no formatting marks.";
+  }
   return validateNumbering(content, "A picture");
 }
 
@@ -238,6 +243,16 @@ export function validateOutput(value: unknown): string | null {
   return validateNumbering(content, "An output");
 }
 
+export function validateAdmonition(value: unknown): string | null {
+  const content = asRecord(value);
+  if (content === null) return "An admonition carries content.";
+  const order = validateOrder(content);
+  if (order !== null) return order;
+  if (typeof content["patternId"] !== "string" || content["patternId"] === "") return "An admonition names a saved pattern.";
+  if (content["runs"] !== undefined) return "An admonition contains child text blocks through CONTAINS, not runs.";
+  return null;
+}
+
 export function validateDivider(value: unknown): string | null {
   const content = asRecord(value);
   if (content === null) return "A divider carries content.";
@@ -262,6 +277,7 @@ export const BLOCK_VALIDATORS: Readonly<Record<string, (value: unknown) => strin
   [DOCUMENT_TYPE]: validateDocument,
   text: validateText,
   divider: validateDivider,
+  admonition: validateAdmonition,
   table: validateTable,
   sourcecode: validateCode,
   output: validateOutput,

@@ -1,4 +1,4 @@
-import { component$, useSignal, useVisibleTask$ } from "@builder.io/qwik";
+import { component$, useSignal, useVisibleTask$, type QRL } from "@builder.io/qwik";
 
 import type { MediaBlockView } from "../server/assemble";
 import { FigureCaption, type SetFigure } from "./figure-caption";
@@ -19,8 +19,9 @@ import { FigureCaption, type SetFigure } from "./figure-caption";
  * the bytes arrive**, from the block's own `width` and `height`, because the
  * blob reference carries no dimensions and nothing may move when they land.
  *
- * A block with no object is a generation not made yet: it draws its box with
- * its words and says so, and whatever offered it draws its own control there
+ * A block with no object is pending: an image can be waiting for an upload
+ * or generation, and a video can be waiting for generation. The upload field
+ * belongs to this block view; a generation control is contributed separately
  * through the `below` place.
  */
 export const MediaBlock = component$<{
@@ -29,8 +30,11 @@ export const MediaBlock = component$<{
    * rather than the block, so a picture numbered above it relabels this one. BO_0295_014 */
   number?: number | undefined;
   caption$?: SetFigure | undefined;
-}>(({ block, number, caption$ }) => {
+  /** Uploads a selected image into this pending image block. DO_0018_001 */
+  uploadImage$?: QRL<(blockId: string, file: File) => Promise<void>> | undefined;
+}>(({ block, number, caption$, uploadImage$ }) => {
   const source = useSignal<string | null>(null);
+  const uploading = useSignal(false);
 
   // A video only. The element cannot be handed the route directly, and the
   // object URL is revoked when the block goes so a long document does not
@@ -68,7 +72,7 @@ export const MediaBlock = component$<{
   // neither.
   const caption =
     block.kind === "image" ? (
-      <FigureCaption blockId={block.blockId} number={number} numbered={block.numbered} caption={block.caption} caption$={caption$} />
+      <FigureCaption blockId={block.blockId} number={number} numbered={block.numbered} caption={block.caption} captionRuns={block.captionRuns} caption$={caption$} />
     ) : null;
 
   if (block.objectId === undefined) {
@@ -83,6 +87,28 @@ export const MediaBlock = component$<{
       >
         <span class="media-block__words">{block.alt ?? ""}</span>
       </div>
+      {block.kind === "image" && uploadImage$ !== undefined && (
+        <label class="media-block__upload" data-image-upload={block.blockId}>
+          <span>{uploading.value ? "Uploading image…" : "Upload image"}</span>
+          <input
+            type="file"
+            accept="image/*"
+            aria-label="Choose an image file to upload"
+            disabled={uploading.value}
+            onChange$={async (_event, element) => {
+              const file = element.files?.[0];
+              element.value = "";
+              if (file === undefined || uploadImage$ === undefined) return;
+              uploading.value = true;
+              try {
+                await uploadImage$(block.blockId, file);
+              } finally {
+                uploading.value = false;
+              }
+            }}
+          />
+        </label>
+      )}
       {caption}
       </div>
     );

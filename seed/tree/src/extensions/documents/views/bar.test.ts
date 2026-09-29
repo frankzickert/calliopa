@@ -50,10 +50,10 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-const mount = async () => {
+const mount = async (document: DocumentView = draft) => {
   const sent: SentCommand[] = [];
-  vi.stubGlobal("fetch", documentsApi(draft, sent));
-  const harness = await mountEditor(draft);
+  vi.stubGlobal("fetch", documentsApi(document, sent));
+  const harness = await mountEditor(document);
   last = harness;
   return { ...harness, sent };
 };
@@ -351,25 +351,27 @@ describe("the bar before editing", () => {
   it("Given a focused block, Then the block controls are icons in one settled order", async () => {
     const view = await mount();
     await turnTo(view, '[data-block-id="blk-b"] [data-block-reading]');
-    // Format leads and History trails the four; the role, the plus, the
-    // archive and the standing with its *i* stand between them. DO_0010_002
+    // Format leads and History trails the block actions, with insertion,
+    // archive and standing controls in their settled order. DO_0010_002
     expect(
       Array.from(
         view.root.querySelectorAll(
           '[data-bar-group="turn-into"] [data-bar-action], [data-bar-group="block"] [data-bar-action], [data-bar-group="standing"] [data-bar-action]',
         ),
       ).map((control) => control.getAttribute("data-bar-action")),
-    ).toEqual(["block-role", "block-add-paragraph", "block-add-table", "block-add-equation", "block-add-code", "block-import-table", "block-retire", "block-standing", "standing-info"]);
+    ).toEqual(["block-role", "block-add-paragraph", "block-add-image", "block-add-table", "block-add-equation", "block-add-admonition", "block-add-code", "block-import-table", "block-retire", "block-standing", "standing-info"]);
     // Each says what it is by its symbol, and carries its words as its name.
     expect(
-      ["block-add-paragraph", "block-add-table", "block-add-equation", "block-import-table", "block-retire"].map((id) => ({
+      ["block-add-paragraph", "block-add-image", "block-add-table", "block-add-equation", "block-add-admonition", "block-import-table", "block-retire"].map((id) => ({
         icon: bar(view.root, id)?.querySelector("[data-icon]")?.getAttribute("data-icon"),
         name: bar(view.root, id)?.getAttribute("aria-label"),
       })),
     ).toEqual([
       { icon: "plus", name: "Insert paragraph after block 2" },
+      { icon: "image", name: "Insert image upload field after block 2" },
       { icon: "table", name: "Insert table after block 2" },
       { icon: "equals", name: "Insert equation after block 2" },
+      { icon: "info", name: "Insert admonition after block 2" },
       { icon: "upload-simple", name: "Import a .csv or .tsv table after block 2" },
       { icon: "archive", name: "Retire block 2" },
     ]);
@@ -429,6 +431,10 @@ describe("the bar before editing", () => {
         icon: control.querySelector("[data-icon]")?.getAttribute("data-icon"),
       })),
     ).toEqual([
+      // The working mode's two toggles lead, each wearing the pole in force.
+      // BO_0306_010
+      { id: "working-mode-field", icon: "arrows-out-simple" },
+      { id: "working-mode-work", icon: "pencil-simple-line" },
       { id: "work-in-proposal", icon: "git-branch" },
       { id: "establish", icon: "lighthouse" },
     ]);
@@ -518,6 +524,7 @@ describe("the bar before editing", () => {
     const select = () =>
       (view.root.querySelector('[data-bar-action="block-role"]') as HTMLSelectElement | null) ?? null;
     expect([...view.root.querySelectorAll('[data-bar-action="block-role"] option')].map((option) => option.getAttribute("value"))).toContain("code");
+    expect([...view.root.querySelectorAll('[data-bar-action="block-role"] option')].map((option) => option.getAttribute("value"))).toContain("image");
     select()!.value = "code";
     await view.userEvent(select()!, "change");
     await view.settle(() => view.sent.some((command) => command.body["command"] === "turnIntoCode"));
@@ -526,6 +533,30 @@ describe("the bar before editing", () => {
       baseRevisionId: "rev-b",
     });
     expect(view.sent.some((command) => command.body["command"] === "revise")).toBe(false);
+  });
+
+  it("turns a text block into a pending image from the block type picker", async () => {
+    const view = await mount();
+    await turnTo(view, '[data-block-id="blk-b"] [data-block-reading]');
+    const select = view.root.querySelector('[data-bar-action="block-role"]') as HTMLSelectElement;
+    select.value = "image";
+    await view.userEvent(select, "change");
+    await view.settle(() => view.sent.some((command) => command.body["command"] === "turnIntoImage"));
+    expect(view.sent.find((command) => command.body["command"] === "turnIntoImage")?.body).toMatchObject({ blockId: "blk-b", baseRevisionId: "rev-b" });
+  });
+
+  it("turns an image into a text role from the same picker", async () => {
+    const document: DocumentView = { ...draft, blocks: [{ kind: "image", blockId: "picture", revisionId: "rev-picture", containmentId: "c-picture", order: "b", captionRuns: [{ text: "Linked text", link: "https://example.test" }], numbered: false }] };
+    const view = await mount(document);
+    await turnTo(view, '[data-block-id="picture"]', "focusin");
+    const select = view.root.querySelector('[data-bar-action="block-role"]') as HTMLSelectElement;
+    const options = [...view.root.querySelectorAll('[data-bar-action="block-role"] option')].map((option) => option.getAttribute("value"));
+    expect(options).toEqual(expect.arrayContaining(["paragraph", "h1", "h2", "h3", "quote", "abstract"]));
+    expect(options).not.toContain("image");
+    select.value = "h1";
+    await view.userEvent(select, "change");
+    await view.settle(() => view.sent.some((command) => command.body["command"] === "turnImageIntoText"));
+    expect(view.sent.find((command) => command.body["command"] === "turnImageIntoText")?.body).toMatchObject({ blockId: "picture", baseRevisionId: "rev-picture", role: "h1" });
   });
 
   it("Given a focused block, When a standing is chosen, Then it is written on that block", async () => {
@@ -627,6 +658,21 @@ describe("the bar before editing", () => {
     expect(view.sent.find((command) => command.body["command"] === "insert")?.body).toMatchObject({
       placement: { between: ["ab", "b"] },
     });
+  });
+
+  it("Given a proposal focused, When Add image is pressed, Then an empty image block goes below it while the proposal stays open", async () => {
+    const view = await mountFull();
+    await view.userEvent('[data-bar-action="proposed-changes"]', "click");
+    await view.settle(() => view.root.querySelector("[data-proposal-id]") !== null);
+    await turnTo(view, `[data-proposal-id="${insert}"]`, "focusin");
+    await view.userEvent('[data-bar-action="block-add-image"]', "click");
+    await view.settle(() => view.sent.some((command) => command.body["command"] === "insert"));
+
+    expect(view.sent.find((command) => command.body["command"] === "insert")?.body).toMatchObject({
+      block: { kind: "image" },
+      placement: { between: ["ab", "b"] },
+    });
+    expect(view.sent.some((command) => command.body["command"] === "answerProposal")).toBe(false);
   });
 
   it("Given proposals hidden, When the plus is pressed on the block above one, Then the hidden proposal still follows the new paragraph", async () => {

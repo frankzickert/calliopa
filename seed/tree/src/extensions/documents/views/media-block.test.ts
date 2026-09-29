@@ -61,6 +61,15 @@ describe("a picture in a document", () => {
     expect(drawn.getAttribute("alt")).toBe("A laurel");
   });
 
+  it("shows linked text as an editable image caption beside the upload field", async () => {
+    const view = await mount([media("blk-b", "b", { kind: "image", captionRuns: [{ text: "linked caption", link: "https://example.test/caption" }] })]);
+    const caption = view.root.querySelector('[data-caption-runs="blk-b"]') as HTMLElement;
+    expect(caption).toBeTruthy();
+    expect(caption.getAttribute("contenteditable")).toBe("true");
+    expect(caption.querySelector("a")?.getAttribute("href")).toBe("https://example.test/caption");
+    expect(view.root.querySelector('[data-image-upload="blk-b"] input[type="file"]')).toBeTruthy();
+  });
+
   it("reserves the box the block stores, because the reference carries none", async () => {
     const view = await mount([
       media("blk-b", "b", { kind: "image", objectId: "abc123", width: 1280, height: 720 }),
@@ -95,6 +104,95 @@ describe("a picture in a document", () => {
     expect(pending.textContent ?? "").toContain("A laurel on a dark ground");
     // And nothing was asked of the blob route for it.
     expect(view.root.querySelector("[data-media-image]")).toBeFalsy();
+  });
+
+  it("shows an empty upload field for a pending image and leaves it empty when no file is chosen", async () => {
+    const view = await mount([
+      media("blk-b", "b", { kind: "image", alt: "A laurel on a dark ground" }),
+    ]);
+    const field = view.root.querySelector('[data-image-upload="blk-b"]') as HTMLLabelElement;
+    const input = field.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(field).toBeTruthy();
+    expect(input.getAttribute("accept")).toBe("image/*");
+    expect(input.getAttribute("aria-label")).toBe("Choose an image file to upload");
+    expect(view.root.querySelector("[data-media-image]")).toBeFalsy();
+    await view.userEvent(input, "change");
+    await view.settle();
+    expect(input.value).toBe("");
+    expect(view.root.querySelector("[data-media-image]")).toBeFalsy();
+  });
+
+  it("uploads a chosen image, then fills the same block with its reference and pixel dimensions", async () => {
+    const document: DocumentView = {
+      documentId: "doc-upload",
+      revisionId: "rev-doc",
+      title: "Draft",
+      blocks: [media("blk-image", "a", { kind: "image" })],
+    };
+    const sent: { url: string; body: Record<string, unknown> }[] = [];
+    const api = documentsApi(document, sent);
+    const uploads: { input: string | URL | Request; init?: RequestInit }[] = [];
+    const reference = { _kind: "blob", hash: `sha256:${"a".repeat(64)}`, mediaType: "image/png", size: 3, filename: "laurel.png" };
+    vi.stubGlobal("createImageBitmap", async () => ({ width: 320, height: 180, close: vi.fn() }));
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url === "/api/x/documents/blobs") {
+        uploads.push({ input, ...(init === undefined ? {} : { init }) });
+        return new Response(JSON.stringify({ outcome: "success", result: { reference } }), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return api(input, init);
+    });
+    const view = await mountEditor(document);
+    const input = view.root.querySelector('[data-image-upload="blk-image"] input') as HTMLInputElement;
+    const file = new File(["png"], "laurel.png", { type: "image/png" });
+    Object.defineProperty(input, "files", { configurable: true, value: [file] });
+    await view.userEvent(input, "change");
+    await view.settle(() => sent.some((command) => command.body["command"] === "fillMediaBlock"));
+
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0]?.init?.body).toBe(file);
+    expect(uploads[0]?.init?.headers).toMatchObject({ "content-type": "image/png", "x-calliopa-filename": "laurel.png" });
+    expect(sent.find((command) => command.body["command"] === "fillMediaBlock")?.body).toMatchObject({
+      command: "fillMediaBlock",
+      blockId: "blk-image",
+      baseRevisionId: "rev-blk-image",
+      reference,
+      width: 320,
+      height: 180,
+    });
+    await view.idle();
+  });
+
+  it("keeps the upload field available and reports an upload failure", async () => {
+    const document: DocumentView = {
+      documentId: "doc-upload-failure",
+      revisionId: "rev-doc",
+      title: "Draft",
+      blocks: [media("blk-image", "a", { kind: "image" })],
+    };
+    const sent: { url: string; body: Record<string, unknown> }[] = [];
+    const api = documentsApi(document, sent);
+    vi.stubGlobal("createImageBitmap", async () => ({ width: 320, height: 180, close: vi.fn() }));
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url === "/api/x/documents/blobs") throw new Error("network unavailable");
+      return api(input, init);
+    });
+    const view = await mountEditor(document);
+    const input = view.root.querySelector('[data-image-upload="blk-image"] input') as HTMLInputElement;
+    Object.defineProperty(input, "files", {
+      configurable: true,
+      value: [new File(["png"], "laurel.png", { type: "image/png" })],
+    });
+    await view.userEvent(input, "change");
+    await view.settle(() => view.root.textContent?.includes("network unavailable") === true);
+
+    expect(view.root.querySelector('[data-image-upload="blk-image"] input')).toBeTruthy();
+    expect(sent.some((command) => command.body["command"] === "fillMediaBlock")).toBe(false);
+    expect(view.root.querySelector("[data-media-image]")).toBeFalsy();
+    await view.idle();
   });
 
   it("keeps a picture beside the prose, in its order", async () => {

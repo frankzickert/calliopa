@@ -21,7 +21,7 @@ import { formatSource } from "./format";
 import { guessLanguage } from "~/extensions/documents/lib/highlight";
 import { bareId, contentOf, nodeRef, typeOf } from "~/server/ccgw/nodes";
 import type { BlobReference } from "~/server/ccgw/blobs";
-import { sameRuns } from "~/lib/runs";
+import { runsText, sameRuns } from "~/lib/runs";
 import {
   ASSERTS,
   DERIVED_FROM,
@@ -117,9 +117,9 @@ export interface NewDividerBlock {
 
 /**
  * A picture or a moving picture (`BO_0273_017`). The bytes are a blob behind
- * CCGW and the block carries the reference; **absent is the pending state**, a
- * generation proposed and not yet paid for, which is why every property here is
- * optional. `source` is what made it, stored and never interpreted by this
+ * CCGW and the block carries the reference; **absent is the pending state**,
+ * whether an image awaits upload or generation, which is why every property
+ * here is optional. `source` is what made it, stored and never interpreted by this
  * model.
  */
 export interface NewMediaBlock {
@@ -175,13 +175,20 @@ export interface NewCodeBlock {
   readonly language?: string;
 }
 
+export interface NewAdmonitionBlock {
+  readonly kind: "admonition";
+  readonly patternId: string;
+  readonly children: readonly NewTextBlock[];
+}
+
 export type NewBlock =
   | NewTextBlock
   | NewDividerBlock
   | NewMediaBlock
   | NewTableBlock
   | NewEquationBlock
-  | NewCodeBlock;
+  | NewCodeBlock
+  | NewAdmonitionBlock;
 
 const isCode = (block: NewBlock): block is NewCodeBlock => block.kind === "sourcecode";
 
@@ -261,8 +268,8 @@ const nodeOf = (graph: ReadResult, id: string): ReadNode | undefined =>
 
 const mediaContent = (block: NewMediaBlock, order: string): Record<string, unknown> => ({
   order,
-  // Every one optional: a block with no reference is a generation not made yet,
-  // and the dimensions are the block's own because the reference carries none.
+  // Every one optional: a block with no reference is pending, and dimensions
+  // are the block's own because the reference carries none.
   ...(block.reference !== undefined ? { reference: block.reference } : {}),
   ...(block.alt !== undefined && block.alt !== "" ? { alt: block.alt } : {}),
   ...(block.width !== undefined ? { width: block.width } : {}),
@@ -314,6 +321,8 @@ export const blockContentFor = (block: NewBlock, order: string): Record<string, 
     ? tableContent(block, order)
     : isCode(block)
     ? codeContent(block, order)
+    : block.kind === "admonition"
+    ? { order, patternId: block.patternId }
     : block.kind === "divider"
     ? { order }
     : {
@@ -339,10 +348,11 @@ async function citedWorksAt(
   documentId: string,
 ): Promise<{ readonly ok: true; readonly works: ReadonlySet<string> | undefined } | { readonly ok: false; readonly outcome: GraphOutcome<never> }> {
   const cited = new Set<string>();
-  for (const block of blocksOf(graph, documentId, CONTAINS)) {
-    if (block.kind !== "text") continue;
-    for (const run of block.runs) if (run.cite !== undefined) cited.add(run.cite.work);
-  }
+  const visit = (block: BlockView): void => {
+    if (block.kind === "text") for (const run of block.runs) if (run.cite !== undefined) cited.add(run.cite.work);
+    if (block.kind === "admonition") for (const child of block.children) visit(child);
+  };
+  for (const block of blocksOf(graph, documentId, CONTAINS)) visit(block);
   if (cited.size === 0) return { ok: true, works: undefined };
   const works = await query({
     statement: "MATCH (w) RETURN GRAPH w ROOT w",
@@ -378,11 +388,24 @@ async function loadDocument(
   if (outcome.outcome !== "success") {
     return { ok: false, outcome: outcome as GraphOutcome<never> };
   }
-  const knownWorks = await citedWorksAt(outcome.result, documentId);
+  let graph = outcome.result;
+  if (relationType === CONTAINS) {
+    const directIds = new Set(graph.relations.filter((relation) => relation.type === CONTAINS && relation.fromNodeId === nodeRef(documentId) && relation.validity.status === "active" && relation.to.kind === "node" && relation.to.nodeId !== undefined).map((relation) => relation.to.kind === "node" ? relation.to.nodeId! : ""));
+    const containers = graph.nodes.filter((node) => directIds.has(node.id) && typeOf(node) === "admonition");
+    if (containers.length > 0) {
+      const nested = await query({ statement: `MATCH (p)-[c:${CONTAINS}]->(b) RETURN GRAPH p, c, b ROOT p`, roots: containers.map((node) => node.id), unbounded: true, purpose: "admonition child blocks" });
+      if (nested.outcome !== "success" && nested.outcome !== "noResult") return { ok: false, outcome: nested as GraphOutcome<never> };
+      if (nested.outcome === "success") {
+        const nodes = new Map([...graph.nodes, ...nested.result.nodes].map((node) => [node.id, node]));
+        graph = { ...graph, nodes: [...nodes.values()], relations: [...graph.relations, ...nested.result.relations] };
+      }
+    }
+  }
+  const knownWorks = await citedWorksAt(graph, documentId);
   if (knownWorks.ok === false) {
     return { ok: false, outcome: knownWorks.outcome };
   }
-  const assembled = assembleDocument(outcome.result, documentId, knownWorks.works === undefined ? {} : { knownWorks: knownWorks.works });
+  const assembled = assembleDocument(graph, documentId, knownWorks.works === undefined ? {} : { knownWorks: knownWorks.works });
   if (assembled === null) {
     return {
       ok: false,
@@ -400,12 +423,13 @@ async function loadDocument(
   const numbers = assembled.citationNumbers ?? {};
   if (relationType === CONTAINS && Object.keys(numbers).length > 0) {
     const cited: { work: string; locator?: string }[] = [];
-    for (const block of assembled.blocks) {
-      if (block.kind !== "text" || block.standing === "discarded") continue;
-      for (const run of block.runs) {
+    const visit = (block: BlockView): void => {
+      if (block.kind === "text" && block.standing !== "discarded") for (const run of block.runs) {
         if (run.cite !== undefined && numbers[run.cite.work] !== undefined) cited.push({ work: run.cite.work, ...(run.cite.locator === undefined ? {} : { locator: run.cite.locator }) });
       }
-    }
+      if (block.kind === "admonition") for (const child of block.children) visit(child);
+    };
+    for (const block of assembled.blocks) visit(block);
     const order = Object.entries(numbers).sort((left, right) => left[1] - right[1]).map(([work]) => work);
     const { resolveCitations } = await import("~/server/registry");
     const answer = await resolveCitations({ documentId, order, cited, ...(assembled.citationStyle === undefined ? {} : { style: assembled.citationStyle }) });
@@ -422,7 +446,7 @@ async function loadDocument(
   // depth's relevance layer need no second request. Only the containment
   // read is asked for the retired blocks. CA_0046_005
   if (relationType !== CONTAINS || styled.blocks.length === 0) {
-    return { ok: true, graph: outcome.result, document: styled };
+    return { ok: true, graph, document: styled };
   }
   const derived = await query({
     statement: `MATCH (b)-[e:${DERIVED_FROM}]->(f) RETURN GRAPH b, e, f ROOT b`,
@@ -445,7 +469,7 @@ async function loadDocument(
       return block.kind === "text" && from !== undefined ? { ...block, derivedFrom: from } : block;
     }),
   };
-  return { ok: true, graph: outcome.result, document };
+  return { ok: true, graph, document };
 }
 
 /**
@@ -1154,16 +1178,144 @@ export async function readBlock(
 ): Promise<GraphOutcome<BlockView>> {
   const loaded = await loadDocument(documentId);
   if (!loaded.ok) return loaded.outcome;
-  const block = loaded.document.blocks.find(
-    (candidate) => candidate.blockId === blockId,
-  );
-  if (block === undefined) {
-    return {
-      outcome: "noResult",
-      detail: `Block ${blockId} is not in document ${documentId}.`,
-    };
+  const located = locate(loaded.document, blockId);
+  if ("failure" in located) return located.failure;
+  return { outcome: "success", result: located.block };
+}
+
+/** Changes the reusable pattern a callout references. */
+export async function setAdmonitionPattern(input: { readonly documentId: string; readonly blockId: string; readonly baseRevisionId: string; readonly patternId: string }): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  const located = locate(loaded.document, input.blockId, input.baseRevisionId);
+  if ("failure" in located) return located.failure;
+  if (located.block.kind !== "admonition") return refuse("blockKind", `Block ${input.blockId} is not an admonition.`);
+  const { listAdmonitionPatterns } = await import("./admonitions");
+  const patterns = await listAdmonitionPatterns();
+  if (patterns.outcome !== "success") return patterns as GraphOutcome<never>;
+  if (!patterns.result.some((pattern) => pattern.id === input.patternId)) return refuse("unknownPattern", `No admonition pattern ${input.patternId}.`);
+  return commit("SET b.patternId = $patternId", { bNodeId: nodeRef(input.blockId), patternId: input.patternId }, `set admonition pattern on ${input.blockId}`, async (dataRevision, revisionOf) => ({ blockId: input.blockId, revisionId: await revisionOf(input.blockId), dataRevision }));
+}
+
+/** Turns a text block into a callout in the same position, retaining its words as the first child. */
+export async function turnIntoAdmonition(input: { readonly documentId: string; readonly blockId: string; readonly baseRevisionId: string; readonly patternId: string }): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  const located = locate(loaded.document, input.blockId, input.baseRevisionId);
+  if ("failure" in located) return located.failure;
+  if (located.block.kind !== "text") return refuse("blockKind", `Block ${input.blockId} is not a text block.`);
+  const { listAdmonitionPatterns } = await import("./admonitions");
+  const patterns = await listAdmonitionPatterns();
+  if (patterns.outcome !== "success") return patterns as GraphOutcome<never>;
+  if (!patterns.result.some((pattern) => pattern.id === input.patternId)) return refuse("unknownPattern", `No admonition pattern ${input.patternId}.`);
+
+  const admonitionId = randomUUID();
+  const childId = randomUUID();
+  const parameters: Record<string, unknown> = {
+    dref: nodeRef(input.documentId),
+    admonitionRef: nodeRef(admonitionId),
+    childRef: nodeRef(childId),
+    cRelationId: located.block.containmentId,
+    dref2: nodeRef(input.documentId),
+    oldRef: nodeRef(input.blockId),
+  };
+  const statement = [
+    `CREATE (a:admonition {${properties("a", { id: admonitionId, order: located.block.order, patternId: input.patternId }, parameters, true)}})`,
+    `RELATE dref -[newContainment:${CONTAINS}]-> admonitionRef`,
+    `CREATE (child:text {${properties("child", { id: childId, order: orderBetween("", ""), runs: normalizeRuns(located.block.runs), ...(located.block.role === "paragraph" ? {} : { role: located.block.role }) }, parameters, true)}})`,
+    `RELATE admonitionRef -[childContainment:${CONTAINS}]-> childRef`,
+    "CLOSE c",
+    `RELATE dref2 -[r:${RETIRED}]-> oldRef`,
+  ].join("; ");
+  return commit(statement, parameters, `turn block ${input.blockId} into admonition`, async (dataRevision, revisionOf) => ({ blockId: admonitionId, revisionId: await revisionOf(admonitionId), dataRevision }));
+}
+
+/** Adds an ordered text child to an admonition container. */
+export async function insertAdmonitionChild(input: { readonly documentId: string; readonly parentBlockId: string; readonly afterBlockId?: string; readonly runs?: readonly Run[] }): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  const parent = locate(loaded.document, input.parentBlockId);
+  if ("failure" in parent) return parent.failure;
+  if (parent.block.kind !== "admonition") return refuse("blockKind", `Block ${input.parentBlockId} is not an admonition container.`);
+  const at = input.afterBlockId === undefined ? parent.block.children.length : parent.block.children.findIndex((child) => child.blockId === input.afterBlockId) + 1;
+  if (at < 1 && input.afterBlockId !== undefined) return refuse("unknownChild", `Block ${input.afterBlockId} is not inside admonition ${input.parentBlockId}.`);
+  const before = parent.block.children[at - 1]?.order ?? "";
+  const after = parent.block.children[at]?.order ?? "";
+  const order = orderBetween(before, after);
+  const blockId = randomUUID();
+  const parameters: Record<string, unknown> = { parentRef: nodeRef(input.parentBlockId), childRef: nodeRef(blockId) };
+  const statement = [
+    `CREATE (b:text {${properties("b", { id: blockId, order, runs: normalizeRuns(input.runs ?? []) }, parameters, true)}})`,
+    `RELATE parentRef -[c:${CONTAINS}]-> childRef`,
+  ].join("; ");
+  return commit(statement, parameters, `add child text to admonition ${input.parentBlockId}`, async (dataRevision, revisionOf) => ({ blockId, revisionId: await revisionOf(blockId), dataRevision }));
+}
+
+/** Joins adjacent text children in an admonition and retires the absorbed child. */
+export async function mergeAdmonitionChildren(input: {
+  readonly documentId: string;
+  readonly parentBlockId: string;
+  readonly intoBlockId: string;
+  readonly intoBaseRevisionId: string;
+  readonly blockId: string;
+  readonly baseRevisionId: string;
+}): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  const parent = locate(loaded.document, input.parentBlockId);
+  if ("failure" in parent) return parent.failure;
+  if (parent.block.kind !== "admonition") return refuse("blockKind", `Block ${input.parentBlockId} is not an admonition container.`);
+  const intoAt = parent.block.children.findIndex((child) => child.blockId === input.intoBlockId);
+  const fromAt = parent.block.children.findIndex((child) => child.blockId === input.blockId);
+  const into = parent.block.children[intoAt];
+  const from = parent.block.children[fromAt];
+  if (into === undefined || from === undefined || Math.abs(intoAt - fromAt) !== 1) {
+    return refuse("unknownChild", "Both children of a merge must be adjacent inside the same admonition.");
   }
-  return { outcome: "success", result: block };
+  if (into.revisionId !== input.intoBaseRevisionId) return conflict(into.blockId, input.intoBaseRevisionId, into.revisionId);
+  if (from.revisionId !== input.baseRevisionId) return conflict(from.blockId, input.baseRevisionId, from.revisionId);
+
+  const earlier = intoAt < fromAt ? into : from;
+  const later = intoAt < fromAt ? from : into;
+  const parameters: Record<string, unknown> = {
+    iNodeId: nodeRef(into.blockId),
+    cRelationId: from.containmentId,
+    dref: nodeRef(input.documentId),
+    fref: nodeRef(from.blockId),
+  };
+  const statements: string[] = [];
+  if (runsText(from.runs) !== "") {
+    parameters["runs"] = normalizeRuns([...earlier.runs, ...later.runs]);
+    statements.push("SET i.runs = $runs");
+  }
+  statements.push("CLOSE c", `RELATE dref -[r:${RETIRED}]-> fref`);
+  const carried = await query({
+    statement: `MATCH (b)-[a:${ASSERTS}]->(c) RETURN GRAPH b, a, c ROOT b`,
+    roots: [nodeRef(from.blockId)],
+    unbounded: true,
+    purpose: "claims of the absorbed admonition child",
+  });
+  if (carried.outcome !== "success" && carried.outcome !== "noResult") return carried as GraphOutcome<never>;
+  const asserted = carried.outcome === "success" ? carried.result.relations : [];
+  asserted
+    .filter((relation) => relation.type === ASSERTS && relation.validity.status === "active" && relation.fromNodeId === nodeRef(from.blockId))
+    .forEach((relation, index) => {
+      parameters[`a${index}RelationId`] = relation.id;
+      parameters[`a${index}From`] = nodeRef(from.blockId);
+      parameters[`m${index}i`] = nodeRef(into.blockId);
+      parameters[`m${index}c`] = relation.to.nodeId ?? "";
+      statements.push(`CLOSE a${index}`, `RELATE m${index}i -[m${index}a:${ASSERTS}]-> m${index}c`);
+    });
+  return commit(
+    statements.join("; "),
+    parameters,
+    `merge admonition child ${from.blockId} into ${into.blockId}`,
+    async (dataRevision, revisionOf) => ({
+      blockId: into.blockId,
+      revisionId: await revisionOf(into.blockId),
+      dataRevision,
+    }),
+  );
 }
 
 /** Inserts a new block at a placement among its siblings. */
@@ -1213,16 +1365,36 @@ export async function insertBlock(input: {
 
   const order = orderFor(loaded.document.blocks, input.placement);
   if ("failure" in order) return order.failure;
+  if (input.block.kind === "admonition") {
+    const { listAdmonitionPatterns } = await import("./admonitions");
+    const patternId = input.block.patternId;
+    const patterns = await listAdmonitionPatterns();
+    if (patterns.outcome !== "success") return patterns as GraphOutcome<never>;
+    if (!patterns.result.some((pattern) => pattern.id === patternId)) return refuse("unknownPattern", `No admonition pattern ${patternId}.`);
+  }
 
   const blockId = randomUUID();
   const parameters: Record<string, unknown> = {
     dref: nodeRef(input.documentId),
     bref: nodeRef(blockId),
   };
-  const statement = [
+  const statements = [
     `CREATE (b:${blockType(input.block)} {${properties("b", { id: blockId, ...blockContentFor(input.block, order.order) }, parameters, true)}})`,
     `RELATE dref -[c:${CONTAINS}]-> bref`,
-  ].join("; ");
+  ];
+  if (input.block.kind === "admonition") {
+    let childOrder = "";
+    input.block.children.forEach((child, index) => {
+      childOrder = orderBetween(childOrder, "");
+      const childId = randomUUID();
+      const alias = `child${index}`;
+      const ref = `${alias}Ref`;
+      parameters[ref] = nodeRef(childId);
+      statements.push(`CREATE (${alias}:text {${properties(alias, { id: childId, order: childOrder, runs: normalizeRuns(child.runs ?? []), ...(child.role && child.role !== "paragraph" ? { role: child.role } : {}) }, parameters, true)}})`);
+      statements.push(`RELATE bref -[childContains${index}:${CONTAINS}]-> ${ref}`);
+    });
+  }
+  const statement = statements.join("; ");
 
   return commit(statement, parameters, `insert block into ${input.documentId}`, async (dataRevision, revisionOf) => ({
     blockId,
@@ -1231,14 +1403,41 @@ export async function insertBlock(input: {
   }));
 }
 
-/**
- * Turns a text block into a code block in its place (`BO_0289_021`): a code
- * block whose source is the block's words takes the text block's order key,
- * and the text block is retired, in one write — so the words are never in
- * two places and the retired block can be restored. A block type is a node's
- * label and cannot change, which is why this is a new block and not a
- * revise; the new block's id is answered.
- */
+/** Turns text into a pending image at the same position, retaining links in an unformatted caption. */
+export async function turnIntoImage(input: { readonly documentId: string; readonly blockId: string; readonly baseRevisionId: string }): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  const located = locate(loaded.document, input.blockId, input.baseRevisionId);
+  if ("failure" in located) return located.failure;
+  if (located.block.kind !== "text") return refuse("blockKind", `Block ${input.blockId} is not a text block.`);
+  const captionRuns = normalizeRuns(located.block.runs.map(({ text, link, marks: _marks, ...rest }) => ({ text, ...(link === undefined ? {} : { link }), ...rest })));
+  const blockId = randomUUID();
+  const parameters: Record<string, unknown> = { dref: nodeRef(input.documentId), bref: nodeRef(blockId), cRelationId: located.block.containmentId, dref2: nodeRef(input.documentId), oref: nodeRef(input.blockId) };
+  const statement = [
+    `CREATE (b:image {${properties("b", { id: blockId, order: located.block.order, captionRuns }, parameters, true)}})`,
+    `RELATE dref -[c1:${CONTAINS}]-> bref`, "CLOSE c", `RELATE dref2 -[r:${RETIRED}]-> oref`,
+  ].join("; ");
+  return commit(statement, parameters, `turn block ${input.blockId} into image`, async (dataRevision, revisionOf) => ({ blockId, revisionId: await revisionOf(blockId), dataRevision }));
+}
+
+/** Restores an image caption as text at the image's position and retires the image. */
+export async function turnImageIntoText(input: { readonly documentId: string; readonly blockId: string; readonly baseRevisionId: string; readonly role: TextRole }): Promise<GraphOutcome<WrittenBlock>> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  const located = locate(loaded.document, input.blockId, input.baseRevisionId);
+  if ("failure" in located) return located.failure;
+  if (located.block.kind !== "image") return refuse("blockKind", `Block ${input.blockId} is not an image block.`);
+  const runs = normalizeRuns(located.block.captionRuns ?? (located.block.caption === undefined ? [] : [{ text: located.block.caption }]));
+  const blockId = randomUUID();
+  const parameters: Record<string, unknown> = { dref: nodeRef(input.documentId), bref: nodeRef(blockId), cRelationId: located.block.containmentId, dref2: nodeRef(input.documentId), oref: nodeRef(input.blockId) };
+  const statement = [
+    `CREATE (b:text {${properties("b", { id: blockId, order: located.block.order, runs, ...(input.role === "paragraph" ? {} : { role: input.role }) }, parameters, true)}})`,
+    `RELATE dref -[c1:${CONTAINS}]-> bref`, "CLOSE c", `RELATE dref2 -[r:${RETIRED}]-> oref`,
+  ].join("; ");
+  return commit(statement, parameters, `turn image ${input.blockId} into text`, async (dataRevision, revisionOf) => ({ blockId, revisionId: await revisionOf(blockId), dataRevision }));
+}
+
+/** Turns a text block into source code at its place (`BO_0289_021`). */
 export async function turnIntoCode(input: {
   readonly documentId: string;
   readonly blockId: string;
@@ -1281,7 +1480,13 @@ function locate(
   blockId: string,
   baseRevisionId?: string,
 ): { readonly block: BlockView } | { readonly failure: GraphOutcome<never> } {
-  const block = document.blocks.find((candidate) => candidate.blockId === blockId);
+  const pending = [...document.blocks];
+  let block: BlockView | undefined;
+  while (pending.length > 0) {
+    const candidate = pending.shift()!;
+    if (candidate.blockId === blockId) { block = candidate; break; }
+    if (candidate.kind === "admonition") pending.unshift(...candidate.children);
+  }
   if (block === undefined) {
     return { failure: refuse("unknownBlock", `Block ${blockId} is not in this document.`) };
   }
@@ -1316,7 +1521,6 @@ export async function reviseTextBlock(input: {
     {
       bNodeId: nodeRef(input.blockId),
       runs: normalizeRuns(input.runs),
-      // A null clears the property: an ordinary paragraph stores no role.
       role: role === "paragraph" ? null : role,
     },
     `revise block ${input.blockId}`,
@@ -1332,11 +1536,11 @@ export async function reviseTextBlock(input: {
  * Fills a media block with the bytes that were made for it, keeping its
  * identity and its place (`BO_0273_017`).
  *
- * This is how a proposed generation stops being pending: the same block, the
- * same candidate, now carrying the reference — so the reader answers the
- * proposal they were already looking at rather than a second one appearing
- * beside it. The box travels with it, because the blob reference carries no
- * dimensions, and `source` is replaced whole by whatever made the bytes.
+ * This is how a pending block stops being pending: the same block now carries
+ * the reference, so an upload or generation fills the block already on screen
+ * rather than inserting a second one beside it. The box travels with it,
+ * because the blob reference carries no dimensions, and `source` is replaced
+ * whole by whatever made the bytes.
  *
  * A block that is not a media block is refused: the reference would be inert
  * data on a type that does not recognize it.
@@ -1453,6 +1657,7 @@ export async function setFigure(input: {
   readonly blockId: string;
   readonly baseRevisionId: string;
   readonly caption?: string;
+  readonly captionRuns?: readonly Run[];
   readonly numbered?: boolean;
 }): Promise<GraphOutcome<WrittenBlock>> {
   const loaded = await loadDocument(input.documentId);
@@ -1478,6 +1683,11 @@ export async function setFigure(input: {
       async (dataRevision, revisionOf) => ({ blockId: input.blockId, revisionId: await revisionOf(input.blockId), dataRevision }),
     );
   }
+  if (kind === "image" && input.captionRuns !== undefined) {
+    if (input.captionRuns.some((run) => (run.marks?.length ?? 0) > 0)) return refuse("captionShape", "An image caption preserves links and has no formatting marks.");
+    return commit("SET b.captionRuns = $captionRuns, b.numbered = $numbered", { bNodeId: nodeRef(input.blockId), captionRuns: normalizeRuns(input.captionRuns), numbered }, `edit image caption ${input.blockId}`, async (dataRevision, revisionOf) => ({ blockId: input.blockId, revisionId: await revisionOf(input.blockId), dataRevision }));
+  }
+  if (input.captionRuns !== undefined) return refuse("captionShape", "Only an image block carries linked caption runs.");
   return commit(
     "SET b.caption = $caption, b.numbered = $numbered",
     {
@@ -2059,6 +2269,17 @@ export async function readDocumentChanges(
     for (const rel of outcome.result.relations) {
       stamp(rel.dataRevision, rel.createdAt);
       stamp(rel.validity.dataRevision, rel.validity.updatedAt);
+    }
+    if (relation === CONTAINS) {
+      const containers = outcome.result.nodes.filter((node) => typeOf(node) === "admonition");
+      if (containers.length > 0) {
+        const nested = await query({ statement: `MATCH (p)-[c:${CONTAINS}]->(b) RETURN GRAPH p, c, b ROOT p INCLUDE HISTORY`, roots: containers.map((node) => node.id), unbounded: true, metadataOnly: true, purpose: "admonition child changes" });
+        if (nested.outcome !== "noResult" && nested.outcome !== "success") return nested as GraphOutcome<ChangeSummary>;
+        if (nested.outcome === "success") {
+          for (const node of nested.result.nodes) { stamp(node.revision.dataRevision, node.revision.createdAt); for (const prior of node.history ?? []) stamp(prior.dataRevision, prior.createdAt); }
+          for (const rel of nested.result.relations) { stamp(rel.dataRevision, rel.createdAt); stamp(rel.validity.dataRevision, rel.validity.updatedAt); }
+        }
+      }
     }
   }
 

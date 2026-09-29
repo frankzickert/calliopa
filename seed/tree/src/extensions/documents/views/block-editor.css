@@ -647,6 +647,29 @@ hr[data-block-divider] {
   white-space: nowrap;
 }
 
+/* The mode the run served, its two poles' icons at the chip's height, and
+   where it strayed from it, muted in the chip's one line. BO_0306_014 */
+.proposal-block__mode {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  height: 24px;
+  padding-inline-start: 0.2rem;
+  color: var(--text-muted);
+}
+
+.proposal-block__drift {
+  min-width: 0;
+  overflow: hidden;
+  padding-inline-end: 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  line-height: 24px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* A derived candidate's *Fixate this framing* and *Discard*, in the chip at the
    chip's height. BO_0246_006 */
 .proposal-block__chip-use {
@@ -2419,6 +2442,18 @@ hr[data-block-divider] {
   width: min(100%, calc(var(--media-width) * 1px));
 }
 
+/* Keep a displayed picture within half the visible viewport (`DO_0020_001`).
+   Automatic sizing lets the height constraint scale its width with the source. */
+.media-block__image {
+  width: auto;
+  max-height: 50vh;
+  max-height: 50dvh;
+}
+
+.media-block[style*="--media-width"].media-block__image {
+  width: auto;
+}
+
 /* Not made yet: the box with its words, on the quiet ground, told apart from
    a loaded block by its border rather than by colour alone. */
 .media-block--pending {
@@ -2434,6 +2469,21 @@ hr[data-block-divider] {
   font-size: 0.875rem;
   opacity: 0.75;
   text-align: center;
+}
+
+.media-block__upload {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block-start: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.media-block__upload input {
+  max-width: 100%;
+  color: inherit;
+  font: inherit;
 }
 
 /* A table in a document (BO_0287_011). The grid scrolls sideways inside its

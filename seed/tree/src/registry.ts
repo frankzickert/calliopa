@@ -82,7 +82,7 @@ export interface RegisteredSection extends LibrarySection {
  * its sections under it, in contribution order. CA_0056_001 CA_0056_008
  */
 export interface RegisteredLibraryIcon extends LibraryIcon {
-  /** The extension id, which is the icon's id in the stored layout. */
+  /** The extension id, or qualified section key for a section icon. */
   readonly id: string;
   readonly sections: readonly string[];
 }
@@ -102,8 +102,7 @@ export interface RegisteredDecorations {
 export interface Registry {
   readonly extensions: readonly string[];
   readonly sections: readonly RegisteredSection[];
-  /** The library's icon column, one icon per extension with sections, in
-   * contribution order. CA_0056_001 */
+  /** The library's icon column, in contribution order. CA_0056_001 CA_0070_004 */
   readonly libraryIcons: readonly RegisteredLibraryIcon[];
   /** Every qualified tab kind and the id of the view it opens with. */
   readonly kinds: Readonly<Record<string, string>>;
@@ -151,33 +150,33 @@ export function buildRegistry(
   };
 
   for (const { id, contributions } of [{ id: HOST, contributions: host }, ...entries]) {
-    // An extension's sections stand under its one icon, so the column never
-    // shows a blank button: sections without an icon, or an icon the table
-    // does not hold, are refused by name. CA_0056_008
     const contributed = contributions.sections ?? [];
-    if (contributed.length > 0) {
-      const icon = contributions.icon;
+    for (const section of contributed) {
+      const key = qualify(id, section.name);
+      const icon = section.icon ?? contributions.icon;
       if (icon === undefined) {
         throw new RegistryError(
           "section_icon_missing",
-          `${id} contributes sections without the icon they stand under in the library`,
+          `${key} has no icon in the library`,
         );
       }
       if (!isIconName(icon.name)) {
         throw new RegistryError(
           "icon_unknown",
-          `${id}'s library icon ${icon.name} is not in the shell's icon table`,
+          `${key}'s library icon ${icon.name} is not in the shell's icon table`,
         );
       }
-      libraryIcons.push({
-        id,
-        title: icon.title,
-        name: icon.name,
-        sections: contributed.map((section) => qualify(id, section.name)),
-      });
-    }
-    for (const section of contributed) {
-      const key = qualify(id, section.name);
+      const iconId = section.icon === undefined ? id : key;
+      const groupIndex = libraryIcons.findIndex((candidate) => candidate.id === iconId);
+      if (groupIndex === -1) {
+        libraryIcons.push({ id: iconId, title: icon.title, name: icon.name, sections: [key] });
+      } else {
+        const group = libraryIcons[groupIndex]!;
+        if (group.title !== icon.title || group.name !== icon.name) {
+          throw new RegistryError("library_icon_collision", `${iconId} has conflicting library icons`);
+        }
+        libraryIcons[groupIndex] = { ...group, sections: [...group.sections, key] };
+      }
       const taken = sections.find((candidate) => candidate.key === key);
       if (taken !== undefined) {
         throw new RegistryError("section_collision", `section ${key} is contributed twice`);

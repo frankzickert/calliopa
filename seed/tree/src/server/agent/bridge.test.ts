@@ -220,6 +220,14 @@ describe("starting a run aimed at a document", () => {
     expect(bodies[2]).toEqual({ goal: "g", context: "", agent: "codex" });
   });
 
+  it("Given a working mode, Then it travels with the run, and none is sent when none was given (BO_0306_017)", async () => {
+    const bodies = sentBodies();
+    await startBridgeRun({ goal: "g", agent: "codex", mode: { field: "consolidate", work: "understand" } });
+    await startBridgeRun({ goal: "g", agent: "codex" });
+    expect(bodies[0]).toEqual({ goal: "g", mode: { field: "consolidate", work: "understand" }, context: "", agent: "codex" });
+    expect(bodies[1]).toEqual({ goal: "g", context: "", agent: "codex" });
+  });
+
   it("Given a target, Then the artifact, the delivery and the references travel in mark order", async () => {
     const bodies = sentBodies();
     await startBridgeRun({

@@ -126,3 +126,23 @@
 - The body and the chips (`BO_0304_013`, `src/lib/command-target.ts`, `reference-chips.tsx`): `MarkedTarget` carries `document` when the reference points into another document, and `SentReference` a `document` kind for one marked whole, which names its document and no block; `PointedReference` shows `documentTitle`; `sent` keeps `document` and drops the title; `readCommandTarget` reads both back and refuses by name a document reference naming a block or a quote, or naming no document, and a `document` field that names nothing; `chipName` says *in “<title>”* for a reference into another document and *document “<title>”* for one marked whole; `revealTarget` carries the document and its title, and a `document` kind of its own. The chip draws the title after the number (`.chip__document`, `data-chip-document`), cut short rather than widening the line.
 - The session and the request (`BO_0304_014`, `view-bridge.ts`, `shell.tsx`): `pointing` (`ViewPointing`) — the prompt's document and block, the marks as the view serialized them (opaque to the shell), the documents marked whole with their titles and numbers, and a count — is written by the view that points and read by every view; `across` (`ViewAcross`) — the last *Mark document* pressed, with the document and its title — is written by the shell (`markDocument$`) and cleared by the mounted document view once applied. `LibraryRow` takes `pointing` and `onMark$`: while a pointing stands, a document's row is wrapped with *Mark document* at its end (`data-mark-document`, `aria-pressed`, `#n` once marked, `data-reference` on the row), a control of its own so the row's press still opens; the tab strip draws the same control before a document tab's close (`.tab__mark`). `rowPointing` derives each row's from the session.
 - Verified 2026-09-25 on the tree at dataRevision 2860 (`BO_0304_015`): `command-target.test.ts` (references into another document and a document marked whole read back with their document, what is sent of a pointed reference, each refusal by name, the reveal target naming the document), `reference-chips.test.ts` (the title after the number, the press naming the document), `library-row.test.ts` (the control on a document's row while a pointing stands, pressed and numbered once marked, absent with none, the row's press still opening), `view-bridge.test.ts`; `tsc --noEmit` clean.
+
+## Working Modes
+
+Under `BO_0306` (`docs/changes/BO_0306_FEAT_working-modes.md` in `calliopa-bootstrap`),
+transferred 2026-09-29: every run a document starts carries the person's working mode. The toggles
+and the choice are `documents`' [Block Editor](../../../src/extensions/documents/docs/system/documents/block-editor.md),
+*Working Modes*; the kernel's half is the fixed layer's
+[UI Kernel](../../../../../docs/system/ui-kernel.md), *Working Modes*.
+
+* The console's composer does not name the mode. User decision, 2026-09-29 (`BO_0306_Q5`).
+- The shell forwards the mode (`BO_0306_017`). The view bridge's `setMode$` keeps the mode each
+  document's view says is in force in the aim (`CommandAim.mode`, keyed by document as the branch
+  is), and `sendCommand$` and `sendGesture$` put it on the run's body; the run route reads it
+  (`readMode` in `src/lib/command-target.ts`, two words or none, the kernel judging the poles) and
+  hands it through `conductRun` to `startBridgeRun`, which sends it beside `intention`. The chip
+  reads the mode and the drift from the run's `agent.run` node, so `BridgeRun` reads neither.
+  `src/components/shell/icons.tsx` carries `arrows-out-simple`, `arrows-in-simple`,
+  `book-open-text` and `pencil-simple-line` from `@phosphor-icons/core@2.1.1`. Verified in
+  `src/server/agent/bridge.test.ts` (the mode sent, and none when none is given) and
+  `src/lib/command-target.test.ts` (`readMode`).

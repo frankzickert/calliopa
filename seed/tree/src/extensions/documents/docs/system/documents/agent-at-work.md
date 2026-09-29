@@ -97,3 +97,29 @@
   in `views/proposals/media-proposal.test.ts` through the harness's `[data-harness-proposed]`
   press and `proposalsRead`: the box shown, the process's end told, the picture drawn where the
   box stood; it failed with the key as it was.
+
+## The Mode A Proposal Served
+
+Under `BO_0306`, transferred 2026-09-29 (the bar's half is [Block Editor](./block-editor.md),
+*Working Modes*): a proposal shows the mode its run served and whether it strayed from it.
+
+* The proposal chip wears the quadrant's mark — the two poles' icons — and, when the kernel found
+  drift, says so in one line with the reason; accepting and rejecting are never blocked by it. The
+  judgement is the kernel's, derived from what the run staged, never the agent's own account. User
+  decision, 2026-09-29.
+- The chip's mark and line (`BO_0306_014`). `proposerOf` (`lib/proposals.ts`) reads `mode` and
+  `drift` from the run's `agent.run` content onto an agent's or the system's `Proposer`, a mode
+  naming no pole read as none; `modeOf` and `driftLine` answer them for the proposer the chip
+  shows (the withdrawer over the refiner over the proposer). `ProposalBlock` draws, after the
+  face, `.proposal-block__mode` — the two poles' icons, `role="img"` named for the quadrant
+  (*Reconnaissance*, *Prototyping*, *Synthesis*, *Commitment support*) — and, after the words,
+  `.proposal-block__drift`, *Strayed from the mode: «reasons»* with the reasons joined by *; *, in
+  the chip's one line, muted and cut with an ellipsis. A run without a mode draws neither.
+- Verified in the render harness (`BO_0306_015`), `views/working-mode.test.ts`: a chip of each
+  quadrant wearing its two icons and named for it with no drift line; a drifting run's line with
+  its reason beside the accept and reject that stand; a run without a mode drawing neither; and
+  `proposerOf` reading the mode and the drift and ignoring a mode outside the poles. Each
+  assertion was shown to bite.
+- [ ] BO_0306_016 The walk on the served build: a document opened fresh shows explore and create;
+  a run sent in each quadrant lands a proposal whose chip names it; a run made to stray draws the
+  line; the choice survives reopening the document.

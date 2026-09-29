@@ -12,6 +12,7 @@ import {
 } from "@builder.io/qwik";
 
 import type { DragPayload } from "~/lib/drag";
+import { patternImageSource, type PatternImage } from "~/lib/attachments";
 import {
   LABEL as STANDING_LABEL,
   MEANING as STANDING_MEANING,
@@ -83,6 +84,7 @@ import { OutputBlock } from "./output-block";
 import { delimiterFor, looksLikeGrid, parsePastedGrid, parseTable, sniffDelimiter } from "../lib/table-parse";
 import type { BlobReference } from "~/server/ccgw/blobs";
 import type {
+  AdmonitionBlockView,
   BlockView,
   DocumentView,
   TextBlockView,
@@ -113,9 +115,11 @@ import {
   fetchProposals,
   fetchRetired,
   sendCommand,
-  uploadTableFile,
+  uploadDocumentFile,
   sendRename,
   fetchReadMark,
+  fetchWorkingMode,
+  sendWorkingMode,
   sendReadMark, requiresProposal, refusedByFloor, afterFloor, WRITE_FLOOR_MS } from "./documents-client";
 import { installSwipe, swipeJustEnded, SWIPEABLE_PROPOSALS } from "./block-swipe";
 import { installPinch } from "./block-pinch";
@@ -159,6 +163,7 @@ import { markingName, readingName } from "./row-name";
 import { DiscardedRow } from "./standing/discarded-row";
 import { StandingAnnouncement } from "./standing/standing-announcement";
 import { CardLabel, StandingMark } from "./standing/standing-mark";
+import { FIRST_MODE, POLES, switched, toggleName, type WorkingMode } from "../lib/working-mode";
 import { isAgentPrincipal } from "../lib/agent-at-work";
 import type { FocusedChild, FocusedWork } from "~/server/focused-work";
 import { BlockControls, BlockFace } from "./block-controls";
@@ -197,6 +202,7 @@ import {
 } from "../lib/agent-at-work";
 import type { ProposalFace } from "../lib/proposals";
 import "./block-editor.css";
+import "./admonition.css";
 
 /**
  * The block editor: one graph document as a reading surface, with one block at
@@ -418,10 +424,12 @@ type TakenDrop = DragEvent & { takenByRow?: boolean };
 /** What a press in one of the bar's block groups asks of a block: named, so
  * it survives a proposal's acceptance as data. DO_0006_004 */
 type BlockAct =
-  | { readonly act: "insert"; readonly block: "text" | "divider" | "table" | "code" | "equation" }
+  | { readonly act: "insert"; readonly block: "text" | "divider" | "table" | "code" | "equation" | "admonition" | "image" }
+  | { readonly act: "admonitionPattern"; readonly patternId: string }
   | { readonly act: "retire" }
   | { readonly act: "role"; readonly role: TextRole }
   | { readonly act: "toCode" }
+  | { readonly act: "toImage" }
   | { readonly act: "standing"; readonly to: Standing };
 
 const isText = (block: BlockView): block is TextBlockView =>
@@ -568,6 +576,10 @@ export interface DocumentState {
    * blocks in view, read with the document; null when never. A derived block
    * revised above it carries the changed marker. BO_0246_007 */
   readonly readMark: number | null;
+  /** The working mode in force on the document for this person: explore or
+   * consolidate, understand or create, which every run the document starts
+   * carries. BO_0306_010 */
+  mode: WorkingMode;
   status: "loading" | "ready" | "failed";
   /** True when the document this tab names is not in the graph any more, which
    * is what a stored tab naming a deleted document arrives as. */
@@ -760,6 +772,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     proposals: null,
     proposalsOpen: false,
     readMark: null,
+    mode: FIRST_MODE,
     status: "loading",
     missing: false,
     notice: null,
@@ -795,6 +808,21 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   /** The run chips this view last reported, so it reports again only when
    * they say something else. BO_0265_014 */
   const reportedChips = useSignal("");
+  const admonitionPatterns = useStore<{ items: { id: string; name: string }[] }>({ items: [] });
+  useVisibleTask$(async ({ cleanup }) => {
+    const win = typeof window === "undefined" ? undefined : window;
+    const refresh = async () => {
+      const response = await fetch("/api/x/documents/patterns");
+      if (!response.ok) return;
+      const answer = await response.json() as { outcome: string; result?: { id: string; name: string }[] };
+      admonitionPatterns.items = answer.result ?? [];
+    };
+    await refresh();
+    if (win === undefined) return;
+    const changed = () => { void refresh(); };
+    win.addEventListener("admonition-patterns-updated", changed);
+    cleanup(() => win.removeEventListener("admonition-patterns-updated", changed));
+  });
   /** Asks the branch component for a session: the bar's toggle, and a session
    * chip's press and answers. Declared before every $ that calls it.
    * CA_0057_005 CA_0057_008 */
@@ -1007,6 +1035,32 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     // they last read is judged against it. BO_0246_007
     const mark = await fetchReadMark(documentId);
     if (mark.outcome === "success") (state as { readMark: number | null }).readMark = mark.result.dataRevision;
+    // The person's working mode, read once with the document and told to the
+    // shell, which hands it to every run the document starts. A read that
+    // fails leaves the first mode in force, which is what the toggles show.
+    // BO_0306_011 BO_0306_012
+    const mode = await fetchWorkingMode(documentId);
+    if (mode.outcome === "success") state.mode = mode.result;
+    await bridge.setMode$(documentId, state.mode);
+  });
+
+  /**
+   * Switches one axis of the working mode to its other pole: drawn at once,
+   * told to the shell and written for the person. A write that fails puts the
+   * pole back and says so, so the toggles never show a mode the next run
+   * would not carry. BO_0306_010 BO_0306_011
+   */
+  const switchMode$ = $(async (axis: "field" | "work") => {
+    if (documentId === null) return;
+    const before = state.mode;
+    const after = switched(before, axis);
+    state.mode = after;
+    await bridge.setMode$(documentId, after);
+    const written = await sendWorkingMode(documentId, after);
+    if (written.outcome === "success") return;
+    state.mode = before;
+    await bridge.setMode$(documentId, before);
+    state.notice = `The working mode could not be switched to ${POLES[axis === "field" ? after.field : after.work].label.toLowerCase()}: ${describeOutcome(written)}`;
   });
 
   const reloadRetired$ = $(async () => {
@@ -1668,7 +1722,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
    * or state, a revealed retired or discarded row, or a proposal, which
    * stays open (DO_0016_003). The placement is worked out after the save, so
    * it reads the rows the save left. */
-  const insert$ = $(async (kind: "text" | "divider" | "table" | "code" | "equation", below: RowTarget) => {
+  const insert$ = $(async (kind: "text" | "divider" | "table" | "code" | "equation" | "admonition" | "image", below: RowTarget) => {
     if (documentId === null) return;
     if (!(await save$())) return;
     const doc = state.document;
@@ -1678,6 +1732,14 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
           ? { after: below.blockId }
           : { at: "end" as const }
         : belowPlacement(drawnRows(state, doc, branchOf(documentId, tab.id)), below, knownKeys(state));
+    let admonitionBlock: { kind: "admonition"; patternId: string; children: { kind: "text"; runs: { text: string }[] }[] } | null = null;
+    if (kind === "admonition") {
+      const response = await fetch("/api/x/documents/patterns");
+      const answer = response.ok ? await response.json() as { outcome: string; result?: { id: string }[] } : null;
+      const first = answer?.result?.[0];
+      if (!first) { state.notice = "Create an admonition pattern in the left panel first."; return; }
+      admonitionBlock = { kind: "admonition", patternId: first.id, children: [{ kind: "text", runs: [{ text: "Write your callout…" }] }] };
+    }
     const outcome = await sendCommand(documentId, {
       command: "insert",
       block:
@@ -1689,6 +1751,10 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
               ? { kind: "sourcecode", source: "" }
               : kind === "equation"
                 ? { kind: "equation", tex: "x" }
+                : kind === "image"
+                  ? { kind: "image" }
+                : kind === "admonition"
+                ? admonitionBlock!
                 : { kind: "text", runs: [] },
       placement,
     });
@@ -1723,6 +1789,41 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       state.notice = describeOutcome(outcome);
       return;
     }
+    state.notice = null;
+    await readBack$(null);
+  });
+
+  const turnIntoImage$ = $(async (on: string) => {
+    if (documentId === null) return;
+    if (editor.blockId === on && !(await save$())) return;
+    await writesSettled(tab.id);
+    const held = state.document?.blocks.find((candidate) => candidate.blockId === on);
+    if (held === undefined || !isText(held)) return;
+    const outcome = await sendCommand(documentId, { command: "turnIntoImage", blockId: on, baseRevisionId: held.revisionId });
+    if (outcome.outcome !== "success") { state.notice = describeOutcome(outcome); return; }
+    state.notice = null;
+    await readBack$(null);
+  });
+
+  const turnIntoAdmonition$ = $(async (on: string, patternId: string) => {
+    if (documentId === null) return;
+    if (editor.blockId === on && !(await save$())) return;
+    await writesSettled(tab.id);
+    const held = state.document?.blocks.find((candidate) => candidate.blockId === on);
+    if (held === undefined || !isText(held)) return;
+    const outcome = await sendCommand(documentId, { command: "turnIntoAdmonition", blockId: on, baseRevisionId: held.revisionId, patternId });
+    if (outcome.outcome !== "success") { state.notice = describeOutcome(outcome); return; }
+    state.notice = null;
+    await readBack$(null);
+  });
+
+  const setAdmonitionPattern$ = $(async (on: string, patternId: string) => {
+    if (documentId === null) return;
+    await writesSettled(tab.id);
+    const held = state.document?.blocks.find((candidate) => candidate.blockId === on);
+    if (held === undefined || held.kind !== "admonition") return;
+    const outcome = await sendCommand(documentId, { command: "setAdmonitionPattern", blockId: on, baseRevisionId: held.revisionId, patternId });
+    if (outcome.outcome !== "success") { state.notice = describeOutcome(outcome); return; }
     state.notice = null;
     await readBack$(null);
   });
@@ -1912,7 +2013,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
    * back so every number below follows. A refusal is said on the notice line.
    */
   const setFigure$: SetFigure = $(
-    async (blockId: string, change: { readonly caption?: string | undefined; readonly numbered?: boolean | undefined }): Promise<string | null> => {
+    async (blockId: string, change: { readonly caption?: string | undefined; readonly captionRuns?: readonly Run[] | undefined; readonly numbered?: boolean | undefined }): Promise<string | null> => {
       if (documentId === null) return "No document.";
       const held = state.document?.blocks.find((candidate) => candidate.blockId === blockId);
       if (held === undefined) return "No such block.";
@@ -1922,6 +2023,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
         blockId,
         baseRevisionId: held.revisionId,
         ...(change.caption === undefined ? {} : { caption: change.caption }),
+        ...(change.captionRuns === undefined ? {} : { captionRuns: change.captionRuns }),
         ...(change.numbered === undefined ? {} : { numbered: change.numbered }),
       });
       if (outcome.outcome !== "success") {
@@ -1959,7 +2061,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     if (!(await save$())) return;
     let reference: BlobReference | undefined;
     if (parsed.cut) {
-      const uploaded = await uploadTableFile(file);
+      const uploaded = await uploadDocumentFile(file);
       if (uploaded.outcome !== "success") {
         state.notice = describeOutcome(uploaded);
         return;
@@ -1986,6 +2088,64 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       state.notice = describeOutcome(outcome);
       return;
     }
+    state.notice = null;
+    await readBack$(null);
+  });
+
+  /** Fills the pending image block the person chose an image for. The file is
+   * decoded before upload so invalid files do not leave staged blob bytes. */
+  const uploadImage$ = $(async (blockId: string, file: File) => {
+    if (documentId === null) return;
+    if (!(await save$())) return;
+    const pending = state.document?.blocks.find((block) => block.blockId === blockId);
+    if (pending === undefined || pending.kind !== "image" || pending.objectId !== undefined) {
+      state.notice = "This image block is no longer waiting for an upload.";
+      return;
+    }
+    if (file.type !== "" && !file.type.startsWith("image/")) {
+      state.notice = `${file.name} is not an image file.`;
+      return;
+    }
+    let width: number;
+    let height: number;
+    try {
+      const bitmap = await createImageBitmap(file);
+      width = bitmap.width;
+      height = bitmap.height;
+      bitmap.close();
+    } catch {
+      state.notice = `${file.name} could not be read as an image.`;
+      return;
+    }
+    if (!Number.isSafeInteger(width) || width < 1 || !Number.isSafeInteger(height) || height < 1) {
+      state.notice = `${file.name} has no readable image dimensions.`;
+      return;
+    }
+    let filled = false;
+    try {
+      const uploaded = await uploadDocumentFile(file);
+      if (uploaded.outcome !== "success") {
+        state.notice = describeOutcome(uploaded);
+        return;
+      }
+      const outcome = await sendCommand(documentId, {
+        command: "fillMediaBlock",
+        blockId,
+        baseRevisionId: pending.revisionId,
+        reference: uploaded.result.reference,
+        width,
+        height,
+      });
+      if (outcome.outcome !== "success") {
+        state.notice = describeOutcome(outcome);
+        return;
+      }
+      filled = true;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      state.notice = `${file.name} could not be uploaded: ${detail}`;
+    }
+    if (!filled) return;
     state.notice = null;
     await readBack$(null);
   });
@@ -2107,7 +2267,14 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     const blockId = editing ? editor.blockId : on;
     if (documentId === null || blockId === null || blockId === undefined) return;
     const held = state.document?.blocks.find((candidate) => candidate.blockId === blockId);
-    if (!editing && (held === undefined || !isText(held))) return;
+    if (held?.kind === "image") {
+      const outcome = await sendCommand(documentId, { command: "turnImageIntoText", blockId, baseRevisionId: held.revisionId, role });
+      if (outcome.outcome !== "success") { state.notice = describeOutcome(outcome); return; }
+      state.notice = null;
+      await readBack$(null);
+      return;
+    }
+    if (held === undefined || !isText(held)) return;
     const at = editor.start;
     const outcome = await sendCommand(documentId, {
       command: "revise",
@@ -2748,9 +2915,15 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
    * acceptance, and nothing but data crosses. DO_0006_004 */
   const actOnBlock$ = $(async (blockId: string, act: BlockAct) => {
     if (act.act === "insert") await insert$(act.block, { blockId });
+    else if (act.act === "admonitionPattern") {
+      const held = state.document?.blocks.find((candidate) => candidate.blockId === blockId);
+      if (held?.kind === "admonition") await setAdmonitionPattern$(blockId, act.patternId);
+      else if (held !== undefined && isText(held)) await turnIntoAdmonition$(blockId, act.patternId);
+    }
     else if (act.act === "retire") await retire$(blockId);
     else if (act.act === "role") await setRole$(act.role, blockId);
     else if (act.act === "toCode") await turnIntoCode$(blockId);
+    else if (act.act === "toImage") await turnIntoImage$(blockId);
     else await standing.setStanding$(blockId, act.to);
   });
 
@@ -3241,6 +3414,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     track(() => state.promptsOpen);
     track(() => state.proposalsOpen);
     track(() => state.branchGroup);
+    track(() => state.mode);
     track(() => state.focusedBlockId);
     track(() => state.focusedItemId);
     track(() => state.proposals);
@@ -3274,6 +3448,26 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
         id: "work",
         label: "Work",
         actions: [
+          // The working mode leads, one control per axis, each wearing the
+          // pole in force so what the person sees is what is active; a press
+          // switches to the other pole. Not pressed toggles: neither pole is
+          // the pressed one. BO_0306_010
+          {
+            kind: "button",
+            id: "working-mode-field",
+            label: POLES[state.mode.field].label,
+            icon: POLES[state.mode.field].icon,
+            name: toggleName(state.mode.field),
+            run$: $(() => switchMode$("field")),
+          },
+          {
+            kind: "button",
+            id: "working-mode-work",
+            label: POLES[state.mode.work].label,
+            icon: POLES[state.mode.work].icon,
+            name: toggleName(state.mode.work),
+            run$: $(() => switchMode$("work")),
+          },
           {
             kind: "toggle",
             id: "work-in-proposal",
@@ -3431,6 +3625,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
         ? editor.position
         : state.document.blocks.findIndex((candidate) => candidate.blockId === blockId) + 1;
       const proposed = item?.block ?? null;
+      const typeTarget = proposed ?? subject;
       const role = editing
         ? editor.role
         : subject !== undefined && isText(subject)
@@ -3443,6 +3638,19 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       const retiredSubject =
         !editing && item === undefined && subject === undefined && state.retired.some((candidate) => candidate.blockId === blockId);
       const named = item !== undefined ? "the proposed block" : retiredSubject ? "the retired block" : `block ${position}`;
+      const canChooseAdmonition = typeTarget !== undefined && (isText(typeTarget) || typeTarget.kind === "admonition");
+      const currentPatternId = typeTarget?.kind === "admonition" ? typeTarget.patternId : null;
+      const patternOptions = canChooseAdmonition
+        ? admonitionPatterns.items.map((pattern) => ({ value: `admonition:${pattern.id}`, label: pattern.name, icon: "info" as const }))
+        : [];
+      const typeOptions = typeTarget?.kind === "admonition"
+        ? patternOptions
+        : [
+            ...TEXT_ROLES.map((option) => ({ value: option, label: ROLE_LABEL[option], icon: ROLE_ICON[option] })),
+            ...patternOptions,
+            ...(subject?.kind === "image" || item?.block?.kind === "image" ? [] : [{ value: "code", label: "Code", icon: "code" as const }]),
+            ...(subject?.kind === "image" || item?.block?.kind === "image" || proposed?.kind === "image" ? [] : [{ value: "image", label: "Image", icon: "image" as const }]),
+          ];
       // The block controls in one settled order, all of them icons: the role
       // the subject is in, then adding a paragraph, then retiring it. The
       // bar draws a choice whose current option names an icon as that icon
@@ -3456,20 +3664,13 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
             {
               kind: "choice",
               id: "block-role",
-              label: "Text role",
-              value: role ?? "paragraph",
-              options: [
-                ...TEXT_ROLES.map((option) => ({
-                  value: option,
-                  label: ROLE_LABEL[option],
-                  icon: ROLE_ICON[option],
-                })),
-                // Source code: the block leaves the text roles for a code
-                // block in its place. BO_0289_021
-                { value: "code", label: "Code", icon: "code" as const },
-              ],
+              label: "Block type",
+              value: currentPatternId !== null ? `admonition:${currentPatternId}` : subject?.kind === "image" ? "image" : role ?? "paragraph",
+              options: typeOptions,
               run$: $((chosen: string) => {
-                const act: BlockAct = chosen === "code" ? { act: "toCode" } : { act: "role", role: chosen as TextRole };
+                const act: BlockAct = chosen.startsWith("admonition:")
+                  ? { act: "admonitionPattern", patternId: chosen.slice("admonition:".length) }
+                  : chosen === "code" ? { act: "toCode" } : chosen === "image" ? { act: "toImage" } : { act: "role", role: chosen as TextRole };
                 if (itemId !== null) {
                   void acceptThenAct$(itemId, act);
                   return;
@@ -3490,6 +3691,14 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
               icon: "plus",
               name: `Insert paragraph after ${named}`,
               run$: press$({ act: "insert", block: "text" }),
+            },
+            {
+              kind: "button",
+              id: "block-add-image",
+              label: "Add image",
+              icon: "image",
+              name: `Insert image upload field after ${named}`,
+              run$: press$({ act: "insert", block: "image" }),
             },
             {
               kind: "button",
@@ -4860,7 +5069,9 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                         continueCode$={setCodeContinues$}
                         numbersCode={state.document?.lineNumbers !== false}
                         importTable$={importTable$}
+                        uploadImage$={uploadImage$}
                         pasteGrid$={pasteGrid$}
+                        createParagraphAfter$={$(() => insert$("text", { blockId: entry.block.blockId }))}
                       />
                     );
                     // Framed by each removal or move that concerns it, the
@@ -5095,8 +5306,12 @@ const BlockRow = component$<{
   numbersCode: boolean;
   /** A .csv or .tsv dropped on the row while reading. BO_0287_013 */
   importTable$: QRL<(file: File, afterBlockId: string | null) => Promise<void>>;
+  /** Fills an empty image block from a selected file. DO_0018_001 */
+  uploadImage$: QRL<(blockId: string, file: File) => Promise<void>>;
   /** A grid pasted into the empty block being edited. BO_0287_012 */
   pasteGrid$: QRL<(text: string) => Promise<void>>;
+  /** Creates a top-level paragraph immediately after this row. */
+  createParagraphAfter$: QRL<() => Promise<void>>;
 }>(
   ({
     block,
@@ -5151,7 +5366,9 @@ const BlockRow = component$<{
     continueCode$,
     numbersCode,
     importTable$,
+    uploadImage$,
     pasteGrid$,
+    createParagraphAfter$,
   }) => {
     const position = index + 1;
     /** The pause before a hovered row reveals its depth, so a pointer
@@ -5352,6 +5569,9 @@ const BlockRow = component$<{
             <BlockControls itemId={documentId} blockId={block.blockId} press$={pressControl$} />
           </div>
         )}
+        {mode === "reading" && block.kind === "image" && (active || focused) && (
+          <div class="block-toolbars"><BlockControls itemId={documentId} blockId={block.blockId} press$={pressControl$} /></div>
+        )}
         <PassageNumbers block={block} />
 
         {/* Every row's grip while reading: drawn on hover on a desktop and on
@@ -5389,6 +5609,7 @@ const BlockRow = component$<{
         )}
 
         {block.kind === "divider" && <hr data-block-divider />}
+        {block.kind === "admonition" && <AdmonitionCallout block={block} documentId={documentId ?? ""} createOutside$={createParagraphAfter$} /> }
 
         {/* A numbered block's number is handed to its view from the read's
             map, never read off the block: the row is keyed by revision and its
@@ -5399,7 +5620,7 @@ const BlockRow = component$<{
         {/* A picture or a moving picture. It carries no authored text and takes
             no text editor, as a divider does not. BO_0273_011 */}
         {(block.kind === "image" || block.kind === "video") && (
-          <MediaBlock block={block} number={figureNumbers?.[block.blockId]} caption$={block.kind === "image" && mode === "reading" ? setFigure$ : undefined} />
+          <MediaBlock block={block} number={figureNumbers?.[block.blockId]} caption$={block.kind === "image" && mode === "reading" ? setFigure$ : undefined} uploadImage$={mode === "reading" ? uploadImage$ : undefined} />
         )}
 
         {/* A table: its cells edited in place while reading, each edit one
@@ -6150,4 +6371,270 @@ const RetiredRow = component$<{
       </button>
     </div>
   );
+});
+
+const AdmonitionCallout = component$<{ block: Extract<BlockView, { kind: "admonition" }>; documentId: string; createOutside$: QRL<() => Promise<void>> }>(({ block, documentId, createOutside$ }) => {
+  const host = useSignal<HTMLElement>();
+  const state = useStore<{ pattern: { name: string; color: string; image?: PatternImage; footline?: string } | null; patterns: { id: string; name: string; color: string; image?: PatternImage; footline?: string }[]; revisionId: string; childRevisions: Record<string, string>; children: TextBlockView[]; pendingFocus: { blockId: string; offset: number } | null }>({ pattern: null, patterns: [], revisionId: block.revisionId, childRevisions: {}, children: [...block.children], pendingFocus: null });
+  useVisibleTask$(async ({ cleanup }) => {
+    const win = host.value?.ownerDocument.defaultView;
+    if (win === null || win === undefined) return;
+    const refresh = async () => {
+      const response = await fetch("/api/x/documents/patterns");
+      if (!response.ok) return;
+      const answer = await response.json() as { outcome: string; result?: ({ id: string; name: string; color: string; image?: PatternImage; footline?: string })[] };
+      state.patterns = answer.result ?? [];
+      state.pattern = answer.result?.find((pattern) => pattern.id === block.patternId) ?? null;
+    };
+    await refresh();
+    const changed = () => { void refresh(); };
+    win.addEventListener("admonition-patterns-updated", changed);
+    cleanup(() => win.removeEventListener("admonition-patterns-updated", changed));
+  });
+  useVisibleTask$(({ track }) => {
+    const pending = track(() => state.pendingFocus);
+    if (pending === null) return;
+    state.pendingFocus = null;
+    const doc = host.value?.ownerDocument;
+    const win = doc?.defaultView;
+    const target = host.value?.querySelector<HTMLElement>(`[data-block-id="${pending.blockId}"]`);
+    if (doc === undefined || win === null || win === undefined) return;
+    if (target === null || target === undefined) return;
+    target.focus();
+    const range = doc.createRange();
+    const walker = doc.createTreeWalker(target, 4);
+    let remaining = pending.offset;
+    let node = walker.nextNode();
+    while (node !== null) {
+      const length = node.textContent?.length ?? 0;
+      if (remaining <= length) {
+        range.setStart(node, remaining);
+        range.collapse(true);
+        const selection = win.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        return;
+      }
+      remaining -= length;
+      node = walker.nextNode();
+    }
+    range.selectNodeContents(target);
+    range.collapse(false);
+    const selection = win.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  const pattern = state.pattern;
+  const imageSource = patternImageSource(pattern?.image);
+  const refreshChildren$ = $(async () => {
+    const response = await fetch(`/api/x/documents/d/${documentId}`);
+    if (!response.ok) return;
+    const answer = await response.json() as { result?: DocumentView };
+    const updated = answer.result?.blocks.find(
+      (entry): entry is AdmonitionBlockView => entry.blockId === block.blockId && entry.kind === "admonition",
+    );
+    state.children = updated === undefined ? state.children : [...updated.children];
+  });
+  const addChild$ = $(async (afterBlockId?: string, runs: readonly Run[] = []) => {
+    const response = await fetch(`/api/x/documents/d/${documentId}/commands`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ command: "insertAdmonitionChild", parentBlockId: block.blockId, ...(afterBlockId ? { afterBlockId } : {}), runs }) });
+    const answer = await response.json() as { outcome: string; result?: { blockId: string } };
+    if (answer.outcome === "success") { await refreshChildren$(); return answer.result?.blockId; }
+    return undefined;
+  });
+  const saveChild$ = $(async (child: TextBlockView, target: HTMLElement) => {
+    const response = await fetch(`/api/x/documents/d/${documentId}/commands`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ command: "revise", blockId: child.blockId, baseRevisionId: state.childRevisions[child.blockId] ?? child.revisionId, runs: [{ text: target.innerText ?? target.textContent ?? "" }] }) });
+    const answer = await response.json() as { outcome: string; result?: { revisionId: string } };
+    if (answer.outcome === "success" && answer.result) state.childRevisions[child.blockId] = answer.result.revisionId;
+  });
+  const splitChild$ = $(async (child: TextBlockView, event: KeyboardEvent, element: HTMLElement) => {
+    if (event.key !== "Enter" || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+    event.preventDefault();
+    const doc = host.value?.ownerDocument;
+    const win = doc?.defaultView;
+    if (doc === undefined || win === null || win === undefined) return;
+    const selection = win.getSelection();
+    const full = element.innerText ?? element.textContent ?? "";
+    if (state.children.at(-1)?.blockId === child.blockId && full.trim() === "") {
+      await createOutside$();
+      return;
+    }
+    let offset = full.length;
+    if (selection?.rangeCount) { const range = selection.getRangeAt(0).cloneRange(); range.selectNodeContents(element); range.setEnd(selection.getRangeAt(0).startContainer, selection.getRangeAt(0).startOffset); offset = range.toString().length; }
+    const head = full.slice(0, offset); const tail = full.slice(offset);
+    const revised = await fetch(`/api/x/documents/d/${documentId}/commands`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ command: "revise", blockId: child.blockId, baseRevisionId: state.childRevisions[child.blockId] ?? child.revisionId, runs: [{ text: head }] }) });
+    const reviseAnswer = await revised.json() as { outcome: string; result?: { revisionId: string } };
+    if (reviseAnswer.outcome !== "success") return;
+    state.childRevisions[child.blockId] = reviseAnswer.result?.revisionId ?? child.revisionId;
+    const created = await addChild$(child.blockId, [{ text: tail }]);
+    if (created) state.pendingFocus = { blockId: created, offset: 0 };
+  });
+  const moveChildCaret$ = $(async (child: TextBlockView, direction: -1 | 1, element: HTMLElement) => {
+    const doc = host.value?.ownerDocument;
+    const win = doc?.defaultView;
+    if (doc === undefined || win === null || win === undefined) return;
+    const index = state.children.findIndex((candidate) => candidate.blockId === child.blockId);
+    const targetChild = state.children[index + direction];
+    if (targetChild === undefined) return;
+    const selection = win.getSelection();
+    if (selection === null || selection.rangeCount === 0 || !selection.getRangeAt(0).collapsed) return;
+    const current = selection.getRangeAt(0);
+    const prefix = doc.createRange();
+    prefix.selectNodeContents(element);
+    prefix.setEnd(current.startContainer, current.startOffset);
+    const offset = prefix.toString().length;
+    const caret = current.cloneRange();
+    caret.collapse(true);
+    const measuredCaret = caret.getBoundingClientRect?.();
+    const x = measuredCaret?.left ?? 0;
+    await saveChild$(child, element);
+    const target = host.value?.querySelector<HTMLElement>(`[data-block-id="${targetChild.blockId}"]`);
+    if (target === null) return;
+    if (target === undefined) return;
+    const walker = doc.createTreeWalker(target, 4);
+    const positions: { node: Node; offset: number; line: number; x: number; global: number }[] = [];
+    let textNode = walker.nextNode();
+    let global = 0;
+    while (textNode !== null) {
+      const length = textNode.textContent?.length ?? 0;
+      for (let point = 0; point <= length; point++) {
+        const range = doc.createRange();
+        range.setStart(textNode, point);
+        range.collapse(true);
+        const rect = range.getBoundingClientRect?.();
+        positions.push({ node: textNode, offset: point, line: rect?.top ?? 0, x: rect?.left ?? 0, global: global + point });
+      }
+      global += length;
+      textNode = walker.nextNode();
+    }
+    let targetOffset = Math.min(offset, (target.innerText ?? target.textContent ?? "").length);
+    if (positions.some((point) => point.line !== 0 || point.x !== 0)) {
+      const line = direction < 0 ? Math.max(...positions.map((point) => point.line)) : Math.min(...positions.map((point) => point.line));
+      targetOffset = positions
+        .filter((point) => point.line === line)
+        .reduce((best, point) => Math.abs(point.x - x) < Math.abs(best.x - x) ? point : best).global;
+    } else if (positions.length > 0) {
+      targetOffset = direction < 0 ? (target.innerText ?? target.textContent ?? "").length : 0;
+    }
+    target.focus();
+    const range = doc.createRange();
+    const targetWalker = doc.createTreeWalker(target, 4);
+    let remaining = targetOffset;
+    let targetNode = targetWalker.nextNode();
+    while (targetNode !== null) {
+      const length = targetNode.textContent?.length ?? 0;
+      if (remaining <= length) {
+        range.setStart(targetNode, remaining);
+        range.collapse(true);
+        const nextSelection = win.getSelection();
+        nextSelection?.removeAllRanges();
+        nextSelection?.addRange(range);
+        return;
+      }
+      remaining -= length;
+      targetNode = targetWalker.nextNode();
+    }
+    range.selectNodeContents(target);
+    range.collapse(false);
+    const nextSelection = win.getSelection();
+    nextSelection?.removeAllRanges();
+    nextSelection?.addRange(range);
+  });
+  const mergeChild$ = $(async (child: TextBlockView, adjacent: TextBlockView, direction: "back" | "forward", element: HTMLElement) => {
+    const into = direction === "back" ? adjacent : child;
+    const from = direction === "back" ? child : adjacent;
+    const adjacentElement = host.value?.querySelector<HTMLElement>(`[data-block-id="${adjacent.blockId}"]`);
+    if (adjacentElement === null || adjacentElement === undefined) return;
+    await saveChild$(child, element);
+    await saveChild$(adjacent, adjacentElement);
+    const response = await fetch(`/api/x/documents/d/${documentId}/commands`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        command: "mergeAdmonitionChild",
+        parentBlockId: block.blockId,
+        intoBlockId: into.blockId,
+        intoBaseRevisionId: state.childRevisions[into.blockId] ?? into.revisionId,
+        blockId: from.blockId,
+        baseRevisionId: state.childRevisions[from.blockId] ?? from.revisionId,
+      }),
+    });
+    const answer = await response.json() as { outcome: string };
+    if (answer.outcome !== "success") return;
+    const caretOffset = direction === "back" ? (adjacentElement.innerText ?? adjacentElement.textContent ?? "").length : (element.innerText ?? element.textContent ?? "").length;
+    await refreshChildren$();
+    state.pendingFocus = { blockId: into.blockId, offset: caretOffset };
+  });
+  const childKeyDown$ = $(async (child: TextBlockView, event: KeyboardEvent, element: HTMLElement) => {
+    const doc = host.value?.ownerDocument;
+    const win = doc?.defaultView;
+    if (doc === undefined || win === null || win === undefined) return;
+    if (event.key === "Enter") {
+      await splitChild$(child, event, element);
+      return;
+    }
+    if ((event.key === "ArrowUp" || event.key === "ArrowDown") && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      const selection = win.getSelection();
+      if (selection === null || selection.rangeCount === 0 || !selection.getRangeAt(0).collapsed) return;
+      const caret = selection.getRangeAt(0).cloneRange();
+      caret.collapse(true);
+      const measuredCaret = caret.getBoundingClientRect?.();
+      const rectTop = measuredCaret?.top ?? 0;
+      const rectBottom = measuredCaret?.bottom ?? 0;
+      const rectHeight = measuredCaret?.height ?? 0;
+      const prefix = doc.createRange();
+      prefix.selectNodeContents(element);
+      prefix.setEnd(selection.getRangeAt(0).startContainer, selection.getRangeAt(0).startOffset);
+      const offset = prefix.toString().length;
+      const textLength = (element.innerText ?? element.textContent ?? "").length;
+      const textLineRects: DOMRect[] = [];
+      const textWalker = doc.createTreeWalker(element, 4);
+      let textNode = textWalker.nextNode();
+      while (textNode !== null) {
+        if ((textNode.textContent?.length ?? 0) > 0) {
+          const lineRange = doc.createRange();
+          lineRange.selectNodeContents(textNode);
+          for (const rect of Array.from(lineRange.getClientRects())) {
+            if (rect.height > 0) textLineRects.push(rect);
+          }
+        }
+        textNode = textWalker.nextNode();
+      }
+      const hasTextLineGeometry = rectHeight > 0 && textLineRects.length > 0;
+      const atVisualEdge = hasTextLineGeometry
+        ? event.key === "ArrowUp"
+          ? rectTop <= Math.min(...textLineRects.map((rect) => rect.top)) + 2
+          : rectBottom >= Math.max(...textLineRects.map((rect) => rect.bottom)) - 2
+        : event.key === "ArrowUp" ? offset === 0 : offset === textLength;
+      if (!atVisualEdge) return;
+      event.preventDefault();
+      await moveChildCaret$(child, event.key === "ArrowUp" ? -1 : 1, element);
+      return;
+    }
+    if (event.key === "Backspace" || event.key === "Delete") {
+      const selection = win.getSelection();
+      if (selection === null || selection.rangeCount === 0 || !selection.getRangeAt(0).collapsed) return;
+      const prefix = doc.createRange();
+      prefix.selectNodeContents(element);
+      prefix.setEnd(selection.getRangeAt(0).startContainer, selection.getRangeAt(0).startOffset);
+      const offset = prefix.toString().length;
+      const atBoundary = event.key === "Backspace" ? offset === 0 : offset === (element.innerText ?? element.textContent ?? "").length;
+      if (!atBoundary) return;
+      const index = state.children.findIndex((candidate) => candidate.blockId === child.blockId);
+      const adjacent = state.children[index + (event.key === "Backspace" ? -1 : 1)];
+      if (adjacent === undefined) {
+        event.preventDefault();
+        return;
+      }
+      event.preventDefault();
+      await mergeChild$(child, adjacent, event.key === "Backspace" ? "back" : "forward", element);
+    }
+  });
+  return <aside ref={host} class="admonition" style={{ "--admonition-color": pattern?.color ?? "#607d8b", ...(imageSource ? { "--admonition-image": `url(${JSON.stringify(imageSource)})` } : {}) }} data-pattern-id={block.patternId}>
+    {imageSource && <img class="admonition__image" src={imageSource} alt="" />}
+    <div class="admonition__content">
+      <strong>{pattern?.name ?? "Admonition"}</strong>
+      <div class="admonition__children">{state.children.map((child) => <div key={child.blockId} class="admonition__text" contentEditable="true" data-block-id={child.blockId} onBlur$={(event) => saveChild$(child, event.currentTarget as HTMLElement)} onKeyDown$={(event, element) => childKeyDown$(child, event, element)}>{child.runs.map((run) => run.text).join("")}</div>)}</div>
+      {pattern?.footline && <footer>{pattern.footline}</footer>}
+    </div>
+  </aside>;
 });

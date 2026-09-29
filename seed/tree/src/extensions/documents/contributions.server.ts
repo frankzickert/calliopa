@@ -5,6 +5,8 @@ import {
 } from "~/contract";
 import {
   handleDocumentChanges,
+  handleAdmonitionPatternsRead,
+  handleAdmonitionPatternWrite,
   handleDocumentCommand,
   handleDocumentCreate,
   handleDocumentList,
@@ -13,10 +15,11 @@ import {
   handleRetiredRead,
   unknownDocument,
   handleReadMark,
+  handleWorkingMode,
   handleBranchRead,
   handlePolicyRead,
   handleStandingRead,
-  handleTableFile,
+  handleDocumentFile,
 } from "./server/api";
 import { withBranch } from "~/server/ccgw/branch-scope";
 import { listDocuments } from "./server/documents";
@@ -51,6 +54,9 @@ const document =
   };
 
 const routes: readonly ApiRoute[] = [
+  { method: "GET", path: "patterns", handle: async (event) => { const answer = await handleAdmonitionPatternsRead(); event.json(answer.status, answer.body); } },
+  { method: "POST", path: "patterns", handle: async (event) => { const answer = await handleAdmonitionPatternWrite(event.request); event.json(answer.status === 200 ? 201 : answer.status, answer.body); } },
+  { method: "PUT", path: "patterns/[id]", handle: async (event, params) => { const answer = await handleAdmonitionPatternWrite(event.request, params["id"] ?? ""); event.json(answer.status, answer.body); } },
   {
     method: "GET",
     path: "d",
@@ -99,6 +105,17 @@ const routes: readonly ApiRoute[] = [
     handle: (event, params) => document((id) => handleReadMark(event.request, id))(event, params),
   },
   {
+    /** The signed-in person's working mode on the document. BO_0306_011 */
+    method: "GET",
+    path: "d/[id]/mode",
+    handle: (event, params) => document((id) => handleWorkingMode(event.request, id))(event, params),
+  },
+  {
+    method: "PUT",
+    path: "d/[id]/mode",
+    handle: (event, params) => document((id) => handleWorkingMode(event.request, id))(event, params),
+  },
+  {
     /** The signed-in person's branch on the document. BO_0250_020 */
     method: "GET",
     path: "d/[id]/branch",
@@ -117,12 +134,11 @@ const routes: readonly ApiRoute[] = [
     handle: (event, params) => document((id) => handleStandingRead(event.request, id))(event, params),
   },
   {
-    /** The bytes of a file a table stands behind, answered as the blob
-     * reference the insert carries. BO_0287_013 */
+    /** A documents-owned file upload answered as its blob reference. */
     method: "POST",
     path: "blobs",
     handle: async (event) => {
-      const { status, body } = await handleTableFile(event.request);
+      const { status, body } = await handleDocumentFile(event.request);
       event.json(status, body);
     },
   },

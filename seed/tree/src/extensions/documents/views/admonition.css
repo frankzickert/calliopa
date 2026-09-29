@@ -1,0 +1,5 @@
+.admonition { --admonition-color: #607d8b; position: relative; display: block; box-sizing: border-box; width: 100%; margin: 1rem 0; padding: 1rem 1rem 1rem 2.5rem; border-inline-start: .35rem solid var(--admonition-color); border-radius: .35rem; background: color-mix(in srgb, var(--admonition-color) 16%, var(--surface, white)); }
+.admonition__image { position: absolute; left: 0; top: 50%; width: 3.5rem; height: 3.5rem; transform: translate(-50%, -50%); object-fit: cover; object-position: center; }
+.admonition__content { flex: 1; min-width: 0; }
+.admonition__text { min-height: 1.5em; }
+.admonition__content footer { margin-block-start: .75rem; text-align: end; font-size: .85em; opacity: .75; }

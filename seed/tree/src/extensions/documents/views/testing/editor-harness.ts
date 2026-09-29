@@ -33,15 +33,15 @@ import {
 import type { DocumentActivity } from "~/server/agent/run-events";
 import { ViewBarPanel } from "~/components/shell/view-bar";
 import type { Tab } from "~/lib/tabs";
-import type { Pointing, RevealTarget } from "~/lib/command-target";
+import type { Pointing, RevealTarget, WorkingMode } from "~/lib/command-target";
 import type { Standing } from "../../lib/disposition";
 import type { BlockHistory, BlockProvenance, DocumentRelations } from "../../server/work";
 import type { FocusedWork } from "~/server/focused-work";
 import type { DocumentJudgements } from "../../server/judgements";
-import type { BlockView, DocumentView } from "../../server/assemble";
+import type { BlockView, DocumentView, TextBlockView } from "../../server/assemble";
 import type { DocumentProposals } from "../../server/documents";
 import { orderBetween } from "~/lib/order";
-import { splitRuns, type Run } from "~/lib/runs";
+import { runsText, splitRuns, type Run } from "~/lib/runs";
 import { BlockEditorView } from "../block-editor";
 
 /**
@@ -97,6 +97,8 @@ export interface BridgeRecord {
   drags: string[];
   /** The branch the view last said the tab works in. BO_0250 */
   branch?: string | null;
+  /** The working mode the view last told the shell. BO_0306_013 */
+  mode?: WorkingMode | null;
   /** The headlines of the messages the view raised, in order. CA_0053_007 */
   messages?: string[];
   /** What the next press on `[data-harness-drop]` drops, and where, as the
@@ -192,6 +194,12 @@ export function documentsApi(
     /** The runs the document's run list answers, newest first. BO_0267_018 */
     readonly runs?: readonly { readonly id: string; readonly goal: string; readonly status: string; readonly source: string | null; readonly references: readonly unknown[]; readonly touched: readonly string[]; readonly agent: string | null; readonly group: string | null; readonly startedAt: number }[];
     readonly marks?: number[];
+    /** The working mode the person holds on the document, none when never
+     * set; the writes a toggle made, in order; and whether the kernel refuses
+     * them. BO_0306_013 */
+    readonly mode?: { field: string; work: string };
+    readonly modes?: { field: string; work: string }[];
+    readonly modeRefused?: boolean;
     /** The focused work the document's blocks have, as the focused read
      * answers it; an open of a block not there is answered as created, with
      * the child's id `child-<blockId>`. CA_0047 */
@@ -316,6 +324,44 @@ export function documentsApi(
         );
       }
       const revisionId = `rev-next-${++revisions}`;
+      if (options.follow === true && body["command"] === "insertAdmonitionChild") {
+        const parentBlockId = String(body["parentBlockId"]);
+        const afterBlockId = typeof body["afterBlockId"] === "string" ? body["afterBlockId"] : undefined;
+        const parent = current.blocks.find((candidate) => candidate.blockId === parentBlockId);
+        if (parent === undefined || parent.kind !== "admonition") return new Response("{}", { status: 404 });
+        const blockId = `child-added-${revisions}`;
+        const index = afterBlockId === undefined ? parent.children.length : parent.children.findIndex((candidate) => candidate.blockId === afterBlockId) + 1;
+        const previous = parent.children[index - 1]?.order ?? "";
+        const next = parent.children[index]?.order ?? "";
+        const child: TextBlockView = {
+          kind: "text", blockId, revisionId, containmentId: `c-${blockId}`, order: orderBetween(previous, next),
+          role: "paragraph", standing: "keep", runs: body["runs"] as Run[],
+        };
+        current = {
+          ...current,
+          blocks: current.blocks.map((candidate) => candidate === parent ? { ...parent, children: [...parent.children.slice(0, index), child, ...parent.children.slice(index)] } : candidate),
+        };
+        return answer({ blockId, revisionId, dataRevision: "1" });
+      }
+      if (options.follow === true && body["command"] === "mergeAdmonitionChild") {
+        const parentBlockId = String(body["parentBlockId"]);
+        const parent = current.blocks.find((candidate) => candidate.blockId === parentBlockId);
+        if (parent === undefined || parent.kind !== "admonition") return new Response("{}", { status: 404 });
+        const into = parent.children.find((candidate) => candidate.blockId === body["intoBlockId"]);
+        const from = parent.children.find((candidate) => candidate.blockId === body["blockId"]);
+        if (into === undefined || from === undefined) return new Response("{}", { status: 404 });
+        const intoAt = parent.children.indexOf(into);
+        const fromAt = parent.children.indexOf(from);
+        const earlier = intoAt < fromAt ? into : from;
+        const later = intoAt < fromAt ? from : into;
+        const updatedInto = runsText(from.runs) === "" ? into : { ...into, runs: [...earlier.runs, ...later.runs], revisionId };
+        current = {
+          ...current,
+          blocks: current.blocks.map((candidate) => candidate === parent ? { ...parent, children: parent.children.filter((child) => child !== from).map((child) => child === into ? updatedInto : child) } : candidate),
+        };
+        retired = [...retired, from];
+        return answer({ blockId: into.blockId, revisionId: updatedInto.revisionId, dataRevision: "1" });
+      }
       if (body["command"] === "resolveJudgement" && judgements !== null) {
         const id = String(body["judgementId"]);
         const resolved = `harness at ${new Date().toISOString()}`;
@@ -381,6 +427,24 @@ export function documentsApi(
       if (options.follow === true && (body["command"] === "revise" || body["command"] === "split")) {
         if (options.writeDelayMs !== undefined) {
           await new Promise((resolve) => setTimeout(resolve, options.writeDelayMs));
+        }
+        if (body["command"] === "revise") {
+          const parent = current.blocks.find((candidate) => candidate.kind === "admonition" && candidate.children.some((child) => child.blockId === body["blockId"]));
+          if (parent?.kind === "admonition") {
+            const child = parent.children.find((candidate) => candidate.blockId === body["blockId"]);
+            if (child === undefined) return new Response("{}", { status: 404 });
+            if (body["baseRevisionId"] !== child.revisionId) {
+              return new Response(JSON.stringify({ outcome: "conflict", conflicts: [{ nodeId: `node:${child.blockId}`, expectedRevisionId: String(body["baseRevisionId"]), currentRevisionId: child.revisionId }] }), { status: 409, headers: { "content-type": "application/json" } });
+            }
+            current = {
+              ...current,
+              blocks: current.blocks.map((candidate) => candidate === parent ? {
+                ...parent,
+                children: parent.children.map((entry) => entry === child ? { ...child, runs: body["runs"] as Run[], revisionId } : entry),
+              } : candidate),
+            };
+            return answer({ blockId: child.blockId, revisionId });
+          }
         }
         const index = current.blocks.findIndex((block) => block.blockId === body["blockId"]);
         const block = current.blocks[index];
@@ -594,6 +658,18 @@ export function documentsApi(
       }
       return answer({ documentId: document.documentId, dataRevision: options.readMark ?? null });
     }
+    if (url === `${base}/mode`) {
+      if (init?.method === "PUT") {
+        const body = JSON.parse(String(init.body ?? "{}")) as { field: string; work: string };
+        options.modes?.push(body);
+        if (options.modeRefused === true) {
+          return new Response(JSON.stringify({ outcome: "storageError", detail: "The kernel answered 503 for the working mode." }), { status: 503, headers: { "content-type": "application/json" } });
+        }
+        return answer(body);
+      }
+      // Never set is the person's first mode, as the route answers it.
+      return answer(options.mode ?? { field: "explore", work: "create" });
+    }
     // The runs of the document the person may see, for *Show prompts* and a
     // prompt's marks. BO_0267_018
     if (url === "/api/runs" && query.get("artifact") === document.documentId) {
@@ -695,6 +771,9 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
       }),
       setBranch$: $((_itemId: string, branch: string | null) => {
         record.branch = branch;
+      }),
+      setMode$: $((_itemId: string, mode: WorkingMode | null) => {
+        record.mode = mode;
       }),
       setTitle$: noop,
       setSaveState$: noop,

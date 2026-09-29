@@ -7,6 +7,7 @@ import type {
 } from "../server/documents";
 import type { DocumentView, BlockView } from "../server/assemble";
 import type { ReadMark } from "../server/read-mark";
+import type { WorkingMode } from "../lib/working-mode";
 import type { GraphOutcome } from "~/server/outcome";
 import type { BlobReference } from "~/server/ccgw/blobs";
 
@@ -122,6 +123,20 @@ export const sendReadMark = async (id: string, dataRevision: number, keepalive =
     }),
   );
 
+/** The person's working mode on the document, read as it opens. BO_0306_011 */
+export const fetchWorkingMode = async (id: string): Promise<GraphOutcome<WorkingMode>> =>
+  readOutcome<WorkingMode>(await fetch(`/api/x/documents/d/${id}/mode`));
+
+/** Writes the working mode a toggle switched to. BO_0306_011 */
+export const sendWorkingMode = async (id: string, mode: WorkingMode): Promise<GraphOutcome<WorkingMode>> =>
+  readOutcome<WorkingMode>(
+    await fetch(`/api/x/documents/d/${id}/mode`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(mode),
+    }),
+  );
+
 export interface WriteResult {
   readonly blockId: string;
   readonly revisionId: string;
@@ -144,17 +159,15 @@ export const sendCommand = async (
     }),
   );
 
-/** The bytes of a `.csv` or `.tsv` a table stands behind, uploaded before the
- * block that references them is written; the answer is the reference the
- * insert carries. BO_0287_013 */
-export const uploadTableFile = async (
+/** File bytes uploaded before their document block references them. */
+export const uploadDocumentFile = async (
   file: File,
 ): Promise<GraphOutcome<{ readonly reference: BlobReference }>> =>
   readOutcome<{ readonly reference: BlobReference }>(
     await fetch(`/api/x/documents/blobs`, {
       method: "POST",
       headers: {
-        "content-type": file.type === "" ? "text/csv" : file.type,
+        "content-type": file.type === "" ? "application/octet-stream" : file.type,
         "x-calliopa-filename": encodeURIComponent(file.name),
       },
       body: file,

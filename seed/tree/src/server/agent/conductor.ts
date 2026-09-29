@@ -1,4 +1,4 @@
-import type { CommandTarget } from "~/lib/command-target";
+import type { CommandTarget, WorkingMode } from "~/lib/command-target";
 import type { ProcessRecord } from "~/lib/process";
 import { agentStatus } from "./adapters";
 import { attachRun, createProcess, listAllProcesses, moveProcess, readProcess } from "../processes";
@@ -76,6 +76,8 @@ export async function conductRun(input: {
   readonly attachments?: readonly string[];
   /** The intention a gesture names, passed through to the bridge. BO_0258_006 */
   readonly intention?: string;
+  /** The working mode in force on the document, passed through. BO_0306_017 */
+  readonly mode?: WorkingMode;
 }): Promise<ConductedRun> {
   // The runtime is the reader's explicit choice or the one the agent
   // stamped as active; the bridge reads an empty selection as the API-key
@@ -91,6 +93,7 @@ export async function conductRun(input: {
     ...(input.group === undefined ? {} : { group: input.group }),
     ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
     ...(input.intention === undefined || input.intention === "" ? {} : { intention: input.intention }),
+    ...(input.mode === undefined ? {} : { mode: input.mode }),
   });
   if (!started.ok) {
     return {

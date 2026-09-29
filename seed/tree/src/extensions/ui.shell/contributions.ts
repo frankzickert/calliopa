@@ -2,6 +2,7 @@ import { contributions as declare, type ViewContribution } from "~/contract";
 import { ExtensionView } from "~/components/views/extension";
 import { ExtensionImportView } from "~/components/views/extension-import";
 import { ExtensionsSection } from "~/components/library/extensions-section";
+import { AdmonitionPatternsSection } from "~/components/shell/admonition-patterns";
 
 /**
  * What `ui.shell` contributes to the frame it hosts, through the same contract
@@ -36,6 +37,13 @@ export const contributions = declare({
   // The icon the sections stand under in the library's icon column. CA_0056_008
   icon: { title: "Extensions", name: "puzzle-piece" },
   sections: [
+    {
+      name: "admonition-patterns",
+      title: "Admonition patterns",
+      icon: { title: "Admonition patterns", name: "info" },
+      empty: "Create a reusable callout pattern",
+      component: AdmonitionPatternsSection,
+    },
     {
       name: "extensions",
       title: "Extensions",

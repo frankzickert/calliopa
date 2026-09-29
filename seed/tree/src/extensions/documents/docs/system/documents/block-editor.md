@@ -199,11 +199,17 @@ The first delivery carries these, each with a keyboard-accessible equivalent and
 - Per-tab selection, active block, and focus target survive ordinary tab switching. Scroll stays browser-local.
 - A reloaded page opens no editor. Which block is active is a live fact about the tab, like its scroll position, so a page that opens no editor records that the tab has nothing selected rather than leaving a selection the next tab switch would act on. Which mode the surface is in is not that kind of fact, and [Command Mode](./command-mode.md#command-mode) says what a reload does with it.
 
+## Admonitions
+
+- The block-type picker lists each saved admonition pattern by name. Choosing a pattern on a text block replaces it in place with a callout and preserves its text and role as the first child; choosing a pattern on a callout changes its reference. Callouts have no separate pattern selector. Their ordered editable text children split at the caret on Enter and have no child-local add button; Up/Down cross children at the first or last text line while preserving horizontal caret position, regardless of extra minimum height; Backspace/Delete merge at child boundaries. An already-empty final child followed by Enter creates a paragraph below and outside the callout. An uploaded Garage image is served through `/api/blobs/<objectId>` and fills a fixed square cropped and centered on the callout's left edge; a lighter tint of the pattern color backgrounds the whole callout, and the optional footline sits at bottom right. Pattern updates are broadcast to callouts in open documents so the rendered style refreshes immediately (`CA_0071_001`–`CA_0071_003`).
+- The API accepts admonitions with one or more text children. Child nodes use ordered `contains` relations, and child edits and insertions revise the graph directly.
+- [x] DO_0022_001 Remove the child-local “Add paragraph” button. Keep Enter splitting and focusing a new child, normal Up/Down movement through wrapped visual lines, and crossing to the adjacent child at the visual top/bottom while retaining horizontal caret position. Determine the edge from the child text line boxes rather than its minimum-height container. Preserve Backspace/Delete merging and the final-child rule. Verify the rendered control and navigation in a browser with single-line and wrapped children.
+
 ## Later Editor Slices
 
 Each of these arrives as its own change, adding its model and validation before its UI. None introduces an extension API.
 
-- Nested lists, callouts, and tables with container-aware keyboard behavior.
+- Nested lists and tables with container-aware keyboard behavior.
 - Code, math, diagram, media, file, and embed blocks.
 - Comments, and block opening and drill. Passage anchors and passage-level references arrived with `BO_0227` ([Command Mode](./command-mode.md#passages)), and so did disposition ([Standing](#standing)).
 - Duplicate, rich structural paste, cross-container copy and move, and advanced conversion.
@@ -563,6 +569,13 @@ categories instead of seven.
 
 ## Pictures And Moving Pictures
 
+- *Add image* in the bar inserts an empty image block directly below its subject (`DO_0018_001`), including a proposal that stays open. The pending image row carries a file field. Choosing a decodable image uploads its bytes through the documents blob route immediately before `fillMediaBlock` writes the blob reference and pixel dimensions onto the same block; cancelling leaves it empty, and upload or write failures appear in the editor notice while the field remains available to retry. The control uploads a chosen image and does not start image generation; the `media` extension's generation control remains its own surface.
+- The *Turn into* picker offers Image beside the text roles and Code for text blocks; an image row
+  offers the text roles. Turning between them preserves the block's place and moves text runs
+  through the image caption without formatting marks; the caption editor preserves links, can add
+  or update a link, and follows links in a new tab. *Add image* remains a separate insertion action
+  (`DO_0019_002`).
+- Editor interaction coverage (`DO_0018_002`): `views/new-block-below.test.ts` proves *Add image* inserts an empty image block below a focused row; `views/bar.test.ts` proves the same below a focused proposal without answering it; `views/media-block.test.ts` proves the pending field is empty and accepts no-file cancellation, uploads a selected image into the same block with its dimensions, and remains available after a network failure. These run through the extension's Qwik render harness, which tests interaction behavior but has no responsive layout engine.
 - Under `calliopa-bootstrap`'s `BO_0273`, promoted to ready by the user on 2026-09-21 and
   transferred here the same day, the editor draws the two block types
   ([Block Document Model](./block-document-model.md#pictures-and-moving-pictures)) and the state in
@@ -570,7 +583,7 @@ categories instead of seven.
 - The editor draws them (`BO_0273_011`). `MediaBlock` (`views/media-block.tsx`) is drawn by
   `BlockRow` where a divider is, for an `image` and a `video` block; like a divider they carry no
   authored text and take no text editor, and they keep their grip, their drag and their place like
-  any row.
+  any row. A pending image also carries the upload field from `DO_0018_001`.
 - An image streams straight from the shell's `/api/blobs/<objectId>` — not CCGW's own
   `/v1/blobs`, which the app origin does not forward, and which drew nothing at all until
   `BO_0273_046`. **A video does not stream**: retrieval serves
@@ -585,11 +598,14 @@ categories instead of seven.
   CSS holds the shape with `aspect-ratio` while it scales to the column, so nothing moves when the
   bytes land and a pending block occupies exactly what its picture will. A block storing no
   dimensions is left to its own size rather than given an invented one.
-- A block with no reference is a generation not made yet (`assemble.ts`, `MediaBlockView`, where
-  `objectId` absent is that state and a reference that is not one is no reference — the block is
-  pending rather than broken). It draws as its reserved box with its `alt` as its words, and its
-  accessible name says the picture has not been made yet. Whatever offered the generation draws its
-  own control there through the `below` place; the reading surface shows no machinery of its own.
+- Displayed images are at most half the visible browser viewport height and preserve their
+  intrinsic aspect ratio as they scale down to fit the column (`DO_0020_001`). The cap applies to
+  the image itself; a caption does not reduce the available image height.
+- A block with no reference is pending (`assemble.ts`, `MediaBlockView`, where `objectId` absent is
+  that state and a reference that is not one is no reference — the block is pending rather than
+  broken). An image draws its upload field beside its reserved box with its `alt` as its words; the
+  `media` extension may draw its separate generation control through the `below` place. The upload
+  field itself never starts generation.
 - Proven in `views/media-block.test.ts` in the render harness: the image streaming from the blob
   route with its alt, the stored box on the element and in its style, a video drawn as a video
   element and never handed the blob route directly, a block with no reference drawn as not made yet
@@ -776,7 +792,7 @@ and the register that kind carries — is drawn by the extension that declares t
 - Under `DO_0016`, set to draft by the user on 2026-09-24, transferred here and set to ready the same day, implemented and walked 2026-09-24: a new block does not always open where the reader asks for it. `startWriting$` and `appendBlock$` (`views/block-editor.tsx`) and the server's `orderFor` (`server/documents.ts`) read the document's established blocks alone, so a proposal drawn at the bottom is not seen. A trailing empty paragraph above the proposal is activated instead, and an `at: "end"` insert takes a key that a proposed insert's key still follows, so the proposal stays below the new block. *Add …* on a focused proposal accepts it first (`acceptThenAct$`) and does nothing for a kind outside `SWIPEABLE_PROPOSALS`, and `{ after: <blockId> }` is refused for a block the server does not hold. A table, code, equation, image, video, divider or output row takes the focus only from a hovering mouse (`onPointerEnter$`), since the press and key paths live in the text reading element, and a retired row has no focus path at all.
 * What the reader sees is what counts. Every placement below is decided from the rows drawn under the reader's current filters: the proposals toggle and the groups shown, *Show retired blocks*, *Show discarded blocks* and *Show prompts*. A drawn proposal is a row like any other. A hidden one is not, so the new block goes below the last visible row and the hidden proposal is drawn after it once shown. User decision, 2026-09-24.
 * Clicking the area below the lowest drawn row opens a new paragraph directly below that row, whatever the row is: a block of any kind or standing, a proposal of any kind, or a retired, discarded or prompt row that is shown. The trailing empty paragraph is reused only when it is the lowest drawn row. With a block active the first press still only ends the edit (`CA_0028_002`), and command mode still does nothing there. User decision, 2026-09-24.
-* *Add paragraph*, *Add table*, *Add equation*, *Add code* and *Import table* place the new block directly below the bar's subject, whatever its kind, standing or state. On a proposal they leave it open: nothing is accepted, and the new block reads directly below the proposal before and after it is answered ([Proposed Changes](./proposed-changes.md#the-bar-acts-on-a-proposal)). User decision, 2026-09-24.
+* *Add paragraph*, *Add image*, *Add table*, *Add equation*, *Add code* and *Import table* place the new block directly below the bar's subject, whatever its kind, standing or state. On a proposal they leave it open: nothing is accepted, and the new block reads directly below the proposal before and after it is answered ([Proposed Changes](./proposed-changes.md#the-bar-acts-on-a-proposal)). User decision, 2026-09-24; image added under `DO_0018_001`.
 * Every drawn row can be the bar's subject. A table, code, equation, image, video, divider or output row takes the focus from a tap or a click (focusing, never editing) and from the keyboard (Tab to the row, Enter or Space focuses it), as a text row does. A shown retired row takes the focus as well. User decision, 2026-09-24.
 - A placement between drawn rows (`DO_0016_001`, landed 2026-09-24). `belowPlacement` in `views/reading-order.ts`, beside `restorePlacement`, answers where a new block goes to read directly below a drawn row (`RowTarget`: a block's row by its identity, a retired or discarded one included, a proposal's by its item, or `"end"`): `{ between: [its key, the next key] }`, the upper bound the smallest key above it among the drawn rows and `knownKeys` — every order key the document knows, drawn or not: its blocks with the discarded and the prompts, the retired blocks read, and every open proposal's, shown or hidden. A row with no key of its own (a removal, a relation) goes below the nearest keyed row above it; a row in a derived section and `"end"` go below the body's lowest row, since a section is drawn after the body whatever its keys; an established block with no key is named as `{ after }`, and a target not drawn at all falls back to `{ after }` for a block and the end otherwise. The server needed nothing: `insert` already took `between` (`BO_0263_001`), minting strictly between the two keys and refusing a pair out of order as `unorderedBetween`, writing nothing. `{ after }` and `{ at: "end" }` keep their callers (`composeInBlock$`, `pasteGrid$`, a dropped file, `composeMediaInsert`).
 - Clicking below the lowest drawn row (`DO_0016_002`, landed 2026-09-24). `startWriting$` reads `drawnRows` rather than the established blocks: it activates the lowest body row when that is an established, shown, empty text block (not retired, discarded or a prompt), and otherwise calls `appendBlock$` with `belowPlacement(rows, "end", …)`. The first press with a block active still only leaves, and command mode still returns first.
@@ -799,7 +815,7 @@ and the register that kind carries — is drawn by the extension that declares t
   spreadsheet arrives by paste or by export. User decision, 2026-09-23.
 - `TableBlock` draws it (`BO_0287_011`, landed 2026-09-23; `views/table-block.tsx`), by `BlockRow` where a divider is: the header row from `columns`, each header a name and a type the reader changes in a select, a cell per cell as an input edited in place, `×` on each row and column and *Add row* and `+` for a column, and the caption as an input below. It carries no text editor and no runs; the grip, the drag, the card and the chip come with the row as they do for a picture, and in command mode it is drawn read-only, the row being what a press marks. A draft of the cells is kept beside the block and reset when a new revision is read back; every edit is checked with `checkTable` first — a misfit is named under the table and ringed on its cell (`data-table-misfit`, `aria-invalid`), nothing sent — and lands as one `reviseTable` on the block's base revision through the editor's `reviseTable$`, which reads the document back; a refusal, a stale base included, is named the same way. A table with a file behind it says *first N of M rows* under its rows (`data-table-count`) and asks the blob route for nothing. A proposed table is drawn the same way with its cells read and not edited (`views/proposals/proposal-block.tsx`).
 - A pasted grid becomes a table (`BO_0287_012`, landed 2026-09-23): the text editor's paste hands text that looks like a grid — a tab and a line break — to `pasteGrid$` when the block being edited holds no words, which parses it, inserts the table after the block and retires the block it was pasted into; a paste into a block holding words stays text as before, so a spreadsheet cell copied into a sentence is still a sentence. Technical decision, open to the user's revision.
-- A file becomes a table (`BO_0287_013`, landed 2026-09-23): *Import table* in the bar's Block group opens a picker for `.csv` and `.tsv`, and a `.csv` or `.tsv` dropped anywhere in the tab while reading lands after the row it fell on, or at the end of the document when it fell on none (`importTable$`; the row it fell on takes it and marks the event as taken, and the view's root takes what no row took, so the margins, the title and the space below the last block take a drop too, found wanting in the walk; the event's target is never read, since a handler runs after the event is over) — the root listens for `dragover`, because Qwik honours a `preventdefault:` attribute only for events it listens for, and without the listener the browser refused the drag over a text row and the drop fired on native drop targets alone (a table's inputs, the edited block's contenteditable); a file of another kind is refused in the view's notice; anything else is refused in the view's notice, naming paste and export as the way for a spreadsheet. The file is parsed in the browser into its preview; when it is past the bound its bytes go first through `POST /api/x/documents/blobs` — the body the file, its name in `X-Calliopa-Filename` — which `handleTableFile` uploads through CCGW's `PUT /v1/blobs` immediately before the write and answers as the blob reference the insert carries with `rowCount`; a file under the bound is inserted whole with no reference. `source` names the file and the time as `{extension: "documents", file, importedAt}`. Beside it, *Add table* inserts an empty table — two text columns, one row (`emptyTable`) — after the block, next to *Add paragraph*; both are icons (`table`, `upload-simple`) carrying their words as their names.
+- A file becomes a table (`BO_0287_013`, landed 2026-09-23): *Import table* in the bar's Block group opens a picker for `.csv` and `.tsv`, and a `.csv` or `.tsv` dropped anywhere in the tab while reading lands after the row it fell on, or at the end of the document when it fell on none (`importTable$`; the row it fell on takes it and marks the event as taken, and the view's root takes what no row took, so the margins, the title and the space below the last block take a drop too, found wanting in the walk; the event's target is never read, since a handler runs after the event is over) — the root listens for `dragover`, because Qwik honours a `preventdefault:` attribute only for events it listens for, and without the listener the browser refused the drag over a text row and the drop fired on native drop targets alone (a table's inputs, the edited block's contenteditable); a file of another kind is refused in the view's notice; anything else is refused in the view's notice, naming paste and export as the way for a spreadsheet. The file is parsed in the browser into its preview; when it is past the bound its bytes go first through `POST /api/x/documents/blobs` — the body the file, its name in `X-Calliopa-Filename` — which `handleDocumentFile` uploads through CCGW's `PUT /v1/blobs` immediately before the write and answers as the blob reference the insert carries with `rowCount`; a file under the bound is inserted whole with no reference. `source` names the file and the time as `{extension: "documents", file, importedAt}`. Beside it, *Add table* inserts an empty table — two text columns, one row (`emptyTable`) — after the block, next to *Add paragraph*; both are icons (`table`, `upload-simple`) carrying their words as their names.
 - Verified 2026-09-23 (`BO_0287_014`). `views/table-block.test.ts` in the render harness: the grid drawn from a block's cells with each header's type on a row of its own, a cell edit landing as one `reviseTable` of the whole table with the same id and no caption it did not carry, a cell refused outside its type with the cell named and ringed and nothing sent, a column's type changed and a misfit refused, a row and a column added and removed, a table with a file behind it drawn from its preview with its count and asking the blob route for nothing, a pasted grid inserting a table after the empty paragraph and retiring it, a pasted word staying text, a proposed rewrite of a table with a file behind it saying the file goes and drawing the proposed table read-only, and a stored type the build does not know still drawn as unsupported content beside a table. `views/bar.test.ts` names the two new controls in the Block group's settled order. The unit project passes over `documents` and the shell's components (65 files, 596 tests before the proposal case), `tsc --noEmit` is clean, and the behaviour project ran through the kernel harness (`calliopa-bootstrap`'s `TestShellDocumentsOverCCGW`) with the table case passing and the five failures a pristine checkout of head shows as well — three of `calliopa-refine`'s, and the picture case whose invented hash CCGW now refuses as a dangling reference, which takes the order case with it.
 - Walked by the user on the served build on 2026-09-23 (`BO_0287_015`, pins 1960 to 2028) and accepted: a table authored from the bar's *Add table* and edited cell by cell; a `.csv` dropped anywhere in the tab landing as a table with its columns typed from its values; and a run asked to add a column proposing one replace. The walk found three things, each fixed in its own proposal and folded above: a semicolon-separated `.csv` landed in one column, a drop took only a table row, and a drop had to hit a row at all.
 
@@ -1213,3 +1229,52 @@ holds the decisions and the `profiles` extension's work): the bar carries a prof
 - Verified in the render harness (`BO_0303_014`, 2026-09-25; `views/figures.test.ts`, *a listing's caption and number*, and `lib/reference-choices.test.ts`): the caption line beneath a numbered code block with *Listing 1.* and its field, the label alone from the read's map, a caption typed saved as one `setFigure` on the base with the ask kept, *Number this listing* on a hovered code block sending the ask with the caption kept, and the `#` entries with the caption's and with the first line's words and none for an unnumbered block.
 - Walked by the user at pin 2881 (`BO_0303_015`, 2026-09-25, "works"): a code block numbered from the bar, captioned beneath it, referred to from a sentence by `#`. The walk found three things. A tab open from before the pin keeps the old client, so the caption line and the toggle appear on a reload. With both panels open and the browser zoomed, the `#` group stands past the bar's faded right edge, in the bar and off the screen, until the bar is scrolled sideways or a panel closed — the bar's behaviour since it scrolls as one (`CA_0060`), the same for a picture's toggle. And while a paragraph is being edited, resting the pointer on the code row takes nothing (`DO_0006_003`), so the toggle is not reached until the editing is left; the gap that leaves is the task below. A probe in its own branch had shown the same build numbering, captioning and drawing *Listing 1.* on every code row of *Eln* at widths from 600 to 1920 pixels, with the pointer's rest, a click into the source and a tap alike, before the user's walk (`.local/walk-0303/`).
 - [ ] BO_0303_017 A click into a code block's source makes its row the bar's subject. Found in the walk: while a paragraph is being edited, a click straight into a code block's source ends the editing and focuses the source, but the bar is left with no block group at all — fifteen actions, the document's alone — until the pointer leaves the block and comes back, since the pointer's rest that would have focused the row ran while the paragraph was edited and took nothing. A picture's or a table's row takes such a click as its subject; a code block's source should too, so *Number this listing* and the block group stand on the block the reader is typing in.
+
+## Working Modes
+
+Under `BO_0306` (`docs/changes/BO_0306_FEAT_working-modes.md` in `calliopa-bootstrap`), set to
+draft by the user on 2026-09-29 and transferred here the same day: a person chooses how the agent
+works in a document — explore or consolidate, understand or create — with two toggles leading the
+bar, and every run the document starts carries that mode. The kernel's half — the run's field, the
+instruction line, the base skill's conventions, the derived fit and the route holding the choice —
+is the fixed layer's [UI Kernel](../../../../../../../../docs/system/ui-kernel.md), *Working Modes*; the
+chip's half is [The Agent At Work](./agent-at-work.md), *The Mode A Proposal Served*.
+
+* Two toggles lead the bar's *Work* group, before *Work in a proposal*: the first is explore or
+  consolidate, the second understand or create. Each shows the mode in force — the icon and name of
+  the active pole — so what the person sees is what is active; pressing it switches to the other
+  pole. User decision, 2026-09-29 (`BO_0306_Q1`).
+* The mode is held per person and document and remembered; a person's first mode in a document is
+  explore + create. User decision, 2026-09-29 (`BO_0306_Q2`, `BO_0306_Q3`).
+* Every run the document starts carries the mode in force when it was sent. User decision,
+  2026-09-29.
+- The icons: `arrows-out-simple` explore, `arrows-in-simple` consolidate, `book-open-text`
+  understand, `pencil-simple-line` create.
+- The two toggles (`BO_0306_010`). The bar task in `views/block-editor.tsx` pushes
+  `working-mode-field` and `working-mode-work` at the head of the `work` group, before
+  *Work in a proposal*, wherever it pushes that group: each a bar `button` wearing the active
+  pole's icon, labelled by its name (*Explore*, *Consolidate*, *Understand*, *Create*), and named
+  for what is in force and what a press switches to (*Exploring — switch to consolidate*). They
+  are buttons rather than toggles, so no `aria-pressed`: neither pole is the pressed one. The
+  poles, their words and icons, `switched`, `toggleName` and `quadrantOf` are
+  `lib/working-mode.ts`, pure, which the chip reads too. `switchMode$` draws the new pole at once.
+- The mode per person and document (`BO_0306_011`). `server/working-mode.ts` reads and writes
+  `/__kernel/state/people/me/mode/<document>`, not found reading as `FIRST_MODE` (explore +
+  create), behind `GET`/`PUT d/[id]/mode` (`handleWorkingMode`); the editor reads it once with the
+  document, after the read mark (`fetchWorkingMode`), and a press writes it
+  (`sendWorkingMode`). A refused write puts the pole back, tells the shell the mode still in
+  force, and says *The working mode could not be switched to «pole»* in the notice.
+- Every run the document starts carries the mode (`BO_0306_012`). The editor tells the shell the
+  mode in force through the view bridge's `setMode$` — on reading it and on every switch — as it
+  tells it the branch through `setBranch$`, since a run is sent by the shell: a command from a
+  block, the console composing into the document and a gesture on it all go through
+  `sendCommand$` or `sendGesture$`, which read the mode from the shell's aim. The per-tab scope of
+  `lib/branch-scope.ts` is not needed: the mode is the person's on the document, not the tab's.
+  The shell's half is `ui.shell`'s
+  [Commands And Runs](../../../../../../docs/system/workspace/commands-and-runs.md), *Working Modes*.
+- Verified in the render harness (`BO_0306_013`), `views/working-mode.test.ts` with the harness's
+  `/mode` route: the two toggles leading the *Work* group before *Work in a proposal*, showing
+  explore and create with no `aria-pressed` on a document never set and the shell told; a mode set
+  before shown as the document opens; each press switching its pole, written, and told to the
+  shell as the mode the next run carries; a refused write putting the pole back and saying so.
+  `views/bar.test.ts`' *Work* group order carries the two. Each assertion was shown to bite.

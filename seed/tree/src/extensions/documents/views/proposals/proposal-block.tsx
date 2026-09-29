@@ -10,6 +10,7 @@ import {
   type QRL,
 } from "@builder.io/qwik";
 
+import { POLES, quadrantOf } from "../../lib/working-mode";
 import { Icon, type IconName } from "~/components/shell/icons";
 import { DERIVED_SECTIONS, derivedSection } from "~/extensions/documents/lib/depth";
 import { DRAG_MOVE_TOLERANCE_PX, LONG_PRESS_MS, movedDistance } from "~/lib/drag";
@@ -22,6 +23,8 @@ import {
   proposalNames,
   proposerName,
   toneOf,
+  modeOf,
+  driftLine,
   type Proposer,
   type TypedProposal,
 } from "../../lib/proposals";
@@ -197,6 +200,8 @@ export const ProposalBlock = component$<{
   const withdrawer = withdrawal ?? null;
   const shown = withdrawer ?? refiner ?? proposer;
   const tone = derived === true || inferredCard ? "derived" : toneOf(shown);
+  const served = modeOf(shown);
+  const strayed = driftLine(shown);
   const face = faceOf(shown);
   const names =
     derived === true
@@ -475,9 +480,23 @@ export const ProposalBlock = component$<{
             <Icon name={face.icon} size={14} />
           )}
         </button>
+        {/* The mode the run served, as the two poles' icons named for the
+            quadrant, and where it strayed from it, in the chip's line. The
+            judgement is the kernel's; the answers stand as ever. BO_0306_014 */}
+        {served !== undefined && (
+          <span class="proposal-block__mode" data-proposal-mode={`${served.field}+${served.work}`} role="img" aria-label={quadrantOf(served)} title={quadrantOf(served)}>
+            <Icon name={POLES[served.field].icon} size={12} />
+            <Icon name={POLES[served.work].icon} size={12} />
+          </span>
+        )}
         <span class="proposal-block__words" data-proposal-words>
           {derived === true ? names.block : withdrawing !== undefined && withdrawing > 0 ? `${words}, withdrawing ${withdrawing}` : words}
         </span>
+        {strayed !== null && (
+          <span class="proposal-block__drift" data-proposal-drift>
+            {strayed}
+          </span>
+        )}
         {/* Beside the answer icons, a derived candidate keeps the two acts
             that say what to do with the framing in one press: fixate accepts
             it and makes it the reader's, discard rejects it. User decision,

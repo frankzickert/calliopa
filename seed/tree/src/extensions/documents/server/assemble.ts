@@ -82,6 +82,12 @@ export interface DividerBlockView extends BlockCommon {
   readonly kind: "divider";
 }
 
+export interface AdmonitionBlockView extends BlockCommon {
+  readonly kind: "admonition";
+  readonly patternId: string;
+  readonly children: readonly TextBlockView[];
+}
+
 /**
  * A picture or a moving picture (`BO_0273_008`). The bytes are a blob behind
  * CCGW and the block carries only what is needed to draw them: the object id
@@ -89,8 +95,8 @@ export interface DividerBlockView extends BlockCommon {
  * retyped with, since retrieval serves every object as an octet stream — and
  * the advisory box the reference does not carry.
  *
- * **`objectId` absent is the pending state**: a generation proposed and not yet
- * paid for is this block with no reference. `source` is whatever made the
+ * **`objectId` absent is the pending state**: an image may await an upload or
+ * generation, and a video may await generation. `source` is whatever made the
  * bytes, stored and never interpreted here; the extension that wrote it draws
  * it (`BO_0273_019`).
  */
@@ -104,6 +110,7 @@ export interface MediaBlockView extends BlockCommon {
   readonly source?: Record<string, unknown>;
   /** A picture's caption (`BO_0295_006`); a number needs none. */
   readonly caption?: string;
+  readonly captionRuns?: readonly Run[];
   /** The author's ask for a number, and — when they asked — the number the
    * document's order gives it, figures and tables counted apart
    * (`BO_0295_008`). Resolved on every read, stored nowhere. */
@@ -254,6 +261,7 @@ export interface OutputBlockView extends BlockCommon {
 export type BlockView =
   | TextBlockView
   | DividerBlockView
+  | AdmonitionBlockView
   | MediaBlockView
   | TableBlockView
   | EquationBlockView
@@ -399,6 +407,10 @@ export function toBlock(node: ReadNode, containmentId: string): BlockView {
     return { ...common, kind: "divider" };
   }
 
+  if (semanticType === "admonition" && typeof content["patternId"] === "string") {
+    return { ...common, kind: "admonition", patternId: content["patternId"], children: [] };
+  }
+
   if (semanticType === "image" || semanticType === "video") {
     const reference = content["reference"];
     // A reference that is not one is no reference: the block is pending rather
@@ -423,7 +435,7 @@ export function toBlock(node: ReadNode, containmentId: string): BlockView {
       ...(source !== null && typeof source === "object" && !Array.isArray(source)
         ? { source: source as Record<string, unknown> }
         : {}),
-      ...(semanticType === "image" ? captionedOf(content) : {}),
+      ...(semanticType === "image" ? { ...captionedOf(content), ...(Array.isArray(content["captionRuns"]) ? { captionRuns: normalizeRuns(content["captionRuns"] as Run[]) } : {}) } : {}),
     };
   }
 
@@ -608,25 +620,28 @@ export function blocksOf(
   documentId: string,
   relationType: string,
 ): BlockView[] {
-  const documentNode = nodeRef(documentId);
   const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
-  const blocks: BlockView[] = [];
-
-  for (const relation of graph.relations) {
-    if (relation.type !== relationType) continue;
-    if (relation.fromNodeId !== documentNode) continue;
-    if (relation.validity.status !== "active") continue;
-    if (relation.to.kind !== "node" || relation.to.nodeId === undefined) continue;
-    const node = nodes.get(relation.to.nodeId);
-    if (node === undefined) continue;
-    blocks.push(toBlock(node, relation.id));
-  }
-
-  const ordered = blocks.filter((block) => block.order !== "");
-  const unplaced = blocks
-    .filter((block) => block.order === "")
-    .sort((left, right) => (left.blockId < right.blockId ? -1 : 1));
-  return [...byOrder(ordered), ...unplaced];
+  const placedUnder = (parentId: string, ancestors = new Set<string>()): BlockView[] => {
+    if (ancestors.has(parentId)) return [];
+    const path = new Set(ancestors).add(parentId);
+    const blocks: BlockView[] = [];
+    for (const relation of graph.relations) {
+      if (relation.type !== relationType || relation.fromNodeId !== parentId || relation.validity.status !== "active") continue;
+      if (relation.to.kind !== "node" || relation.to.nodeId === undefined) continue;
+      const node = nodes.get(relation.to.nodeId);
+      if (node === undefined) continue;
+      let block = toBlock(node, relation.id);
+      if (relationType === CONTAINS && block.kind === "admonition") {
+        const children = placedUnder(node.id, path).filter((child): child is TextBlockView => child.kind === "text");
+        block = { ...block, children };
+      }
+      blocks.push(block);
+    }
+    const ordered = blocks.filter((block) => block.order !== "");
+    const unplaced = blocks.filter((block) => block.order === "").sort((left, right) => left.blockId < right.blockId ? -1 : 1);
+    return [...byOrder(ordered), ...unplaced];
+  };
+  return placedUnder(nodeRef(documentId));
 }
 
 /** The document node of a read rooted at it, or undefined. */
@@ -909,7 +924,8 @@ export function assembleDocument(
   const equations = numberEquations(blocksOf(graph, documentId, CONTAINS));
   const figures = numberFiguresAndTables(equations.blocks);
   const code = numberCodeLines(figures.blocks);
-  const citations = numberCitations(code, options.knownWorks);
+  const citationOrder: BlockView[] = code.flatMap((block): readonly BlockView[] => block.kind === "admonition" ? block.children : [block]);
+  const citations = numberCitations(citationOrder, options.knownWorks);
   const references = labelReferences(code, { equations: equations.numbers, figures: figures.figures, tables: figures.tables, listings: figures.listings });
   return {
     documentId: bareId(node.id),

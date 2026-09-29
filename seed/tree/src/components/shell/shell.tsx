@@ -85,6 +85,7 @@ import {
   NO_POINTING,
   staleIn,
   type Pointing,
+  type WorkingMode,
 } from "~/lib/command-target";
 import type { BridgeAttachment } from "~/server/agent/bridge";
 import type { WorkspaceRecord } from "~/lib/workspace";
@@ -738,6 +739,7 @@ export const Shell = component$<{
     }
     run.sending = true;
     const branch = aim.branch?.[command.itemId];
+    const mode = aim.mode?.[command.itemId];
     const started = await startRun$(
       {
         ...(run.agent === null ? {} : { agent: run.agent }),
@@ -749,6 +751,8 @@ export const Shell = component$<{
         // A command issued in a branch proposes into it: the run's group
         // is the person's branch, not one of its own. BO_0250_010
         ...(branch === undefined ? {} : { branch }),
+        // The working mode in force on the document. BO_0306_017
+        ...(mode === undefined ? {} : { mode }),
         ...(command.attachments.length === 0 ? {} : { attachments: command.attachments }),
       },
       command.itemId,
@@ -769,6 +773,7 @@ export const Shell = component$<{
     if (run.sending) return { ok: false, error: "A command is already being sent." };
     run.sending = true;
     const branch = aim.branch?.[gesture.itemId];
+    const mode = aim.mode?.[gesture.itemId];
     const started = await startRun$(
       {
         ...(run.agent === null ? {} : { agent: run.agent }),
@@ -778,6 +783,7 @@ export const Shell = component$<{
         ...(gesture.context === undefined || gesture.context === "" ? {} : { context: gesture.context }),
         artifact: gesture.itemId,
         ...(branch === undefined ? {} : { branch }),
+        ...(mode === undefined ? {} : { mode }),
       },
       gesture.itemId,
     );
@@ -1189,6 +1195,12 @@ export const Shell = component$<{
       if (branch === null) delete next[itemId];
       else next[itemId] = branch;
       aim.branch = next;
+    }),
+    setMode$: $((itemId: string, mode: WorkingMode | null) => {
+      const next = { ...(aim.mode ?? {}) };
+      if (mode === null) delete next[itemId];
+      else next[itemId] = mode;
+      aim.mode = next;
     }),
     proposed: runProposed,
     reveal,

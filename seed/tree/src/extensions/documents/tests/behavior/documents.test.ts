@@ -8,8 +8,10 @@ import {
   reviseEquation,
   reviseTable,
   insertBlock,
+  insertAdmonitionChild,
   listDocuments,
   mergeTextBlocks,
+  mergeAdmonitionChildren,
   moveBlock,
   moveRetiredBlock,
   placeProposedItem,
@@ -28,6 +30,8 @@ import {
   setFrontMatter,
   splitTextBlock,
 } from "~/extensions/documents/server/documents";
+import type { BlockView } from "~/extensions/documents/server/assemble";
+import { saveAdmonitionPattern } from "~/extensions/documents/server/admonitions";
 import { documentsCiting } from "~/extensions/documents/server/cited-by";
 import { randomBytes, randomUUID } from "node:crypto";
 
@@ -105,6 +109,41 @@ describe.skipIf(!configured)("documents over CCGW", () => {
     );
     expect(changes.changeCount).toBe(1);
     expect(changes.lastWrittenAt).not.toBeNull();
+  });
+
+  it("Given adjacent admonition children, Then merging preserves their words and retires the absorbed child", async () => {
+    const pattern = ok<{ id: string }>(await saveAdmonitionPattern({ name: `Merge ${randomUUID()}`, color: "#607d8b" }));
+    const inserted = ok<{ blockId: string }>(await insertBlock({
+      documentId,
+      block: { kind: "admonition", patternId: pattern.id, children: [{ kind: "text", runs: [{ text: "first" }] }] },
+      placement: { at: "end" },
+    }));
+    const second = ok<{ blockId: string }>(await insertAdmonitionChild({ documentId, parentBlockId: inserted.blockId, runs: [{ text: "second" }] }));
+    await settle();
+    const before = ok<{ blocks: readonly BlockView[] }>(await readDocument(documentId));
+    const parent = before.blocks.find((candidate) => candidate.blockId === inserted.blockId);
+    if (parent?.kind !== "admonition") throw new Error("the inserted admonition was not read back");
+    const firstChild = parent.children[0];
+    const secondChild = parent.children.find((candidate) => candidate.blockId === second.blockId);
+    if (firstChild === undefined || secondChild === undefined) throw new Error("the admonition children were not read back");
+
+    const merged = ok<{ blockId: string }>(await mergeAdmonitionChildren({
+      documentId,
+      parentBlockId: parent.blockId,
+      intoBlockId: firstChild.blockId,
+      intoBaseRevisionId: firstChild.revisionId,
+      blockId: secondChild.blockId,
+      baseRevisionId: secondChild.revisionId,
+    }));
+    expect(merged.blockId).toBe(firstChild.blockId);
+
+    const after = ok<{ blocks: readonly BlockView[] }>(await readDocument(documentId));
+    const updatedParent = after.blocks.find((candidate) => candidate.blockId === parent.blockId);
+    expect(updatedParent?.kind).toBe("admonition");
+    if (updatedParent?.kind !== "admonition") throw new Error("the merged admonition was not read back");
+    expect(updatedParent.children).toHaveLength(1);
+    expect(updatedParent.children[0]?.runs).toEqual([{ text: "firstsecond" }]);
+    expect(ok<readonly BlockView[]>(await readRetiredBlocks(documentId)).some((candidate) => candidate.blockId === secondChild.blockId)).toBe(true);
   });
 
   it("Given a revise with the current base, Then the runs land and the next base is answered", async () => {

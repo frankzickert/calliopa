@@ -111,6 +111,11 @@ describe("assembling a document", () => {
     expect(document?.blocks[0]).toMatchObject({ role: "h2" });
   });
 
+  it("reads an image caption as linked text runs", () => {
+    const document = assembleDocument(graphOf([{ id: "picture", type: "image", content: { order: "i", captionRuns: [{ text: "linked", link: "https://example.test" }] } }]), DOCUMENT);
+    expect(document?.blocks[0]).toMatchObject({ kind: "image", captionRuns: [{ text: "linked", link: "https://example.test" }] });
+  });
+
   it("Given a text block with a disposition, Then its standing comes back, and none or an unknown value reads keep", () => {
     const document = assembleDocument(
       graphOf([

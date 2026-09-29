@@ -114,6 +114,8 @@ describe("what a picture, a table and an output may carry", () => {
     expect(validateImage({ order: "a0", caption: 3 })).toBe("A picture's caption is words.");
     expect(validateImage({ order: "a0", number: 2 })).toBe("A picture's number is the document's order and is never stored.");
     expect(validateImage({ order: "a0", runs: [] })).toBe("A picture carries a caption, not runs.");
+    expect(validateImage({ order: "a0", captionRuns: [{ text: "linked", link: "https://example.test" }] })).toBeNull();
+    expect(validateImage({ order: "a0", captionRuns: [{ text: "bold", marks: ["bold"] }] })).toContain("no formatting marks");
   });
 
   it("takes an ask on a table and on an output, and refuses a stored number on either", () => {
@@ -136,6 +138,10 @@ describe("the command that numbers a figure or a table", () => {
     expect(parseDocumentCommand({ command: "setFigure", blockId: "b", baseRevisionId: "r", numbered: false })).toEqual({
       command: { command: "setFigure", blockId: "b", baseRevisionId: "r", numbered: false },
     });
+    expect(parseDocumentCommand({ command: "setFigure", blockId: "b", baseRevisionId: "r", captionRuns: [{ text: "linked", link: "https://example.test" }] })).toEqual({
+      command: { command: "setFigure", blockId: "b", baseRevisionId: "r", captionRuns: [{ text: "linked", link: "https://example.test" }] },
+    });
+    expect(parseDocumentCommand({ command: "setFigure", blockId: "b", baseRevisionId: "r", captionRuns: [{ text: "bold", marks: ["bold"] }] })).toHaveProperty("failure");
   });
 
   it("refuses a command naming no block, a malformed ask and a number written back", () => {

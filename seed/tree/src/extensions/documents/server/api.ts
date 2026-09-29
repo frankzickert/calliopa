@@ -12,9 +12,15 @@ import {
   createDocument,
   deleteDocument,
   insertBlock,
+  insertAdmonitionChild,
+  mergeAdmonitionChildren,
+  setAdmonitionPattern,
+  turnIntoAdmonition,
   listDocuments,
   reviseCode,
   turnIntoCode,
+  turnIntoImage,
+  turnImageIntoText,
   reviseEquation,
   setFigure,
   setCitationStyle,
@@ -23,6 +29,7 @@ import {
   setCodeContinues,
   setFrontMatter,
   reviseTable,
+  fillMediaBlock,
   mergeTextBlocks,
   moveBlock,
   proposeDocumentChanges,
@@ -74,12 +81,15 @@ import {
   type RelationInput,
 } from "./work";
 import { readMark, writeMark, type ReadMark } from "./read-mark";
+import { readMode, writeMode } from "./working-mode";
+import type { WorkingMode } from "../lib/working-mode";
 import { classify, documentStates, judgementsOf, resolveJudgement, type DocumentJudgements } from "./judgements";
 import { acceptanceOf, consequencesFor, type Acceptance, type Consequences } from "./phase";
 import { branchOf, documentPolicy, readStanding, signedInAccount, type BranchOfDocument, type BranchStanding, type DocumentPolicy } from "./branch";
 import { withBranch } from "~/server/ccgw/branch-scope";
 import { PHASES, isPhase, type Phase } from "./vocabulary";
 import type { DocumentState } from "~/extensions/documents/lib/judgements";
+import { listAdmonitionPatterns, saveAdmonitionPattern, updateAdmonitionPattern, type AdmonitionPattern } from "./admonitions";
 import {
   addClaim,
   declareRelation,
@@ -244,14 +254,33 @@ function readNewBlock(
   if (input === null) return { failure: "A block is an object." };
   const kind = input["kind"];
   if (kind === "divider") return { block: { kind: "divider" } };
+  if (kind === "admonition") {
+    const patternId = text(input["patternId"]);
+    if (patternId === null) return { failure: "An admonition names a saved pattern." };
+    const rawChildren = input["children"];
+    const sources = Array.isArray(rawChildren) ? rawChildren : [{ kind: "text", runs: [{ text: "Write your callout…" }] }];
+    const children: { kind: "text"; runs: readonly Run[]; role?: TextRole }[] = [];
+    for (const source of sources) {
+      const child = record(source);
+      if (child === null || child["kind"] !== "text") return { failure: "An admonition contains ordered text blocks." };
+      const runs = readRuns(child["runs"]);
+      if ("failure" in runs) return runs;
+      const role = readRole(child["role"]);
+      if ("failure" in role) return role;
+      children.push({ kind: "text", runs: runs.runs, ...(role.role === undefined ? {} : { role: role.role }) });
+    }
+    if (children.length === 0) return { failure: "An admonition contains at least one text block." };
+    return { block: { kind: "admonition", patternId, children } };
+  }
   if (kind === "table") return readTableBlock(input);
+  if (kind === "image") return { block: { kind: "image" } };
   if (kind === "sourcecode") return readCodeBlock(input);
   if (kind === "equation") return readEquationBlock(input);
   if (kind === "output") {
     return { failure: "An output block is what an execution produced; send the code instead of writing its output." };
   }
   if (kind !== "text") {
-    return { failure: `A new block is text, a divider, a table, an equation or code, not ${String(kind)}.` };
+    return { failure: `A new block is text, a divider, an image, a table, an equation or code, not ${String(kind)}.` };
   }
   const role = readRole(input["role"]);
   if ("failure" in role) return role;
@@ -282,6 +311,11 @@ function readRole(
 /** The edits the editor issues, each carrying exactly what it needs. */
 export type DocumentCommand =
   | { readonly command: "insert"; readonly block: NewBlock; readonly placement: Placement }
+  | { readonly command: "fillMediaBlock"; readonly blockId: string; readonly baseRevisionId: string; readonly reference: BlobReference; readonly width: number; readonly height: number }
+  | { readonly command: "setAdmonitionPattern"; readonly blockId: string; readonly baseRevisionId: string; readonly patternId: string }
+  | { readonly command: "turnIntoAdmonition"; readonly blockId: string; readonly baseRevisionId: string; readonly patternId: string }
+  | { readonly command: "insertAdmonitionChild"; readonly parentBlockId: string; readonly afterBlockId?: string; readonly runs: readonly Run[] }
+  | { readonly command: "mergeAdmonitionChild"; readonly parentBlockId: string; readonly intoBlockId: string; readonly intoBaseRevisionId: string; readonly blockId: string; readonly baseRevisionId: string }
   | {
       readonly command: "revise";
       readonly blockId: string;
@@ -306,6 +340,7 @@ export type DocumentCommand =
       readonly blockId: string;
       readonly baseRevisionId: string;
       readonly caption?: string;
+      readonly captionRuns?: readonly Run[];
       readonly numbered?: boolean;
     }
   /** A document's own citation style, or null for the instance's default. BO_0291_037 */
@@ -320,6 +355,8 @@ export type DocumentCommand =
   | { readonly command: "setFrontMatter"; readonly baseRevisionId: string; readonly frontMatter: FrontMatter }
   /** A text block turned into a code block in its place. BO_0289_021 */
   | { readonly command: "turnIntoCode"; readonly blockId: string; readonly baseRevisionId: string }
+  | { readonly command: "turnIntoImage"; readonly blockId: string; readonly baseRevisionId: string }
+  | { readonly command: "turnImageIntoText"; readonly blockId: string; readonly baseRevisionId: string; readonly role: TextRole }
   /** A code block revised whole: its source and language. BO_0289_018 */
   | {
       readonly command: "reviseCode";
@@ -487,6 +524,46 @@ export function parseDocumentCommand(
         },
       };
     }
+    case "insertAdmonitionChild": {
+      const parentBlockId = text(input["parentBlockId"]);
+      const afterBlockId = text(input["afterBlockId"]);
+      const runs = input["runs"] === undefined ? { runs: [] } : readRuns(input["runs"]);
+      if (parentBlockId === null) return { failure: "An admonition child names its container." };
+      if ("failure" in runs) return runs;
+      return { command: { command: "insertAdmonitionChild", parentBlockId, ...(afterBlockId === null ? {} : { afterBlockId }), runs: runs.runs } };
+    }
+    case "mergeAdmonitionChild": {
+      const parentBlockId = text(input["parentBlockId"]);
+      const intoBlockId = text(input["intoBlockId"]);
+      const intoBaseRevisionId = text(input["intoBaseRevisionId"]);
+      const blockId = text(input["blockId"]);
+      const childBaseRevisionId = text(input["baseRevisionId"]);
+      if (parentBlockId === null || intoBlockId === null || intoBaseRevisionId === null || blockId === null || childBaseRevisionId === null) {
+        return { failure: "Merging admonition children names their container, survivor and absorbed child, and both base revisions." };
+      }
+      return { command: { command: "mergeAdmonitionChild", parentBlockId, intoBlockId, intoBaseRevisionId, blockId, baseRevisionId: childBaseRevisionId } };
+    }
+    case "setAdmonitionPattern": {
+      const patternId = text(input["patternId"]);
+      if (blockId === null || baseRevisionId === null || patternId === null) return { failure: "Changing an admonition pattern names its block, base revision, and saved pattern." };
+      return { command: { command: "setAdmonitionPattern", blockId, baseRevisionId, patternId } };
+    }
+    case "turnIntoAdmonition": {
+      const patternId = text(input["patternId"]);
+      if (blockId === null || baseRevisionId === null || patternId === null) return { failure: "Turning a text block into an admonition names its block, base revision, and saved pattern." };
+      return { command: { command: "turnIntoAdmonition", blockId, baseRevisionId, patternId } };
+    }
+    case "fillMediaBlock": {
+      if (blockId === null || baseRevisionId === null) return { failure: "Filling an image names its block and base revision." };
+      const reference = input["reference"];
+      if (!isBlobReference(reference)) return { failure: "An image reference is the core's blob reference." };
+      const width = input["width"];
+      const height = input["height"];
+      if (typeof width !== "number" || !Number.isSafeInteger(width) || width < 1 || typeof height !== "number" || !Number.isSafeInteger(height) || height < 1) {
+        return { failure: "An uploaded image carries its positive pixel width and height." };
+      }
+      return { command: { command: "fillMediaBlock", blockId, baseRevisionId, reference, width, height } };
+    }
     case "revise": {
       if (blockId === null || baseRevisionId === null) {
         return { failure: "A revise names a block and the revision it is based on." };
@@ -544,6 +621,9 @@ export function parseDocumentCommand(
       if (numbered !== undefined && typeof numbered !== "boolean") {
         return { failure: "A figure's or a table's numbered is true or false." };
       }
+      const captionRuns = input["captionRuns"] === undefined ? undefined : readRuns(input["captionRuns"]);
+      if (captionRuns !== undefined && "failure" in captionRuns) return captionRuns;
+      if (captionRuns !== undefined && captionRuns.runs.some((run) => (run.marks?.length ?? 0) > 0)) return { failure: "An image caption preserves links and has no formatting marks." };
       if (input["number"] !== undefined) {
         return { failure: "A number is the document's order and is never written." };
       }
@@ -553,6 +633,7 @@ export function parseDocumentCommand(
           blockId,
           baseRevisionId,
           ...(caption === undefined ? {} : { caption }),
+          ...(captionRuns === undefined ? {} : { captionRuns: captionRuns.runs }),
           ...(numbered === undefined ? {} : { numbered }),
         },
       };
@@ -610,6 +691,16 @@ export function parseDocumentCommand(
         return { failure: "Turning a block into code names the block and the revision it is based on." };
       }
       return { command: { command: "turnIntoCode", blockId, baseRevisionId } };
+    }
+    case "turnIntoImage": {
+      if (blockId === null || baseRevisionId === null) return { failure: "Turning a block into an image names the block and its base revision." };
+      return { command: { command: "turnIntoImage", blockId, baseRevisionId } };
+    }
+    case "turnImageIntoText": {
+      if (blockId === null || baseRevisionId === null) return { failure: "Turning an image into text names the block and its base revision." };
+      const role = readRole(input["role"]);
+      if ("failure" in role || role.role === undefined) return { failure: "Turning an image into text names a text role." };
+      return { command: { command: "turnImageIntoText", blockId, baseRevisionId, role: role.role } };
     }
     case "reviseCode": {
       if (blockId === null || baseRevisionId === null) {
@@ -1011,6 +1102,15 @@ export function runDocumentCommand(
   >
 > {
   switch (command.command) {
+    case "fillMediaBlock":
+      return fillMediaBlock({
+        documentId,
+        blockId: command.blockId,
+        baseRevisionId: command.baseRevisionId,
+        reference: command.reference,
+        width: command.width,
+        height: command.height,
+      });
     case "promoteBlock":
       return signedInAccount().then((account) =>
         account.outcome !== "success"
@@ -1021,6 +1121,12 @@ export function runDocumentCommand(
       return resolveJudgement({ judgementId: command.judgementId });
     case "turnIntoCode":
       return turnIntoCode({ documentId, blockId: command.blockId, baseRevisionId: command.baseRevisionId });
+    case "turnIntoImage":
+      return turnIntoImage({ documentId, blockId: command.blockId, baseRevisionId: command.baseRevisionId });
+    case "turnIntoAdmonition":
+      return turnIntoAdmonition({ documentId, blockId: command.blockId, baseRevisionId: command.baseRevisionId, patternId: command.patternId });
+    case "turnImageIntoText":
+      return turnImageIntoText({ documentId, blockId: command.blockId, baseRevisionId: command.baseRevisionId, role: command.role });
     case "reviseCode":
       return reviseCode({
         documentId,
@@ -1054,6 +1160,7 @@ export function runDocumentCommand(
         blockId: command.blockId,
         baseRevisionId: command.baseRevisionId,
         ...(command.caption === undefined ? {} : { caption: command.caption }),
+        ...(command.captionRuns === undefined ? {} : { captionRuns: command.captionRuns }),
         ...(command.numbered === undefined ? {} : { numbered: command.numbered }),
       });
     case "reviseTable":
@@ -1087,6 +1194,12 @@ export function runDocumentCommand(
         block: command.block,
         placement: command.placement,
       });
+    case "insertAdmonitionChild":
+      return insertAdmonitionChild({ documentId, parentBlockId: command.parentBlockId, ...(command.afterBlockId === undefined ? {} : { afterBlockId: command.afterBlockId }), runs: command.runs });
+    case "mergeAdmonitionChild":
+      return mergeAdmonitionChildren({ documentId, parentBlockId: command.parentBlockId, intoBlockId: command.intoBlockId, intoBaseRevisionId: command.intoBaseRevisionId, blockId: command.blockId, baseRevisionId: command.baseRevisionId });
+    case "setAdmonitionPattern":
+      return setAdmonitionPattern({ documentId, blockId: command.blockId, baseRevisionId: command.baseRevisionId, patternId: command.patternId });
     case "revise":
       return reviseTextBlock({
         documentId,
@@ -1193,6 +1306,15 @@ async function decode(request: Request): Promise<unknown | undefined> {
  * and title per document and nothing else, so the drawer never pays for block
  * content it does not render.
  */
+export async function handleAdmonitionPatternsRead(): Promise<OutcomeResponse<readonly AdmonitionPattern[]>> {
+  return respond(await listAdmonitionPatterns());
+}
+
+export async function handleAdmonitionPatternWrite(request: Request, id?: string): Promise<OutcomeResponse<AdmonitionPattern>> {
+  const value = await decode(request);
+  return respond(id === undefined ? await saveAdmonitionPattern(value) : await updateAdmonitionPattern(id, value));
+}
+
 export async function handleDocumentList(
 ): Promise<OutcomeResponse<readonly DocumentSummary[]>> {
   return respond(await listDocuments());
@@ -1313,6 +1435,19 @@ export async function handleReadMark(request: Request, documentId: string): Prom
   return respond(await writeMark(documentId, dataRevision));
 }
 
+/** The signed-in person's working mode on a document: read as the document
+ * opens, written when a toggle is pressed. BO_0306_011 */
+export async function handleWorkingMode(request: Request, documentId: string): Promise<OutcomeResponse<WorkingMode>> {
+  if (request.method === "GET") return respond(await readMode(documentId));
+  let body: unknown = null;
+  try {
+    body = await request.json();
+  } catch {
+    body = null;
+  }
+  return respond(await writeMode(documentId, body));
+}
+
 /** A block's claims' revisions, on request for the depth's history. CA_0046_003 */
 export async function handleHistoryRead(
   documentId: string,
@@ -1355,13 +1490,12 @@ export async function handleDocumentCommand(
 }
 
 /**
- * The bytes of a file a table stands behind (`BO_0287_013`): the body is the
- * file, its name in `X-Calliopa-Filename`, percent-encoded. Uploaded through
- * CCGW immediately before the block that references it is written, which is
- * the blob contract; the answer is the reference the insert carries. A file
- * CCGW refuses as too large is refused in its words.
+ * A file's bytes uploaded by the documents editor: the body is the file, its
+ * name in `X-Calliopa-Filename`, percent-encoded. Uploaded through CCGW
+ * immediately before the block that references it is written, which is the
+ * blob contract. A file CCGW refuses as too large is refused in its words.
  */
-export async function handleTableFile(request: Request): Promise<OutcomeResponse<{ readonly reference: BlobReference }>> {
+export async function handleDocumentFile(request: Request): Promise<OutcomeResponse<{ readonly reference: BlobReference }>> {
   const encoded = request.headers.get("x-calliopa-filename") ?? "";
   let filename = "";
   try {
@@ -1381,7 +1515,7 @@ export async function handleTableFile(request: Request): Promise<OutcomeResponse
     outcome: "success",
     result: {
       reference: {
-        ...blobReference(objectId, mediaType === "" ? "text/csv" : mediaType, uploaded.result.size),
+        ...blobReference(objectId, mediaType === "" ? "application/octet-stream" : mediaType, uploaded.result.size),
         filename,
       },
     },
