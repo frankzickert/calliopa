@@ -13,9 +13,10 @@ import type { GraphOutcome } from "~/server/outcome";
  * renders the child's current face on the block.
  *
  * The capability is the shell's (`CA_0065`, user decision 2026-09-23): what
- * it does is retarget a tab, push a route and land on a block, three things
- * the frame owns and no view may do for itself, and a reader must be able to
- * reach it on every install rather than only where some extension draws it.
+ * it does is open the child in a tab of its own, give it a route and land on
+ * a block (`CA_0073`), things the frame owns and no view may do for itself,
+ * and a reader must be able to reach it on every install rather than only
+ * where some extension draws it.
  *
  * What the shell does not own is the vocabulary. `document`, `text` and
  * `contains` are `documents`', and only `focuses` is the shell's declaration,
@@ -62,8 +63,8 @@ const unsupported = <T>(kind: string): GraphOutcome<T> =>
  * The contribution for a target kind, resolved when it is needed rather than
  * when this module loads. The server registry imports every extension's
  * server half, so a static import here would close a cycle through any
- * extension module that opens focused work — `documents`' own writes and
- * `calliopa-refine`'s reach both do, and the cycle leaves one extension's
+ * extension module that opens focused work — `documents`' own writes do —
+ * and the cycle leaves one extension's
  * contributions undefined while the registry is still being built. Technical
  * decision at implementation, 2026-09-23. CA_0065_002
  */

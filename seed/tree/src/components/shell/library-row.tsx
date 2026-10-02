@@ -40,7 +40,9 @@ export const LibraryRow = component$<{
   onOpen$: QRL<(target: OpenTarget) => void>;
   pointing?: RowPointing | undefined;
   onMark$?: QRL<(document: string, title: string) => void> | undefined;
-}>(({ item, current, onOpen$, pointing, onMark$ }) => {
+  /** A dragged block is held over the row: it carries the hold mark. */
+  held?: boolean | undefined;
+}>(({ item, current, onOpen$, pointing, onMark$, held }) => {
   const open = item.open;
   const parts = (
     <>
@@ -83,6 +85,10 @@ export const LibraryRow = component$<{
       data-badge={item.badge}
       data-proposed={item.proposedBy === undefined ? undefined : ""}
       data-current={current ? "true" : undefined}
+      // Held over with a dragged block, the row opens its document beside the
+      // active tab. CA_0072_004
+      data-spring={`library:${item.id}`}
+      data-spring-hold={held === true ? "true" : undefined}
       data-reference={marking && pointing.number !== null ? pointing.number : undefined}
       aria-current={current ? "true" : undefined}
       onClick$={() => onOpen$(open)}

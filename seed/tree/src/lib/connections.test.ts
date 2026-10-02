@@ -4,6 +4,8 @@ import {
   serviceSave,
   agentNeeds,
   configurationRefusal,
+  signOutBlocker,
+  signOutConsequences,
   type AgentStatus,
   type ConnectionRecord,
 } from "./connections";
@@ -279,7 +281,7 @@ describe("A channel's configuration", () => {
 
   it("Given a service that fixes its own address, When that address is in the record, Then it is accepted", () => {
     const evaluation = {
-      id: "calliopa-refine-evaluation",
+      id: "demo-evaluation",
       kind: "service" as const,
       fields: [],
       fixed: { address: "https://ai-gateway.vercel.sh/v1" },
@@ -299,7 +301,7 @@ describe("A channel's configuration", () => {
         address: "https://ai-gateway.vercel.sh/v1",
         library: "512345",
       }),
-    ).toBe("calliopa-refine-evaluation takes no configuration.");
+    ).toBe("demo-evaluation takes no configuration.");
   });
 });
 
@@ -339,5 +341,48 @@ describe("What a service row's Save would write", () => {
 
   it("Given a field typed back to what it already was, Then nothing was changed", () => {
     expect(serviceSave("", fields, { retention: "require" }, stored)).toBeNull();
+  });
+});
+
+/**
+ * A sign-out never interrupts a run: a run it would stop holds it, whoever's
+ * run it is. Signing Codex out restarts the gateway, so every gateway run
+ * holds it; signing Claude out stops only Claude's runs. BO_0316_006
+ */
+describe("what holds a sign-out", () => {
+  it("Given no run in flight, or a kernel that answers no counts, Then nothing holds it", () => {
+    expect(signOutBlocker("codex", {})).toBeNull();
+    expect(signOutBlocker("claude-code", null)).toBeNull();
+  });
+
+  it("Given a Claude run, Then Codex may still sign out and Claude waits", () => {
+    const active = { "claude-code": 1 };
+    expect(signOutBlocker("codex", active)).toBeNull();
+    expect(signOutBlocker("claude-code", active)).toBe("A run is going on Claude Code. Sign out once it ends.");
+  });
+
+  it("Given gateway runs, Then Codex waits for every one of them and Claude does not", () => {
+    expect(signOutBlocker("codex", { hermes: 1 })).toBe("A run is going on Hermes. Sign out once it ends.");
+    expect(signOutBlocker("codex", { codex: 2, hermes: 1, provider: 1 })).toBe(
+      "4 runs are going on Codex, Hermes and the API-key model. Sign out once they end.",
+    );
+    expect(signOutBlocker("claude-code", { codex: 2, hermes: 1 })).toBeNull();
+  });
+});
+
+/** The confirmation says what follows before anything is removed. BO_0316_007 */
+describe("what a sign-out says first", () => {
+  it("Given Codex while Hermes reasons on the subscription, Then it names Hermes too", () => {
+    expect(signOutConsequences("codex", "subscription")).toEqual([
+      "Codex leaves the agent menu.",
+      "Hermes reasons on your ChatGPT subscription through this sign-in, so it cannot run until Codex is signed in again.",
+    ]);
+    // A stamp that names no model is the subscription, the default.
+    expect(signOutConsequences("codex")).toHaveLength(2);
+  });
+
+  it("Given Codex while Hermes reasons on the API-key model, or Claude Code, Then only the agent menu is named", () => {
+    expect(signOutConsequences("codex", "provider")).toEqual(["Codex leaves the agent menu."]);
+    expect(signOutConsequences("claude-code", "subscription")).toEqual(["Claude Code leaves the agent menu."]);
   });
 });

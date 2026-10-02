@@ -72,6 +72,9 @@ export interface GraphRead {
   readonly dataRevision?: number;
   /** Lays one open proposal group over established truth. */
   readonly proposalOverlay?: string;
+  /** Reads the overlay's rejected members as staged, as they stood when they
+   * were staged (`calliopa-bootstrap`'s `BO_0315_001`). */
+  readonly proposalOverlayRejected?: boolean;
   readonly unbounded?: boolean;
   readonly metadataOnly?: boolean;
   readonly purpose?: string;
@@ -141,6 +144,7 @@ export async function query(read: GraphRead): Promise<GraphOutcome<ReadResult>> 
       ...(read.roots === undefined ? {} : { roots: read.roots }),
       ...((read.dataRevision ?? currentDataRevision()) === undefined ? {} : { dataRevision: read.dataRevision ?? currentDataRevision() }),
       ...(overlay === undefined ? {} : { proposalOverlay: overlay }),
+      ...(read.proposalOverlayRejected === true ? { proposalOverlayRejected: true } : {}),
       ...(read.unbounded === true ? { unbounded: true } : {}),
       ...(read.metadataOnly === true ? { metadataOnly: true } : {}),
       context: { principal: PRINCIPAL, purpose: read.purpose ?? "ui.shell read" },
@@ -199,6 +203,11 @@ export interface TouchedSet {
     readonly toKind: string;
     readonly toId: string;
   }[];
+  /** An entry of the reaching read that carries a group's rejected members
+   * rather than its staged ones, with the data revision each rejection was
+   * established at (`calliopa-bootstrap`'s `BO_0315_001`). */
+  readonly rejected?: boolean;
+  readonly rejectedAt?: Readonly<Record<string, number>>;
 }
 
 export async function touchedSet(proposal: string): Promise<GraphOutcome<TouchedSet>> {
@@ -208,6 +217,32 @@ export async function touchedSet(proposal: string): Promise<GraphOutcome<Touched
       return { outcome: "storageError", detail: `touched set of ${proposal}: ${response.status}` };
     }
     return { outcome: "success", result: (await response.json()) as TouchedSet };
+  } catch (error) {
+    return { outcome: "storageError", detail: `CCGW is unreachable: ${String(error)}` };
+  }
+}
+
+/**
+ * The open groups that reach any of the named nodes, each in the touched
+ * set's shape, answered by the core in one read (`POST
+ * /v1/proposals/reaching`) instead of one touched-set read per open group.
+ * A reader of one known group keeps `touchedSet`. With `rejected`, the
+ * answer adds an entry for every group holding rejected members that reach
+ * the nodes, carrying those members alone (`BO_0315_001`). BO_0314_012
+ */
+export async function reachingGroups(nodes: readonly string[], rejected = false): Promise<GraphOutcome<readonly TouchedSet[]>> {
+  if (nodes.length === 0) return { outcome: "success", result: [] };
+  try {
+    const response = await fetch(`${graphEnv().ccgwUrl}/v1/proposals/reaching`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nodes: [...nodes], ...(rejected ? { rejected: true } : {}) }),
+    });
+    if (!response.ok) {
+      return { outcome: "storageError", detail: `the groups reaching ${nodes.length} nodes: ${response.status}` };
+    }
+    const answer = (await response.json()) as { readonly groups?: readonly TouchedSet[] };
+    return { outcome: "success", result: answer.groups ?? [] };
   } catch (error) {
     return { outcome: "storageError", detail: `CCGW is unreachable: ${String(error)}` };
   }
@@ -330,6 +365,34 @@ export type Decision = "accept" | "reject";
 
 export interface Decided {
   readonly decision: Decision;
+}
+
+/**
+ * A gather's group answered whole through the bridge's `accept` or `reject`
+ * verb (`BO_0322_009`): accepted with `gather`, which the kernel executes
+ * without its confirmation when every member is content, and rejected as a
+ * group, which needs none. A gather the kernel keeps behind its confirmation
+ * answers as refused with the confirmation address, as a member does.
+ * BO_0322_013
+ */
+export async function decideGroup(decision: Decision, proposal: string, rationale: string): Promise<GraphOutcome<Decided>> {
+  let answer;
+  try {
+    answer = await post(`${graphEnv().kernelUrl}/__kernel/review/${decision}`, {
+      proposal,
+      rationale,
+      ...(decision === "accept" ? { gather: true } : {}),
+    });
+  } catch (error) {
+    return { outcome: "storageError", detail: `the kernel is unreachable: ${String(error)}` };
+  }
+  const { status, envelope } = answer;
+  if (status === 200 && envelope.status === "success") return { outcome: "success", result: { decision } };
+  if (status === 200 && envelope.status === "pending") {
+    return { outcome: "refused", detail: `this gather needs the kernel's confirmation: ${envelope.confirmUrl ?? ""}` };
+  }
+  if (status === 409 || status === 422) return { outcome: "refused", detail: describe(envelope, "the kernel refused the gather") };
+  return { outcome: "storageError", detail: describe(envelope, `the kernel answered ${status}`) };
 }
 
 /**

@@ -517,3 +517,54 @@ describe("couldBeOneEdit", () => {
     expect(couldBeOneEdit(LONG, "Once you know the machine computes by cancellation", 0)).toBe(false);
   });
 });
+
+// A keyword named on purpose (`calliopa-bootstrap`'s `BO_0310_010`): an
+// identity over words the sentence keeps, joined only with the same keyword.
+describe("a named keyword", () => {
+  const named: Run[] = [
+    { text: "Both " },
+    { text: "quantum ", keyword: "kw-qc" },
+    { text: "computers", keyword: "kw-qc" },
+    { text: " and " },
+    { text: "qubits", keyword: "kw-q" },
+  ];
+
+  it("is kept whole and joined only with a neighbour naming the same keyword", () => {
+    expect(normalizeRuns(named)).toEqual([
+      { text: "Both " },
+      { text: "quantum computers", keyword: "kw-qc" },
+      { text: " and " },
+      { text: "qubits", keyword: "kw-q" },
+    ]);
+    expect(normalizeRuns([{ text: "a", keyword: "kw-1" }, { text: "b", keyword: "kw-2" }])).toHaveLength(2);
+    expect(sameRuns([{ text: "a", keyword: "kw-1" }], [{ text: "a" }])).toBe(false);
+  });
+
+  it("takes words typed inside it and leaves words typed at its edge to the sentence", () => {
+    const runs = normalizeRuns(named);
+    // Inside "quantum computers", after "quantum".
+    expect(replaceRange(runs, 12, 12, "X")[1]).toEqual({ text: "quantumX computers", keyword: "kw-qc" });
+    // Right after it.
+    const after = replaceRange(runs, 22, 22, "!");
+    expect(after[1]).toEqual({ text: "quantum computers", keyword: "kw-qc" });
+    expect(after[2]).toEqual({ text: "! and " });
+    // A split inside it keeps both halves naming it.
+    const [head, tail] = splitRuns(runs, 12);
+    expect(head[1]).toEqual({ text: "quantum", keyword: "kw-qc" });
+    expect(tail[0]).toEqual({ text: " computers", keyword: "kw-qc" });
+  });
+
+  it("gives way to a link set over its words", () => {
+    const linked = applyLink(normalizeRuns(named), 5, 22, "https://example.org");
+    expect(linked[1]).toEqual({ text: "quantum computers", link: "https://example.org" });
+  });
+
+  it("is read back, and refused naming nothing, with no words, beside a link or as an atom", () => {
+    expect(readRuns([{ text: "qubits", keyword: "kw-q" }])).toEqual({ runs: [{ text: "qubits", keyword: "kw-q" }] });
+    expect(readRuns([{ text: "qubits", keyword: " " }])).toEqual({ failure: "Run 0 names no keyword." });
+    expect(readRuns([{ text: "", keyword: "kw-q" }])).toEqual({ failure: "Run 0 names a keyword with no words." });
+    expect(readRuns([{ text: "q", keyword: "kw-q", link: "https://example.org" }])).toEqual({ failure: "Run 0 names a keyword or carries a link, never both." });
+    expect("failure" in readRuns([{ text: "", keyword: "kw-q", blockRef: "blk-1" }])).toBe(true);
+    expect("failure" in readRuns([{ text: "x", keyword: "kw-q", math: true }])).toBe(true);
+  });
+});

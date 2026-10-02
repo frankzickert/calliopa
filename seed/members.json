@@ -58,8 +58,31 @@
           "title",
           "kind"
         ],
-        "semantics": "A work of the instance's bibliography — a bibliographic work, the cited thing — a root node with no parent and no block flag, so it is never offered among the kinds a document's block may take; its record in CSL-JSON shape, the shape a DOI resolves to, the engine exports and the citation processor consumes. Declared by bibliography under BO_0291; named work rather than source because node:source is already relations' relation type (user decision, 2026-09-23). The identifier — DOI, ISBN or URL — is the identity for duplicates. A citation is a run of a text block carrying cite with the work's identity and no text of its own, drawn as the work's number, which the document read derives and never stores. The record's two hyphenated CSL keys are stored as containerTitle and publisherPlace, the dialect having no quoted identifiers; the extension maps them at its write and its read.",
+        "semantics": "A work as the instance's bibliography held it before BO_0313 — a root node with its record in CSL-JSON shape — read only by bibliography's migration-bo-0313-sources-are-documents, which makes each a document carrying record: source and the built-in Source, rewrites every citation to name it and retires the work. Nothing writes one any more: a source is a document (BO_0313_Q1). The record's two hyphenated CSL keys were stored as containerTitle and publisherPlace. The declaration stays one release, so an install that has not yet run the migration reads its works, and is dropped by the next (BO_0313_026).",
         "singleOpenCandidate": true
+      }
+    },
+    {
+      "extension": "bibliography",
+      "nodeId": "node:migration-bo-0313-sources-are-documents",
+      "type": "ext.migration",
+      "content": {
+        "after": [
+          "migration-bo-0313-source-fields"
+        ],
+        "id": "migration-bo-0313-sources-are-documents",
+        "migrates": [
+          "work",
+          "document",
+          "text",
+          "CONTAINS",
+          "hasBlockRole",
+          "roleFields",
+          "fieldsOf",
+          "fieldsFor"
+        ],
+        "rationale": "BO_0313_Q1: every work becomes a source document and every citation is rewritten to name it, automatically as the release is taken (BO_0312_Q7). The route answers one script: each established work becomes a document with its title and record: source, an empty paragraph for the person's notes, Source taken and its fields filled from the record, its file moved to File; every cite run of an established text block naming a work is rewritten to name the new document, its locator kept, so every reference list reads as before; and each work is retired. An instance without works answers an empty statement. The work declaration stays one release, so an install that has not yet run this reads its works, and is dropped by the next (BO_0313_026).",
+        "route": "kernel/migrations/sources-are-documents"
       }
     },
     {
@@ -68,19 +91,20 @@
       "type": "ext.skill",
       "content": {
         "conventions": {
-          "citeByRun": "A citation is a run of the sentence carrying cite: {work: <workId>, locator?} and empty text, proposed with propose_document_changes like any change to the sentence. Never write the number: the document's read derives it.",
-          "fetchDontDraft": "A work that is not in the bibliography is fetched with fetch_record — its DOI, ISBN, PMID, arXiv id or an address — and proposed with propose_work. Never draft a record from memory: a wrong author or year in a reference is worse than no reference.",
+          "citeByRun": "A citation is a run of the sentence carrying cite: {work: <workId>, locator?} and empty text, proposed with propose_document_changes like any change to the sentence; workId is the source document's identity as read_works answers it. Never write the number: the document's read derives it.",
+          "fetchDontDraft": "A source that is not here is fetched with fetch_record — its DOI, ISBN, PMID, arXiv id or an address — and proposed with propose_work. Never draft a record from memory: a wrong author or year in a reference is worse than no reference. An interview, a conversation or anything with no identifier is the person's to add.",
           "locatorWhenItHelps": "Give a locator — p. 12, §3, fig. 2 — when the claim rests on one place in a long work; leave it out otherwise.",
-          "oneWorkOnce": "propose_work refuses a work the bibliography already holds and names it: cite that one.",
-          "readBeforeCiting": "Read the bibliography with read_works before citing, and cite by the workId it answers. A work cited twice keeps its number."
+          "oneWorkOnce": "propose_work refuses a source already here and names it: cite that one.",
+          "readBeforeCiting": "Read the sources with read_works before citing, and cite by the workId it answers. A source cited twice keeps its number.",
+          "sourcesAreDocuments": "A source is a document carrying the Source role, of any CSL type — a paper, a book, a web page, an interview, a conversation, a dataset, software, a report. Its body holds the person's notes on it: read it with read_document when what you cite rests on them."
         },
-        "goal": "Cite what a claim rests on, from the instance's bibliography, where a reader would want to follow it; add a work to the bibliography only from a record you fetched.",
+        "goal": "Cite what a claim rests on, from the sources here, where a reader would want to follow it; add a source only from a record you fetched.",
         "id": "bibliography.citing",
-        "outputContract": "A conclusion naming the works you cited and any you proposed; zero or more works staged into the run's group; the sentences carrying their cite runs staged beside them.",
-        "permittedOperations": "read_works to read the bibliography; fetch_record, the kernel's, to fetch a work's record; propose_work to stage a work into your group; propose_document_changes to stage a sentence carrying a cite run. Nothing you hold writes truth.",
+        "outputContract": "A conclusion naming the sources you cited and any you proposed; zero or more sources staged into the run's group; the sentences carrying their cite runs staged beside them.",
+        "permittedOperations": "read_works to read the sources; fetch_record, the kernel's, to fetch a record; propose_work to stage a source into your group; propose_document_changes to stage a sentence carrying a cite run. Nothing you hold writes truth.",
         "preconditions": [
           "The bibliography extension is active: read_works answers. If it does not, say so and cite nothing.",
-          "You can say which sentence the work supports; a citation stands where a claim does."
+          "You can say which sentence the source supports; a citation stands where a claim does."
         ]
       }
     },
@@ -89,7 +113,7 @@
       "nodeId": "node:bibliography.propose_work",
       "type": "ext.tool",
       "content": {
-        "description": "Propose a work to the instance's bibliography: the record fetch_record answered for it, as it came — one CSL-JSON item — and what you fetched it from. The work is staged into your proposal group, never written as truth: the person accepts it with the rest. A work sharing a DOI, an ISBN or an address with one the bibliography already holds is refused, naming that work: cite it instead. Fetch the record first; do not draft one from memory. Once proposed, cite it by the workId this answers.",
+        "description": "Propose a source: the record fetch_record answered for it, as it came — one CSL-JSON item of any type, a paper, a web page, an interview, a dataset — and what you fetched it from. The source is staged into your proposal group as a document carrying the Source role, its fields filled from the record, never written as truth: the person accepts it with the rest. A source sharing a DOI, an ISBN or an address with one already here is refused, naming that source: cite it instead. Fetch the record first; do not draft one from memory. Once proposed, cite it by the workId this answers, which is the source document's identity.",
         "id": "bibliography.propose_work",
         "inputSchema": {
           "additionalProperties": false,
@@ -118,7 +142,7 @@
       "nodeId": "node:bibliography.read_works",
       "type": "ext.tool",
       "content": {
-        "description": "The instance's bibliography at your pin: each work's identity, a line saying who, when and what, its record but for the abstract, and whether it holds a file, narrowed by every word of an optional query. Read it before citing: a citation names a work by the workId this answers. It stages nothing.",
+        "description": "The sources at your pin — every document carrying the Source role, of any kind: each one's identity as workId, a line saying who, when and what, its record but for the abstract, and whether it holds a file, narrowed by every word of an optional query. Read it before citing: a citation names a source by the workId this answers. It stages nothing.",
         "id": "bibliography.read_works",
         "inputSchema": {
           "additionalProperties": false,
@@ -143,14 +167,16 @@
           "atomicProposal": "One extension change is one proposal group: every staged revision and relation belongs to the same group and is accepted or rejected as a unit. Never trickle per-file proposals; a half-applied extension state must never be materializable.",
           "consolidate": "Working mode consolidate: narrow the field. Name what now seems durable, merge duplicates by refining the proposal that stands (refines) rather than adding beside it, withdraw weaker or surplus framings with a successor (withdraw), state the consequences of what is kept, and prepare the decision the person takes. Close at least as much as you open: a consolidating run that adds more new blocks than it withdraws or refines is judged as having strayed. (BO_0306)",
           "create": "Working mode create: write. Stage in small reviewable units — one proposal per coherent change, each answerable on its own — and make the assumptions each rests on visible in its note or its words, so the person can accept, reject or refine one without taking the whole drift of the run. (BO_0306)",
-          "explore": "Working mode explore (the run's instructions name it when the person chose it): widen the field. Surface alternatives rather than one answer, preserve ambiguity the material has not settled, ask the sharper question, and keep each candidate cheap to discard — say in its note that it is a candidate. Present nothing as settled: no phase transition, no status change, and settled words are left standing rather than rewritten. Adding several proposals is proportionate here. (BO_0306)",
+          "deepen": "Pinch in (the run's instructions name it when a person zoomed in on a block): the person asked for the next useful layer of that block, and wrote no words. Search the web for news on the block's subject with the search tool, and cite what you use. Deepen at the same level of intent: examples, edge cases, mechanisms, trade-offs, or why it matters. Propose one rewrite of the block that leaves it clear and complete: finish a fragmentary thought keeping its direction, restate what is vague, split mixed ideas, and name the implied assumption. Propose new blocks below it for what the search and the deepening found, each its own item. Propose no gather and no move. (BO_0322)",
+          "explore": "Working mode explore (the run's instructions name it when the person chose it): widen the field. Surface alternatives rather than one answer, preserve ambiguity the material has not settled, ask the sharper question, and keep each candidate cheap to discard — say in its note that it is a candidate. Present nothing as settled: no status change, and settled words are left standing rather than rewritten. Adding several proposals is proportionate here. (BO_0306)",
+          "gather": "Pinch out (the run's instructions name it when a person zoomed out on a block): the person asked for more structure, and wrote no words. Read the block's neighbours outward in both directions, one at a time, and stop in a direction at the first that does not belong with it. Propose exactly one item of kind gather, and nothing else, since a gather stands alone in its proposal: the block, the unbroken stretch you took in document order with the block among them, and the summary as runs. The summary is a short form, such as a title, claim, takeaway, decision, todo or one-line gist, covering the block, what it gathers and the focused work it already has. When no neighbour fits, stage nothing and say so. (BO_0322)",
           "humanWritesCostAConfirmation": "Every human-class write from the shell parks at the kernel bridge and waits for a confirmation on the kernel's own origin — no human mutation travels from the app origin to CCGW. Budget one cross-origin confirmation per write. That is proportionate for occasional truth like creating a channel and disproportionate for continuous editing, so a surface that writes on every keystroke needs a different shape than one that writes on a button.",
           "oneOpenProposalPerBlock": "A block carries at most one open proposal: every block type declares singleOpenCandidate, so a candidate of a block another open group already holds a candidate of is refused by the core — there is no second candidate to stage beside the first. Work bearing on such a block builds on the candidate that stands, staged into that group as a refinement (the document tools' refines; conventions.openProposals of ui.shell.documents), rather than opening a competing one, so the person answers once. Nothing here answers a proposal: accepting and rejecting stay the person's (proofsAreNotProposals). (BO_0271)",
           "proofsAreNotProposals": "Never stage a proposal whose intended outcome is rejection. A proof-only group is indistinguishable from a real one at the review surface — the rationale is rendered as ordinary text — so after a run of proposals that all deserved acceptance, one that did not will be accepted by the same motion. Construct demonstrations so the refusal is the whole proof and stop there: a refused mutation stages nothing and opens no group. Acceptance is the one non-delegable human action in the architecture and its entire value is the attention behind it, so anything that produces frequent near-identical almost-always-correct proposals is spending that attention down.",
           "understand": "Working mode understand: read more than you write. Trace definitions and dependencies, tell established material from open proposals, and answer with a map of what follows from what — relations with their reasons, and short explanatory blocks placed where the command asks. Leave the document's own blocks alone unless the command referenced them: rewriting, removing or moving an unreferenced established block is judged as having strayed. (BO_0306)",
           "valuesTravelAsParameters": "How a statement says values, which the grammar will not let you guess:\n- Every value beyond a scalar travels beside the statement in the tool call's parameters field, which is one JSON object written as text — for example parameters: \"{\\\"bid\\\": \\\"art-x.b1\\\", \\\"runs\\\": [{\\\"text\\\": \\\"...\\\"}]}\". The statement writes $name where a value belongs; lists and objects have no literal form inside the statement itself, and runs: [{text: ...}] inline is a parse error every time.\n- Every $name in the statement must have a key in that JSON object. An empty parameters value beside a parameterized statement is always wrong, and resending a refused statement without filling it changes nothing.\n- A script is one or more statements separated by semicolons; CREATE ... RELATE ... in one breath is a parse error at RELATE. Aliases scope per statement but parameters are request-global, so one parameters object serves the whole script: the canonical block write is CREATE (n:Text {id: $bid, runs: $runs, order: $order}); RELATE childRef -[r:CONTAINS]-> parentRef, with bid, runs, order, childRef and parentRef all keys of the one JSON object.\n- RELATE endpoint refs resolve from parameters — <ref>NodeId first, then <ref> — and those values carry the node: prefix (childRef: \"node:art-x.b1\"), even though the id property inside CREATE content is bare. The ref names an existing node; the id property mints one.\n- When syntax is uncertain, calliopa_explain compiles a statement without executing it. Explain and correct rather than retrying a refusal unchanged — the diagnostics name what they want.",
           "whereRequirementsLive": "An extension's requirements and open work live in its own docs/ members (docs/system/**/*.md under the live-line protocol), read through calliopa_query like its code. An extension's changes are its own docs/changes/ members (BO_0254): docs/changes/<PREFIX>_NNNN_TYPE_<short-name>.md in its subtree, finished ones under docs/changes/completed/, each carrying its status in a Status: line from idea, draft, ready, wip, completed, rejected. They are written and revised the way every other docs member is — from a checkout, in the proposal that carries the code — and rendered read-only in the shell's Extensions section. A run working from the composer holds no checkout and so writes none. A run that changes an extension's behaviour also updates its docs in the same proposal group and keeps its change document's Status: line honest — wip when it claims ready work, completed when the work is done; only a person establishes draft or ready, and acceptance is what establishes any status. (BO_0201, BO_0254)",
-          "workVocabulary": "Documents carry a decision vocabulary (BO_0244): a text block may have a kind, and reason-bearing relations connect blocks. Two rules, whichever tool writes them: a relation is proposed with a reason naming the condition that connects its ends — never that they seem related — and with origin inferred or derived, since a run never declares; and each end names a block by blockId, of this document or another, never a retired or discarded one, and never the same block twice. A relation anchored a claim until BO_0288; claim and asserts are calliopa-refine's vocabulary now and no kernel tool reads or writes them. Propose these through propose_document_changes (items kind, relate, reason, derive), never by statement, so review sees them as the editor would have written them.",
+          "workVocabulary": "Documents carry reason-bearing relations between blocks (BO_0244). Two rules, whichever tool writes them: a relation is proposed with a reason naming the condition that connects its ends — never that they seem related — and with origin inferred or derived, since a run never declares; and each end names a block by blockId, of this document or another, never a retired or discarded one, and never the same block twice. Propose these through propose_document_changes (items relate, reason), never by statement, so review sees them as the editor would have written them. (BO_0288, BO_0324)",
           "writeShapeFollowsFrequency": "Choose the write path by how often the operation happens, not by what it touches. Continuous editing stages candidates with no confirmation and one deliberate act to establish them; an occasional deliberate act — creating a channel, filing something into one — takes the confirmation directly, where the ceremony is proportionate. Both are the same architecture; only the frequency differs, and reaching for one shape everywhere makes typing intolerable or truth too cheap."
         },
         "goal": "Stage work into Calliopa's graph as one reviewable proposal, whatever the reader's intention was.",
@@ -342,22 +368,32 @@
         "name": "blockRole",
         "optionalProperties": [
           "description",
-          "retired"
+          "retired",
+          "builtin",
+          "fields",
+          "formerId",
+          "sendWithPrompt",
+          "blocks"
         ],
         "permittedChildTypes": [],
         "properties": {
+          "blocks": "false when blocks may not take the role: it is taken by documents alone; absent or true, blocks may take it (BO_0332). A built-in's is the release's: Keyword, Profile, Format and Source are taken by documents alone",
+          "builtin": "true for a built-in role (Keyword, Profile, Format, Source, Definition, Alias): never renamed, retired or restored",
           "description": "what a block of this role does, in the person's words",
-          "id": "the block role's identity, a UUID the shell mints; the node id is node:<id>",
-          "name": "the block role's name, as the choice offers it",
-          "order": "the block role's place among the ones its document role offers, a number",
-          "retired": "true once the block role is retired: the choice stops offering it, assignments stay and say so"
+          "fields": "the fields the role carries, an ordered list of {key, name, type, required, options?, default?}; key is minted once and never changes, type is text, longText, number, date, boolean, choice, reference or file",
+          "formerId": "the id the role had as a documentRole before BO_0309, by which a reader still holding it finds the role",
+          "id": "the role's identity: a UUID the shell mints, or builtin:<name> for a built-in; the node id is node:<id>",
+          "name": "the role's name, as the chip's control and the Roles category offer it",
+          "order": "the role's place among the roles, a number; the built-ins come first",
+          "retired": "true once the role is retired: nothing offers it any more, assignments stay and say so",
+          "sendWithPrompt": "on builtin:keyword alone: the field keys and offered-role ids whose words go with a prompt that includes a keyword (BO_0310)"
         },
         "requiredProperties": [
           "id",
           "name",
           "order"
         ],
-        "semantics": "A block role a document role offers (BO_0299), reached from it by offers: a root node with no parent and no block flag. Retired, never deleted."
+        "semantics": "A role (BO_0299; the one role type since BO_0309): a root node with no parent and no block flag, taken by a document or by any block in its reading order through hasBlockRole, several per subject. A role offers roles through offers, and a block may take a role offered by a role on any block above it, never on itself. A role says whether blocks may take it (blocks); the document always may. It carries fields, whose values a subject holds in a roleFields node. Retired, never deleted."
       }
     },
     {
@@ -373,16 +409,139 @@
         ],
         "permittedChildTypes": [],
         "properties": {
-          "description": "what a document of this role is, in the person's words",
-          "id": "the role's identity, a UUID the shell mints; the node id is node:<id>",
-          "name": "the role's name, as the choices offer it",
-          "retired": "true once the role is retired: the choices stop offering it, assignments stay and say so"
+          "description": "what a document of this role was, in the person's words",
+          "id": "the role's identity, a UUID the shell minted; the node id is node:<id>",
+          "name": "the role's name",
+          "retired": "true once the role was retired"
         },
         "requiredProperties": [
           "id",
           "name"
         ],
-        "semantics": "A document role (BO_0299): a root node with no parent and no block flag, so it is never offered among the kinds a document's block may take. Configured in the app; retired, never deleted."
+        "semantics": "A document role before BO_0309. The migration one-role-type makes each a blockRole carrying its id as formerId and retires it; nothing writes one any more. The declaration stays until every install has run the migration."
+      }
+    },
+    {
+      "extension": "doc-block-roles",
+      "nodeId": "node:roleFields",
+      "type": "ext.blocktype",
+      "content": {
+        "id": "roleFields",
+        "name": "roleFields",
+        "optionalProperties": [
+          "values",
+          "files"
+        ],
+        "permittedChildTypes": [],
+        "properties": {
+          "files": "the blob references of the file values, at the top level so the blobs stay live (binary-content.md)",
+          "id": "a UUID the shell mints; the node id is node:<id>",
+          "role": "the id of the role whose fields these are, the same role fieldsFor reaches",
+          "values": "the values, keyed by the field's key: text, a number, true/false, a YYYY-MM-DD date, a choice's option, a node id for a reference, or {hash, filename, mediaType, size} for a file"
+        },
+        "requiredProperties": [
+          "id",
+          "role"
+        ],
+        "semantics": "One block's (or document's) values for one role it takes (BO_0309): a root node with no parent and no block flag, joined to the block by fieldsOf and to the role by fieldsFor, since relations carry no properties. A value is written as the person's truth at once, or proposed by a run. It stays when the role is cleared, so taking the role again finds it."
+      }
+    },
+    {
+      "extension": "doc-block-roles",
+      "nodeId": "node:migration-bo-0309-builtin-roles",
+      "type": "ext.migration",
+      "content": {
+        "id": "migration-bo-0309-builtin-roles",
+        "migrates": [
+          "blockRole"
+        ],
+        "rationale": "BO_0309 gives every instance the built-in roles Keyword, Profile, Format and Source (BO_0308_Q5), with the fixed ids builtin:keyword, builtin:profile, builtin:format and builtin:source and builtin: true. The route answers one script creating those the instance does not hold, and nothing when it holds them all, so a person's fields and offers on a built-in are never overwritten by a release. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003).",
+        "route": "kernel/migrations/builtin-roles"
+      }
+    },
+    {
+      "extension": "doc-block-roles",
+      "nodeId": "node:migration-bo-0309-one-role-type",
+      "type": "ext.migration",
+      "content": {
+        "id": "migration-bo-0309-one-role-type",
+        "migrates": [
+          "documentRole",
+          "hasDocumentRole",
+          "blockRole",
+          "offers"
+        ],
+        "rationale": "BO_0309 makes document roles and block roles one role type. A node never changes its type, so the route answers one script that makes each documentRole a new blockRole carrying its name, description and retired flag and its old id as formerId, placed after the roles already there; re-relates each offers from it and each document's hasDocumentRole to it as the new role's offers and the document's hasBlockRole, closing the old relations; and retires the old node. Nothing is lost: block roles keep their ids and their assignments, a reader holding a former id finds the role by it, and every document and block answers the same role names. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003), on this instance and on every install that takes the release.",
+        "route": "kernel/migrations/one-role-type"
+      }
+    },
+    {
+      "extension": "doc-block-roles",
+      "nodeId": "node:migration-bo-0310-keyword-builtins",
+      "type": "ext.migration",
+      "content": {
+        "after": [
+          "migration-bo-0309-builtin-roles"
+        ],
+        "id": "migration-bo-0310-keyword-builtins",
+        "migrates": [
+          "blockRole",
+          "offers"
+        ],
+        "rationale": "BO_0310 makes Keyword offer the built-ins Definition and Alias on every instance, through offers a release makes, and sends the definition with a prompt. The built-ins themselves are created by migration-bo-0309-builtin-roles, which now holds them. The route answers one script relating the offers that do not stand, and setting sendWithPrompt to [builtin:definition] where Keyword holds none, so a person's switches are never reset by an upgrade; nothing when all stand. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003).",
+        "route": "kernel/migrations/keyword-builtins"
+      }
+    },
+    {
+      "extension": "doc-block-roles",
+      "nodeId": "node:migration-bo-0312-format-fields",
+      "type": "ext.migration",
+      "content": {
+        "after": [
+          "migration-bo-0309-builtin-roles"
+        ],
+        "id": "migration-bo-0312-format-fields",
+        "migrates": [
+          "blockRole"
+        ],
+        "rationale": "BO_0312 makes Format's release fields available on every instance: the required type choice and the schema text field. The migration preserves fields a person added and installs or repairs only the two release fields.",
+        "route": "kernel/migrations/format-fields"
+      }
+    },
+    {
+      "extension": "doc-block-roles",
+      "nodeId": "node:migration-bo-0313-source-fields",
+      "type": "ext.migration",
+      "content": {
+        "after": [
+          "migration-bo-0309-builtin-roles"
+        ],
+        "id": "migration-bo-0313-source-fields",
+        "migrates": [
+          "blockRole"
+        ],
+        "rationale": "BO_0313 makes a source a document carrying the built-in Source, its CSL record the role's fields: Kind (a required choice of every CSL type), Authors and Editors (long text, one Family, Given per line), Issued, Container, Volume, Issue, Pages, Publisher, Place, DOI, ISBN, URL, Accessed (text), Abstract (long text), Tags (text), File (file) and Fetched (text). The route answers one SET of Source's fields that installs or repairs these release fields by key and keeps every field a person added beside them; an instance where they stand answers an empty statement.",
+        "route": "kernel/migrations/source-fields"
+      }
+    },
+    {
+      "extension": "doc-block-roles",
+      "nodeId": "node:fieldsFor",
+      "type": "ext.relationtype",
+      "content": {
+        "id": "fieldsFor",
+        "name": "fieldsFor",
+        "semantics": "A roleFields node holds the values of a role: directed from the roleFields node to the blockRole. Declared by doc-block-roles under BO_0309_010."
+      }
+    },
+    {
+      "extension": "doc-block-roles",
+      "nodeId": "node:fieldsOf",
+      "type": "ext.relationtype",
+      "content": {
+        "id": "fieldsOf",
+        "name": "fieldsOf",
+        "semantics": "A roleFields node holds values for a subject: directed from the roleFields node to the block or document taking the role. Declared by doc-block-roles under BO_0309_010."
       }
     },
     {
@@ -392,7 +551,7 @@
       "content": {
         "id": "hasBlockRole",
         "name": "hasBlockRole",
-        "semantics": "A block carries a block role: directed from any block in a document's reading order to the blockRole, at most one active per block, the roles extension's rule. Every block kind may carry one (BO_0299_Q8). Written as the person's own truth at once, never proposed. Declared by doc-block-roles under BO_0299_011."
+        "semantics": "A block or a document carries a role: directed from the document node, or from any block in its reading order, to the blockRole, several per subject (BO_0309). Every block kind may carry one (BO_0299_Q8). Taken by the person as truth at once, or proposed by a run and established by the person's acceptance (BO_0308_Q4). Declared by doc-block-roles under BO_0299_011."
       }
     },
     {
@@ -402,7 +561,7 @@
       "content": {
         "id": "hasDocumentRole",
         "name": "hasDocumentRole",
-        "semantics": "A document carries a document role: directed from the document to the documentRole, at most one active per document, the roles extension's rule, checked by a read before the write. Written as the person's own truth at once, never proposed (BO_0299_Q2, BO_0299_Q6). Declared by doc-block-roles under BO_0299_011."
+        "semantics": "A document carried a document role before BO_0309: the migration one-role-type relates each as a hasBlockRole from the same document and closes it; nothing writes one any more. The declaration stays until every install has run the migration."
       }
     },
     {
@@ -412,7 +571,7 @@
       "content": {
         "id": "offers",
         "name": "offers",
-        "semantics": "A document role offers a block role: directed from the documentRole to the blockRole, one document role per block role. Declared by doc-block-roles under BO_0299_011."
+        "semantics": "A role offers a role: directed from one blockRole to another, any number each way (BO_0309). A block may take a role offered by a role on itself or on any block above it in its reading order, the document counting as the top. Declared by doc-block-roles under BO_0299_011, widened by BO_0309."
       }
     },
     {
@@ -421,20 +580,71 @@
       "type": "ext.skill",
       "content": {
         "conventions": {
-          "neverAssign": "You never propose a document role or a block role: read_document_roles answers reads alone, and no item of propose_document_changes sets one. A block whose role is not offered by the current document role, or is retired, is still written by that role; say so in your conclusion if it matters.",
-          "profileSaysHow": "A profile attached to the document may say how a role is written — its own blocks can carry the same roles. Where the profile speaks to a role, follow it; where it is silent, the role's description and its name are the guide.",
-          "readRolesFirst": "Before proposing into a document, call read_document_roles once. The answer carries the document role, and per block in reading order its block role with its description — what a block of that role does, in the person's words.",
-          "roleIsNotTheTypographicRole": "A block's blockRole is not its role in read_document: that one is the typographic role — paragraph, h1, quote. Keep the two apart.",
-          "writeByRole": "A block's block role says what the block is for: write a Hook as a hook, a Closing as a closing that answers the hook. The role's description is the person's own account of it and outranks your idea of the word."
+          "documentRolesOnTheDocument": "A role marked documentOnly — Keyword, Profile, Format and Source always — is taken by the document alone: propose it on the document, never on a block, and propose_roles refuses it on a block. A block's role marked notOnBlock was taken before the role became the document's alone; leave it unless the person asks you to clear it. A part that should carry a document role on its own is a block's focused work, whose document takes it.",
+          "profileSaysHow": "A profile may say how a role is written; its own blocks can carry the same roles. Where the profile speaks to a role, follow it; where it is silent, the role's description, its fields and its name are the guide.",
+          "proposeWhenAsked": "Propose a role or a value with propose_roles when the command asks for it, or when a value the command needs is missing and the words say what it is. A role or a value the person set is rewritten only on the person's word. It stands only once the person accepts it.",
+          "readRolesFirst": "Before proposing into a document, call read_document_roles once. The answer carries the document's own roles and, per block in reading order, its roles, each with its description, its fields and their values, what is missing, and what the block can take.",
+          "roleIsNotTheTypographicRole": "A block's roles are not its role in read_document: that one is the typographic role — paragraph, h1, quote. Keep the two apart.",
+          "roledBlockIsThePlace": "When the command asks for what a role is for and a block already carries that role, propose a rewrite of that block or answer from it; never insert a second block of the role. Insert one only where no block carries it; an empty roled block is asking to be written.",
+          "writeByRole": "A block's roles say what the block is for: write a Hook as a hook, a Closing as a closing that answers the hook. The role's description is the person's own account of it and outranks your idea of the word. A block carrying several roles serves each."
         },
-        "goal": "Write a document that carries a document role by its roles: each block by the block role the person gave it, the whole by what the document role means, and never assign a role yourself.",
+        "goal": "Write a document whose blocks carry roles by those roles: each block by the roles the person gave it, the whole by the document's own; and, where the command asks for it, propose a role or a value for the person to accept.",
         "id": "doc-block-roles.roles",
-        "outputContract": "A conclusion naming the document role you wrote under and which block roles the proposed blocks serve; the blocks staged into the run's group; no role assigned or proposed.",
-        "permittedOperations": "read_document_roles to read the document's role and each block's; propose_document_changes to propose the words. Nothing you hold assigns a role, and no item proposes one.",
+        "outputContract": "A conclusion naming the roles you wrote under and which roles the proposed blocks serve, and any role or value you proposed; the blocks and the proposed roles and values staged into the run's group.",
+        "permittedOperations": "read_document_roles to read the roles and their values; propose_roles to propose taking or clearing a role, or a field's value; propose_document_changes to propose the words.",
         "preconditions": [
-          "read_document_roles answers for the document. If the document carries no document role, write it as you would any document and read nothing more here.",
-          "You can name the block you are writing into; its block role is read by blockId from the answer."
+          "read_document_roles answers for the document. If nothing in it carries a role and the command asks for none, write it as you would any document and read nothing more here.",
+          "You can name the block you are writing into or proposing for; its roles are read by blockId from the answer."
         ]
+      }
+    },
+    {
+      "extension": "doc-block-roles",
+      "nodeId": "node:doc-block-roles.propose_roles",
+      "type": "ext.tool",
+      "content": {
+        "description": "Propose roles for one block, or for the document when you name no block: roles to take and to clear, and values for a role's fields. It is staged into your proposals and stands only once the person accepts it. A role must be one the block can take where it stands (read_document_roles' takeable), and a value one of its field's type — a date as YYYY-MM-DD, a choice as one of its options.",
+        "id": "doc-block-roles.propose_roles",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "block": {
+              "description": "The block, as a record id; leave it out for the document's own roles.",
+              "type": "string"
+            },
+            "clear": {
+              "description": "Role ids to clear.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "document": {
+              "description": "The document, as a record id.",
+              "type": "string"
+            },
+            "take": {
+              "description": "Role ids to take.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "values": {
+              "additionalProperties": {
+                "type": "object"
+              },
+              "description": "Values by role id, then by field key.",
+              "type": "object"
+            }
+          },
+          "required": [
+            "document"
+          ],
+          "type": "object"
+        },
+        "name": "propose_roles",
+        "route": "kernel/tools/propose_roles"
       }
     },
     {
@@ -442,7 +652,7 @@
       "nodeId": "node:doc-block-roles.read_document_roles",
       "type": "ext.tool",
       "content": {
-        "description": "The document's role — a Story, an Essay — and each block's block role, in reading order, at your pin: what the person assigned, never a candidate's. Read it before proposing into a document that carries a document role, and write each block by its role: a Hook block is written as a hook. It stages nothing, and you never propose a role — assigning one is the person's act.",
+        "description": "The document's own roles and each block's, in reading order, at your pin: several per block, each with its description, its fields and their values, and the missing required ones; and per block the roles it can take where it stands (takeable). What the person established, never a candidate's. Read it before proposing into a document whose blocks carry roles, and write each block by its roles: a Hook block is written as a hook.",
         "id": "doc-block-roles.read_document_roles",
         "inputSchema": {
           "additionalProperties": false,
@@ -459,52 +669,6 @@
         },
         "name": "read_document_roles",
         "route": "kernel/tools/read_document_roles"
-      }
-    },
-    {
-      "extension": "documents",
-      "nodeId": "node:BlockKind",
-      "type": "ext.blocktype",
-      "content": {
-        "id": "BlockKind",
-        "name": "BlockKind",
-        "optionalProperties": [
-          "words"
-        ],
-        "properties": {
-          "id": "the declaration's identity; the node id is node:<id>",
-          "value": "the value this declaration permits",
-          "words": "how the value reads to a person, when it differs from the value"
-        },
-        "requiredProperties": [
-          "id",
-          "value"
-        ],
-        "semantics": "A value text.kind may carry. The slot is this extension's and it enumerates none: what a block may be said to be is declared by the extension that has something to say about blocks, as instances of this type attached to its own manifest by partOf (extension-model.md, Declaration By Instance). A declaration instance is not a member the export sees, so an individual extension's vocabulary lives in its instance's graph and travels with no release. Declared by documents under BO_0256_002.",
-        "singleOpenCandidate": true
-      }
-    },
-    {
-      "extension": "documents",
-      "nodeId": "node:RootPhase",
-      "type": "ext.blocktype",
-      "content": {
-        "id": "RootPhase",
-        "name": "RootPhase",
-        "optionalProperties": [
-          "words"
-        ],
-        "properties": {
-          "id": "the declaration's identity; the node id is node:<id>",
-          "value": "the value this declaration permits",
-          "words": "how the value reads to a person, when it differs from the value"
-        },
-        "requiredProperties": [
-          "id",
-          "value"
-        ],
-        "semantics": "A value document.phase may carry, declared by instance as BlockKind is. The slot is this extension's; the phases are the decision extension's, so an instance holding none can propose no phase, which is correct rather than a gap. Declared by documents under BO_0256_002.",
-        "singleOpenCandidate": true
       }
     },
     {
@@ -601,15 +765,14 @@
         "optionalProperties": [
           "intention",
           "record",
-          "phase",
-          "supersededBy",
           "runtime",
           "authors",
           "affiliations",
           "keywords",
           "venue",
           "citationStyle",
-          "profile",
+          "imageBackend",
+          "profileType",
           "formatCode",
           "lineNumbers"
         ],
@@ -629,6 +792,16 @@
             "ieee",
             "apa",
             "chicago-author-date"
+          ],
+          "imageBackend": [
+            "higgsfield",
+            "openart",
+            "codex"
+          ],
+          "profileType": [
+            "instructions",
+            "image",
+            "video"
           ]
         },
         "properties": {
@@ -637,14 +810,13 @@
           "citationStyle": "the document's own citation style, by the id of a style the bibliography ships; absent, the document follows the instance's default (BO_0291_037)",
           "formatCode": "whether a settled edit of a code block, and an accepted one, is pretty-printed through the code service's formatter: absent or true means on, false means off; switched per document from the bar's Format code toggle, written by the person as their own edit (BO_0296_013)",
           "id": "the document's identity, a UUID the shell mints; the node id is node:<id>",
+          "imageBackend": "the saved generation backend for an image or a video profile — higgsfield, openart, or codex for an image alone; retained when profileType changes",
           "intention": "the marking a reader gave the whole document: the marks value of an established ext.intention declaration; unconstrained here because intention extensions are declared per instance and a permitted set in this declaration would refuse a marking the instance legitimately declares — the agent bridge refuses an unknown intention at run start",
           "keywords": "the manuscript's keywords, in order (BO_0293)",
           "lineNumbers": "whether each line of a code block is numbered in the document: absent or true means shown, false means hidden; switched per document from the bar's Line numbers toggle, written by the person as their own edit, and nothing of it reaches a run (BO_0302_003)",
-          "phase": "the root's phase (BO_0249): proposed — a safe hypothetical environment, the default when absent; accepted — the wider system may rely on it; superseded — another root replaced it, named in supersededBy. The values are an established RootPhase declaration's, unconstrained here for the reason kind is (BO_0256_002)",
-          "profile": "the profile the reader attached to this document: the id of a document carrying record profile, whose established words the kernel supplies to a run started from a command in this document; absent means no profile; written as the person's own act by the profiles extension (BO_0298_010)",
+          "profileType": "the profile mode: instructions (absent means the same), image or video; image and video reveal the generation backend selector",
           "record": "the record slot carried over from the previous document type: names a record declaration; no permitted set, per the recorded non-enforcement of BO_0199_002",
           "runtime": "the runtime the document is connected to for running its code blocks, by its id; absent means none. Written by the kernel as the person's own edit (BO_0289)",
-          "supersededBy": "the id of the root that superseded this one; present only with phase superseded, written in the same mutation that accepts the successor (BO_0249)",
           "title": "the document's title",
           "venue": "the venue a manuscript of this document is made for, a word the manuscripts extension knows — generic or ieee (BO_0293)"
         },
@@ -652,7 +824,7 @@
           "id",
           "title"
         ],
-        "semantics": "The one product-level document kind: a node with a title whose content is its ordered child blocks, held as CONTAINS relations from the document to each block rather than nested in its revision. A document is not itself a block: it is not ordered among siblings and nothing contains it. At most one open candidate per document. Declared by ui.shell under BO_0207_011; the previous gateway's TypeScript definition of the same type is retired with the gateway. Since BO_0254 an extension's changes are its own docs/changes/ members, not documents: a document is a document. Since BO_0249 a root carries a phase — proposed, accepted or superseded — and, superseded, names its successor in supersededBy.",
+        "semantics": "The one product-level document kind: a node with a title whose content is its ordered child blocks, held as CONTAINS relations from the document to each block rather than nested in its revision. A document is not itself a block: it is not ordered among siblings and nothing contains it. At most one open candidate per document. Declared by ui.shell under BO_0207_011; the previous gateway's TypeScript definition of the same type is retired with the gateway. Since BO_0254 an extension's changes are its own docs/changes/ members, not documents: a document is a document.",
         "singleOpenCandidate": true
       }
     },
@@ -858,14 +1030,12 @@
         "optionalProperties": [
           "role",
           "intention",
-          "disposition",
-          "kind"
+          "disposition"
         ],
         "permittedChildTypes": [],
         "permittedValues": {
           "disposition": [
             "fixate",
-            "discarded",
             "prompt"
           ],
           "role": [
@@ -878,10 +1048,9 @@
           ]
         },
         "properties": {
-          "disposition": "the standing the reader gave the block: fixate — left standing and sent with every command issued in its document — or discarded, which leaves the drawn flow while the block stays in the document and its order, or prompt, a block sent as a command. Absent means keep, where a block stands unless someone says otherwise. Narrowed from keep, pin, resolved, discarded by BO_0272: pin is fixate under its own name, a resolved block reads as discarded and the old keep as the resting state, until the next write stores it",
+          "disposition": "the standing the reader gave the block: fixate — left standing and sent with every command issued in its document — or prompt, a block sent as a command. Absent means keep, where a block stands unless someone says otherwise. Narrowed from fixate, discarded, prompt by BO_0315: a block the reader removes is retired, and the migration migration-bo-0315 retires every block stored as discarded or resolved and clears its value; pin, stored before BO_0272, reads as fixate until the next write stores it",
           "id": "the block's identity, a UUID the shell mints; the node id is node:<id>",
           "intention": "the marking a reader gave this block, resolved own marking first, else the nearest marked ancestor, else the document's; the marks value of an established ext.intention declaration, unconstrained for the reason the document type records",
-          "kind": "what the block is, in whatever vocabulary an extension declares for it: the value of an established BlockKind declaration. Unconstrained here, because the values are declared by the extension that owns them and this one has none to name (BO_0256_002)",
           "order": "the block's place among its siblings: a fractional key compared as a string, so inserting between two siblings mints a key between theirs and writes one block",
           "role": "the text's role; absent means paragraph, so an ordinary block stores no role property. Widening this set is an ordinary change; narrowing it is breaking, because established content may hold a value the narrower set forbids",
           "runs": "the formatted text as an ordered list of runs, each carrying text and its own marks and no offsets; the core canonicalizes runs on every write"
@@ -946,12 +1115,39 @@
     },
     {
       "extension": "documents",
-      "nodeId": "node:derivedFrom",
-      "type": "ext.relationtype",
+      "nodeId": "node:migration-bo-0315",
+      "type": "ext.migration",
       "content": {
-        "id": "derivedFrom",
-        "name": "derivedFrom",
-        "semantics": "A block was derived from another block: directed from the derived block to a block it rests on, staged by the run that drafts it, so system-maintained from two accepted blocks is a fact the graph holds and provenance reads. Declared by ui.shell under BO_0244_006."
+        "id": "migration-bo-0315",
+        "migrates": [
+          "text"
+        ],
+        "rationale": "BO_0315 narrows text.disposition from fixate, discarded, prompt to fixate, prompt: the standing scale becomes keep and fixate, and a block the reader removes is retired rather than discarded (user decision, 2026-09-30). Nothing is lost. The route answers one script that retires every text block stored as discarded or resolved, keeping its place — the value cleared, the containment closed and the block related retired from its document, as the bar's retirement does — so each can be restored from Show removed like any retired block. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003), on this instance and on every install that takes the release.",
+        "route": "kernel/migrations/retire-discarded"
+      }
+    },
+    {
+      "extension": "documents",
+      "nodeId": "node:migration-bo-0324-retire-refinement",
+      "type": "ext.migration",
+      "content": {
+        "id": "migration-bo-0324-retire-refinement",
+        "migrates": [
+          "claim",
+          "judgement",
+          "relation",
+          "asserts",
+          "judges",
+          "source",
+          "target",
+          "derivedFrom",
+          "focuses",
+          "text",
+          "document",
+          "acceptedBy"
+        ],
+        "rationale": "BO_0324 removes calliopa-refine, calliopa-show, calliopa-video and test with their data, and what existed only for refinement: block kinds, claims, judgements, derived blocks and the root's phase (BO_0324_Q1, BO_0324_Q2, BO_0324_Q5). The relations stored against claims are deleted with them (BO_0324_Q6). The route answers one script that clears kind on every text block, a document's phase, supersededBy and acceptedAt, and an intention of refine; closes every relation on a claim, a judgement or a relation anchored on a claim, every derivedFrom edge and an investigation's focuses edge; and retires those nodes and the documents recorded as investigations. A type no longer declared reads as empty, so the route answers nothing on a graph that never held refinement or that it has already run on. Relations of asserts, judges and derivedFrom that an earlier write left active on nodes it retired stand on retired ends and are read by nothing; they stay in the store's history, and this member's revision, staged with the declarations' removal, is what covers their types leaving.",
+        "route": "kernel/migrations/retire-refinement"
       }
     },
     {
@@ -981,42 +1177,56 @@
       "content": {
         "conventions": {
           "changeDocuments": "An extension's changes are its own docs/changes/ members (BO_0254): docs/changes/<PREFIX>_NNNN_TYPE_<short-name>.md in its subtree, finished ones under docs/changes/completed/, each carrying its status in a Status: line from idea, draft, ready, wip, completed, rejected. They are written and revised the way every other docs member is — from a checkout, in the proposal that carries the code — and rendered read-only in the shell's Extensions section. A run working from the composer holds no checkout and so writes none. A document tool never writes one: create_document takes a title and a first block and nothing else. (BO_0254)",
-          "claimsAndRelations": "A block asserts claims — its assertions in canonical words, each with an identity — and relations anchor on claims, never on blocks: a relate item names a source and a target claim by claimId, or a block by blockId with the claim's words to draft when the block asserts none; a block that asserts exactly one claim may be named alone. A relation is proposed with a reason naming the condition that connects its ends (cache reuse is safe only while the context is unchanged), never that they seem related, and with origin inferred or derived — a run never declares. A block's kind says what it is in the decision vocabulary (assumption, question, evidence, decision, …); a derive item says which blocks a block the same group inserts rests on. A relation ends by its state and is never removed. (BO_0244)",
-          "commit": "A commit command is answered by a proposal, never by a write (BO_0249_012; material §46, rule 19): when the command says 'yes, this is the decision', 'treat this as the requirement', 'make this the accepted direction' or the like, stage exactly one phase item {kind: \"phase\", phase: \"accepted\"} on the document the command is about, with the rationale as one sentence of consequences drawn from the relations sourced on the document's claims and the judgements standing on its blocks — never a decision block, never a rewrite of the pinned synthesis. The shell draws that proposal as the transition card under the intent, and the reader's press on Establish is the one confirmation. This rule lives here because a person's run reads this skill whatever the document's intention; refine's conventions carry it as well. 'This' in a commit command is the document, never a block: a block the reader marked or referenced says where the decision is stated, so the phase item is the answer even then — mark that block's kind decision in the same proposal if it is not already, but a kind item alone answers nothing (found live 2026-09-15: two runs answered 'yes, this is the decision' with a marked block by a kind item and no phase). The rationale's one sentence of consequences also names the proposals standing unanswered in the document, since accepting the direction leaves them to be answered (BO_0271).",
           "marks": "A run carries text and, when it has any, marks among bold, italic, strikethrough and code, and may carry a link. Marks are not declared in the graph's vocabulary; the editor's set is the one that renders.",
           "notes": "A read and each proposed item may carry a note: one short line, at most 80 characters, saying what you do with the block. The person sees it on the block while you work, and on the proposal after. Give one when the plain words — Reading, Proposes a rewrite, Proposes removal — would not say what you are doing; leave it out otherwise. A note is never the change itself (BO_0265).",
-          "openProposals": "The document you work in is not settled: other runs' proposals may stand unanswered on its blocks, and read_document answers them (BO_0271). Every block carries proposal — {group, item, proposer, kind, words, refinable, reason} — when another group has proposed against it, and the document carries proposedInserts, the new blocks proposed into it, each with where it would stand. Read them before writing anything new. What stands and needs sharpening is refined in place, never proposed again beside it: a block keeps one open proposal, so a second rewrite of the same block is refused by the core. A refinement is a replace carrying refines: {group, item} — the group and item read_document answered — with the runs and, if it changes, the role; it lands on that proposal's candidate, under that group, and the person answers once. A proposed insert is refined the same way, by its group and item. Stage only what needs changing. Where a standing proposal already says what you would say, leave its words as they are; say that you left it plainly only when there is really nothing to add anywhere. The document's own blocks — accepted text — are left as they are unless the command referenced one (a marked block or passage) or plainly asks for those words to change; every proposal the person has not answered is open matter, accepted words are not. A proposal whose refinable is false is context: read it, build on what it says, never propose against it — its reason says why: a run still going may restage the same block a moment later, another person's branch is theirs, a candidate the system derived is answered by the person alone, a fixated framing is kept, an answered member is settled, and a removal or a move has no words to refine. Your final words say what you refined and whose it was, and what you left standing because it already said it. When the command asks to reconcile, merge or reduce the standing proposals (BO_0286): refine the proposals that stay, so the reconciled words live in them; withdraw the ones those words make surplus with a withdraw item — proposal: {group, item}, successor: the standing item or the index of the item in this call that supersedes it, withdrawalReason: one short line where the successor does not say it — and stage nothing beside them. A withdrawal is a proposal, never an answer: the item stays open with its words, the person rejects it with one press or accepts it anyway, and accepting the successor rejects what it supersedes in the same press. Any withdrawable item may be withdrawn, a removal or a move too, which then leaves the block as it stands. The final words say how many proposals were refined and how many withdrawn, and in whose favour.",
+          "openProposals": "The document you work in is not settled: other runs' proposals may stand unanswered on its blocks, and read_document answers them (BO_0271). Every block carries proposal — {group, item, proposer, kind, words, refinable, reason} — when another group has proposed against it, and the document carries proposedInserts, the new blocks proposed into it, each with where it would stand. Read them before writing anything new. What stands and needs sharpening is refined in place, never proposed again beside it: a block keeps one open proposal, so a second rewrite of the same block is refused by the core. A refinement is a replace carrying refines: {group, item} — the group and item read_document answered — with the runs and, if it changes, the role; it lands on that proposal's candidate, under that group, and the person answers once. A proposed insert is refined the same way, by its group and item. Stage only what needs changing. Where a standing proposal already says what you would say, leave its words as they are; say that you left it plainly only when there is really nothing to add anywhere. The document's own blocks — accepted text — are left as they are unless the command referenced one (a marked block or passage) or plainly asks for those words to change; every proposal the person has not answered is open matter, accepted words are not. A proposal whose refinable is false is context: read it, build on what it says, never propose against it — its reason says why: a run still going may restage the same block a moment later, another person's branch is theirs, a fixated framing is kept, an answered member is settled, and a removal or a move has no words to refine. Your final words say what you refined and whose it was, and what you left standing because it already said it. When the command asks to reconcile, merge or reduce the standing proposals (BO_0286): refine the proposals that stay, so the reconciled words live in them; withdraw the ones those words make surplus with a withdraw item — proposal: {group, item}, successor: the standing item or the index of the item in this call that supersedes it, withdrawalReason: one short line where the successor does not say it — and stage nothing beside them. A withdrawal is a proposal, never an answer: the item stays open with its words, the person rejects it with one press or accepts it anyway, and accepting the successor rejects what it supersedes in the same press. Any withdrawable item may be withdrawn, a removal or a move too, which then leaves the block as it stands. The final words say how many proposals were refined and how many withdrawn, and in whose favour.",
           "prompts": "A block with the prompt standing is a command the reader wrote in the document and sent, not material of it (BO_0267): never rewrite, remove or move it, and do not build on it unless the command asks. When your run was sent from a block, the instructions name it. Every command given in a document is answered by proposing into it: when the command asks a question, the answer is staged directly after the block the command was sent from, as the blocks the reader should read it as (conventions.structure), and your final words say what you staged.",
           "readerAnswersPerItem": "Each item is decided on its own in the editor. Keep an item to one intent, so a reader can accept the heading and reject the rewrite.",
+          "relations": "Reason-bearing relations connect blocks: a relate item names its source and its target by blockId, of this document or another, never a retired or discarded block and never the same block twice. A relation is proposed with a reason naming the condition that connects its ends (cache reuse is safe only while the context is unchanged), never that they seem related, and with origin inferred or derived — a run never declares. A relation ends by its state and is never removed. (BO_0244, BO_0288, BO_0324)",
           "structure": "What you stage arrives as the structure you wrote, never as one block holding all of it (BO_0270). Split the content at its headings: a heading is its own text block with the role it has — h1, h2, h3 — and a block's runs never carry # characters, which nothing renders. Under a heading each paragraph is its own block, and each list item is its own block with its marker as plain text, since no role renders a list; a fenced code block stays one text block, because it is one unit; and a table is a table block — kind table, with its typed columns (text, number, date, boolean) and its rows, one block whole (BO_0287) — never pipes in a paragraph. An equation is an equation block — kind equation, carrying the exact TeX it is set from, optionally a caption and numbered when its author asks for a number (BO_0290) — never TeX in a paragraph; mathematics inside a sentence is a run of that sentence carrying math: true whose text is its TeX, and a reference to a numbered equation is a run carrying equationRef with that equation's identity and no text of its own. A picture carries an optional caption and numbered when its author asks for a figure number, and a table numbered likewise (BO_0295); A code block carries an optional caption and numbered when its author asks for a listing number, counted apart from figures and tables (BO_0303); read_document answers a numbered code block's number, and a reference to it reads Listing N; a reference to a numbered figure — a picture, or an output a person numbered — is a run carrying figureRef with its identity and no text of its own, and to a numbered table a run carrying tableRef. A reference to any block of the document — a section by its heading, a paragraph, or a numbered figure, table or equation — is a run of its sentence carrying blockRef with that block's identity and no text of its own (BO_0300); read_document answers each as its label — Figure 3, Table 1, (2), the heading's words, or Remark N for a paragraph another sentence refers to, which the manuscript then sets apart as a numbered remark — or missing when the block is outside the reading order; prefer blockRef over figureRef, tableRef and equationRef, which remain read for the sentences that carry them. A citation is a run of its sentence carrying cite — {work, locator?}: the identity of a work of the instance's bibliography, and where in it when the claim rests on one place, such as p. 12 — whose text is empty, never a bracketed number or an author and year typed into the words (BO_0291); read_document answers each citation's number, or missing when its work is gone, and how the reader sees it drawn is the document's citation style. Never set a caption or numbered on an output: an output is what an execution produced, and its caption and number are the person's. A number is never written: read_document answers the number the document's order gives each numbered equation, figure, table and listing — each kind counted apart — and a reference answers the number it resolves to, or missing when its block is gone or asks for none. A change to a table is a replace of that one block carrying the whole table; where a file stands behind it, read_document says so with its row count and the rows you read are its first hundred, and your replace drops the file, since the cells you propose are the whole table. A paper's abstract is one text block with the role abstract, wherever it stands; a manuscript's authors, affiliations, keywords and venue are the document's own properties, set by a person, and a run proposes none of them (BO_0293). Never invent structure: content that carries no heading is given none, and a one-sentence answer is one block by this rule rather than by an exception. A rewrite carries it too: rewriting a block into content with headings stages the replace beside the inserts in the one group, with the rationale saying the items are one change."
         },
         "examples": {
-          "addAClaim": "propose_document_changes {documentId, rationale, items: [{kind: claim, blockId, text: [{text: 'Cached authorization stays valid for the request.'}]}]}",
           "addAColumnToATable": "read_blocks {documentId, blockIds: [<table>]} → the block answers columns, rows and, behind a file, file: true with rowCount → propose_document_changes {documentId, rationale, items: [{kind: replace, blockId: <table>, columns: [...the columns, {name: 'Founded', type: date}], rows: [...each row with its new cell, '' where unknown]}]}",
           "addAHeadingAbove": "propose_document_changes {documentId, rationale, items: [{kind: insert, block: {kind: text, role: h2, runs: [{text: 'Heading'}]}, placement: {before: blockId}}]}",
           "addATable": "propose_document_changes {documentId, rationale, items: [{kind: insert, block: {kind: table, columns: [{name: 'City', type: text}, {name: 'Population', type: number}], rows: [['Berlin', '3755000'], ['Hamburg', '1892000']], caption: 'German cities'}, placement: {after: blockId}}]}",
           "answerAQuestion": "a short answer is one block: the command, sent from block <p>, asks 'what does #1 mean?' → read_blocks {documentId, blockIds: [<#1>]} → propose_document_changes {documentId, rationale, items: [{kind: insert, block: {kind: text, runs: [{text: '#1 means ...'}]}, placement: {after: <p>}, note: 'Answers the question'}]}",
           "answerWithSections": "an answer that has sections is one item per block, in reading order, each placed after the command block — the kernel gives each its own order key (BO_0268): propose_document_changes {documentId, rationale, items: [{kind: insert, block: {kind: text, role: h2, runs: [{text: 'What it costs'}]}, placement: {after: <p>}}, {kind: insert, block: {kind: text, runs: [{text: 'The first paragraph of that section.'}]}, placement: {after: <p>}}, {kind: insert, block: {kind: text, role: h2, runs: [{text: 'What it buys'}]}, placement: {after: <p>}}, {kind: insert, block: {kind: text, runs: [{text: 'The second section.'}]}, placement: {after: <p>}}]}",
-          "commitADecision": "propose_document_changes {documentId, rationale: 'The reader said yes, this is the decision. Accepting would make two documents rest on its definition and reopen one requirement under review.', items: [{kind: phase, phase: accepted}]}",
-          "commitADecisionWithAMarkedBlock": "propose_document_changes {documentId, rationale: 'The reader said yes, this is the decision, marking block #8 where it is stated. Accepting would …', items: [{kind: phase, phase: accepted}, {kind: kind, blockId: <#8>, blockKind: decision}]}",
           "dropAStrayDivider": "propose_document_changes {documentId, rationale, items: [{kind: remove, blockId}]}",
           "findAnExtensionsChanges": "the extension's docs/changes/ members, read from a checkout or GET /api/extensions/<id> — the Status: line of each says where it stands",
           "leaveWhatAlreadySaysIt": "read_document {documentId} → the block the command bears on carries proposal {…, kind: 'rewrite', words: '…', refinable: true} whose words already say what the command asks → stage nothing against that block; propose only what the standing rewrite does not cover, if anything → final words: 'The rewrite standing on <block> already says this; I left it as it stands and staged nothing there.'",
           "readTheBlocksYouWorkOn": "read_document {documentId} → read_blocks {documentId, blockIds: [blockId, blockId], note: 'Checking the definition against its use'} → propose_document_changes {documentId, rationale, items: [{kind: replace, blockId, runs: [{text: '...'}], note: 'Tightens the definition'}]}",
           "reconcileStandingProposals": "read_document {documentId} → twenty proposed inserts stand from an ended run, all refinable → read_blocks {documentId, blockIds: […]} → propose_document_changes {documentId, rationale: 'Reconciles the twenty proposed blocks into one argument of six: the six that carry it are refined, the fourteen they absorb are withdrawn in their favour', items: [{kind: replace, refines: {group: 'node:run-…', item: 'node:run-…|insert|node:<a>'}, runs: […]}, …, {kind: withdraw, proposal: {group: 'node:run-…', item: 'node:run-…|insert|node:<b>'}, successor: {index: 0}, withdrawalReason: 'folded into the opening paragraph'}, …]} — nothing is staged beside the standing proposals; the person answers each withdrawn block from its chip, or all of them by accepting the refined ones",
           "refineAStandingProposal": "read_document {documentId} → the block carries proposal {group: 'node:run-…', item: 'node:run-…|replace|node:<blockId>', proposer: 'Codex', kind: 'rewrite', words: '…', refinable: true} → read_blocks {documentId, blockIds: [blockId]} → propose_document_changes {documentId, rationale: 'Sharpens the standing rewrite of the definition: the words are Codex's with the exception stated', items: [{kind: replace, refines: {group: 'node:run-…', item: 'node:run-…|replace|node:<blockId>'}, runs: [{text: '…'}], note: 'Sharpens the standing rewrite'}]} — the block still carries one proposal, now with these words, and the person answers once",
-          "relateTwoClaims": "read_document {documentId} → find the claims → propose_document_changes {documentId, rationale, items: [{kind: relate, relation: {kind: dependsOn, reason: [{text: 'the cache is safe only while the request sees one revision'}], origin: inferred, source: {claimId}, target: {blockId, claim: [{text: 'A request sees one stable revision.'}]}}}]}",
+          "relateTwoBlocks": "read_document {documentId} → find the blocks → propose_document_changes {documentId, rationale, items: [{kind: relate, relation: {kind: dependsOn, reason: [{text: 'the cache is safe only while the request sees one revision'}], origin: inferred, source: {blockId}, target: {blockId}}}]}",
           "reviseAReason": "propose_document_changes {documentId, rationale, items: [{kind: reason, relationId, reason: [{text: '...'}]}]}",
           "rewriteAParagraph": "read_document {documentId} → find the block whose runs carry the sentence → read_blocks {documentId, blockIds: [blockId]} → propose_document_changes {documentId, rationale, items: [{kind: replace, blockId, runs: [{text: '...'}]}]}",
-          "rewriteIntoSections": "a rewrite that grows sections keeps the block and adds the rest in the same group: propose_document_changes {documentId, rationale: 'One change: the paragraph becomes two sections.', items: [{kind: replace, blockId, runs: [{text: 'The opening, rewritten.'}]}, {kind: insert, block: {kind: text, role: h3, runs: [{text: 'Trade-offs'}]}, placement: {after: blockId}}, {kind: insert, block: {kind: text, runs: [{text: 'What they are.'}]}, placement: {after: blockId}}]}",
-          "sayWhatABlockRestsOn": "propose_document_changes {documentId, rationale, items: [{kind: insert, block: {...}, placement}, {kind: derive, blockId: <the inserted block>, from: [blockId, blockId]}]}",
-          "setAKind": "propose_document_changes {documentId, rationale, items: [{kind: kind, blockId, blockKind: assumption}]}"
+          "rewriteIntoSections": "a rewrite that grows sections keeps the block and adds the rest in the same group: propose_document_changes {documentId, rationale: 'One change: the paragraph becomes two sections.', items: [{kind: replace, blockId, runs: [{text: 'The opening, rewritten.'}]}, {kind: insert, block: {kind: text, role: h3, runs: [{text: 'Trade-offs'}]}, placement: {after: blockId}}, {kind: insert, block: {kind: text, runs: [{text: 'What they are.'}]}, placement: {after: blockId}}]}"
         },
         "goal": "Read and propose changes to the documents a reader writes in, through the kernel toolset's document tools, so a run's proposal lands exactly what the editor would have written and is reviewed per item.",
         "id": "ui.shell.documents",
-        "outputContract": "One propose_document_changes call per coherent change to one document, with a rationale saying why. Report the group the tool answered and what it stages; never claim the change is accepted. A refusal envelope is an answer: read its diagnostics and adjust the items rather than retrying the same call. A commit command — 'yes, this is the decision', 'treat this as the requirement', 'make this the accepted direction' — is answered by one phase item {kind: \"phase\", phase: \"accepted\"} on the document, whatever block is marked or referenced: the marks say where the decision is stated, not what to change, and a kind item alone is the wrong answer (conventions.commit). A commit's sentence of consequences names the proposals standing unanswered in the document. A refinement is reported as what it refined and whose proposal that was; a standing proposal left as it stands because it already says it is reported as left, not as done (conventions.openProposals). A reconciliation is reported as how many standing proposals were refined and how many withdrawn, and in whose favour, never as new blocks staged beside them.",
-        "permittedOperations": "list_documents to find a document by title, and an extension's changes by change — each row carries change and status for a change document; read_document for its blocks in reading order with their identities, kinds, roles and runs, and for a change document its extension and status; read_blocks for only the blocks it names, in reading order and in read_document's shape, which is how the person sees what you look at (BO_0265); propose_document_changes with items of kind replace (runs and/or role for a block), insert (a new text or divider block at a placement), remove (a block leaves the reading order, retired rather than deleted), move (a block to a placement) and status (a change document's status, one of idea, draft, ready, wip, completed, rejected); create_document for a new document with a title, its first block and — for a change of an extension — change naming the extension and a status, idea unless said. Everything stages into this run's proposal group; nothing writes truth. The statement tools remain available for anything beyond documents. — and, since BO_0244, kind (a block's blockKind, none clears it), claim (add a claim to a block, or revise one by claimId), relate (a reason-bearing relation between two claims), reason (a relation's new reason) and derive (the blocks a block rests on). read_document answers each block's blockKind, claims, provenance and derivedFrom, and the document's relations with both ends. Since BO_0249, phase: the root's phase — {kind: \"phase\", phase: proposed | accepted | superseded, supersededBy only with superseded} on the document itself, refused on a change document, whose status is its lifecycle. An agent proposes a phase and never sets it; the reader establishes it from the transition card. Since BO_0271, read_document and read_blocks answer on each block its proposal — the standing proposal another group holds against it: group, item, proposer, kind (rewrite, removal, move), words, refinable and, when not refinable, reason — and the document's proposedInserts, each with its placement; and a replace item may carry refines: {group, item}, landing its runs and role on that proposal's candidate in that group instead of in this run's, which is how a standing proposal is refined (conventions.openProposals). Since BO_0286, withdraw: {kind: \"withdraw\", proposal: {group, item}, successor?: {group, item} | {index}, withdrawalReason?} marks a standing proposal as surplus, on the proposal itself, for the person to reject with one press; read_document answers each standing proposal's withdrawable and, when a run has proposed one, its withdrawnBy — the run, its agent, the successor and the reason (conventions.openProposals).",
+        "outputContract": "One propose_document_changes call per coherent change to one document, with a rationale saying why. Report the group the tool answered and what it stages; never claim the change is accepted. A refusal envelope is an answer: read its diagnostics and adjust the items rather than retrying the same call. A refinement is reported as what it refined and whose proposal that was; a standing proposal left as it stands because it already says it is reported as left, not as done (conventions.openProposals). A reconciliation is reported as how many standing proposals were refined and how many withdrawn, and in whose favour, never as new blocks staged beside them.",
+        "permittedOperations": "list_documents to find a document by title, and an extension's changes by change — each row carries change and status for a change document; read_document for its blocks in reading order with their identities, kinds, roles and runs, and for a change document its extension and status; read_blocks for only the blocks it names, in reading order and in read_document's shape, which is how the person sees what you look at (BO_0265); propose_document_changes with items of kind replace (runs and/or role for a block), insert (a new text or divider block at a placement), remove (a block leaves the reading order, retired rather than deleted), move (a block to a placement) and status (a change document's status, one of idea, draft, ready, wip, completed, rejected); create_document for a new document with a title, its first block and — for a change of an extension — change naming the extension and a status, idea unless said. Everything stages into this run's proposal group; nothing writes truth. The statement tools remain available for anything beyond documents. — and, since BO_0244, relate (a reason-bearing relation between two blocks) and reason (a relation's new reason). read_document answers each block's provenance and the document's relations with both ends. Since BO_0271, read_document and read_blocks answer on each block its proposal — the standing proposal another group holds against it: group, item, proposer, kind (rewrite, removal, move), words, refinable and, when not refinable, reason — and the document's proposedInserts, each with its placement; and a replace item may carry refines: {group, item}, landing its runs and role on that proposal's candidate in that group instead of in this run's, which is how a standing proposal is refined (conventions.openProposals). Since BO_0286, withdraw: {kind: \"withdraw\", proposal: {group, item}, successor?: {group, item} | {index}, withdrawalReason?} marks a standing proposal as surplus, on the proposal itself, for the person to reject with one press; read_document answers each standing proposal's withdrawable and, when a run has proposed one, its withdrawnBy — the run, its agent, the successor and the reason (conventions.openProposals).",
         "preconditions": "The run holds the kernel toolset. The document to change exists at the run's pin; read it once with read_document to find your way, then read the blocks you work on with read_blocks before proposing against them — the person sees each block you read marked while you read it — because a replace or a move names a block by the identity those reads answered."
+      }
+    },
+    {
+      "extension": "keywords",
+      "nodeId": "node:migration-bo-0310-merge-keyword-roles",
+      "type": "ext.migration",
+      "content": {
+        "after": [
+          "migration-bo-0310-keyword-builtins"
+        ],
+        "id": "migration-bo-0310-merge-keyword-roles",
+        "migrates": [
+          "blockRole",
+          "hasBlockRole",
+          "roleFields",
+          "fieldsFor",
+          "offers"
+        ],
+        "rationale": "BO_0310_Q4: the roles a person chose in the retired Keywords section as the keyword, definition and alias roles merge into the built-ins Keyword, Definition and Alias. The kernel hands the route the extension's settings; it answers one script copying each chosen role's fields (a name the built-in holds kept once, its values rekeyed) and offers onto the built-in, moving every assignment and its roleFields values, and retiring the chosen role, so Roles shows no duplicate and every keyword and mention resolves as before. Nothing chosen, or all merged, answers an empty statement.",
+        "route": "kernel/migrations/merge-keyword-roles"
       }
     },
     {
@@ -1025,9 +1235,10 @@
       "type": "ext.skill",
       "content": {
         "conventions": {
-          "mentionsAreDerived": "A mention is resolved from the words when the document is read and stored nowhere: you write the words, and the connection follows. Do not add links, marks or brackets to make one.",
+          "mentionsAreDerived": "A mention is resolved from the words when the document is read and stored nowhere: you write the words, and the connection follows. Do not add links, marks or brackets to make one. Where a sentence must name a keyword whose words would not match it, write those words as a run carrying keyword, the keyword document's id, as a person does by typing @; it is words, never a link or an atom.",
           "neverMark": "You never mark a document as a keyword, give it or its blocks a role, or propose a definition into a keyword's document unless asked to in that document: marking and defining are the person's acts.",
           "preferTheTitle": "Use the keyword's title in your words rather than an alias, so the mention is drawn and the glossary carries the name the person chose. A plural or a possessive of the title is fine; a different word is not the keyword.",
+          "promptKeywordsArrive": "The keywords the prompt includes reach you at your start, in their own section of your instructions, with what the person chose to send of each. Write by those words; read_keywords answers the rest of the document.",
           "readKeywordsFirst": "Before proposing into a document, call read_keywords once. Where the document mentions a keyword, its definition is in the answer; where you are about to write a keyword the document does not mention yet, the instance's keywords are listed by name.",
           "writeByTheDefinition": "Write about a keyword as its definition has it. The definition is the person's own account and outranks your idea of the word; where it is silent, the keyword's document is the next place to read."
         },
@@ -1037,8 +1248,38 @@
         "permittedOperations": "read_keywords to read the document's mentions and the instance's keywords; read_document to read a keyword's document whole when its definition is not enough; propose_document_changes to propose the words. Nothing you hold marks a keyword or assigns a role.",
         "preconditions": [
           "read_keywords answers for the document. If the instance holds no keywords, write as you would any document and read nothing more here.",
-          "A keyword is a document the person gave the keyword role; its definition and its aliases are blocks of that document under roles the person named."
+          "A keyword is a document carrying the built-in role Keyword; its definition and its aliases are its blocks carrying the built-in roles Definition and Alias."
         ]
+      }
+    },
+    {
+      "extension": "keywords",
+      "nodeId": "node:keywords.prompt_keywords",
+      "type": "ext.tool",
+      "content": {
+        "atRunStart": true,
+        "description": "Called by the kernel at the start of a run a person's command started, never offered to the run (BO_0310_025): the keywords the prompt block includes, named with @ or matched in its words, each with what Keyword's Send with prompt switches on, as one instruction section, and the keywords sent for the record.",
+        "id": "keywords.prompt_keywords",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "block": {
+              "description": "The prompt block, as a record id.",
+              "type": "string"
+            },
+            "document": {
+              "description": "The document the command was sent from, as a record id.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "document",
+            "block"
+          ],
+          "type": "object"
+        },
+        "name": "prompt_keywords",
+        "route": "kernel/tools/prompt_keywords"
       }
     },
     {
@@ -1063,6 +1304,65 @@
         },
         "name": "read_keywords",
         "route": "kernel/tools/read_keywords"
+      }
+    },
+    {
+      "extension": "manuscripts",
+      "nodeId": "node:formatRendition",
+      "type": "ext.blocktype",
+      "content": {
+        "id": "formatRendition",
+        "name": "formatRendition",
+        "optionalProperties": [
+          "title",
+          "venue",
+          "log",
+          "omitted"
+        ],
+        "permittedChildTypes": [],
+        "permittedValues": {
+          "outcome": [
+            "ok",
+            "errors",
+            "failed",
+            "timed out"
+          ],
+          "type": [
+            "text",
+            "table",
+            "image",
+            "video",
+            "pdf",
+            "structured"
+          ]
+        },
+        "properties": {
+          "by": "who made it: a person's name, or the run that made it",
+          "document": "the document the block stands in",
+          "files": "the produced files, each the core's blob reference with its filename, hoisted to a top-level list: for a PDF its LaTeX source and .bib beside it",
+          "id": "the rendition's identity, a UUID; the node id is node:<id>",
+          "log": "the service's errors and warnings, in order",
+          "made": "when it was made, ISO 8601",
+          "of": "the block carrying Format the rendition was made of, or the document for its whole reading order",
+          "omitted": "what the projection left out and why, in words",
+          "outcome": "what the producing service answered: ok, errors, failed or timed out",
+          "revision": "the dataRevision the rendition projects",
+          "title": "the block's or the document's title at the revision projected",
+          "type": "what was produced, the Format type: text, table, image, video, pdf or structured",
+          "venue": "the venue template it was made for"
+        },
+        "requiredProperties": [
+          "id",
+          "of",
+          "document",
+          "revision",
+          "type",
+          "files",
+          "made",
+          "by",
+          "outcome"
+        ],
+        "semantics": "An output kept on a block carrying Format (BO_0312_021): a root node with no parent and no block flag, as a work is, so it is never offered among the kinds a block may take."
       }
     },
     {
@@ -1114,23 +1414,47 @@
     },
     {
       "extension": "manuscripts",
+      "nodeId": "node:migration-bo-0312-formats",
+      "type": "ext.migration",
+      "content": {
+        "after": [
+          "migration-bo-0309-one-role-type"
+        ],
+        "id": "migration-bo-0312-formats",
+        "migrates": [
+          "manuscript",
+          "document",
+          "blockRole",
+          "roleFields",
+          "hasBlockRole",
+          "fieldsOf",
+          "fieldsFor"
+        ],
+        "rationale": "BO_0312 makes manuscripts formats. The manuscripts kept before are deleted with the surface that showed them (BO_0312_Q4): the route retires every manuscript node and leaves its blobs to the store's collection. Front matter moves from the document to a role the person owns (BO_0312_Q3): when any document holds authors, affiliations, keywords or a venue, the route creates one ordinary role Paper with the fields Authors and Affiliations (long text, one per line) and Keywords (text), has each such document take it with its values written in, and clears the four properties. The venue was a template id and has no field on Paper; a person's venue role says it now. Paper is an ordinary role afterwards, the person's to rename or change. An instance with nothing to move answers an empty statement. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003), on this instance and on every install that takes the release (BO_0312_Q7).",
+        "route": "kernel/migrations/formats"
+      }
+    },
+    {
+      "extension": "manuscripts",
       "nodeId": "node:manuscripts.making",
       "type": "ext.skill",
       "content": {
         "conventions": {
-          "aFileNotABlock": "A run's manuscript is a file of the document: it proposes no block and changes no property. Do not describe it as a change to the document.",
-          "onceIsEnough": "Every manuscript made is kept on the document and listed with your process. Make one, read it, and say what you found; make another only after the document changed.",
-          "readBeforeMaking": "Read the document first. A manuscript with no abstract, no authors or no numbered figure is what the document has, not a fault of the tool: propose the missing block or say what front matter the person has to set, rather than making manuscript after manuscript.",
-          "readTheAnswer": "The answer is the LaTeX source, the log's warnings and what was left out — never the PDF. Read the omitted list first: every line names a block the paper could not carry and why. Then the warnings. Then the source, for what the venue's rules ask that the document does not give.",
-          "sayItInTheDocument": "What the manuscript needs goes into the document as a proposal — a question block under the section it concerns, or the missing block itself — and into your conclusion. Never edit the source: the manuscript is a projection of the record, and the record is what is corrected."
+          "aRenditionNotABlock": "A rendition is kept on the document carrying Format: it proposes no block and changes no property. Do not describe it as a change to the document.",
+          "nameTheRoles": "Name the venue role and the paper role your profile points at. The tool reads their values by field key — template, citationStyle, authors, affiliations, keywords — and answers which it read and which were missing. A missing key is something the person sets on the role: say so, or propose the value.",
+          "onceIsEnough": "Make one rendition, read it, and say what you found. Every rendition is kept on the document and listed with your process; make another only after the document or its roles changed.",
+          "readTheAnswer": "The answer is the LaTeX source, the log's warnings, what was left out and the role fields read and missing — never the PDF. Read the omitted list first: every line names a block the paper could not carry and why. Then the missing fields. Then the warnings. Then the source, for what the venue's rules ask that the document does not give.",
+          "readTheRolesFirst": "Read the document's roles before making anything. The document carries Format (PDF), the venue and the paper; the venue and the paper are the person's own roles, named by their ids, never looked up by name. If the document carries no Format, or Format is not a PDF, propose Format on the document rather than calling the tool — never on a block: Format is taken by documents alone. A part to be formatted on its own is opened as a block's focused work, whose document takes Format.",
+          "sayItAsAProposal": "What the venue still needs goes into the document as a proposal — the missing block, a question under the section it concerns, a role value — and into your conclusion. Never edit the source: the manuscript is a projection of the record, and the record is what is corrected."
         },
-        "goal": "Make a manuscript of the document you work in when the person asks for one, or when the document is to be submitted and a reading of it against the venue's rules is wanted; read what came back and say in the document what the manuscript needs.",
+        "goal": "Make a manuscript — a PDF with its LaTeX source and references — of a document carrying Format, its whole reading order, when a profile the person wrote tells you to, or when the person asks for one; read what came back and say what the venue still needs as a proposal.",
         "id": "manuscripts.making",
-        "outputContract": "A conclusion naming the venue, the outcome, what was left out and what the document needs for the venue; the kept manuscript staged into the run's group with its files; any proposed blocks staged beside it.",
-        "permittedOperations": "make_manuscript, the kernel's, to make and keep a manuscript of a document at your pin for a venue: generic or ieee, else the document's own venue, else generic. read_document to read the front matter and the blocks first. propose_document_changes to say in the document what the manuscript needs. Nothing you hold writes truth.",
+        "outputContract": "A conclusion naming the document, the venue, the outcome, which role fields were read and which were missing, what was left out and what the venue still needs; the kept rendition staged into the run's group with its files; any proposed blocks or role values staged beside it.",
+        "permittedOperations": "read_document_roles to read the document's roles and their values first. make_manuscript, the kernel's, to make and keep one rendition of the document at your pin, naming the venue role (its template and citationStyle fields) and the paper role (its authors, affiliations and keywords) the profile points at. read_document to read the blocks. propose_document_changes and propose_roles to say what the manuscript needs. Nothing you hold writes truth.",
         "preconditions": [
           "The manuscripts extension is active and the instance has a typesetting service: make_manuscript is listed, and refuses in words when there is no service.",
-          "The document holds what a manuscript is made of at your pin: a title, its front matter, an abstract block, sections, numbered figures and tables, citations from the bibliography. What is not there is not in the manuscript — nothing is typed a second time."
+          "The document to make it of carries the built-in Format role with its type PDF: a manuscript is made of its whole reading order and kept on it. Format is never on a block.",
+          "No profile ships: a fresh install makes no manuscript until the person writes a profile that asks for one. The profile's words say which venue and paper roles to name."
         ]
       }
     },
@@ -1140,20 +1464,91 @@
       "type": "ext.skill",
       "content": {
         "conventions": {
-          "oneAtATime": "Propose one picture per place it is wanted. A run that stages six pictures has decided six times that someone should pay.",
-          "quoteBeforeProposing": "Ask what it would cost first, and put the figure in your answer, so the person decides with the price in front of them.",
-          "theBlockIsThePrompt": "Propose a picture from what the document already says. Leave `prompt` out unless the block's words would make a poor picture, and say why you replaced them.",
-          "theModelDecidesTheKind": "A model makes pictures or moving pictures, not both. Name the model and let its kind follow; never ask for a kind the model does not make."
+          "cost": "For Codex, proceed without a quote and say the cost is unavailable. Do not ask for a second confirmation. For a backend with an available quote, quote before generation and say the amount.",
+          "followJob": "A running job is not a finished picture or video. Keep collecting its existing job; never start a second job to retry collection.",
+          "oneAtATime": "Generate at most one image or video in a Send. A second generation requires another Send.",
+          "profileChoosesBackend": "Use the backend saved in the profile. Never select another backend in tool arguments.",
+          "theBlockIsThePrompt": "Use the prompt block’s words unless the person or task supplies replacement words.",
+          "videoNeedsAPicture": "A video opens on the picture above the block. Make the picture in an earlier Send with an image profile, then send the words for the motion with a video profile."
         },
-        "goal": "Offer a picture where a document would be clearer for one, and never make it yourself. You propose; a person decides and pays.",
+        "goal": "Generate one image or one video under the person's selected image or video profile, then leave it in the Send's review group.",
         "id": "media.pictures",
-        "outputContract": "A conclusion naming what you proposed, which block it follows, and what it would cost; zero or more pending picture blocks staged into the run's group; and nothing made.",
-        "permittedOperations": "quote_generation to say what something would cost, and propose_generation to stage a picture that is not made yet. Nothing you hold can spend: the press that bills is a person's, on a route no run can reach.",
+        "outputContract": "A conclusion naming the generated image or video and its cost status; the pending block and its completed blob staged in the Send's review group.",
+        "permittedOperations": "media.generate once in the Send, then media.collect_generation with the returned pending block and job id until it completes. The kernel admits at most one spending tool call per Send.",
         "preconditions": [
-          "A generator is signed in. If none is, say so and stop: the person signs in to Higgsfield or OpenArt in Settings, with their own subscription.",
-          "You can name the block the picture belongs after. A picture is made from a block's own words, so the block is the prompt.",
-          "The person has not said they do not want one. An unasked-for picture that costs money is worse than no picture."
+          "The Send carries an image- or video-generation profile with an available saved backend. If its backend is signed out, tell the person to sign in to it in Settings and do not call generate.",
+          "A video animates the nearest picture above the block: if there is none, say so and do not call generate.",
+          "The person has not said they do not want an image or a video."
         ]
+      }
+    },
+    {
+      "extension": "media",
+      "nodeId": "node:media.collect_generation",
+      "type": "ext.tool",
+      "content": {
+        "description": "Read and collect an image job already started by media.generate. Supply its pending image block and job id. This does not start or pay for another generation.",
+        "id": "media.collect_generation",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "block": {
+              "description": "The pending image block id returned by media.generate.",
+              "type": "string"
+            },
+            "job": {
+              "description": "The job id returned by media.generate.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "block",
+            "job"
+          ],
+          "type": "object"
+        },
+        "name": "collect_generation",
+        "route": "kernel/tools/collect_generation"
+      }
+    },
+    {
+      "extension": "media",
+      "nodeId": "node:media.generate",
+      "type": "ext.tool",
+      "content": {
+        "description": "Generate one image with this Send's image profile. The selected block must carry Format.type=image. The profile selects the backend; do not choose or override it. Use the block's words unless words is supplied. This is the one paid generation available per Send. It stages a pending image and returns a job id; call collect_generation with that job and block until it completes. Codex cost is unavailable and is not quoted.",
+        "id": "media.generate",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "block": {
+              "description": "The text block whose words form the image prompt.",
+              "type": "string"
+            },
+            "model": {
+              "description": "An offered image model for the profile-selected backend. Omit for its default; Codex uses codex-image.",
+              "type": "string"
+            },
+            "options": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Values for offered model axes.",
+              "type": "object"
+            },
+            "words": {
+              "description": "Optional replacement prompt words.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "block"
+          ],
+          "type": "object"
+        },
+        "name": "generate",
+        "route": "kernel/tools/generate",
+        "spends": true
       }
     },
     {
@@ -1242,493 +1637,36 @@
       }
     },
     {
-      "extension": "publishing",
-      "nodeId": "node:assignment",
-      "type": "ext.blocktype",
+      "extension": "profiles",
+      "nodeId": "node:migration-bo-0311-profile-in-the-chip",
+      "type": "ext.migration",
       "content": {
-        "id": "assignment",
-        "name": "assignment",
-        "properties": {
-          "channel": "the channel that takes the shape",
-          "container": "the container the site declares that the shape is taken into",
-          "id": "the assignment's identity, a UUID the extension mints; the node id is node:<id>",
-          "parts": "the list of {part, slot}: each of the shape's parts and the slot of that container it is assigned to",
-          "shape": "the shape taken"
-        },
-        "requiredProperties": [
-          "id",
-          "channel",
-          "shape",
-          "container",
-          "parts"
+        "after": [
+          "migration-bo-0309-builtin-roles"
         ],
-        "semantics": "What a channel takes: one shape into one container the site declares, its parts assigned to slots. One per channel and shape, related to the channel by `takes` and to the shape by `of`; what it names is what the index read keeps when the site stops listing a key. PU_0003_001",
-        "singleOpenCandidate": true
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:binding",
-      "type": "ext.blocktype",
-      "content": {
-        "id": "binding",
-        "name": "binding",
-        "optionalProperties": [
-          "address",
-          "number",
-          "disclosure"
+        "id": "migration-bo-0311-profile-in-the-chip",
+        "migrates": [
+          "document",
+          "hasBlockRole"
         ],
-        "permittedValues": {
-          "recordKind": [
-            "deliverable",
-            "item"
-          ]
-        },
-        "properties": {
-          "address": "the record's address at the channel: the slug a route names, freely editable until the record was ever published there and a permanent citation target afterwards",
-          "channel": "the channel; one binding per record and channel is the extension's rule, checked by a read before the write",
-          "disclosure": "the synthetic-media disclosure the channel's control needs",
-          "fields": "the values of the container's fields the site declares, typed as the index declares them",
-          "id": "the binding's identity, a UUID the extension mints; the node id is node:<id>",
-          "number": "the record's number at the channel, for a numbered container; typed by the author",
-          "recordId": "the deliverable or item this binding is about",
-          "recordKind": "what kind of record"
-        },
-        "requiredProperties": [
-          "id",
-          "recordId",
-          "recordKind",
-          "channel",
-          "fields"
+        "rationale": "BO_0311 chooses the profile per command in the chip, and makes Profile a built-in role every profile carries (BO_0308_Q5, BO_0308_Q7, BO_0311_Q1). The route answers one script relating every document carrying record profile that does not take builtin:profile to it, and clearing the profile slot every document still carries from before, so every chip starts at No profile; nothing when both stand. The document declaration drops profile in the same release. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003).",
+        "route": "kernel/migrations/profile-in-the-chip"
+      }
+    },
+    {
+      "extension": "profiles",
+      "nodeId": "node:migration-bo-0311-profile-record",
+      "type": "ext.migration",
+      "content": {
+        "after": [
+          "migration-bo-0311-profile-in-the-chip"
         ],
-        "semantics": "What one record is worth at one channel, as authored. Observed facts — when it was published, its state — are never stored here; they are the log's. PU_0003_001",
-        "singleOpenCandidate": true
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:channel",
-      "type": "ext.blocktype",
-      "content": {
-        "id": "channel",
-        "name": "channel",
-        "properties": {
-          "id": "the channel's identity, a UUID the extension mints; the node id is node:<id>",
-          "kind": "the id of the channel kind this channel is of — an adapter the publishing extension ships; the registry in code is the roster, so the value is unconstrained here",
-          "title": "the channel's title, the author's own words for where this goes"
-        },
-        "requiredProperties": [
-          "id",
-          "kind",
-          "title"
+        "id": "migration-bo-0311-profile-record",
+        "migrates": [
+          "document"
         ],
-        "semantics": "A destination the author's work goes to, created by the author from the Channels category: a kind and a title. Its credential and configuration are a party record in the kernel's secret store under publishing-<id>, never in the graph, and its state is read from that record. It declares a contentIndex through `declares` when its kind reads an index from the destination. PU_0001_002",
-        "singleOpenCandidate": true
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:contentIndex",
-      "type": "ext.blocktype",
-      "content": {
-        "id": "contentIndex",
-        "name": "contentIndex",
-        "optionalProperties": [
-          "containers",
-          "slots",
-          "copy"
-        ],
-        "properties": {
-          "channel": "the channel that declared it; one index per channel is the extension's rule, checked by a read before the write",
-          "containers": "the containers the site declared, each with whether the last read still listed it",
-          "copy": "the site-wide copy fields the site declared, each with whether the last read still listed it",
-          "id": "the index's identity, a UUID the extension mints; the node id is node:<id>",
-          "readAt": "when the site was last read, as an ISO-8601 timestamp the extension stamps at the write",
-          "slots": "the slots the site declared, each with whether the last read still listed it"
-        },
-        "requiredProperties": [
-          "id",
-          "channel",
-          "readAt"
-        ],
-        "semantics": "What a website declared at GET <address>/index, as the publishing extension stored it: containers with route templates and fields, slots typed by content class with their constraints, copy fields. A key the site no longer lists is kept and marked while something is assigned to it, dropped otherwise. PU_0001_002 PU_0001_007",
-        "singleOpenCandidate": true
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:deliverable",
-      "type": "ext.blocktype",
-      "content": {
-        "id": "deliverable",
-        "name": "deliverable",
-        "properties": {
-          "id": "the deliverable's identity, a UUID the extension mints; the node id is node:<id>",
-          "title": "the deliverable's title"
-        },
-        "requiredProperties": [
-          "id",
-          "title"
-        ],
-        "semantics": "An instance of a shape (`shaped`), gathering the items and nested deliverables that fill its parts (`gathers`). Nothing on it says where it went; that is the publication log's. PU_0002_001",
-        "singleOpenCandidate": true
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:export",
-      "type": "ext.blocktype",
-      "content": {
-        "id": "export",
-        "name": "export",
-        "optionalProperties": [
-          "width",
-          "height"
-        ],
-        "permittedValues": {
-          "provenance": [
-            "ingested",
-            "produced"
-          ]
-        },
-        "properties": {
-          "bytes": "the blob reference: _kind blob, hash sha256:<objectId>, mediaType, size and the filename it arrived as",
-          "height": "the export's height in pixels",
-          "id": "the export's identity, a UUID the extension mints; the node id is node:<id>",
-          "mediaType": "the media type read off the file, restated beside the reference",
-          "provenance": "how it came to exist: ingested from outside, or produced here",
-          "size": "the size in bytes, restated beside the reference",
-          "width": "the export's width in pixels; its aspect is derived from the dimensions on the way out"
-        },
-        "requiredProperties": [
-          "id",
-          "bytes",
-          "mediaType",
-          "size",
-          "provenance"
-        ],
-        "semantics": "One rendition of an item: content-addressed bytes in the graph's blob store, permanent once referenced. Replacing an export closes the item's `exported` relation to the old one and keeps it. PU_0002_001",
-        "singleOpenCandidate": true
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:item",
-      "type": "ext.blocktype",
-      "content": {
-        "id": "item",
-        "name": "item",
-        "optionalProperties": [
-          "label",
-          "durationSeconds",
-          "width",
-          "height",
-          "transcript",
-          "alt"
-        ],
-        "permittedValues": {
-          "class": [
-            "video",
-            "image",
-            "audio",
-            "prose",
-            "file"
-          ]
-        },
-        "properties": {
-          "alt": "the alt text of a picture",
-          "class": "the content class",
-          "durationSeconds": "a video's or an audio's duration, read off the file",
-          "height": "a picture's height in pixels, read off the file",
-          "id": "the item's identity, a UUID the extension mints; the node id is node:<id>",
-          "label": "a short line naming the item, the author's",
-          "synthetic": "whether the item is synthetic media; stated per item, never defaulted, so a destination applies its own disclosure from it",
-          "transcript": "the words a video or an audio says, so an agent that cannot watch can read",
-          "width": "a picture's width in pixels, read off the file"
-        },
-        "requiredProperties": [
-          "id",
-          "class",
-          "synthetic"
-        ],
-        "semantics": "One piece of content: its class, its machine facts, a label and its disclosure; its exports through `exported`, or its body document through `prose`. It may be gathered by several deliverables or by none; one gathered by none is standing. PU_0002_001",
-        "singleOpenCandidate": true
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:part",
-      "type": "ext.blocktype",
-      "content": {
-        "id": "part",
-        "name": "part",
-        "optionalProperties": [
-          "role",
-          "constraints",
-          "shape"
-        ],
-        "permittedValues": {
-          "cardinality": [
-            "one",
-            "optional",
-            "some",
-            "any"
-          ],
-          "class": [
-            "video",
-            "image",
-            "audio",
-            "prose",
-            "file",
-            "shape"
-          ]
-        },
-        "properties": {
-          "cardinality": "how many fill it: exactly one, at most one, one or more, any number",
-          "class": "the content class the items filling it are of, or `shape` for a part that nests another shape",
-          "constraints": "what the author requires of the items filling it at production time: aspect, maxDurationSeconds, minWidth, minHeight, formats",
-          "id": "the part's identity, a UUID the extension mints; the node id is node:<id>",
-          "order": "the part's place among its shape's parts: a fractional key compared as a string",
-          "role": "a label for what the author makes the part as",
-          "shape": "the shape a part of class shape nests",
-          "title": "the part's title"
-        },
-        "requiredProperties": [
-          "id",
-          "title",
-          "class",
-          "cardinality",
-          "order"
-        ],
-        "semantics": "One part of a shape: a content class with a cardinality, a role and constraints, or a nested shape. Items fill it through `fills`. PU_0002_001",
-        "singleOpenCandidate": true
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:release",
-      "type": "ext.blocktype",
-      "content": {
-        "id": "release",
-        "name": "release",
-        "optionalProperties": [
-          "recordTitle",
-          "externalId",
-          "externalAddress",
-          "detail"
-        ],
-        "permittedValues": {
-          "act": [
-            "publish",
-            "retire"
-          ],
-          "outcome": [
-            "succeeded",
-            "failed"
-          ],
-          "recordKind": [
-            "deliverable",
-            "item"
-          ]
-        },
-        "properties": {
-          "act": "publishing puts what the channel did not hold; retiring ends what it did",
-          "at": "when, as an ISO-8601 timestamp the extension stamps at the write",
-          "channel": "the channel",
-          "detail": "what went wrong, on a failure; never carries a presented secret",
-          "externalAddress": "where the channel serves it, on a success",
-          "externalId": "the channel's own id for what it now holds, on a success",
-          "id": "the entry's identity, a UUID the extension mints; the node id is node:<id>",
-          "objectIds": "every content-addressed object the attempt sent, which are permanent once named here",
-          "outcome": "succeeded or failed",
-          "recordId": "the record the attempt was about",
-          "recordKind": "what kind of record",
-          "recordTitle": "the record's title at the time, so the log reads without the record"
-        },
-        "requiredProperties": [
-          "id",
-          "recordId",
-          "recordKind",
-          "channel",
-          "act",
-          "outcome",
-          "objectIds",
-          "at"
-        ],
-        "semantics": "One entry of the append-only publication log: created as an established revision and never revised, retired or removed. A record's state at a channel is derived from its entries. PU_0003_001",
-        "singleOpenCandidate": true
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:shape",
-      "type": "ext.blocktype",
-      "content": {
-        "id": "shape",
-        "name": "shape",
-        "properties": {
-          "id": "the shape's identity, a UUID the extension mints; the node id is node:<id>",
-          "title": "the shape's title, the author's word for the kind of deliverable it describes"
-        },
-        "requiredProperties": [
-          "id",
-          "title"
-        ],
-        "semantics": "A deliverable type the author defines — Episode, Statement, Weekly edition — composed of parts through `composes`, and nesting other shapes through `nests`. Which shapes exist is data; the concept is the publishing extension's. PU_0002_001",
-        "singleOpenCandidate": true
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:composes",
-      "type": "ext.relationtype",
-      "content": {
-        "id": "composes",
-        "name": "composes",
-        "semantics": "A part of a shape. Directed shape to part."
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:declares",
-      "type": "ext.relationtype",
-      "content": {
-        "id": "declares",
-        "name": "declares",
-        "semantics": "The index a channel declared. Directed channel to contentIndex; at most one active per channel."
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:exported",
-      "type": "ext.relationtype",
-      "content": {
-        "id": "exported",
-        "name": "exported",
-        "semantics": "An export an item still exports. Directed item to export; closed when the export is replaced, the export kept."
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:fills",
-      "type": "ext.relationtype",
-      "content": {
-        "id": "fills",
-        "name": "fills",
-        "semantics": "The part an item or a nested deliverable fills. Directed item or deliverable to part."
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:gathers",
-      "type": "ext.relationtype",
-      "content": {
-        "id": "gathers",
-        "name": "gathers",
-        "semantics": "What a deliverable holds: an item, or a deliverable of a nested shape. Directed deliverable to item or deliverable; an item may be gathered by any number of deliverables."
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:nests",
-      "type": "ext.relationtype",
-      "content": {
-        "id": "nests",
-        "name": "nests",
-        "semantics": "A shape a part of another shape nests. Directed outer shape to inner shape; never a cycle."
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:of",
-      "type": "ext.relationtype",
-      "content": {
-        "id": "of",
-        "name": "of",
-        "semantics": "The shape an assignment takes. Directed assignment to shape."
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:prose",
-      "type": "ext.relationtype",
-      "content": {
-        "id": "prose",
-        "name": "prose",
-        "semantics": "The body document of a prose item, in the shell's block model. Directed item to document; at most one active per item."
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:shaped",
-      "type": "ext.relationtype",
-      "content": {
-        "id": "shaped",
-        "name": "shaped",
-        "semantics": "The shape a deliverable is an instance of. Directed deliverable to shape; exactly one active per deliverable."
-      }
-    },
-    {
-      "extension": "publishing",
-      "nodeId": "node:takes",
-      "type": "ext.relationtype",
-      "content": {
-        "id": "takes",
-        "name": "takes",
-        "semantics": "An assignment of a channel. Directed channel to assignment."
-      }
-    },
-    {
-      "extension": "relations",
-      "nodeId": "node:rootphase-accepted",
-      "type": "RootPhase",
-      "content": {
-        "id": "rootphase-accepted",
-        "value": "accepted"
-      }
-    },
-    {
-      "extension": "relations",
-      "nodeId": "node:rootphase-proposed",
-      "type": "RootPhase",
-      "content": {
-        "id": "rootphase-proposed",
-        "value": "proposed"
-      }
-    },
-    {
-      "extension": "relations",
-      "nodeId": "node:rootphase-superseded",
-      "type": "RootPhase",
-      "content": {
-        "id": "rootphase-superseded",
-        "value": "superseded"
-      }
-    },
-    {
-      "extension": "relations",
-      "nodeId": "node:policy",
-      "type": "ext.blocktype",
-      "content": {
-        "id": "policy",
-        "name": "policy",
-        "optionalProperties": [],
-        "permittedChildTypes": [],
-        "permittedValues": {
-          "rule": [
-            "owner"
-          ]
-        },
-        "properties": {
-          "id": "the policy's identity; the node id is node:<id>",
-          "rule": "who may establish a root under this policy: owner — the instance's owner and any human account the instance admits, the one rule today (BO_0249_006); named approvers, required reviewers and majorities are each their own change"
-        },
-        "requiredProperties": [
-          "id",
-          "rule"
-        ],
-        "semantics": "An acceptance policy a root references through an acceptedBy relation (material §27): acceptance policy belongs to the block, never to the route, and a child inherits policy only through an explicit relation. Declared by ui.shell under BO_0249_006 with one permitted rule, owner, so the hook is the relation the material asks for and not a policy engine. It moved to relations with the root's phase under BO_0288_015, because what accepting a root would change is a relation traversal.",
-        "singleOpenCandidate": true
+        "rationale": "BO_0311_015: a document taking Profile is a profile. A document given Profile from its chip before taking the role wrote record profile carries the role without the record, so the chip, the run start and the grant do not read it as a profile. The route answers one script setting record profile on every such carrier, nothing when all hold it. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003).",
+        "route": "kernel/migrations/profile-record"
       }
     },
     {
@@ -1769,8 +1707,8 @@
         },
         "properties": {
           "id": "the relation's identity, a UUID the shell mints; the node id is node:<id>",
-          "kind": "what the source claim does to the target claim, from the material's list; derives-from is the derivedFrom provenance edge, not a kind here",
-          "origin": "declared by a person or a governed process; derived mechanically from accepted structure; inferred by a run — an inferred relation is a proposal until a person confirms it and never propagates pressure before",
+          "kind": "what the source block does to the target block, from the material's list",
+          "origin": "declared by a person or a governed process; derived mechanically from accepted structure; inferred by a run — an inferred relation is a proposal until a person confirms it",
           "reason": "why the source matters to the target, as runs, in the reader's or the run's words: the condition that connects them, which is what makes propagation precise",
           "state": "the relation's lifecycle: absent means declared; exercised once evaluated against a change; needsReview when its reason may no longer apply; orphaned when an end is gone; retired when intentionally ended. A relation ends by this state and is never RETIREd, so its record stays readable"
         },
@@ -1785,16 +1723,6 @@
         ],
         "semantics": "A reason-bearing relation between two blocks: a node, because a Relation stores no properties and the reason is what carries consequence (data-model.md BO_0029_003). Joined to its ends by source and target edges leaving this node, so staging one revises neither end. Proposed is the node being a candidate, not a state. Declared by ui.shell under BO_0244_006, anchored on claims until BO_0288_015 moved it to relations and gave it the block: any block says something, and a claim only ever existed where refinement had been.",
         "singleOpenCandidate": true
-      }
-    },
-    {
-      "extension": "relations",
-      "nodeId": "node:acceptedBy",
-      "type": "ext.relationtype",
-      "content": {
-        "id": "acceptedBy",
-        "name": "acceptedBy",
-        "semantics": "A root's acceptance policy: directed from a document to the policy node whose rule says who may establish it. Absent, the root is under the owner rule. Declared by ui.shell under BO_0249_006, moved to relations with the phase under BO_0288_015."
       }
     },
     {
@@ -1862,7 +1790,6 @@
     "bibliography",
     "calliopa-base",
     "calliopa-extension",
-    "calliopa-refine",
     "code",
     "doc-block-roles",
     "documents",

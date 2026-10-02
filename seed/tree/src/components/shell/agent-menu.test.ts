@@ -23,19 +23,6 @@ const agents: readonly SelectableRuntime[] = [
   { id: "hermes", label: "Hermes · gpt-5.5", selectable: true, reason: null },
 ];
 
-/** A model, which is a sender with axes. BO_0279_007 */
-const model: SelectableRuntime = {
-  id: "media:higgsfield:gpt_image_2",
-  label: "GPT Image 2",
-  selectable: true,
-  reason: null,
-  icon: "image",
-  options: [
-    { axis: "aspect-ratio", label: "Ratio", values: ["1:1", "16:9", "9:16"], start: "1:1" },
-    { axis: "resolution", label: "Quality", values: ["1k", "2k", "4k"], start: "2k" },
-  ],
-};
-
 const signedIn: readonly SelectableRuntime[] = agents.map((agent) => ({
   ...agent,
   selectable: true,
@@ -329,50 +316,17 @@ describe("the agent list follows sign-in", () => {
   });
 });
 
-describe("what a model lets a person choose before the press", () => {
+describe("no model in the menu", () => {
   /**
-   * A sender may carry axes: what it makes is not only who makes it
-   * (`BO_0279_007`). They are drawn in the menu beneath the sender just
-   * chosen, and the press is *Send*, which stands in the same chip.
+   * A picture is made by the agent's tool under a profile, so the menu offers
+   * agents alone and draws no control of a model's (`calliopa-bootstrap`'s
+   * `BO_0312_040`, which took the senders of `BO_0273_035` out).
    */
-  it("Given an agent chosen, Then no controls are drawn", async () => {
+  it("Given the menu opened, Then it draws no controls beside the agents", async () => {
     const view = await mount("codex", "codex");
     expect(view.axes()).toHaveLength(0);
     await view.userEvent("[data-agent-menu]", "click");
     expect(view.axes()).toHaveLength(0);
-  });
-
-  it("Given a model chosen, Then its ratio and its quality stand in the chip, each starting where the model says", async () => {
-    const view = await mount(model.id, "codex", [...agents, model]);
-    const drawn = view.axes();
-    expect(drawn.map((one) => one.getAttribute("data-agent-axis"))).toEqual([
-      "aspect-ratio",
-      "resolution",
-    ]);
-    // The values the model takes, and nothing invented.
-    expect(
-      Array.from(drawn[1]?.querySelectorAll("option") ?? []).map((one) => one.getAttribute("value")),
-    ).toEqual(["1k", "2k", "4k"]);
-    expect(drawn[0]?.getAttribute("value")).toBe("1:1");
-    expect(drawn[1]?.getAttribute("value")).toBe("2k");
-  });
-
-  it("Given the list closed, Then the controls still stand, because choosing closes it", async () => {
-    // `pick` closes the list on a choice. Drawn inside it, these could only be
-    // seen before a model was chosen — which is to say never. BO_0279_007
-    const view = await mount(model.id, "codex", [...agents, model]);
-    expect(view.list()?.hasAttribute("hidden")).toBe(true);
-    expect(view.axes()).toHaveLength(2);
-  });
-
-  it("Given a model chosen from the open list, Then the list closes and the controls remain", async () => {
-    const view = await mount("codex", "codex", [...agents, model]);
-    await view.userEvent("[data-agent-menu]", "click");
-    await view.userEvent(`[data-agent="${model.id}"]`, "click");
-    expect(view.list()?.hasAttribute("hidden")).toBe(true);
-    expect(view.axes().map((one) => one.getAttribute("data-agent-axis"))).toEqual([
-      "aspect-ratio",
-      "resolution",
-    ]);
+    expect(view.options().map((option) => option.getAttribute("data-agent"))).toEqual(agents.map((agent) => agent.id));
   });
 });

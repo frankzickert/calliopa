@@ -1,6 +1,6 @@
 import { graphEnv } from "../ccgw/env";
 import { HttpError } from "../http-error";
-import { forwardedCookie } from "../request-context";
+import { forwardedCookie, forwardedGrant } from "../request-context";
 
 /**
  * The shell's side of the kernel's two stores for what is not content: the
@@ -32,6 +32,9 @@ export async function call(path: string, init: RequestInit): Promise<Response> {
   const cookie = forwardedCookie();
   const headers = new Headers(init.headers);
   if (cookie !== undefined && !headers.has("cookie")) headers.set("cookie", cookie);
+  // A run's tool presents the grant the kernel handed it. BO_0312_063
+  const grant = forwardedGrant();
+  if (grant !== undefined && !headers.has("x-calliopa-run-grant")) headers.set("x-calliopa-run-grant", grant);
   try {
     return await fetch(`${graphEnv().kernelUrl}${path}`, { ...init, headers });
   } catch (error) {

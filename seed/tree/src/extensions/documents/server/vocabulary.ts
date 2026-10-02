@@ -1,6 +1,5 @@
 import { isOrderKey } from "~/lib/order";
 import { readRuns, TEXT_ROLES, type Run, type TextRole } from "~/lib/runs";
-import { readFrontMatter } from "../lib/front-matter";
 import { asRecord } from "~/server/ccgw/nodes";
 import { isBlobReference } from "~/server/ccgw/blobs";
 import { checkTable, readColumns, readRows } from "~/extensions/documents/lib/table";
@@ -35,28 +34,12 @@ export {
 /** The document node type. One generic kind; story concepts arrive later. */
 export const DOCUMENT_TYPE = "document";
 
-/** The bibliography's work type (`BO_0291_013`): the cited thing a citation
- * run names, a root node of that extension and never a block of a document.
- * Named here only so the document read can tell a work from anything else it
- * finds under a cited identity; the declaration is the bibliography's. */
-export const WORK_TYPE = "work";
-
-/**
- * A root's phase (`BO_0249`): proposed is a safe hypothetical environment,
- * accepted means the wider system may rely on it, superseded means another
- * root replaced it — `supersededBy` names which. Absent reads as proposed.
- * Named `phase`, not `state`: `state` is the document's derived refinement
- * state in the reads and a relation's state in the `state` item (`BO_0248`).
- */
-export const PHASE_PROPERTY = "phase";
-export const SUPERSEDED_BY_PROPERTY = "supersededBy";
-/** The dataRevision an acceptance was made at, the one fact it stores:
- * what is accepted is derived from it per claim. BO_0274_005 */
-export const ACCEPTED_AT_PROPERTY = "acceptedAt";
-export const PHASES = ["proposed", "accepted", "superseded"] as const;
-export type Phase = (typeof PHASES)[number];
-export const isPhase = (value: unknown): value is Phase =>
-  typeof value === "string" && (PHASES as readonly string[]).includes(value);
+/** What a source document carries in its `record` slot (`BO_0313_030`): the
+ * cited thing a citation run names is a document carrying `record: source`
+ * and the built-in *Source*. Named here only so the document read can tell a
+ * source from anything else it finds under a cited identity; what a source
+ * means is `bibliography`'s. */
+export const SOURCE_RECORD = "source";
 
 /** The block types this build understands. A stored type outside this set is
  * unsupported content: shown as such and never silently dropped. */
@@ -89,9 +72,6 @@ export function validateDocument(value: unknown): string | null {
   const content = asRecord(value);
   if (content === null) return "A document carries content.";
   if (typeof content["title"] !== "string") return "A document carries a title.";
-  // The front matter a manuscript's head projects. BO_0293_012
-  const frontMatter = readFrontMatter(content);
-  if ("failure" in frontMatter) return frontMatter.failure;
   // The formatting switch: whether a settled or an accepted code block is
   // pretty-printed, on unless stored off. BO_0296_013
   if (content["formatCode"] !== undefined && typeof content["formatCode"] !== "boolean") {

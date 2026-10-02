@@ -246,7 +246,7 @@ describe("labelling references", () => {
     { ...common("img", "f"), kind: "image", objectId: "o", numbered: true, number: 1 } as BlockView,
     { ...common("img2", "f2"), kind: "image", objectId: "o2", numbered: true, number: 2 } as BlockView,
     { ...common("eq", "g"), kind: "equation", tex: "x", standing: "keep" } as unknown as BlockView,
-    words("gone", "h", "paragraph", "Discarded.", [], "discarded"),
+    words("gone", "h", "paragraph", "Sent as a command.", [], "prompt"),
     words("abs", "i", "abstract", "An abstract."),
   ];
 
@@ -254,7 +254,7 @@ describe("labelling references", () => {
     const { labels, remarks } = labelReferences(blocks, { equations: {}, figures: { img: 1, img2: 2 }, tables: {} });
     expect(labels).toEqual({ h: "The Method", p3: "Remark 1", q: "Remark 2", img: "Figure 1", img2: "Figure 2" });
     expect(remarks).toEqual({ p3: 1, q: 2 });
-    // p1 is referred to by nothing, gone is discarded, abs is an abstract, eq is unnumbered.
+    // p1 is referred to by nothing, gone is a prompt, abs is an abstract, eq is unnumbered.
     expect(labels["p1"]).toBeUndefined();
     expect(labels["gone"]).toBeUndefined();
     expect(labels["abs"]).toBeUndefined();

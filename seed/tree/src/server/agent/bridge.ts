@@ -1,6 +1,6 @@
 import type { CommandTarget } from "~/lib/command-target";
 import type { SentMark } from "~/lib/execution";
-import type { HermesModel } from "~/lib/connections";
+import type { ActiveRuns, HermesModel } from "~/lib/connections";
 import { graphEnv } from "../ccgw/env";
 import { forwardedCookie } from "../request-context";
 import type { RunEvent } from "./run-events";
@@ -58,12 +58,24 @@ export interface BridgeRun {
   readonly source?: { readonly block: string; readonly revisionId: string };
   readonly touched?: readonly string[];
   readonly references?: readonly SentMark[];
-  /** The profile the run start read from the document the command was sent
-   * from, by id and title; the words it received are the profile as
-   * established at `pin`. Absent when none was attached. BO_0298_002 */
+  /** The profile the run start read for the command, as its chip chose it,
+   * by id and title; the words it received are the profile as
+   * established at `pin`. Absent when none was chosen. BO_0298_002 */
   readonly profile?: { readonly id: string; readonly title: string };
+  /** What each extension's run-start tool sent the run, or why it sent
+   * nothing (`calliopa-bootstrap`'s `BO_0310_003`). */
+  readonly context?: readonly RunContextEntry[];
   readonly archived?: boolean;
   readonly startedAt?: number;
+}
+
+/** One extension's run-start context as the record keeps it: the items sent,
+ * never the words, or the failure. BO_0310_003 */
+export interface RunContextEntry {
+  readonly extension: string;
+  readonly tool: string;
+  readonly items?: readonly { readonly id: string; readonly title: string }[];
+  readonly failure?: string;
 }
 
 /** An attachment as the run's record names it (`BO_0229_003`). */
@@ -177,6 +189,12 @@ export function startBridgeRun(input: {
   /** The working mode the person chose for the document, which the kernel
    * records on the run and names in its instructions. BO_0306_017 */
   readonly mode?: { readonly field: string; readonly work: string };
+  /** The profile the command's chip chose, by its document's id; the kernel
+   * reads it at the run's pin and refuses one it cannot honour. BO_0311_002 */
+  readonly profile?: string;
+  /** A pinch on the target's one block, zooming in or out; the kernel names
+   * the base skill's convention for it to the run. BO_0322_016 */
+  readonly pinch?: "in" | "out";
 }): Promise<BridgeReply<BridgeRun>> {
   const target = input.target ?? null;
   return ask(
@@ -188,6 +206,8 @@ export function startBridgeRun(input: {
         ...(input.goal === "" ? {} : { goal: input.goal }),
         ...(input.intention === undefined || input.intention === "" ? {} : { intention: input.intention }),
         ...(input.mode === undefined ? {} : { mode: input.mode }),
+        ...(input.profile === undefined || input.profile === "" ? {} : { profile: input.profile }),
+        ...(input.pinch === undefined ? {} : { pinch: input.pinch }),
         context: input.context ?? "",
         agent: input.agent ?? "",
         ...(input.speed === undefined ? {} : { speed: input.speed }),
@@ -221,6 +241,24 @@ export async function claudeRunnerHealth(): Promise<string | null> {
   const reply = await ask("/health", { method: "GET" }, (body) => {
     const claude = (body as { claude?: unknown } | null)?.claude;
     return typeof claude === "string" ? claude : null;
+  });
+  return reply.ok ? reply.value : null;
+}
+
+/**
+ * The runs in flight by agent, across every person, from the kernel's agent
+ * health: counts alone, never whose. Null when the kernel does not answer,
+ * or answers no counts. BO_0316_004
+ */
+export async function activeRuns(): Promise<ActiveRuns | null> {
+  const reply = await ask("/health", { method: "GET" }, (body) => {
+    const active = (body as { active?: unknown } | null)?.active;
+    if (active === null || typeof active !== "object") return null;
+    return Object.fromEntries(
+      Object.entries(active as Record<string, unknown>).filter(
+        (entry): entry is [string, number] => typeof entry[1] === "number",
+      ),
+    );
   });
   return reply.ok ? reply.value : null;
 }

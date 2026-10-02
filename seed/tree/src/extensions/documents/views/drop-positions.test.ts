@@ -6,12 +6,12 @@ import { documentsApi, mountEditor, type SentCommand } from "./testing/editor-ha
 
 /**
  * Every drawn row has a place (BO_0263_002): a block dropped on a proposed
- * insert, a revealed retired or discarded row, or a block with a rewrite
+ * insert, a revealed removed row, or a block with a rewrite
  * attached lands directly before it, between the keys of the rows the reader
  * saw — pressed in Qwik's render harness through the editor's own JSX, with
  * the drop handed over as the shell's drag model hands one.
  */
-const text = (blockId: string, order: string, words: string, standing: "keep" | "discarded" = "keep"): BlockView => ({
+const text = (blockId: string, order: string, words: string, standing: "keep" | "fixate" = "keep"): BlockView => ({
   kind: "text",
   blockId,
   revisionId: `rev-${blockId}`,
@@ -26,7 +26,7 @@ const draft: DocumentView = {
   documentId: "doc-1",
   revisionId: "rev-doc",
   title: "Draft",
-  blocks: [text("blk-a", "a", "Opening."), text("blk-b", "b", "The storm."), text("blk-c", "c", "Set aside.", "discarded")],
+  blocks: [text("blk-a", "a", "Opening."), text("blk-b", "b", "The storm."), text("blk-c", "c", "Set aside.", "fixate")],
 };
 
 const retired = [text("blk-r", "ab", "Gone.")];
@@ -57,7 +57,7 @@ async function mount() {
   const sent: SentCommand[] = [];
   vi.stubGlobal("fetch", documentsApi(draft, sent, { proposals, retired }));
   const view = await mountEditor(draft);
-  for (const toggle of ["proposed-changes", "retired-blocks", "discarded-blocks"]) {
+  for (const toggle of ["proposed-changes", "removed"]) {
     await view.userEvent(`[data-bar-action="${toggle}"]`, "click");
   }
   await view.settle(() => view.root.querySelector(`[data-retired-id="blk-r"]`) !== null);
@@ -72,7 +72,7 @@ async function mount() {
 }
 
 describe("every drawn row has a place", () => {
-  it("Given the rows revealed, Then a proposed insert, a retired and a discarded row are drop targets and a rewrite is not one of its own", async () => {
+  it("Given the rows revealed, Then a proposed insert, a removed row and a fixated block are drop targets and a rewrite is not one of its own", async () => {
     const view = await mount();
     const targets = Array.from(view.root.querySelectorAll("[data-drop-target]")).map((element) => element.getAttribute("data-drop-target"));
     expect(targets).toEqual([
@@ -100,11 +100,10 @@ describe("every drawn row has a place", () => {
     const slots = Array.from(view.root.querySelectorAll(".drop-slot"));
     const rowOf = (slot: Element) => slot.lastElementChild?.getAttribute("class") ?? "";
     expect(slots.map((slot) => slot.firstElementChild?.getAttribute("class"))).toEqual(slots.map(() => "drop-mark"));
-    // A rewrite in its block's place, a proposed insert, a revealed retired row
-    // and a revealed discarded row: every row the reader may drop a block on.
+    // A rewrite in its block's place, a proposed insert and a revealed removed
+    // row: every row the reader may drop a block on that is not a block's own.
     expect(slots.filter((slot) => rowOf(slot).includes("proposal-block")).length).toBe(2);
     expect(slots.some((slot) => rowOf(slot).includes("retired-row"))).toBe(true);
-    expect(slots.some((slot) => rowOf(slot).includes("discarded-row"))).toBe(true);
     // A block row is not slotted: it holds its own mark, so nothing stands
     // between its margin and its neighbour's.
     for (const row of Array.from(view.root.querySelectorAll(".block-row"))) {
@@ -121,7 +120,7 @@ describe("every drawn row has a place", () => {
     expect(moveOf(await view.drop("blk-a", `block:proposal:${newBlock}`))).toEqual({ between: ["b", "bb"] });
     // Before the retired row.
     expect(moveOf(await view.drop("blk-b", "block:blk-r"))).toEqual({ between: ["a", "ab"] });
-    // Before the discarded row, after the proposed insert.
+    // Before the fixated block, after the proposed insert.
     expect(moveOf(await view.drop("blk-a", "block:blk-c"))).toEqual({ between: ["bb", "c"] });
     // Before a block with its rewrite: the pair is one place.
     expect(moveOf(await view.drop("blk-a", "block:blk-b"))).toEqual({ between: ["ab", "b"] });

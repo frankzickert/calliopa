@@ -20,10 +20,10 @@ describe("process input", () => {
   });
 
   it("Given an affected item of a kind an extension contributes, Then it is accepted qualified by the extension", () => {
-    // A publish is a process of the publishing extension's own (CA_0050_002): the item kind is the registry's.
-    expect(parseProcessInput({ title: "Publish E1 to Calliopa.com", itemId: "e1", itemKind: "publishing:deliverable" })).toMatchObject({
-      itemId: "e1",
-      itemKind: "publishing:deliverable",
+    // A process an extension's route produces names its item by the registry's kind (CA_0050_002).
+    expect(parseProcessInput({ title: "Typeset Ice loss", itemId: "d1", itemKind: "documents:document" })).toMatchObject({
+      itemId: "d1",
+      itemKind: "documents:document",
     });
   });
 

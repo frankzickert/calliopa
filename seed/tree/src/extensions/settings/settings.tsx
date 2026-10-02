@@ -7,7 +7,7 @@ import {
   useVisibleTask$,
 } from "@builder.io/qwik";
 
-import { agentNeeds, type ConnectionRecord, type HermesModel, serviceSave } from "~/lib/connections";
+import { agentNeeds, type ConnectionRecord, type HermesModel, serviceSave, signOutConsequences } from "~/lib/connections";
 import type { ViewProps } from "~/components/shell/view-host";
 import type { LoginState } from "~/server/agent/adapters";
 import type { AccountListing, AccountView, LicenceView } from "~/server/kernel/accounts";
@@ -134,6 +134,10 @@ export const SettingsView = component$<ViewProps>(() => {
     code: string;
     sent: boolean;
   }>({ runtime: null, state: null, code: "", sent: false });
+  /** The runtime whose sign-out is being confirmed: pressing Sign out asks
+   * first and says what follows, and only the second press signs out.
+   * BO_0316_007 */
+  const confirmingSignOut = useSignal<string | null>(null);
 
   /**
    * The people who hold authority, as the kernel answers them for the
@@ -238,7 +242,47 @@ export const SettingsView = component$<ViewProps>(() => {
    * code to type — and, when the flow asks for one, a field to paste its code
    * back into. Nothing that could sign in again ever reaches this surface.
    */
-  const signIn$ = $(async (party: string) => {
+  /**
+   * Follows the flow a request of the row's own started, until it ends, then
+   * reads the rows and the agent list again. A sign-in and a sign-out are
+   * followed alike: the broker stamps both with their request's id.
+   * BO_0261_002 BO_0316_007
+   */
+  const follow$ = $(async (party: string, id: string) => {
+    // The broker writes its progress as it goes; this follows it until the
+    // flow ends rather than asking once and leaving the reader guessing.
+    //
+    // If nothing answers at all the agent is not running, and saying so
+    // beats a control that stays disabled for as long as a login could have
+    // taken. Once the flow has spoken once, it is given the time a human
+    // needs to go and sign in.
+    for (let attempt = 0; attempt < 900; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const reported = await fetch(
+        `/api/x/settings/agent/login?id=${encodeURIComponent(id)}`,
+      );
+      const answered = reported.ok
+        ? ((await reported.json()) as LoginState | null)
+        : null;
+      if (answered !== null && answered.runtime === party) {
+        login.state = answered;
+        if (answered.status !== "running") break;
+      }
+      if (login.state === null && attempt >= 14) {
+        state.error =
+          "The agent is not answering. It may not be running yet.";
+        break;
+      }
+    }
+    await read$();
+    // However the flow ended, the command bar reads the agents again: the
+    // server's list, not this flow's last state, says what can run now.
+    // CA_0052_003
+    await bridge.agentsChanged$();
+  });
+
+  /** Starts a flow of the broker's for one runtime, and follows it. */
+  const startFlow$ = $(async (party: string, path: string, failed: string) => {
     state.busy = party;
     state.error = null;
     login.runtime = party;
@@ -246,54 +290,42 @@ export const SettingsView = component$<ViewProps>(() => {
     login.code = "";
     login.sent = false;
     try {
-      const asked = await fetch("/api/x/settings/agent/login", {
+      const asked = await fetch(path, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ runtime: party }),
       });
       if (!asked.ok) {
         const refused = (await asked.json()) as { error?: string };
-        state.error = refused.error ?? "The sign-in could not be started.";
+        state.error = refused.error ?? failed;
+        // A sign-out refused for a run in flight: the row says so too.
+        await read$();
         return;
       }
       // Only the flow this request started is followed: a state an earlier
       // flow left answers null until the broker starts this one. BO_0261_002
       const { id } = (await asked.json()) as { id: string };
-      // The broker writes its progress as it goes; this follows it until the
-      // flow ends rather than asking once and leaving the reader guessing.
-      //
-      // If nothing answers at all the agent is not running, and saying so
-      // beats a control that stays disabled for as long as a login could have
-      // taken. Once the flow has spoken once, it is given the time a human
-      // needs to go and sign in.
-      for (let attempt = 0; attempt < 900; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        const reported = await fetch(
-          `/api/x/settings/agent/login?id=${encodeURIComponent(id)}`,
-        );
-        const answered = reported.ok
-          ? ((await reported.json()) as LoginState | null)
-          : null;
-        if (answered !== null && answered.runtime === party) {
-          login.state = answered;
-          if (answered.status !== "running") break;
-        }
-        if (login.state === null && attempt >= 14) {
-          state.error =
-            "The agent is not answering. It may not be running yet.";
-          break;
-        }
-      }
-      await read$();
-      // However the flow ended, the command bar reads the agents again: the
-      // server's list, not this flow's last state, says what can run now.
-      // CA_0052_003
-      await bridge.agentsChanged$();
+      await follow$(party, id);
     } catch {
       state.error = "The agent could not be reached.";
     } finally {
       state.busy = null;
     }
+  });
+
+  const signIn$ = $((party: string) =>
+    startFlow$(party, "/api/x/settings/agent/login", "The sign-in could not be started."),
+  );
+
+  /**
+   * Signs a runtime out, once the reader has confirmed it. Every copy of its
+   * sign-in on the instance goes, and nothing is revoked with the provider.
+   * The server refuses while a run the sign-out would stop is in flight.
+   * BO_0316_007
+   */
+  const signOut$ = $(async (party: string) => {
+    confirmingSignOut.value = null;
+    await startFlow$(party, "/api/x/settings/agent/logout", "The sign-out could not be started.");
   });
 
   /**
@@ -422,6 +454,12 @@ export const SettingsView = component$<ViewProps>(() => {
       if (state.busy === null && state.rows.some((row) => row.flow?.state === "awaiting")) void read$();
     }, 3000);
     cleanup(() => clearInterval(flow));
+    // A sign-out waiting for a run: the row reads again until the run ends,
+    // so the control comes back without a reload. BO_0316_007
+    const held = setInterval(() => {
+      if (state.busy === null && state.rows.some((row) => (row.signOutBlocked ?? null) !== null)) void read$();
+    }, AGENT_POLL_MS);
+    cleanup(() => clearInterval(held));
   });
 
   // A refusal is shown in the section the reader was acting in; which one is
@@ -635,6 +673,56 @@ export const SettingsView = component$<ViewProps>(() => {
                             {busy ? "Signing in…" : "Sign in"}
                           </button>
                         )}
+                      {(row.party === "codex" || row.party === "claude-code") &&
+                        (row.status?.authenticated ?? false) &&
+                        (confirmingSignOut.value === row.party ? (
+                          <div class="sign-out" data-sign-out-confirm={row.party} role="group" aria-label={`Sign out of ${row.label || row.party}`}>
+                            {signOutConsequences(
+                              row.party,
+                              state.rows.find((each) => each.party === "hermes")?.agent?.hermesModel,
+                            ).map((line) => (
+                              <p class="sign-out__consequence" key={line} data-sign-out-consequence>
+                                {line}
+                              </p>
+                            ))}
+                            <div class="sign-out__choices">
+                              <button
+                                type="button"
+                                class="connection__action"
+                                disabled={busy}
+                                data-sign-out-confirmed={row.party}
+                                onClick$={() => signOut$(row.party)}
+                              >
+                                Sign out
+                              </button>
+                              <button
+                                type="button"
+                                class="connection__action"
+                                data-sign-out-cancel={row.party}
+                                onClick$={() => (confirmingSignOut.value = null)}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              class="connection__action"
+                              disabled={busy || (row.signOutBlocked ?? null) !== null}
+                              data-sign-out={row.party}
+                              onClick$={() => (confirmingSignOut.value = row.party)}
+                            >
+                              {busy ? "Signing out…" : "Sign out"}
+                            </button>
+                            {(row.signOutBlocked ?? null) !== null && (
+                              <p class="sign-out__held" data-sign-out-held role="status">
+                                {row.signOutBlocked}
+                              </p>
+                            )}
+                          </>
+                        ))}
                       {login.runtime === row.party && login.state !== null && (
                         <div
                           class="sign-in"
@@ -692,6 +780,7 @@ export const SettingsView = component$<ViewProps>(() => {
                             </div>
                           )}
                           {login.state.status === "running" &&
+                            login.state.action !== "logout" &&
                             (login.sent || login.state.awaiting === "cli") && (
                               <p
                                 class="sign-in__sent"
@@ -1287,7 +1376,8 @@ export const SettingsView = component$<ViewProps>(() => {
       {/* The sections active extensions contribute, below the tab's own:
           an extension's settings are its own, and leave with it when it is
           deactivated. BO_0264_016 */}
-      {REGISTRY.settingsSections.map((section) => (
+      {/* A section that is the owner's is drawn for the owner alone. BO_0311_040 */}
+      {REGISTRY.settingsSections.filter((section) => section.owner !== true || people.me?.owner === true).map((section) => (
         <section key={section.key} class="settings-section" aria-labelledby={`settings-${section.key}`} data-settings-section={section.key}>
           <h2 class="settings-section__heading" id={`settings-${section.key}`}>
             {section.title}

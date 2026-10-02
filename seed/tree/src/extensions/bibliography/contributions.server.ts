@@ -1,5 +1,5 @@
 import { serverContributions as declare, type ApiRoute } from "~/contract";
-import { blobReference, isBlobReference, objectIdOfHash, putBlob, readBlob } from "~/server/ccgw/blobs";
+import { readBlob } from "~/server/ccgw/blobs";
 import { HttpError } from "~/server/http-error";
 import { respond } from "~/server/outcome";
 import { isRecordId } from "~/server/uuid";
@@ -11,33 +11,19 @@ import { instanceStyle, setInstanceStyle } from "./server/style";
 import { isStyleId } from "./lib/styles";
 import { TOOLS, ToolRefusal, type ToolCall } from "./server/tools";
 import { askOf, fetchRecord, type FetchAsk } from "./server/fetch";
-import { listWorks, readWork, setWorkFile, type WorkView } from "./server/works";
+import { MIGRATIONS } from "./server/migrations";
+import { listWorks, readWork } from "./server/works";
 
 /**
- * The server half of `bibliography` (`BO_0291_016`–`BO_0291_019`): its own
- * command route under `/api/x/bibliography/`, the fetch of a record through
- * the kernel forward, the bibliography's works for the Sources section and
- * the work view, and a work's file — uploaded through this origin as a
- * picture is, since the browser cannot reach `PUT /v1/blobs`, and streamed
- * back typed as the PDF it is. Only server code imports this module.
+ * The server half of `bibliography` (`BO_0291_016`–`BO_0291_019`, reshaped by
+ * `BO_0313`): its own command route under `/api/x/bibliography/`, the fetch
+ * of a record through the kernel forward, the sources — documents carrying
+ * *Source* — for the citation control and a source's own reads, a source's
+ * *File* streamed back typed as what it is, the tools the kernel calls and
+ * the migration it runs. Only server code imports this module.
  */
 
-/** What the Sources section is handed: the works, or that the graph did not answer. */
-export interface SourcesListing {
-  readonly reachable: boolean;
-  readonly works: readonly WorkView[];
-}
-
 const record = (value: unknown): Record<string, unknown> => (typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {});
-
-const MAX_FILE_BYTES = 64 * 1024 * 1024;
-
-const readers = {
-  sources: async (): Promise<SourcesListing> => {
-    const listed = await listWorks();
-    return listed.outcome === "success" ? { reachable: true, works: listed.result } : { reachable: false, works: [] };
-  },
-};
 
 const routes: readonly ApiRoute[] = [
   {
@@ -65,7 +51,7 @@ const routes: readonly ApiRoute[] = [
     path: "works/[id]",
     handle: async (event, params) => {
       const id = params["id"] ?? "";
-      if (!isRecordId(id)) throw new HttpError(404, "no such work");
+      if (!isRecordId(id)) throw new HttpError(404, "no such source");
       const { status, body } = respond(await readWork(id));
       event.json(status, body);
     },
@@ -77,72 +63,37 @@ const routes: readonly ApiRoute[] = [
     path: "works/[id]/cited-by",
     handle: async (event, params) => {
       const id = params["id"] ?? "";
-      if (!isRecordId(id)) throw new HttpError(404, "no such work");
+      if (!isRecordId(id)) throw new HttpError(404, "no such source");
+      const source = await readWork(id);
+      if (source.outcome !== "success") {
+        const { status, body } = respond(source);
+        event.json(status === 200 ? 404 : status, body);
+        return;
+      }
       const { status, body } = respond(await documentsCiting(id));
       event.json(status, body);
     },
   },
   {
-    // The file arrives as the request body with its type and name in
-    // headers, as a table's file does (`documents`' `blobs` route), and is
-    // set on the work against the base revision the tab read. BO_0291_018
-    method: "POST",
-    path: "works/[id]/file",
-    handle: async (event, params) => {
-      const id = params["id"] ?? "";
-      if (!isRecordId(id)) throw new HttpError(404, "no such work");
-      const base = event.request.headers.get("x-calliopa-base-revision") ?? "";
-      const mediaType = event.request.headers.get("content-type") ?? "application/pdf";
-      const filename = decodeURIComponent(event.request.headers.get("x-calliopa-filename") ?? "") || "file.pdf";
-      if (!mediaType.startsWith("application/pdf")) throw new HttpError(400, "a work's file is a PDF");
-      const bytes = new Uint8Array(await event.request.arrayBuffer());
-      if (bytes.length === 0) throw new HttpError(400, "the file is empty");
-      if (bytes.length > MAX_FILE_BYTES) throw new HttpError(413, "the file is larger than 64 MiB");
-      const stored = await putBlob(bytes);
-      if (stored.outcome !== "success") {
-        const { status, body } = respond(stored);
-        event.json(status, body);
-        return;
-      }
-      const objectId = objectIdOfHash(stored.result.hash);
-      if (objectId === null) throw new HttpError(502, "the store answered no object for the file");
-      const file = { ...blobReference(objectId, "application/pdf", stored.result.size), filename };
-      const { status, body } = respond(await setWorkFile({ workId: id, baseRevisionId: base, file }));
-      event.json(status, body);
-    },
-  },
-  {
-    method: "DELETE",
-    path: "works/[id]/file",
-    handle: async (event, params) => {
-      const id = params["id"] ?? "";
-      if (!isRecordId(id)) throw new HttpError(404, "no such work");
-      const base = event.request.headers.get("x-calliopa-base-revision") ?? "";
-      const { status, body } = respond(await setWorkFile({ workId: id, baseRevisionId: base, file: null }));
-      event.json(status, body);
-    },
-  },
-  {
-    // The work's file, typed as the PDF it is, the way `calliopa-refine`
-    // serves a captured page's PDF: the generic blob route answers every
-    // object as octet-stream by the mirror rule. BO_0291_018
+    // A source's *File*, typed as what it is: the generic blob route answers every
+    // object as octet-stream by the mirror rule. BO_0291_018 BO_0313_021
     method: "GET",
     path: "works/[id]/file",
     handle: async (event, params) => {
       const id = params["id"] ?? "";
-      if (!isRecordId(id)) throw new HttpError(404, "no such work");
+      if (!isRecordId(id)) throw new HttpError(404, "no such source");
       const work = await readWork(id);
-      if (work.outcome !== "success") throw new HttpError(404, "no such work");
-      const reference = work.result.record.file;
-      if (reference === undefined || !isBlobReference(reference)) throw new HttpError(404, "this work holds no file");
+      if (work.outcome !== "success") throw new HttpError(404, "no such source");
+      const file = work.result.record.file as { hash?: unknown; mediaType?: unknown; filename?: unknown } | undefined;
+      if (file === undefined || typeof file.hash !== "string") throw new HttpError(404, "this source holds no file");
       let bytes: Uint8Array;
       try {
-        bytes = await readBlob(reference.hash);
+        bytes = await readBlob(file.hash);
       } catch {
-        throw new HttpError(404, "the work's file could not be read");
+        throw new HttpError(404, "the source's file could not be read");
       }
-      const name = typeof (reference as { filename?: unknown }).filename === "string" ? String((reference as { filename?: string }).filename) : `${work.result.record.title}.pdf`;
-      event.headers.set("Content-Type", "application/pdf");
+      const name = typeof file.filename === "string" ? file.filename : `${work.result.record.title}.pdf`;
+      event.headers.set("Content-Type", typeof file.mediaType === "string" ? file.mediaType : "application/pdf");
       event.headers.set("Content-Disposition", `inline; filename="${name.replace(/"/gu, "")}"`);
       event.cacheControl({ maxAge: 31536000, public: false, immutable: true });
       event.send(200, bytes);
@@ -201,7 +152,9 @@ const routes: readonly ApiRoute[] = [
 
 /**
  * What the kernel calls (`BO_0291_021`): a run's `propose_work` and
- * `read_works`, answering the kernel alone.
+ * `read_works`, and the executable migration it runs once per instance as it
+ * serves the pin that carries the member (`BO_0313_023`), answering the
+ * kernel alone.
  */
 const kernelRoutes: readonly ApiRoute[] = [
   {
@@ -224,11 +177,22 @@ const kernelRoutes: readonly ApiRoute[] = [
       }
     },
   },
+  {
+    method: "POST",
+    path: "kernel/migrations/[migration]",
+    kernelCallback: true,
+    handle: async (event, params) => {
+      const migration = MIGRATIONS[params["migration"] ?? ""];
+      if (migration === undefined) throw new HttpError(404, `bibliography runs no migration ${params["migration"] ?? ""}`);
+      const answer = await migration();
+      if (answer.outcome !== "success") throw new HttpError(502, `the migration could not read the graph: ${answer.outcome}`);
+      event.json(200, answer.result);
+    },
+  },
 ];
 
 export const contributions = declare({
   routes: [...routes, ...kernelRoutes],
-  readers,
   // How a document's citations read in its style, asked by `documents`'
   // read. BO_0291_030
   citations: (request) => labelsFor(request),

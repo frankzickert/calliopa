@@ -1,5 +1,4 @@
 import { readStanding, storedValue, type Standing } from "~/extensions/documents/lib/disposition";
-import type { FrontMatter } from "../lib/front-matter";
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { orderBetween } from "~/lib/order";
@@ -7,12 +6,15 @@ import { proposerOf, type Proposer } from "~/extensions/documents/lib/proposals"
 import type { ListedDocumentEntry } from "~/extensions/documents/lib/library-item";
 import {
   decide,
+  decideGroup,
   query,
+  reachingGroups,
   stage,
   touchedSet,
   write,
   type ReadNode,
   type ReadResult,
+  type TouchedSet,
 } from "~/server/ccgw/client";
 import { branchGroupOf, currentBranch, outsideBranch } from "~/server/ccgw/branch-scope";
 import type { GraphOutcome, NonEmpty } from "~/server/outcome";
@@ -23,20 +25,13 @@ import { bareId, contentOf, nodeRef, typeOf } from "~/server/ccgw/nodes";
 import type { BlobReference } from "~/server/ccgw/blobs";
 import { runsText, sameRuns } from "~/lib/runs";
 import {
-  ASSERTS,
-  DERIVED_FROM,
-  draftClaimScript,
+  endHere,
   farBlock,
-  isBlockKind,
-  onlyKindDiffers,
-  readClaims,
   readRelationEnds,
-  readRelationsOf,
   relationOf,
+  relationsOnBlocks,
   relationScript,
-  CLAIM_TYPE,
   RELATION_TYPE,
-  type ClaimView,
   type RelationEnd,
   type RelationEndInput,
   type RelationInput,
@@ -44,11 +39,10 @@ import {
   type RelationView,
 } from "./work";
 import { childrenOf, focusOf } from "~/server/focused-work";
-import { PROFILE_RECORD, type ProfileSelection, type ProfileSummary } from "../lib/profile";
+import { PROFILE_RECORD, type ProfileGeneration, type ProfileSummary } from "../lib/profile";
 import { DOCUMENT_TARGET_KIND } from "./focus";
-import { reachesDocument } from "./reach";
+import { FOCUSES, gatherOf, reachesDocument } from "./reach";
 import {
-  ACCEPTED_AT_PROPERTY,
   DOCUMENT_TYPE,
   normalizeRuns,
   splitRuns,
@@ -56,9 +50,8 @@ import {
   type TextRole,
 } from "./vocabulary";
 import { checkTable, type TableColumn, type TableRow } from "~/extensions/documents/lib/table";
-import { PHASE_PROPERTY, SUPERSEDED_BY_PROPERTY, WORK_TYPE, isPhase, type Phase } from "./vocabulary";
+import { SOURCE_RECORD } from "./vocabulary";
 import { proposedWorksCited } from "./proposed-works";
-import { conflictsOf } from "./phase";
 
 /**
  * The document and block operations the editor works through, over the one
@@ -94,8 +87,8 @@ export type Placement =
   | { readonly before: string }
   | { readonly after: string }
   /** Between two drawn rows' order keys, either `null` at an end: the rows a
-   * reader dropped between, which may be a proposed insert, a retired block
-   * or a discarded one as well as a block of the document. BO_0263_001 */
+   * reader dropped between, which may be a proposed insert or a removed row
+   * as well as a block of the document. BO_0263_001 */
   | { readonly between: readonly [string | null, string | null] };
 
 /** A slice of a document's blocks. Bounds name blocks and are exclusive. */
@@ -336,12 +329,13 @@ export const blockContentFor = (block: NewBlock, order: string): Record<string, 
 const blockType = (block: NewBlock): string => block.kind;
 
 /**
- * The works the document's blocks cite that stand at the pin (`BO_0291_013`):
- * a citation names a node the document does not contain, so one rooted read
- * over the cited identities, made only when something is cited, says which
- * of them are there. The match names no label — a root that is a node of
- * another type is then an ordinary miss, read as not a work — and an empty
- * answer is the ordinary case for a citation of nothing.
+ * The sources the document's blocks cite that stand at the pin (`BO_0291_013`,
+ * `BO_0313_030`): a citation names a document carrying `record: source`, which
+ * the citing document does not contain, so one rooted read over the cited
+ * identities, made only when something is cited, says which of them are
+ * there. The match names no label — a root that is another node, or a
+ * document that is no source, is then an ordinary miss — and an empty answer
+ * is the ordinary case for a citation of nothing.
  */
 async function citedWorksAt(
   graph: ReadResult,
@@ -363,7 +357,9 @@ async function citedWorksAt(
   if (works.outcome !== "success") return { ok: false, outcome: works as GraphOutcome<never> };
   return {
     ok: true,
-    works: new Set(works.result.nodes.filter((node) => typeOf(node) === WORK_TYPE).map((node) => bareId(node.id))),
+    works: new Set(
+      works.result.nodes.filter((node) => typeOf(node) === DOCUMENT_TYPE && contentOf(node)["record"] === SOURCE_RECORD).map((node) => bareId(node.id)),
+    ),
   };
 }
 
@@ -424,7 +420,7 @@ async function loadDocument(
   if (relationType === CONTAINS && Object.keys(numbers).length > 0) {
     const cited: { work: string; locator?: string }[] = [];
     const visit = (block: BlockView): void => {
-      if (block.kind === "text" && block.standing !== "discarded") for (const run of block.runs) {
+      if (block.kind === "text") for (const run of block.runs) {
         if (run.cite !== undefined && numbers[run.cite.work] !== undefined) cited.push({ work: run.cite.work, ...(run.cite.locator === undefined ? {} : { locator: run.cite.locator }) });
       }
       if (block.kind === "admonition") for (const child of block.children) visit(child);
@@ -441,35 +437,7 @@ async function loadDocument(
       };
     }
   }
-  // Which blocks a run derived from which: one rooted read over
-  // `derivedFrom` beside the containment read, so the body's order and the
-  // depth's relevance layer need no second request. Only the containment
-  // read is asked for the retired blocks. CA_0046_005
-  if (relationType !== CONTAINS || styled.blocks.length === 0) {
-    return { ok: true, graph, document: styled };
-  }
-  const derived = await query({
-    statement: `MATCH (b)-[e:${DERIVED_FROM}]->(f) RETURN GRAPH b, e, f ROOT b`,
-    roots: styled.blocks.map((block) => nodeRef(block.blockId)),
-    unbounded: true,
-    purpose: "derivations",
-  });
-  if (derived.outcome !== "success" && derived.outcome !== "noResult") {
-    return { ok: false, outcome: derived as GraphOutcome<never> };
-  }
-  const sources = new Map<string, string[]>();
-  for (const relation of derived.outcome === "success" ? derived.result.relations : []) {
-    if (relation.type !== DERIVED_FROM || relation.validity.status !== "active" || relation.to.nodeId === undefined) continue;
-    sources.set(relation.fromNodeId, [...(sources.get(relation.fromNodeId) ?? []), bareId(relation.to.nodeId)].sort());
-  }
-  const document: DocumentView = {
-    ...styled,
-    blocks: styled.blocks.map((block) => {
-      const from = sources.get(nodeRef(block.blockId));
-      return block.kind === "text" && from !== undefined ? { ...block, derivedFrom: from } : block;
-    }),
-  };
-  return { ok: true, graph, document };
+  return { ok: true, graph, document: styled };
 }
 
 /**
@@ -862,67 +830,6 @@ export async function listDocuments(): Promise<GraphOutcome<readonly ListedDocum
 }
 
 /**
- * A root's phase, set by the reader from the transition card (`BO_0249_007`,
- * `BO_0274_005`): the base is compared first as a rename's is, and `accepted`
- * writes `acceptedAt` — the dataRevision the acceptance is made at — beside
- * the phase, which is the one fact the acceptance stores; what it accepted is
- * derived from it per claim (`acceptanceOf`). A claim contradicting an accepted
- * claim elsewhere is derived as not accepted rather than refusing the press, so
- * a press accepts what it can; `supersede` stays as the deliberate way to
- * replace a direction, moving the superseded root's `phase` and `supersededBy`
- * in the same mutation. A phase that is not `accepted` clears the stamp. A
- * content write, confirmation-free at the bridge: the press on *Establish* is
- * the confirmation (`BO_0249`, Decided).
- */
-export async function setDocumentPhase(input: {
-  readonly documentId: string;
-  readonly baseRevisionId: string;
-  readonly phase: Phase;
-  readonly supersede?: string;
-}): Promise<GraphOutcome<WrittenDocument>> {
-  const loaded = await loadDocument(input.documentId);
-  if (!loaded.ok) return loaded.outcome;
-  if (!isPhase(input.phase)) {
-    return refuse("unknownPhase", `A phase is proposed, accepted or superseded, not ${String(input.phase)}.`);
-  }
-  if (loaded.document.revisionId !== input.baseRevisionId) {
-    return conflict(input.documentId, input.baseRevisionId, loaded.document.revisionId);
-  }
-  // The stamp is written with the phase and cleared by any other phase: a root
-  // moved back to proposed, or superseded, has no acceptance to derive from.
-  // It is the revision the document was read at — the same one the base check
-  // passed against — so a claim established after the reader looked at what
-  // they were accepting is not accepted by their press. BO_0274_005
-  const statements = [`SET d.${PHASE_PROPERTY} = $phase, d.${ACCEPTED_AT_PROPERTY} = $acceptedAt`];
-  const parameters: Record<string, unknown> = {
-    dNodeId: nodeRef(input.documentId),
-    phase: input.phase,
-    acceptedAt: input.phase === "accepted" ? (loaded.document.dataRevision ?? 0) : null,
-  };
-  let rationale = `set phase of document ${input.documentId} to ${input.phase}`;
-  if (input.phase === "accepted") {
-    const conflicts = await conflictsOf(loaded.document);
-    if (conflicts.outcome !== "success") return conflicts as GraphOutcome<never>;
-    const superseded = conflicts.result.find((other) => other.documentId === input.supersede);
-    if (input.supersede !== undefined && superseded === undefined) {
-      return refuse("notContradicting", `Document ${input.supersede} is not an accepted root contradicting this one, so there is nothing to supersede.`);
-    }
-    if (superseded !== undefined) {
-      statements.push(`SET o.${PHASE_PROPERTY} = $superseded, o.${SUPERSEDED_BY_PROPERTY} = $successor`);
-      parameters["oNodeId"] = nodeRef(superseded.documentId);
-      parameters["superseded"] = "superseded";
-      parameters["successor"] = input.documentId;
-      rationale = `${rationale}, superseding document ${superseded.documentId}`;
-    }
-  }
-  return commit(statements.join("; "), parameters, rationale, async (dataRevision, revisionOf) => ({
-    documentId: input.documentId,
-    revisionId: await revisionOf(input.documentId),
-    dataRevision,
-  }));
-}
-
-/**
  * The ordered document, optionally narrowed to a range of its blocks. Bounds
  * name blocks and are exclusive, so a caller reading what follows a block does
  * not have to drop the first result.
@@ -1003,42 +910,6 @@ export async function renameDocument(input: {
     "SET d.title = $title",
     { dNodeId: nodeRef(input.documentId), title: input.title },
     `rename document ${input.documentId}`,
-    async (dataRevision, revisionOf) => ({
-      documentId: input.documentId,
-      revisionId: await revisionOf(input.documentId),
-      dataRevision,
-    }),
-  );
-}
-
-/**
- * A document's front matter set whole on its base revision (`BO_0293_012`):
- * the authors, the affiliations, the keywords and the venue a manuscript's
- * head projects, each written by property so what the panel leaves empty is
- * cleared. The abstract is a block and is written as one.
- */
-export async function setFrontMatter(input: {
-  readonly documentId: string;
-  readonly baseRevisionId: string;
-  readonly frontMatter: FrontMatter;
-}): Promise<GraphOutcome<WrittenDocument>> {
-  const loaded = await loadDocument(input.documentId);
-  if (!loaded.ok) return loaded.outcome;
-  if (loaded.document.revisionId !== input.baseRevisionId) {
-    return conflict(input.documentId, input.baseRevisionId, loaded.document.revisionId);
-  }
-  const { authors, affiliations, keywords, venue } = input.frontMatter;
-  return commit(
-    "SET d.authors = $authors, d.affiliations = $affiliations, d.keywords = $keywords, d.venue = $venue",
-    {
-      dNodeId: nodeRef(input.documentId),
-      // A null clears the property, as an ordinary paragraph stores no role.
-      authors: authors === undefined ? null : authors,
-      affiliations: affiliations === undefined ? null : affiliations,
-      keywords: keywords === undefined ? null : keywords,
-      venue: venue === undefined ? null : venue,
-    },
-    `set front matter of document ${input.documentId}`,
     async (dataRevision, revisionOf) => ({
       documentId: input.documentId,
       revisionId: await revisionOf(input.documentId),
@@ -1289,23 +1160,6 @@ export async function mergeAdmonitionChildren(input: {
     statements.push("SET i.runs = $runs");
   }
   statements.push("CLOSE c", `RELATE dref -[r:${RETIRED}]-> fref`);
-  const carried = await query({
-    statement: `MATCH (b)-[a:${ASSERTS}]->(c) RETURN GRAPH b, a, c ROOT b`,
-    roots: [nodeRef(from.blockId)],
-    unbounded: true,
-    purpose: "claims of the absorbed admonition child",
-  });
-  if (carried.outcome !== "success" && carried.outcome !== "noResult") return carried as GraphOutcome<never>;
-  const asserted = carried.outcome === "success" ? carried.result.relations : [];
-  asserted
-    .filter((relation) => relation.type === ASSERTS && relation.validity.status === "active" && relation.fromNodeId === nodeRef(from.blockId))
-    .forEach((relation, index) => {
-      parameters[`a${index}RelationId`] = relation.id;
-      parameters[`a${index}From`] = nodeRef(from.blockId);
-      parameters[`m${index}i`] = nodeRef(into.blockId);
-      parameters[`m${index}c`] = relation.to.nodeId ?? "";
-      statements.push(`CLOSE a${index}`, `RELATE m${index}i -[m${index}a:${ASSERTS}]-> m${index}c`);
-    });
   return commit(
     statements.join("; "),
     parameters,
@@ -1353,6 +1207,35 @@ export async function composeMediaInsert(input: {
     `RELATE dref -[c:${CONTAINS}]-> bref`,
   ].join("; ");
   return { ok: true, blockId, statement, parameters };
+}
+
+/** Compose the revision that fills a pending media block for a run tool. */
+export async function composeMediaFill(input: {
+  readonly documentId: string;
+  readonly blockId: string;
+  readonly jobId: string;
+  readonly reference: BlobReference;
+  readonly source: Record<string, unknown>;
+}): Promise<
+  | { readonly ok: true; readonly statement: string; readonly parameters: Record<string, unknown> }
+  | { readonly ok: false; readonly refusal: string }
+> {
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return { ok: false, refusal: `No document ${input.documentId}.` };
+  const block = loaded.document.blocks.find((candidate) => candidate.blockId === input.blockId);
+  if (block === undefined || (block.kind !== "image" && block.kind !== "video") || block.objectId !== undefined) {
+    return { ok: false, refusal: `Block ${input.blockId} is not a pending picture or video.` };
+  }
+  if (block.source?.["job"] !== input.jobId) {
+    return { ok: false, refusal: `Job ${input.jobId} does not belong to block ${input.blockId}.` };
+  }
+  const source = { ...block.source, ...input.source };
+  delete source["pending"];
+  return {
+    ok: true,
+    statement: "SET b.reference = $reference, b.source = $source",
+    parameters: { bNodeId: nodeRef(input.blockId), reference: input.reference, source },
+  };
 }
 
 export async function insertBlock(input: {
@@ -1949,10 +1832,6 @@ export async function mergeTextBlocks(input: {
     return conflict(into.blockId, input.intoBaseRevisionId, into.revisionId);
   }
 
-  // The absorbed block's claims move to the survivor with the words that
-  // carried them: each `asserts` is closed and made again from the survivor
-  // in the same script, so a relation anchored on the claim keeps its end.
-  // BO_0244_007
   const parameters: Record<string, unknown> = {
     iNodeId: nodeRef(input.intoBlockId),
     runs: normalizeRuns([...into.runs, ...from.runs]),
@@ -1961,23 +1840,6 @@ export async function mergeTextBlocks(input: {
     fref: nodeRef(from.blockId),
   };
   const statements = ["SET i.runs = $runs", "CLOSE c", `RELATE dref -[r:${RETIRED}]-> fref`];
-  const carried = await query({
-    statement: `MATCH (b)-[a:${ASSERTS}]->(c) RETURN GRAPH b, a, c ROOT b`,
-    roots: [nodeRef(from.blockId)],
-    unbounded: true,
-    purpose: "claims of the absorbed block",
-  });
-  if (carried.outcome !== "success" && carried.outcome !== "noResult") return carried as GraphOutcome<never>;
-  const asserted = carried.outcome === "success" ? carried.result.relations : [];
-  asserted
-    .filter((relation) => relation.type === ASSERTS && relation.validity.status === "active" && relation.fromNodeId === nodeRef(from.blockId))
-    .forEach((relation, index) => {
-      parameters[`a${index}RelationId`] = relation.id;
-      parameters[`a${index}From`] = nodeRef(from.blockId);
-      parameters[`m${index}i`] = nodeRef(input.intoBlockId);
-      parameters[`m${index}c`] = relation.to.nodeId ?? "";
-      statements.push(`CLOSE a${index}`, `RELATE m${index}i -[m${index}a:${ASSERTS}]-> m${index}c`);
-    });
 
   return commit(
     statements.join("; "),
@@ -2027,6 +1889,100 @@ export async function moveBlock(input: {
     }),
   );
 }
+
+/**
+ * Moves a block of another document into this one (CA_0072_006): one write
+ * closes its containment where it stands and relates this document to it at
+ * the minted key, so its identity, its content and any `focuses` edge stay
+ * with it — a block that has focused work takes the work along. The source
+ * is read for the block's containment, and nothing is asked of its revision:
+ * a drag moves the block the reader sees, as a move within one document does.
+ */
+export async function moveBlockIn(input: {
+  readonly documentId: string;
+  readonly fromDocumentId: string;
+  readonly blockId: string;
+  readonly placement: Placement;
+}): Promise<GraphOutcome<WrittenBlock>> {
+  if (input.fromDocumentId === input.documentId) {
+    return refuse("sameDocument", "A block moves within its own document by a move.");
+  }
+  const source = await loadDocument(input.fromDocumentId);
+  if (!source.ok) return source.outcome;
+  const located = locate(source.document, input.blockId);
+  if ("failure" in located) return located.failure;
+  const target = await loadDocument(input.documentId);
+  if (!target.ok) return target.outcome;
+  const inside = await withinFocusedWorkOf(input.blockId, input.documentId);
+  if (inside !== null) return inside;
+  const order = orderFor(target.document.blocks, input.placement);
+  if ("failure" in order) return order.failure;
+  return commit(
+    ["SET b.order = $order", "CLOSE c", `RELATE dref -[n:${CONTAINS}]-> bref`].join("; "),
+    {
+      bNodeId: nodeRef(input.blockId),
+      order: order.order,
+      cRelationId: located.block.containmentId,
+      // The containment's origin, from where the kernel's gate reads the
+      // close: the source document, or the callout holding a child.
+      cFrom: nodeRef(containerOf(source.document.blocks, input.blockId) ?? input.fromDocumentId),
+      dref: nodeRef(input.documentId),
+      bref: nodeRef(input.blockId),
+    },
+    `move block ${input.blockId} from ${input.fromDocumentId} into ${input.documentId}`,
+    async (dataRevision, revisionOf) => ({
+      blockId: input.blockId,
+      revisionId: await revisionOf(input.blockId),
+      dataRevision,
+    }),
+  );
+}
+
+/** How deep a move looks along `focuses` before it stops: far past any work a
+ * reader nests by hand, and a bound on a graph that should never loop. */
+const FOCUSED_WORK_DEPTH = 32;
+
+/**
+ * A refusal when `documentId` is the block's own focused work or lies below
+ * it along `focuses`, where the block would come to contain itself; `null`
+ * when the move is free of that. CA_0072_006
+ */
+async function withinFocusedWorkOf(blockId: string, documentId: string): Promise<GraphOutcome<never> | null> {
+  let blocks = [blockId];
+  const seen = new Set<string>();
+  for (let depth = 0; depth < FOCUSED_WORK_DEPTH && blocks.length > 0; depth += 1) {
+    const children = await childrenOf(DOCUMENT_TARGET_KIND, blocks);
+    if (children.outcome !== "success") return children as GraphOutcome<never>;
+    const next: string[] = [];
+    for (const child of children.result.values()) {
+      if (child.itemId === documentId) {
+        return refuse("insideItsOwnWork", "A block cannot move into its own focused work.");
+      }
+      if (seen.has(child.itemId)) continue;
+      seen.add(child.itemId);
+      const loaded = await loadDocument(child.itemId);
+      if (!loaded.ok) return loaded.outcome;
+      next.push(...blockIdsOf(loaded.document.blocks));
+    }
+    blocks = next;
+  }
+  return null;
+}
+
+/** The callout that holds a block, or `null` for a block the document holds. */
+const containerOf = (blocks: readonly BlockView[], blockId: string): string | null => {
+  for (const block of blocks) {
+    if (block.kind !== "admonition") continue;
+    if (block.children.some((child) => child.blockId === blockId)) return block.blockId;
+    const inner = containerOf(block.children, blockId);
+    if (inner !== null) return inner;
+  }
+  return null;
+};
+
+/** Every block of a document, a callout's children among them. */
+const blockIdsOf = (blocks: readonly BlockView[]): string[] =>
+  blocks.flatMap((block) => [block.blockId, ...(block.kind === "admonition" ? blockIdsOf(block.children) : [])]);
 
 /**
  * Moves a retired block without restoring it (BO_0263_012): its key is
@@ -2109,6 +2065,55 @@ export async function retireBlock(input: {
       revisionId: located.block.revisionId,
       dataRevision,
     }),
+  );
+}
+
+/**
+ * Retires several blocks in one write: the bar's *Retire* on a selection that
+ * marks more than one block (`DO_0023_004`). Each block is named with the
+ * revision the reader saw, so one that changed since refuses the whole press
+ * rather than a part of it being retired; the closes and the relations travel
+ * in one script with the document as an endpoint, as a single retirement's
+ * do, and each block lands in the retired list on its own.
+ */
+export async function retireBlocks(input: {
+  readonly documentId: string;
+  readonly blocks: readonly { readonly blockId: string; readonly baseRevisionId: string }[];
+}): Promise<GraphOutcome<{ readonly blockIds: readonly string[]; readonly dataRevision: string }>> {
+  if (input.blocks.length === 0) return refuse("emptyRetire", "A retirement names at least one block.");
+  const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok) return loaded.outcome;
+  const located: BlockView[] = [];
+  for (const named of input.blocks) {
+    const found = locate(loaded.document, named.blockId, named.baseRevisionId);
+    if ("failure" in found) return found.failure;
+    located.push(found.block);
+  }
+  // A block with focused work stays until the child is deleted, as a single
+  // retirement's does; the first one standing in the way is named. CA_0047_002
+  const children = await childrenOf(DOCUMENT_TARGET_KIND, located.map((block) => block.blockId));
+  if (children.outcome !== "success") return children as GraphOutcome<never>;
+  for (const block of located) {
+    const child = children.result.get(block.blockId);
+    if (child !== undefined) {
+      return refuse("focusedWork", `A marked block has focused work, “${child.title}”. Delete that document first.`);
+    }
+  }
+  const statements: string[] = [];
+  const parameters: Record<string, unknown> = {};
+  located.forEach((block, index) => {
+    const alias = `x${index}`;
+    parameters[`${alias}cRelationId`] = block.containmentId;
+    parameters[`${alias}d`] = nodeRef(input.documentId);
+    parameters[`${alias}b`] = nodeRef(block.blockId);
+    statements.push(`CLOSE ${alias}c`, `RELATE ${alias}d -[${alias}r:${RETIRED}]-> ${alias}b`);
+  });
+  const blockIds = located.map((block) => block.blockId);
+  return commit(
+    statements.join("; "),
+    parameters,
+    `retire ${blockIds.length} blocks from ${input.documentId}`,
+    async (dataRevision) => ({ blockIds, dataRevision }),
   );
 }
 
@@ -2316,20 +2321,13 @@ export type DocumentProposalItem =
       readonly baseRevisionId: string;
       readonly placement: Placement;
     }
-  /** The work items (`BO_0244_010`): a block's kind, a claim added or
-   * revised, a relation with its reason, a relation's new reason, and the
-   * blocks a block was derived from. */
-  | { readonly kind: "kind"; readonly blockId: string; readonly blockKind: string | null }
-  | { readonly kind: "claim"; readonly blockId: string; readonly claimId?: string; readonly text: readonly Run[] }
+  /** The relation items (`BO_0244_010`): a relation with its reason
+   * between two blocks, and a relation's new reason. */
   | { readonly kind: "relate"; readonly relation: RelationInput }
   | { readonly kind: "reason"; readonly relationId: string; readonly reason: readonly Run[] }
   /** A relation's lifecycle state, proposed by a run after a pressure
    * judgement: exercised, needsReview, orphaned or retired. BO_0248_013 */
-  | { readonly kind: "state"; readonly relationId: string; readonly state: RelationState }
-  /** The root's phase, proposed by a run answering a commit command or by a
-   * person the policy lets propose but not establish (`BO_0249_011`). */
-  | { readonly kind: "phase"; readonly phase: Phase; readonly supersededBy?: string }
-  | { readonly kind: "derive"; readonly blockId: string; readonly from: readonly string[] };
+  | { readonly kind: "state"; readonly relationId: string; readonly state: RelationState };
 
 export interface StagedItem {
   readonly itemId: string;
@@ -2392,15 +2390,13 @@ export async function proposeDocumentChanges(input: {
   const isOutcome = (value: unknown): value is GraphOutcome<never> =>
     typeof value === "object" && value !== null && "outcome" in value;
 
-  // The work items that may need a read before they compile: a relation's
-  // ends, and the claims this document asserts. BO_0244_010
-  const claims = await readClaims(loaded.document.blocks.map((block) => block.blockId));
-  if (claims.outcome !== "success") return claims as GraphOutcome<never>;
+  // The relation items need a read before they compile: a relation's ends.
+  // BO_0244_010
   const work = new Map<number, { readonly statements: readonly string[]; readonly item: StagedItem }>();
   for (const [index, item] of input.items.entries()) {
     const alias = `i${index}`;
     if (item.kind === "relate") {
-      const compiled = await compileRelate(alias, groupId, item.relation, loaded.document, claims.result.byBlock, parameters);
+      const compiled = await compileRelate(alias, groupId, item.relation, loaded.document, parameters);
       if ("failure" in compiled) return compiled.failure;
       work.set(index, compiled);
     }
@@ -2411,11 +2407,9 @@ export async function proposeDocumentChanges(input: {
       if (found.result.length === 0) return refuse("unknownRelation", `Relation ${item.relationId} is not in the graph.`);
       parameters[`${alias}NodeId`] = nodeRef(item.relationId);
       parameters[`${alias}reason`] = normalizeRuns([...item.reason]);
-      const source = claims.result.blockOf.get(found.result[0]?.source ?? "");
-      const targetBlock = claims.result.blockOf.get(found.result[0]?.target ?? "");
       work.set(index, {
         statements: [`SET ${alias}.reason = $${alias}reason`],
-        item: { itemId: itemId(groupId, "reason", [nodeRef(item.relationId)]), kind: "reason", blockId: source ?? targetBlock ?? "" },
+        item: { itemId: itemId(groupId, "reason", [nodeRef(item.relationId)]), kind: "reason", blockId: anchorIn(loaded.document, found.result[0]) },
       });
     }
     if (item.kind === "state") {
@@ -2424,26 +2418,10 @@ export async function proposeDocumentChanges(input: {
       if (found.result.length === 0) return refuse("unknownRelation", `Relation ${item.relationId} is not in the graph.`);
       parameters[`${alias}NodeId`] = nodeRef(item.relationId);
       parameters[`${alias}state`] = item.state;
-      const source = claims.result.blockOf.get(found.result[0]?.source ?? "");
-      const targetBlock = claims.result.blockOf.get(found.result[0]?.target ?? "");
       work.set(index, {
         statements: [`SET ${alias}.state = $${alias}state`],
-        item: { itemId: itemId(groupId, "state", [nodeRef(item.relationId)]), kind: "state", blockId: source ?? targetBlock ?? "" },
+        item: { itemId: itemId(groupId, "state", [nodeRef(item.relationId)]), kind: "state", blockId: anchorIn(loaded.document, found.result[0]) },
       });
-    }
-    if (item.kind === "phase") {
-      if (!isPhase(item.phase)) return refuse("unknownPhase", `A phase is proposed, accepted or superseded, not ${String(item.phase)}.`);
-      if (item.supersededBy !== undefined && item.phase !== "superseded") {
-        return refuse("supersededByWithoutSuperseded", "supersededBy names the successor of a superseded root; with another phase it means nothing.");
-      }
-      parameters[`${alias}NodeId`] = documentNode;
-      parameters[`${alias}phase`] = item.phase;
-      let statement = `SET ${alias}.${PHASE_PROPERTY} = $${alias}phase`;
-      if (item.supersededBy !== undefined) {
-        parameters[`${alias}by`] = item.supersededBy;
-        statement = `${statement}, ${alias}.${SUPERSEDED_BY_PROPERTY} = $${alias}by`;
-      }
-      work.set(index, { statements: [statement], item: { itemId: itemId(groupId, "phase", [documentNode]), kind: "phase", blockId: "" } });
     }
   }
   try {
@@ -2470,7 +2448,7 @@ export async function proposeDocumentChanges(input: {
       return;
     }
 
-    if (item.kind === "relate" || item.kind === "reason" || item.kind === "state" || item.kind === "phase") {
+    if (item.kind === "relate" || item.kind === "reason" || item.kind === "state") {
       // Resolved before the loop, since an end may need a read.
       const compiled = work.get(index);
       if (compiled === undefined) throw refuse("itemShape", "A work item was not compiled.");
@@ -2484,46 +2462,6 @@ export async function proposeDocumentChanges(input: {
       throw refuse("unknownBlock", `Block ${item.blockId} is not in this document.`);
     }
     const target = nodeRef(item.blockId);
-
-    if (item.kind === "kind") {
-      if (block.kind !== "text") throw refuse("blockKind", `Block ${item.blockId} is a ${block.kind} block; only a text block carries a kind.`);
-      if (item.blockKind !== null && !isBlockKind(item.blockKind)) throw refuse("blockKind", `${item.blockKind} is not a kind a block can be.`);
-      parameters[`${alias}NodeId`] = target;
-      parameters[`${alias}kind`] = item.blockKind;
-      statements.push(`SET ${alias}.kind = $${alias}kind`);
-      staged.push({ itemId: itemId(groupId, "kind", [target]), kind: "kind", blockId: item.blockId });
-      return;
-    }
-    if (item.kind === "claim") {
-      if (item.text.length === 0) throw refuse("emptyClaim", "A claim carries words.");
-      if (item.claimId !== undefined) {
-        const known = (claims.result.byBlock[item.blockId] ?? []).some((claim) => claim.claimId === item.claimId);
-        if (!known) throw refuse("unknownClaim", `Claim ${item.claimId} is not asserted by block ${item.blockId}.`);
-        parameters[`${alias}NodeId`] = nodeRef(item.claimId);
-        parameters[`${alias}text`] = normalizeRuns([...item.text]);
-        statements.push(`SET ${alias}.text = $${alias}text`);
-        staged.push({ itemId: itemId(groupId, "claim", [nodeRef(item.claimId)]), kind: "claim", blockId: item.blockId });
-        return;
-      }
-      const drafted = draftClaimScript(alias, item.blockId, item.text, parameters, false);
-      statements.push(...drafted.statements);
-      staged.push({ itemId: itemId(groupId, "claim", [nodeRef(drafted.claimId)]), kind: "claim", blockId: item.blockId });
-      return;
-    }
-    if (item.kind === "derive") {
-      if (item.from.length === 0) throw refuse("emptyDerive", `A derive names the blocks ${item.blockId} rests on.`);
-      item.from.forEach((sourceId, n) => {
-        if (sourceId === item.blockId) throw refuse("selfDerive", "A block is not derived from itself.");
-        const edge = `${alias}d${n}`;
-        parameters[`${edge}b`] = target;
-        parameters[`${edge}f`] = nodeRef(sourceId);
-        statements.push(`RELATE ${edge}b -[${edge}e:${DERIVED_FROM}]-> ${edge}f`);
-      });
-      // The members are the staged edges, named by the block until the
-      // touched set names them, as a removal's are.
-      staged.push({ itemId: itemId(groupId, "derive", [target]), kind: "derive", blockId: item.blockId });
-      return;
-    }
 
     if (item.kind === "remove") {
       parameters[`${alias}cRelationId`] = block.containmentId;
@@ -2579,94 +2517,54 @@ export async function proposeDocumentChanges(input: {
       : `proposal against document ${input.documentId}: ${JSON.stringify(input.request)}`;
   const outcome = await stage(groupId, statements.join("; "), parameters, rationale);
   if (outcome.outcome !== "success") return outcome as GraphOutcome<StagedProposal>;
-  // A derivation's members are its staged edges, whose ids exist only once
-  // staged: the touched set names them, and the item is renamed by them so
-  // it can be answered as it is read back. BO_0244_010
-  // Unless the same group revises the block: the edges then travel with
-  // the block's own candidate, and answering that item answers them.
-  let items: StagedItem[] = staged;
-  if (staged.some((item) => item.kind === "derive")) {
-    const touched = await touchedSet(groupId);
-    if (touched.outcome !== "success") return touched as GraphOutcome<never>;
-    items = staged.map((item) => {
-      if (item.kind !== "derive") return item;
-      const carrier = staged.find((other) => other.blockId === item.blockId && (other.kind === "kind" || other.kind === "replace" || other.kind === "move"));
-      if (carrier !== undefined) return { ...item, itemId: carrier.itemId };
-      const edges = touched.result.stagedRelations
-        .filter((relation) => relation.type === DERIVED_FROM && relation.fromNodeId === nodeRef(item.blockId))
-        .map((relation) => relation.id);
-      return edges.length === 0 ? item : { ...item, itemId: itemId(groupId, "derive", edges) };
-    });
-  }
   return {
     outcome: "success",
-    result: { groupId, items, dataRevision: outcome.result.dataRevision },
+    result: { groupId, items: staged, dataRevision: outcome.result.dataRevision },
   };
 }
 
+/** The block of this document a relation is drawn under: its source when the
+ * source is here, else its target, else none. */
+const anchorIn = (document: DocumentView, ends: { readonly source: string; readonly target: string } | undefined): string => {
+  const here = new Set(document.blocks.map((block) => nodeRef(block.blockId)));
+  if (ends === undefined) return "";
+  if (here.has(ends.source)) return bareId(ends.source);
+  if (here.has(ends.target)) return bareId(ends.target);
+  return "";
+};
+
 /**
- * A `relate` item's script: the relation node and its two edges, and the
- * claim drafted for an end that names a block with the words to draft. The
- * members are the drafted claims and then the relation, decided in that
- * order so the relation is never established with an end that is still a
- * candidate. BO_0244_010
+ * A `relate` item's script: the relation node and its two edges to blocks.
+ * An end of this document is judged from the document read, an end of
+ * another by its own read; one end is this document's. BO_0244_010
  */
 async function compileRelate(
   alias: string,
   groupId: string,
   relation: RelationInput,
   document: DocumentView,
-  claims: Readonly<Record<string, readonly ClaimView[]>>,
   parameters: Record<string, unknown>,
 ): Promise<{ readonly statements: readonly string[]; readonly item: StagedItem } | { readonly failure: GraphOutcome<never> }> {
   if (relation.reason.length === 0) {
     return { failure: refuse("noReason", "A relation gives its reason: the condition that connects its ends, never that they seem related.") };
   }
-  const statements: string[] = [];
-  const members: string[] = [];
-  let anchor = "";
-  const resolve = async (suffix: string, end: RelationEndInput): Promise<string | GraphOutcome<never>> => {
-    if ("claimId" in end) {
-      const found = await query({ statement: `MATCH (c:${CLAIM_TYPE}) RETURN GRAPH c`, roots: [nodeRef(end.claimId)], purpose: "relation end" });
-      if (found.outcome !== "success" || !found.result.nodes.some((node) => node.id === nodeRef(end.claimId))) {
-        return refuse("unknownClaim", `Claim ${end.claimId} is not in the graph.`);
-      }
-      return end.claimId;
-    }
-    const here = document.blocks.find((block) => block.blockId === end.blockId);
-    let asserted: readonly ClaimView[];
-    if (here !== undefined) {
-      if (here.kind === "text" && here.standing === "discarded") {
-        return refuse("discardedBlock", `Block ${end.blockId} is discarded; a relation never anchors on a discarded block.`);
-      }
-      asserted = claims[end.blockId] ?? [];
-      if (anchor === "") anchor = end.blockId;
-    } else {
-      const far = await farBlock(end.blockId);
-      if (far.outcome !== "success") return far as GraphOutcome<never>;
-      asserted = far.result.claims;
-    }
-    if (end.claim !== undefined && end.claim.length > 0) {
-      const drafted = draftClaimScript(`${alias}${suffix}`, end.blockId, end.claim, parameters, false);
-      statements.push(...drafted.statements);
-      members.push(nodeRef(drafted.claimId));
-      return drafted.claimId;
-    }
-    if (asserted.length === 1) return (asserted[0] as ClaimView).claimId;
-    if (asserted.length === 0) return refuse("noClaim", `Block ${end.blockId} asserts no claim yet; give the claim's words to draft one.`);
-    return refuse("severalClaims", `Block ${end.blockId} asserts ${asserted.length} claims; name one by claimId.`);
+  const resolve = async (end: RelationEndInput): Promise<RelationEnd | GraphOutcome<never>> => {
+    const here = endHere(document, end.blockId);
+    if (here !== null) return here;
+    const far = await farBlock(end.blockId);
+    return far.outcome === "success" ? far.result : (far as GraphOutcome<never>);
   };
-  const source = await resolve("s", relation.source);
-  if (typeof source !== "string") return { failure: source };
-  const target = await resolve("t", relation.target);
-  if (typeof target !== "string") return { failure: target };
-  if (source === target) return { failure: refuse("sameClaim", "A relation's source and target are two claims.") };
-  const script = relationScript(alias, { kind: relation.kind, reason: relation.reason, origin: relation.origin ?? "inferred" }, source, target, parameters, false);
-  statements.push(...script.statements);
-  members.push(nodeRef(script.relationId));
+  const source = await resolve(relation.source);
+  if ("outcome" in source) return { failure: source };
+  const target = await resolve(relation.target);
+  if ("outcome" in target) return { failure: target };
+  if (source.blockId === target.blockId) return { failure: refuse("sameBlock", "A relation's source and target are two blocks.") };
+  const anchor = source.documentId === document.documentId ? source.blockId : target.documentId === document.documentId ? target.blockId : "";
+  if (anchor === "") return { failure: refuse("elsewhere", "One end of a relation proposed here is a block of this document.") };
+  const script = relationScript(alias, { kind: relation.kind, reason: relation.reason, origin: relation.origin ?? "inferred" }, source.blockId, target.blockId, parameters, false);
   return {
-    statements,
-    item: { itemId: itemId(groupId, "relate", members), kind: "relate", blockId: anchor },
+    statements: script.statements,
+    item: { itemId: itemId(groupId, "relate", [nodeRef(script.relationId)]), kind: "relate", blockId: anchor },
   };
 }
 
@@ -2679,26 +2577,18 @@ export interface ProposedChange {
   readonly blockId: string;
   /** What the block would say. Absent for a `remove`, which proposes no content. */
   readonly block: BlockView | null;
-  /** A proposed claim, for a `claim` item. BO_0244_010 */
-  readonly claim?: ClaimView;
   /** A proposed relation, or one whose reason is proposed, for `relate` and `reason`. */
   readonly relation?: RelationView;
   /** The state the relation holds now, for a `state` item proposing another. BO_0248_013 */
   readonly previousState?: string;
-  /** The blocks a `derive` item says its block rests on. */
-  readonly derivedFrom?: readonly string[];
+  /** A `gather` item (`BO_0322`): the blocks it moves into its block's
+   * focused work, in document order, and whether it creates that focused
+   * work. Its `block` is the block with its summary. BO_0322_013 */
+  readonly gathered?: readonly string[];
+  readonly createsChild?: boolean;
   /** A relation drawn in another document: only its target is here, so this
    * document counts it and does not draw it. */
   readonly elsewhere?: boolean;
-  /** A derived candidate of a system run — a synthesis, frontier, tension,
-   * alternative, consequence or next it maintains — drawn in the derived
-   * idiom and answered by use, never by icons. BO_0246_006 */
-  readonly derived?: boolean;
-  /** A `phase` item: the root's proposed phase, its successor when superseded,
-   * and the proposer's sentence of consequences (`BO_0249_011`). */
-  readonly phase?: Phase;
-  readonly supersededBy?: string;
-  readonly sentence?: string;
   /** The agent's own short line on the item, recorded by its run (the
    * `agent.run` node's `notes`), shown on the item's mark in place of the
    * derived words. BO_0265_011 */
@@ -2716,13 +2606,14 @@ export interface ProposedChange {
   readonly withdrawal?: { readonly runId: string; readonly proposer: Proposer; readonly successor?: string; readonly reason?: string };
 }
 
-/** The kinds a system run derives; its candidates of these are drawn as
- * derived, not as an agent's proposal. BO_0246_006 */
-export const DERIVED_KINDS: readonly string[] = ["synthesis", "frontier", "tension", "alternative", "consequence", "next"];
-
 export interface DocumentProposals {
   readonly documentId: string;
   readonly unanswered: number;
+  /** The rejected rewrites, inserts and moves that reached the document,
+   * read only when asked for — *Show removed* draws them among the removed
+   * rows, and *Restore* reopens one. Answered nothing else; never counted as
+   * unanswered. BO_0315_015 */
+  readonly rejected?: readonly ProposedChange[];
   readonly groups: readonly {
     readonly groupId: string;
     readonly items: readonly ProposedChange[];
@@ -2741,22 +2632,6 @@ export interface DocumentProposals {
 }
 
 /** The open proposal groups of the graph, by id. */
-async function openGroups(): Promise<GraphOutcome<readonly string[]>> {
-  const outcome = await query({
-    statement: "MATCH (g:ProposalGroup) RETURN GRAPH g",
-    unbounded: true,
-    purpose: "open proposals",
-  });
-  if (outcome.outcome === "noResult") return { outcome: "success", result: [] };
-  if (outcome.outcome !== "success") return outcome as GraphOutcome<readonly string[]>;
-  return {
-    outcome: "success",
-    result: outcome.result.nodes
-      .filter((node) => node.revision.content?.["status"] === "open")
-      .map((node) => node.id),
-  };
-}
-
 /**
  * The unanswered proposals standing against a document, grouped as they were
  * staged. This is the document's own reading of them: what each item would do
@@ -2770,54 +2645,64 @@ async function openGroups(): Promise<GraphOutcome<readonly string[]>> {
  */
 export async function readDocumentProposals(
   documentId: string,
+  options: { readonly rejected?: boolean } = {},
 ): Promise<GraphOutcome<DocumentProposals>> {
   // Always against truth: read under the tab's branch, the branch's own
   // candidates are the document and no member of it would list, so the
   // person in the branch could settle nothing. Found live in the BO_0250
   // walk-through, 2026-09-15.
-  return outsideBranch(() => readDocumentProposalsAgainstTruth(documentId));
+  return outsideBranch(() => readDocumentProposalsAgainstTruth(documentId, options));
 }
 
 async function readDocumentProposalsAgainstTruth(
   documentId: string,
+  options: { readonly rejected?: boolean } = {},
 ): Promise<GraphOutcome<DocumentProposals>> {
   const read = await loadDocument(documentId);
   // A started document's blocks are all its run's inserts. BO_0251_008
   const started = !read.ok && read.outcome.outcome === "noResult" ? await readStarted(documentId) : null;
   if (!read.ok && started?.outcome !== "success") return started ?? (read as { readonly outcome: GraphOutcome<never> }).outcome;
   const loaded = { document: read.ok ? read.document : (started as { readonly result: DocumentView }).result };
-  const groupIds = await openGroups();
-  if (groupIds.outcome !== "success") return groupIds as GraphOutcome<never>;
-
   const documentNode = nodeRef(documentId);
   const established = new Map(loaded.document.blocks.map((block) => [nodeRef(block.blockId), block]));
-  const claims = await readClaims(loaded.document.blocks.map((block) => block.blockId));
-  if (claims.outcome !== "success") return claims as GraphOutcome<never>;
   const groups: { groupId: string; items: ProposedChange[]; stagedBy: string[]; proposer: Proposer; run?: { runId: string; stagedAt: number } }[] = [];
   let unanswered = 0;
 
-  // Only a group that reaches this document is read: its touched set — one
-  // cheap core read per open group, all at once — names the nodes it stages
-  // and the relations it stages or closes, and a group none of whose nodes or
-  // ends is this document's has nothing to answer here. Reading every open
-  // group's members instead made a document open wait on every proposal in
-  // the instance. BO_0257_008
-  const reach = new Set<string>([documentNode, ...established.keys(), ...claims.result.blockOf.keys()]);
-  if (claims.result.blockOf.size > 0) {
-    const relations = await readRelationsOf([...claims.result.blockOf.keys()]);
-    if (relations.outcome !== "success") return relations as GraphOutcome<never>;
-    for (const entry of relations.result) reach.add(entry.node.id);
+  // Only a group that reaches this document is read: the core answers the
+  // open groups whose staged nodes or staged and closed relation ends are
+  // this document's, each with its touched set, in one read however many
+  // groups are open in the instance. Reading every open group's touched set
+  // instead made each read wait on every proposal in the instance, through
+  // the core's few connections. BO_0257_008 BO_0314_012
+  const reach = new Set<string>([documentNode, ...established.keys()]);
+  // A group revising a relation stands on the relation node, not the
+  // blocks: the relations on this document's blocks reach it too.
+  const standing = await relationsOnBlocks([...established.keys()]);
+  if (standing.outcome !== "success") return standing as GraphOutcome<never>;
+  for (const ref of standing.result) reach.add(ref);
+  const reached = await reachingGroups([...reach].sort(), options.rejected === true);
+  if (reached.outcome !== "success") return reached as GraphOutcome<never>;
+  // The rejected entries of the same read, asked for by *Show removed*.
+  // BO_0315_015
+  const reaching = { outcome: "success" as const, result: reached.result.filter((touched) => touched.rejected !== true) };
+  const rejectedReads = await Promise.all(
+    reached.result
+      .filter((touched) => touched.rejected === true)
+      .map((touched) => readRejectedGroup(touched, documentNode, established)),
+  );
+  const rejected: ProposedChange[] = [];
+  for (const outcome of rejectedReads) {
+    if (outcome.outcome !== "success") return outcome as GraphOutcome<never>;
+    rejected.push(...outcome.result);
   }
-  const touchedSets = await Promise.all(groupIds.result.map((groupId) => touchedSet(groupId)));
 
   // The groups that reach the document are read all at once and answered in
   // the listing's order: each is its own few reads, and one after another
   // they kept a document with many standing refinements waiting. BO_0257_010
   const readGroup = async (
     groupId: string,
-    touched: Awaited<ReturnType<typeof touchedSet>>,
+    touched: { readonly outcome: "success"; readonly result: TouchedSet },
   ): Promise<GraphOutcome<(typeof groups)[number] | null>> => {
-      if (touched.outcome !== "success") return touched as GraphOutcome<never>;
       if (!reachesDocument(touched.result, reach)) return { outcome: "success", result: null };
       // A group answered or accepted between the listing and this read has
       // nothing left to show, and its overlay is refused as not open: it is
@@ -2850,36 +2735,6 @@ async function readDocumentProposalsAgainstTruth(
 
       const items: ProposedChange[] = [];
       const named = new Set<string>();
-
-      // The root's phase, staged on the document node itself (`BO_0249_011`):
-      // a candidate of the document whose phase differs from the established
-      // one is the transition proposed, drawn as the card, never as a block.
-      const documentCandidate = staged.get(documentNode);
-      if (documentCandidate !== undefined) {
-        const content = contentOf(documentCandidate);
-        const proposedPhase = content[PHASE_PROPERTY];
-        const currentPhase = loaded.document.phase ?? "proposed";
-        if (isPhase(proposedPhase) && proposedPhase !== currentPhase) {
-          const group = await query({
-            statement: "MATCH (g:ProposalGroup {id: $gid}) RETURN GRAPH g",
-            parameters: { gid: bareId(groupId) },
-            purpose: "phase proposal's rationale",
-          });
-          const rationale = group.outcome === "success" ? group.result.nodes[0]?.revision.content?.["rationale"] : undefined;
-          const supersededBy = content[SUPERSEDED_BY_PROPERTY];
-          named.add(documentNode);
-          items.push({
-            itemId: itemId(groupId, "phase", [documentNode]),
-            groupId,
-            kind: "phase",
-            blockId: "",
-            block: null,
-            phase: proposedPhase,
-            ...(typeof supersededBy === "string" && supersededBy !== "" ? { supersededBy } : {}),
-            ...(typeof rationale === "string" && rationale !== "" ? { sentence: rationale } : {}),
-          });
-        }
-      }
 
       for (const relation of touched.result.stagedRelations) {
         if (relation.fromNodeId !== documentNode) continue;
@@ -2917,6 +2772,34 @@ async function readDocumentProposalsAgainstTruth(
         }
       }
 
+      // A gather (`BO_0322`): the group closes blocks' containment in this
+      // document and places the same blocks under another node, the focused
+      // work, and rewrites the one block left here into its summary. It is
+      // the group's only item, answered as the group. The kernel derives it
+      // the same way (`gatherItem`). BO_0322_013
+      const gathered = gatherOf(touched.result, documentNode, established);
+      if (gathered !== null) {
+        for (const [nodeId, node] of staged) {
+          const block = established.get(nodeId);
+          if (block === undefined || gathered.moved.has(nodeId)) continue;
+          const proposed = toBlock(node, block.containmentId);
+          if (sameBlock(block, proposed)) continue;
+          named.add(nodeId);
+          for (const moved of gathered.moved) named.add(moved);
+          items.push({
+            itemId: itemId(groupId, "gather", [nodeId]),
+            groupId,
+            kind: "gather",
+            blockId: block.blockId,
+            block: proposed,
+            gathered: loaded.document.blocks.filter((candidate) => gathered.moved.has(nodeRef(candidate.blockId))).map((candidate) => candidate.blockId),
+            createsChild: touched.result.stagedRelations.some((relation) => relation.type === FOCUSES && relation.fromNodeId === gathered.child && relation.toId === nodeId),
+            ...withdrawalOf(node),
+          });
+          break;
+        }
+      }
+
       // A carry-forward anchor is never an item: its candidate copies the
       // established revision so a staged relation can anchor at it, and once
       // truth has moved past that copy it would read as a rewrite back — which
@@ -2929,7 +2812,7 @@ async function readDocumentProposalsAgainstTruth(
         if (block === undefined) continue;
         const proposed = toBlock(node, block.containmentId);
         if (sameBlock(block, proposed)) continue;
-        const kind = onlyOrderDiffers(block, proposed) ? "move" : onlyKindDiffers(block, proposed) ? "kind" : "replace";
+        const kind = onlyOrderDiffers(block, proposed) ? "move" : "replace";
         items.push({
           itemId: itemId(groupId, kind, [nodeId]),
           groupId,
@@ -2941,19 +2824,11 @@ async function readDocumentProposalsAgainstTruth(
         });
       }
 
-      // The work items: claims, relations and derivations the group stages
-      // against this document's blocks and claims. BO_0244_010
-      const workItems = await readWorkItems(groupId, loaded.document, touched.result, staged, claims.result);
+      // The relation items the group stages against this document's blocks.
+      // BO_0244_010
+      const workItems = await readWorkItems(groupId, loaded.document, staged);
       if (workItems.outcome !== "success") return workItems as GraphOutcome<never>;
-      // A derivation whose block the group also revises travels with that
-      // item — its edges anchor at the block's candidate — so it is said on
-      // the item rather than answered on its own.
-      for (const derived of workItems.result.filter((item) => item.kind === "derive")) {
-        const carrier = items.findIndex((item) => item.blockId === derived.blockId && (item.kind === "kind" || item.kind === "replace" || item.kind === "move"));
-        if (carrier >= 0) items[carrier] = { ...(items[carrier] as ProposedChange), derivedFrom: derived.derivedFrom ?? [] };
-        else items.push(derived);
-      }
-      items.push(...workItems.result.filter((item) => item.kind !== "derive"));
+      items.push(...workItems.result);
 
       if (items.length === 0) return { outcome: "success", result: null };
       // Authorship is the graph's: the stager is whoever the core stamped on
@@ -2965,24 +2840,10 @@ async function readDocumentProposalsAgainstTruth(
       // before the run closed (`stageRunSummary`), never by the stamp
       // (`proposerFrom`). BO_0233_001
       const run = [...members.values()].find((node) => node.revision.content?.["_type"] === "agent.run");
-      // A system run's derived candidates are the system's reading, read at no
-      // cost: marked here so the editor draws them in the derived idiom and
-      // never asks for an answer by icon. BO_0246_006
-      const system = run?.revision.content?.["trigger"] === "system";
-      const marked = system
-        ? items.map((item) =>
-            (item.kind === "insert" || item.kind === "replace") &&
-            item.block !== null &&
-            item.block.kind === "text" &&
-            DERIVED_KINDS.includes(item.block.blockKind ?? "")
-              ? { ...item, derived: true }
-              : item,
-          )
-        : items;
       // The agent's notes on its items, as its run recorded them, keyed by
       // the member each item's decision covers. BO_0265_011
       const notes = notesOf(run?.revision.content?.["notes"]);
-      const noted = notes.size === 0 ? marked : marked.map((item) => withNote(item, notes));
+      const noted = notes.size === 0 ? items : items.map((item) => withNote(item, notes));
       const runId = run?.revision.content?.["id"];
       // A person's branch is a group named after the document and the person:
       // its proposer is that person, whatever the stamps say. BO_0250_016
@@ -3000,7 +2861,7 @@ async function readDocumentProposalsAgainstTruth(
       };
   };
   const groupReads = await Promise.all(
-    groupIds.result.map((groupId, index) => readGroup(groupId, touchedSets[index] as Awaited<ReturnType<typeof touchedSet>>)),
+    reaching.result.map((touched) => readGroup(touched.proposal, { outcome: "success", result: touched })),
   );
   for (const outcome of groupReads) {
     if (outcome.outcome !== "success") return outcome as GraphOutcome<never>;
@@ -3045,8 +2906,99 @@ async function readDocumentProposalsAgainstTruth(
 
   return {
     outcome: "success",
-    result: { documentId, unanswered, groups },
+    result: { documentId, unanswered, groups, ...(options.rejected === true ? { rejected } : {}) },
   };
+}
+
+/**
+ * One group's rejected members against a document, as they stood when they
+ * were staged: the core's rejected overlay reads them (`BO_0315_001`), and
+ * the entry names which they are. Only a rewrite, an insert or a move is an
+ * item here — what the swipe rejects; a rejected removal, work item or
+ * relation card is not drawn. BO_0315_015
+ */
+async function readRejectedGroup(
+  touched: TouchedSet,
+  documentNode: string,
+  established: ReadonlyMap<string, BlockView>,
+): Promise<GraphOutcome<readonly ProposedChange[]>> {
+  const groupId = touched.proposal;
+  const members = new Set(touched.touchedNodes);
+  const anchors = new Set(touched.carryForwardNodes ?? []);
+  const read = await query({
+    statement: "MATCH (n) WHERE n._proposal = $g RETURN GRAPH n ROOT n INCLUDE CANDIDATES",
+    parameters: { g: groupId },
+    proposalOverlay: groupId,
+    proposalOverlayRejected: true,
+    unbounded: true,
+    purpose: "rejected proposal members",
+  });
+  if (read.outcome === "noResult") return { outcome: "success", result: [] };
+  if (read.outcome !== "success") return read as GraphOutcome<never>;
+  const staged = new Map(
+    read.result.nodes
+      .filter((node) => members.has(node.id) && !anchors.has(node.id) && node.revision.content?.["_proposal"] === groupId)
+      .map((node) => [node.id, node] as const),
+  );
+  const items: ProposedChange[] = [];
+  const inserted = new Set(
+    touched.stagedRelations
+      .filter((relation) => relation.fromNodeId === documentNode && relation.type === CONTAINS && !established.has(relation.toId))
+      .map((relation) => relation.toId),
+  );
+  for (const [nodeId, node] of staged) {
+    if (inserted.has(nodeId)) {
+      items.push({ itemId: itemId(groupId, "insert", [nodeId]), groupId, kind: "insert", blockId: bareId(nodeId), block: toBlock(node, "") });
+      continue;
+    }
+    const block = established.get(nodeId);
+    if (block === undefined) continue;
+    const proposed = toBlock(node, block.containmentId);
+    if (sameBlock(block, proposed)) continue;
+    const kind = onlyOrderDiffers(block, proposed) ? "move" : "replace";
+    items.push({ itemId: itemId(groupId, kind, [nodeId]), groupId, kind, blockId: block.blockId, block: proposed });
+  }
+  return { outcome: "success", result: items };
+}
+
+/**
+ * *Restore* on a rejected proposal (`BO_0315_015`): the same item staged
+ * again as a new open proposal of the reader's, against the document as it
+ * stands — an insert where its key put it, a rewrite of the block's words
+ * and a move to its key, each from the block's current revision. It is read
+ * from the rejected members, never taken from the request, so only what was
+ * proposed is reopened.
+ */
+export async function reopenProposal(documentId: string, reopened: string): Promise<GraphOutcome<StagedProposal>> {
+  const read = await readDocumentProposals(documentId, { rejected: true });
+  if (read.outcome !== "success") return read as GraphOutcome<never>;
+  const item = (read.result.rejected ?? []).find((candidate) => candidate.itemId === reopened);
+  if (item === undefined || item.block === null) return refuse("notRejected", `No rejected proposal ${reopened} reaches this document.`);
+  const loaded = await loadDocument(documentId);
+  if (!loaded.ok) return loaded.outcome;
+  const blocks = loaded.document.blocks;
+  const order = item.block.order;
+  const around = (except: string): Placement => {
+    const keys = blocks.filter((block) => block.blockId !== except && block.order !== "").map((block) => block.order).sort();
+    const low = keys.filter((key) => key < order).at(-1) ?? null;
+    const high = keys.find((key) => key > order) ?? null;
+    return { between: [low, high] };
+  };
+  const current = blocks.find((block) => block.blockId === item.blockId);
+  let proposed: DocumentProposalItem;
+  if (item.kind === "insert") {
+    if (item.block.kind !== "text") return refuse("notReopenable", "Only a proposed paragraph can be reopened.");
+    proposed = { kind: "insert", block: { kind: "text", runs: [...item.block.runs], role: item.block.role }, placement: around(item.blockId) };
+  } else if (current === undefined) {
+    return refuse("goneBlock", `Block ${item.blockId} is no longer in the document.`);
+  } else if (item.kind === "move") {
+    proposed = { kind: "move", blockId: item.blockId, baseRevisionId: current.revisionId, placement: around(item.blockId) };
+  } else if (item.block.kind === "text") {
+    proposed = { kind: "replace", blockId: item.blockId, baseRevisionId: current.revisionId, runs: [...item.block.runs], role: item.block.role };
+  } else {
+    return refuse("notReopenable", "Only a proposed paragraph can be reopened.");
+  }
+  return proposeDocumentChanges({ documentId, items: [proposed] });
 }
 
 /** The refiner a candidate names, when a run refined it: the stamp the
@@ -3098,151 +3050,72 @@ const sameBlock = (left: BlockView, right: BlockView): boolean =>
   left.order === right.order &&
   (left.kind !== "text" ||
     right.kind !== "text" ||
-    (left.role === right.role && sameRuns(left.runs, right.runs) && (left.blockKind ?? "") === (right.blockKind ?? "")));
+    (left.role === right.role && sameRuns(left.runs, right.runs)));
 
 /**
- * The work items a group stages against a document, read from its touched
- * set and its candidates: a new claim is a candidate `claim` node a staged
- * `asserts` from one of this document's blocks points at; a revised claim a
- * candidate of a claim the document asserts whose words differ; a relation a
- * candidate `relation` node whose source or target is a claim here — a claim
- * the same group drafts for it folds into its members — and one whose
- * established reason differs is a `reason` item; a derivation is the staged
- * `derivedFrom` edges from one of this document's blocks. BO_0244_010
+ * The relation items a group stages against a document: a relation is a
+ * candidate `relation` node with an end among this document's blocks. A new
+ * one is a `relate` item; one standing already is a `state` item when the
+ * group moves its state, else a `reason` item. BO_0244_010
  */
 async function readWorkItems(
   groupId: string,
   document: DocumentView,
-  touched: { readonly stagedRelations: readonly { readonly id: string; readonly type: string; readonly fromNodeId: string; readonly toId: string }[] },
   staged: ReadonlyMap<string, ReadNode>,
-  claims: { readonly byBlock: Readonly<Record<string, readonly ClaimView[]>>; readonly blockOf: ReadonlyMap<string, string> },
 ): Promise<GraphOutcome<readonly ProposedChange[]>> {
   const items: ProposedChange[] = [];
-  const blockRefs = new Set(document.blocks.map((block) => nodeRef(block.blockId)));
-  const establishedClaims = new Map<string, ClaimView>();
-  for (const [blockId, list] of Object.entries(claims.byBlock)) {
-    for (const claim of list) establishedClaims.set(nodeRef(claim.claimId), { ...claim, ...(blockId === "" ? {} : {}) });
-  }
-  // Claims drafted by this group for a relation it also stages: folded into
-  // the relation's item, so they are answered together and in order.
-  const draftedFor = new Map<string, string[]>();
   const stagedRelationNodes = [...staged.values()].filter((node) => typeOf(node) === RELATION_TYPE).map((node) => node.id);
-  const ends = stagedRelationNodes.length === 0 ? [] : await (async () => {
-    const read = await readRelationEnds(stagedRelationNodes, groupId);
-    return read.outcome === "success" ? read.result : [];
-  })();
+  if (stagedRelationNodes.length === 0) return { outcome: "success", result: items };
+  const ends = await readRelationEnds(stagedRelationNodes, groupId);
+  if (ends.outcome !== "success") return ends as GraphOutcome<never>;
   // The same relations as established, for what a staged revision changes:
   // the state, or the reason. BO_0248_013
-  const established = stagedRelationNodes.length === 0 ? new Map<string, ReadNode>() : await (async () => {
-    const read = await readRelationEnds(stagedRelationNodes);
-    return new Map((read.outcome === "success" ? read.result : []).map((entry) => [entry.node.id, entry.node]));
-  })();
-  const claimBlock = (ref: string): string | undefined =>
-    claims.blockOf.get(ref) ??
-    [...touched.stagedRelations]
-      .filter((relation) => relation.type === ASSERTS && relation.toId === ref && blockRefs.has(relation.fromNodeId))
-      .map((relation) => bareId(relation.fromNodeId))[0];
-  for (const entry of ends) {
-    for (const ref of [entry.source, entry.target]) {
-      if (staged.has(ref) && !establishedClaims.has(ref)) draftedFor.set(entry.node.id, [...(draftedFor.get(entry.node.id) ?? []), ref]);
-    }
-  }
-  const drafted = new Set([...draftedFor.values()].flat());
-
-  // Claims.
-  for (const relation of touched.stagedRelations) {
-    if (relation.type !== ASSERTS || !blockRefs.has(relation.fromNodeId) || drafted.has(relation.toId)) continue;
-    const node = staged.get(relation.toId);
-    if (node === undefined || typeOf(node) !== CLAIM_TYPE || establishedClaims.has(relation.toId)) continue;
-    items.push({
-      itemId: itemId(groupId, "claim", [relation.toId]),
-      groupId,
-      kind: "claim",
-      blockId: bareId(relation.fromNodeId),
-      block: null,
-      claim: { claimId: bareId(node.id), revisionId: node.revision.id, status: node.revision.status, text: normalizeRuns((contentOf(node)["text"] ?? []) as Run[]) },
-    });
-  }
-  for (const [ref, claim] of establishedClaims) {
-    const node = staged.get(ref);
-    if (node === undefined) continue;
-    const text = normalizeRuns((contentOf(node)["text"] ?? []) as Run[]);
-    if (sameRuns(text, claim.text)) continue;
-    items.push({
-      itemId: itemId(groupId, "claim", [ref]),
-      groupId,
-      kind: "claim",
-      blockId: claims.blockOf.get(ref) ?? "",
-      block: null,
-      claim: { ...claim, revisionId: node.revision.id, status: node.revision.status, text },
-    });
-  }
-
-  // Relations: new ones, and ones whose reason the group revises.
-  const endOf = (ref: string): RelationEnd => {
-    const blockId = claimBlock(ref);
-    const node = staged.get(ref);
-    const known = establishedClaims.get(ref);
-    const text = node !== undefined ? normalizeRuns((contentOf(node)["text"] ?? []) as Run[]) : (known?.text ?? []);
-    return {
-      claimId: bareId(ref),
-      blockId: blockId ?? "",
-      documentId: blockId === undefined ? "" : document.documentId,
-      documentTitle: blockId === undefined ? "" : document.title,
-      status: node?.revision.status ?? known?.status ?? "",
-      text,
-    };
+  const before = await readRelationEnds(stagedRelationNodes);
+  const established = new Map((before.outcome === "success" ? before.result : []).map((entry) => [entry.node.id, entry.node]));
+  const far = new Map<string, RelationEnd>();
+  const endOf = async (ref: string): Promise<RelationEnd> => {
+    const blockId = bareId(ref);
+    const here = endHere(document, blockId);
+    if (here !== null) return here;
+    const known = far.get(ref);
+    if (known !== undefined) return known;
+    const read = await farBlock(blockId);
+    const end = read.outcome === "success" ? read.result : { blockId, documentId: "", documentTitle: "", text: [] };
+    far.set(ref, end);
+    return end;
   };
-  for (const entry of ends) {
-    const sourceHere = claimBlock(entry.source) !== undefined;
-    const targetHere = claimBlock(entry.target) !== undefined;
+  for (const entry of ends.result) {
+    const source = await endOf(entry.source);
+    const target = await endOf(entry.target);
+    const sourceHere = source.documentId === document.documentId;
+    const targetHere = target.documentId === document.documentId;
     if (!sourceHere && !targetHere) continue;
-    const view = relationOf(entry.node, endOf(entry.source), endOf(entry.target));
-    const isNew = !(await hasEstablished(entry.node.id));
-    if (isNew) {
+    const view = relationOf(entry.node, source, target);
+    const blockId = sourceHere ? source.blockId : target.blockId;
+    const previous = established.get(entry.node.id);
+    if (previous === undefined && !(await hasEstablished(entry.node.id))) {
       items.push({
-        itemId: itemId(groupId, "relate", [...(draftedFor.get(entry.node.id) ?? []), entry.node.id]),
+        itemId: itemId(groupId, "relate", [entry.node.id]),
         groupId,
         kind: "relate",
-        blockId: sourceHere ? (claimBlock(entry.source) as string) : (claimBlock(entry.target) as string),
+        blockId,
         block: null,
         relation: view,
         ...(sourceHere ? {} : { elsewhere: true }),
       });
-    } else {
-      const before = established.get(entry.node.id);
-      const previousState = before === undefined ? "declared" : relationOf(before, view.source, view.target).state;
-      const stateMoves = previousState !== view.state;
-      items.push({
-        itemId: itemId(groupId, stateMoves ? "state" : "reason", [entry.node.id]),
-        groupId,
-        kind: stateMoves ? "state" : "reason",
-        blockId: sourceHere ? (claimBlock(entry.source) as string) : (claimBlock(entry.target) as string),
-        block: null,
-        relation: view,
-        ...(stateMoves ? { previousState } : {}),
-        ...(sourceHere ? {} : { elsewhere: true }),
-      });
+      continue;
     }
-  }
-
-  // Derivations.
-  const derivations = new Map<string, { relations: string[]; from: string[] }>();
-  for (const relation of touched.stagedRelations) {
-    if (relation.type !== DERIVED_FROM || !blockRefs.has(relation.fromNodeId)) continue;
-    const entry = derivations.get(relation.fromNodeId) ?? { relations: [], from: [] };
-    entry.relations.push(relation.id);
-    entry.from.push(bareId(relation.toId));
-    derivations.set(relation.fromNodeId, entry);
-  }
-  for (const [blockRef, entry] of derivations) {
+    const previousState = previous === undefined ? "declared" : relationOf(previous, source, target).state;
+    const stateMoves = previousState !== view.state;
     items.push({
-      itemId: itemId(groupId, "derive", entry.relations),
+      itemId: itemId(groupId, stateMoves ? "state" : "reason", [entry.node.id]),
       groupId,
-      kind: "derive",
-      blockId: bareId(blockRef),
+      kind: stateMoves ? "state" : "reason",
+      blockId,
       block: null,
-      derivedFrom: [...entry.from].sort(),
+      relation: view,
+      ...(stateMoves ? { previousState } : {}),
+      ...(sourceHere ? {} : { elsewhere: true }),
     });
   }
   return { outcome: "success", result: items };
@@ -3430,6 +3303,26 @@ export async function answerDocumentProposal(input: {
     return refuse("itemShape", `${input.itemId} does not name a proposed change.`);
   }
   const decision = input.answer === "accepted" ? "accept" : "reject";
+  // A gather is answered as its group, whole: the summary, the focused work
+  // and every move land or leave together. BO_0322_013
+  if (parsed.kind === "gather") {
+    const answered = await decideGroup(decision, parsed.groupId, `gather ${input.itemId}`);
+    if (answered.outcome !== "success") return answered as GraphOutcome<AnsweredItem>;
+    const state = await query({
+      statement: "MATCH (g:ProposalGroup {id: $gid}) RETURN GRAPH g",
+      parameters: { gid: bareId(parsed.groupId) },
+      purpose: "group state after answer",
+    });
+    return {
+      outcome: "success",
+      result: {
+        itemId: input.itemId,
+        answer: input.answer,
+        dataRevision: state.outcome === "success" ? String(state.result.resolvedDataRevision) : "",
+        groupState: "closed",
+      },
+    };
+  }
   // A started document goes with the first item the reader accepts, before
   // the item: the core accepts a block's member into a document whose own is
   // still a candidate and leaves the block established in a document that is
@@ -3439,9 +3332,9 @@ export async function answerDocumentProposal(input: {
     const taken = await decide("accept", parsed.groupId, nodeRef(input.documentId), `take document ${input.documentId} with ${input.itemId}`);
     if (taken.outcome !== "success") return taken as GraphOutcome<AnsweredItem>;
   }
-  // The works a proposed sentence cites and its own group proposes are
-  // accepted first, so a citation never lands pointing at a work that is
-  // still a proposal. BO_0291_036
+  // The sources a proposed sentence cites and its own group proposes are
+  // accepted first, so a citation never lands pointing at a source that is
+  // still a proposal. BO_0291_036 BO_0313_030
   if (decision === "accept") {
     const carried = await query({
       statement: "MATCH (n) WHERE n._proposal = $g RETURN GRAPH n ROOT n INCLUDE CANDIDATES",
@@ -3451,9 +3344,13 @@ export async function answerDocumentProposal(input: {
       purpose: "works a proposed citation carries",
     });
     if (carried.outcome === "storageError") return carried as GraphOutcome<AnsweredItem>;
-    const works = carried.outcome === "success" ? proposedWorksCited(carried.result.nodes, parsed.members, parsed.groupId) : [];
+    const touchedEdges = carried.outcome === "success" ? await touchedSet(parsed.groupId) : null;
+    const works =
+      carried.outcome === "success"
+        ? proposedWorksCited(carried.result.nodes, parsed.members, parsed.groupId, touchedEdges?.outcome === "success" ? touchedEdges.result.stagedRelations : [])
+        : [];
     for (const work of works) {
-      const taken = await decide("accept", parsed.groupId, work, `work ${bareId(work)} cited by ${input.itemId}`);
+      const taken = await decide("accept", parsed.groupId, work, `source ${bareId(work)} cited by ${input.itemId}`);
       if (taken.outcome !== "success") return taken as GraphOutcome<AnsweredItem>;
     }
   }
@@ -3655,13 +3552,11 @@ export async function promoteBlock(input: {
 }
 
 /**
- * Profiles (`BO_0298_010`–`BO_0298_012`): the `profile` property of the
- * `document` declaration names the profile attached to a document — the id
- * of a document carrying `record: profile` — and these are the writes and
- * reads the `profiles` extension's routes are made of. A selection is the
- * person's own act, established at once as truth whatever branch the tab is
- * in (`BO_0298_Q7`), never a proposal; the kernel reads the property at a
- * run's start (`calliopa-bootstrap`'s `ui-kernel.md`, Profiles).
+ * Profiles (`BO_0298_011`–`BO_0298_012`): a profile is a document carrying
+ * `record: profile`, and these are the reads the `profiles` extension's
+ * routes are made of. The profile is chosen per command and no document names
+ * one (`calliopa-bootstrap`'s `BO_0311`); the kernel reads the command's at a
+ * run's start (`ui-kernel.md`, The Profile In The Command, With Tools).
  */
 
 /** One document node's content as established, or null when the pin holds none. */
@@ -3711,51 +3606,81 @@ export async function listProfiles(): Promise<GraphOutcome<readonly ProfileSumma
   return { outcome: "success", result: listed.sort(byProfileTitle) };
 }
 
-/** What a document's `profile` names, resolved: the profile, none, or an id
- * the graph no longer holds as a profile. */
-async function selectionOf(content: Record<string, unknown>): Promise<GraphOutcome<ProfileSelection>> {
-  const named = content["profile"];
-  if (typeof named !== "string" || named === "") return { outcome: "success", result: { profile: null, gone: null } };
-  const profile = await documentContent(named);
-  if (profile.outcome !== "success") return profile as GraphOutcome<never>;
-  return {
-    outcome: "success",
-    result: isProfile(profile.result) ? { profile: profileOf(named, profile.result), gone: null } : { profile: null, gone: named },
-  };
-}
-
-/** The document's selection as it stands. */
-export async function readProfileSelection(documentId: string): Promise<GraphOutcome<ProfileSelection>> {
+/** The profile a document is, by its id and title, or null when it is no
+ * profile — what the chip and the grant control ask of the document they are
+ * drawn on. BO_0311_011 BO_0311_012 */
+export async function profileSummary(documentId: string): Promise<GraphOutcome<ProfileSummary | null>> {
   const document = await documentContent(documentId);
   if (document.outcome !== "success") return document as GraphOutcome<never>;
-  if (document.result === null) return { outcome: "noResult", detail: `No document ${documentId}.` };
-  return selectionOf(document.result);
+  return { outcome: "success", result: isProfile(document.result) ? profileOf(documentId, document.result) : null };
 }
 
 /**
- * The person's selection written: a profile by its id, or null for *No
- * profile*. An id that is not an established document carrying
- * `record: profile` is refused before anything is written, in words.
+ * One script clearing the `profile` slot every document still carries — the
+ * profile a person attached before the chip chose it per command — or none
+ * when no document carries one (`BO_0311_020`, `BO_0311_Q1`). Idempotent: run
+ * by `profiles`' executable migration, which drops the attachments on upgrade.
  */
-export async function setProfile(input: {
+export async function clearProfileSlotsStatement(): Promise<GraphOutcome<{ readonly statement: string; readonly parameters: Record<string, unknown> }>> {
+  const read = await outsideBranch(() =>
+    query({ statement: `MATCH (d:${DOCUMENT_TYPE}) RETURN GRAPH d`, unbounded: true, purpose: "documents carrying a profile slot" }),
+  );
+  if (read.outcome === "noResult") return { outcome: "success", result: { statement: "", parameters: {} } };
+  if (read.outcome !== "success") return read as GraphOutcome<never>;
+  const statements: string[] = [];
+  const parameters: Record<string, unknown> = {};
+  read.result.nodes
+    .filter((node) => typeOf(node) === DOCUMENT_TYPE && node.revision.status === "established" && contentOf(node)["profile"] !== undefined)
+    .map((node) => node.id)
+    .sort()
+    .forEach((id, index) => {
+      parameters[`p${index}NodeId`] = id;
+      statements.push(`SET p${index}.profile = null`);
+    });
+  return { outcome: "success", result: { statement: statements.join("; "), parameters } };
+}
+
+/** Structured image-generation settings on a profile document. */
+export async function readProfileGeneration(documentId: string): Promise<GraphOutcome<ProfileGeneration | null>> {
+  const document = await documentContent(documentId);
+  if (document.outcome !== "success") return document as GraphOutcome<never>;
+  if (document.result === null) return { outcome: "noResult", detail: `No document ${documentId}.` };
+  if (!isProfile(document.result)) return { outcome: "success", result: null };
+  const type = document.result["profileType"];
+  const backend = document.result["imageBackend"];
+  return { outcome: "success", result: {
+    profileType: type === "image" || type === "video" ? type : "instructions",
+    imageBackend: backend === "higgsfield" || backend === "openart" || backend === "codex" ? backend : null,
+  } };
+}
+
+/** Save structured profile settings. Omitting a backend preserves the saved value. */
+export async function setProfileGeneration(input: {
   readonly documentId: string;
-  readonly profile: string | null;
-}): Promise<GraphOutcome<ProfileSelection>> {
+  readonly profileType: "instructions" | "image" | "video";
+  readonly imageBackend?: "higgsfield" | "openart" | "codex";
+}): Promise<GraphOutcome<ProfileGeneration>> {
+  // Codex makes pictures only: a video profile's backend is a video
+  // generator's (`calliopa-bootstrap`'s BO_0312). BO_0320_012
+  if (input.profileType === "video" && input.imageBackend === "codex") {
+    return { outcome: "validationFailure", failures: [{ operation: null, rule: "profile", detail: "Codex makes pictures only; a video profile uses Higgsfield or OpenArt." }] };
+  }
   const document = await documentContent(input.documentId);
   if (document.outcome !== "success") return document as GraphOutcome<never>;
-  if (document.result === null) return { outcome: "noResult", detail: `No document ${input.documentId}.` };
-  let chosen: ProfileSummary | null = null;
-  if (input.profile !== null) {
-    const profile = await documentContent(input.profile);
-    if (profile.outcome !== "success") return profile as GraphOutcome<never>;
-    if (!isProfile(profile.result)) {
-      return { outcome: "validationFailure", failures: [{ operation: null, rule: "profile", detail: `${input.profile} is not a profile: a profile is a document carrying record ${PROFILE_RECORD}.` }] };
-    }
-    chosen = profileOf(input.profile, profile.result);
+  if (document.result === null || !isProfile(document.result)) {
+    return { outcome: "validationFailure", failures: [{ operation: null, rule: "profile", detail: `${input.documentId} is not a profile.` }] };
   }
-  const written = await outsideBranch(() =>
-    write("SET d.profile = $profile", { dNodeId: nodeRef(input.documentId), profile: input.profile }, `attach profile ${input.profile ?? "none"} to document ${input.documentId}`),
-  );
+  const current = await readProfileGeneration(input.documentId);
+  if (current.outcome !== "success" || current.result === null) return current as GraphOutcome<never>;
+  // The saved backend stays when the type changes, a Codex one included
+  // (BO_0320_013); `media.generate` refuses Codex for a video. BO_0312
+  const backend = input.imageBackend ?? current.result.imageBackend;
+  const statement = input.imageBackend === undefined
+    ? "SET d.profileType = $profileType"
+    : "SET d.profileType = $profileType, d.imageBackend = $imageBackend";
+  const parameters: Record<string, unknown> = { dNodeId: nodeRef(input.documentId), profileType: input.profileType };
+  if (input.imageBackend !== undefined) parameters["imageBackend"] = input.imageBackend;
+  const written = await outsideBranch(() => write(statement, parameters, `set generation profile ${input.documentId}`));
   if (written.outcome !== "success") return written as GraphOutcome<never>;
-  return { outcome: "success", result: { profile: chosen, gone: null } };
+  return { outcome: "success", result: { profileType: input.profileType, imageBackend: backend } };
 }

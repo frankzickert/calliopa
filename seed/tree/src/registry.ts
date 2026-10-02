@@ -267,25 +267,10 @@ export interface RegisteredParty extends PartyDescriptor {
   readonly extension: string;
 }
 
-/** A runtime party roster and the extension that answers it. CA_0049_001 */
-export interface RegisteredRoster {
-  readonly extension: string;
-  readonly roster: () => Promise<readonly PartyDescriptor[]>;
-}
-
 /** What one extension says a run proposed into it. BO_0255_007 */
 export interface RegisteredProposedTargets {
   readonly extension: string;
   readonly read: (group: string) => Promise<readonly ProposedTarget[]>;
-}
-
-/** One extension's senders and what a command sent to one of them does. */
-export interface RegisteredSenders {
-  readonly extension: string;
-  readonly roster: NonNullable<ServerContributions["senders"]>;
-  readonly send: NonNullable<ServerContributions["send"]>;
-  /** What a send would cost, when this extension can say. BO_0279_009 */
-  readonly quote?: NonNullable<ServerContributions["quote"]>;
 }
 
 export interface ServerRegistry {
@@ -295,10 +280,6 @@ export interface ServerRegistry {
   /** Handler tables by extension id. */
   readonly routes: Readonly<Record<string, readonly ApiRoute[]>>;
   readonly parties: readonly RegisteredParty[];
-  /** The rosters read at runtime, in extension order. */
-  readonly rosters: readonly RegisteredRoster[];
-  /** Senders beside the agents, by extension, in contribution order. BO_0273_035 */
-  readonly senders: readonly RegisteredSenders[];
   /** What each extension says a run proposed into it, in extension order. */
   readonly proposedTargets: readonly RegisteredProposedTargets[];
   /** What each extension says the items of a kind are marked with. BO_0256_008 */
@@ -311,34 +292,12 @@ export interface ServerRegistry {
   readonly citations?: { readonly extension: string; readonly resolve: NonNullable<ServerContributions["citations"]> };
 }
 
-/**
- * Lays one roster's answer over the parties already held: an id must start
- * with the roster's extension followed by a hyphen, and must not be held
- * already, or it is dropped — a roster can add rows, never shadow one.
- * Pure, so the rule is proven over fixture rosters. CA_0049_001
- */
-export function mergeRoster(
-  held: readonly RegisteredParty[],
-  extension: string,
-  answered: readonly PartyDescriptor[],
-): RegisteredParty[] {
-  const merged = [...held];
-  for (const party of answered) {
-    if (!party.id.startsWith(`${extension}-`)) continue;
-    if (merged.some((candidate) => candidate.id === party.id)) continue;
-    merged.push({ ...party, extension });
-  }
-  return merged;
-}
-
 export function buildServerRegistry(
   entries: readonly Entry<ServerContributions>[],
 ): ServerRegistry {
   const readers: Record<string, () => Promise<unknown>> = {};
   const routes: Record<string, readonly ApiRoute[]> = {};
   const parties: RegisteredParty[] = [];
-  const rosters: RegisteredRoster[] = [];
-  const senders: RegisteredSenders[] = [];
   const proposedTargets: RegisteredProposedTargets[] = [];
   const itemGlyphs: NonNullable<ServerContributions["itemGlyphs"]>[] = [];
   const focusedWork: Record<string, FocusedWorkContribution> = {};
@@ -351,24 +310,6 @@ export function buildServerRegistry(
         throw new RegistryError("citation_resolver_collision", `${id} resolves citations, which ${citations.extension} already does`);
       }
       citations = { extension: id, resolve: contributions.citations };
-    }
-    if (contributions.partyRoster !== undefined) {
-      rosters.push({ extension: id, roster: contributions.partyRoster });
-    }
-    if (contributions.senders !== undefined) {
-      // Both halves or neither: a sender nothing answers for would stand in
-      // the menu and refuse every send.
-      if (contributions.send === undefined) {
-        throw new RegistryError("sender_unanswered", `${id} offers senders and answers no send`);
-      }
-      senders.push({
-        extension: id,
-        roster: contributions.senders,
-        send: contributions.send,
-        // Optional: a sender that cannot say what it would cost is still a
-        // sender. BO_0279_009
-        ...(contributions.quote === undefined ? {} : { quote: contributions.quote }),
-      });
     }
     if (contributions.itemGlyphs !== undefined) {
       itemGlyphs.push(contributions.itemGlyphs);
@@ -421,8 +362,6 @@ export function buildServerRegistry(
     readers,
     routes,
     parties,
-    rosters,
-    senders,
     proposedTargets,
     itemGlyphs,
     focusedWork,

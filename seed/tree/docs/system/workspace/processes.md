@@ -113,7 +113,23 @@ Short requests and long-running processes are different primitives.
 
 - Under `calliopa-bootstrap`'s `BO_0298`
   ([Block Document Model](../../../src/extensions/documents/docs/system/documents/block-document-model.md#profiles)
-  in `documents`): a run started from a document with a profile attached is guided by it, and the
-  record says so (`calliopa-bootstrap`'s `ui-kernel.md` `BO_0298_002`). The person sees it in the
+  in `documents`): a run whose command was sent with a profile chosen in its chip is guided by
+  it, and the record says so (`calliopa-bootstrap`'s `ui-kernel.md` `BO_0298_002`, `BO_0311_002`). The person sees it in the
   run's detail and nowhere else; the chip stays as it is. User decision, 2026-09-25 (`BO_0298_Q10`).
 - The process detail names the profile (`BO_0298_031`, landed 2026-09-25): `GET /api/processes/:id/profile` reads the run through `runForProcess` and `readBridgeRun` and answers the record's `profile` — `{id, title}` — or `null` for a run with none and for a process that is not a run; the shell reads it beside the proposals and the attachments when the selection changes (`ProposedRead.profile`), and the detail draws one line under the step, *Profile: «title»* (`data-process-profile`), whose press (`data-process-profile-open`) opens the profile document in the document tab as `data-process-item` opens what a run proposes into. `BridgeRun` carries the field. Proven in `process-selection.test.ts` through the inspector host: the line with its title for a run guided by one, and nothing for a run with none.
+
+## What The Run Was Told At Its Start
+
+- Under `calliopa-bootstrap`'s `BO_0310`: the run's detail lists, beside its profile, what each
+  extension's run-start tool sent it (`calliopa-bootstrap`'s `ui-kernel.md`, `BO_0310_003`)
+  (`BO_0310_040`, landed 2026-09-30). `GET /api/processes/:id/context` reads the run through
+  `runForProcess` and `readBridgeRun` and answers the record's `context` — per extension its
+  `items` or its `failure` — or none for a run told nothing and for a process that is not a run;
+  `/api/processes/:id` answers the process, not the run, so the context stands beside the profile's
+  route. The shell reads it with the proposals, the attachments and the profile when the selection
+  changes (`ProposedRead.context`), and the detail draws one line per extension under the profile:
+  *Keywords: Quantum computing, Qubit* (`data-process-context`), or *Keywords: nothing sent — …*
+  naming the failure (`data-process-context-failure`), the extension's id as its name with a
+  capital. `BridgeRun` carries `context`. Proven in `process-selection.test.ts` through the
+  inspector host: the keywords sent and a failure named for one run, and nothing for a run told
+  nothing.

@@ -78,6 +78,10 @@ export async function conductRun(input: {
   readonly intention?: string;
   /** The working mode in force on the document, passed through. BO_0306_017 */
   readonly mode?: WorkingMode;
+  /** The profile the command's chip chose, passed through. BO_0311_002 */
+  readonly profile?: string;
+  /** A pinch on a block, passed through. BO_0322_016 */
+  readonly pinch?: "in" | "out";
 }): Promise<ConductedRun> {
   // The runtime is the reader's explicit choice or the one the agent
   // stamped as active; the bridge reads an empty selection as the API-key
@@ -94,6 +98,8 @@ export async function conductRun(input: {
     ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
     ...(input.intention === undefined || input.intention === "" ? {} : { intention: input.intention }),
     ...(input.mode === undefined ? {} : { mode: input.mode }),
+    ...(input.profile === undefined ? {} : { profile: input.profile }),
+    ...(input.pinch === undefined ? {} : { pinch: input.pinch }),
   });
   if (!started.ok) {
     return {
@@ -108,13 +114,17 @@ export async function conductRun(input: {
   // which the kernel read. BO_0267_009
   const process = await createProcess(
     input.workspaceId,
-    { title: firstLine(started.value.goal) || input.goal, step: "Started" },
+    // A pinch has no words: its process is named by what it asks. BO_0322_016
+    { title: input.pinch === undefined ? firstLine(started.value.goal) || input.goal : pinchName(input.pinch), step: "Started" },
     undefined,
     person?.name,
   );
   const attached = await attachRun(process.id, started.value.id);
   return { ok: true, runId: started.value.id, process: attached ?? process };
 }
+
+/** What a pinch is called where a command's words would stand. BO_0322_016 */
+export const pinchName = (pinch: "in" | "out"): string => (pinch === "in" ? "Deepen" : "Gather");
 
 /** The first line of a command's words, which a process is named by. */
 export const firstLine = (words: string): string => words.trim().split("\n")[0]?.trim() ?? "";

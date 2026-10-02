@@ -11,10 +11,10 @@ import {
 } from "../testing/editor-harness";
 
 /**
- * A proposal takes a standing: the swipe accepts it and the block it becomes
- * takes the standing the release committed, and the same three buttons the
- * block carries in command mode are the path that is not the gesture.
- * BO_0272_008 BO_0272_010
+ * A proposal in the block bar and the swipe (`BO_0315_010`, `BO_0315_013`):
+ * the swipe keeps or removes it, and the bar's *Fixate* accepts it and
+ * fixates the block it becomes, while *Remove* rejects it — the path that is
+ * not the gesture. BO_0272_008
  *
  * The gesture itself is the adapter's, which needs a real pointer and a real
  * layout; what is pressed here is the decision behind it — which rows it may
@@ -118,7 +118,7 @@ describe("a proposal takes a standing", () => {
         Array.from(view.standingOn(itemId)?.querySelectorAll("button") ?? []).map((button) =>
           button.getAttribute("aria-label"),
         ),
-      ).toEqual(["Discard", "Keep", "Fixate"]);
+      ).toEqual(["Remove", "Fixate"]);
       // One row is the subject, so one row carries them.
       expect(view.root.querySelectorAll("[data-standing-toolbar]")).toHaveLength(1);
     }
@@ -126,7 +126,7 @@ describe("a proposal takes a standing", () => {
     await view.turnTo(removal);
     expect(view.standingOn(removal)).toBeFalsy();
     // The gesture takes exactly those three kinds.
-    expect([...SWIPEABLE_PROPOSALS]).toEqual(["replace", "insert", "move"]);
+    expect([...SWIPEABLE_PROPOSALS]).toEqual(["replace", "insert", "move", "gather"]);
     await view.idle();
   });
 
@@ -156,18 +156,15 @@ describe("a proposal takes a standing", () => {
     await view.idle();
   });
 
-  it("Given Discard pressed on a proposed rewrite, Then it is accepted and its block discarded", async () => {
+  it("Given Remove pressed on a proposed rewrite, Then it is rejected and no standing is written", async () => {
     const view = await mount();
     await view.turnTo(rewrite);
-    await view.userEvent(
-      `[data-proposal-id="${rewrite}"] [data-standing-option="discarded"]`,
-      "click",
-    );
-    await view.waitFor(() => view.commands("setDisposition").length > 0);
-    expect(view.commands("answerProposal").map((command) => command.body["answer"])).toEqual(["accepted"]);
-    expect(view.commands("setDisposition").map((command) => [command.body["blockId"], command.body["standing"]])).toEqual([
-      ["blk-b", "discarded"],
+    await view.userEvent(`[data-proposal-id="${rewrite}"] [data-block-remove]`, "click");
+    await view.waitFor(() => view.commands("answerProposal").length > 0);
+    expect(view.commands("answerProposal").map((command) => [command.body["itemId"], command.body["answer"]])).toEqual([
+      [rewrite, "rejected"],
     ]);
+    expect(view.commands("setDisposition")).toEqual([]);
     await view.idle();
   });
 

@@ -5,7 +5,7 @@ import type { DocumentProposals } from "../../server/documents";
 import type { BranchRead, Standing } from "../../lib/branch";
 import { leaveBranch } from "../../lib/branch-scope";
 import { SAVE_PAUSE_MS } from "../block-editor";
-import { documentsApi, mountEditor, type SentCommand } from "../testing/editor-harness";
+import { documentsApi, mountEditor, pointFrom, type SentCommand } from "../testing/editor-harness";
 
 /**
  * Proposal sessions in the editor (`BO_0250_020`–`BO_0250_022`, `CA_0057`),
@@ -185,7 +185,7 @@ const mount = async (
 };
 
 describe("the proposal toggle", () => {
-  it("Given a document, Then the Work group leads with the toggle and Establish…, the Document group trails with Take back and Delete, and nothing stands under the title; given a change document, there is no toggle", async () => {
+  it("Given a document, Then the Work group leads with the toggle, the Document group trails with Take back and Delete, and nothing stands under the title; given a change document, there is no toggle", async () => {
     const view = await mount();
     await view.waitFor(() => view.toggle() != null);
     const actions = (id: string) =>
@@ -194,11 +194,9 @@ describe("the proposal toggle", () => {
           "[data-bar-action]",
         ),
       ].map((action) => action.getAttribute("data-bar-action"));
-    // The two acts that decide what the document is lead the bar, the
-    // toggle first and the decision extension's *Establish…* merged in after
-    // it through the decoration bar. DO_0010_001 DO_0010_013 BO_0274_004
-    // The working mode's two toggles lead the group. BO_0306_010
-    expect(actions("work")).toEqual(["working-mode-field", "working-mode-work", "work-in-proposal", "establish"]);
+    // The act that decides what the document is leads the bar.
+    // DO_0010_001 DO_0010_013
+    expect(actions("work")).toEqual(["work-in-proposal"]);
     // *Take back* leads the trailing group: it is drawn whenever the bar is,
     // since a standing is most often set on a block that is not active.
     // CA_0058_011
@@ -559,6 +557,21 @@ describe("separation of duties", () => {
     expect(saves[1]?.body["runs"]).toEqual(saves[0]?.body["runs"]);
     expect(saves[1]?.body["baseRevisionId"]).toBe(saves[0]?.body["baseRevisionId"]);
     expect(view.pressed()).toBe(true);
+    await view.settle();
+  });
+});
+
+describe("the reader's own session marked whole (BO_0321_013)", () => {
+  it("Given pointing, When a session chip is pressed, Then the session is one proposal reference with its items", async () => {
+    const view = await mount(plain, { branch: OPEN, proposals: branchProposals() });
+    await view.waitFor(() => view.chips().length === 1);
+    await pointFrom(view, "blk-a");
+    view.record.toggleRun = BRANCH;
+    view.record.toggleMark = true;
+    await view.userEvent("[data-harness-toggle-run]", "click");
+    await view.waitFor(() => (view.record.pointing?.references ?? []).length === 1);
+    expect(view.record.pointing?.references[0]).toMatchObject({ kind: "proposal", number: 1, group: BRANCH, count: 3, proposer: "alice" });
+    await view.waitFor(() => view.chips()[0]?.reference === 1);
     await view.settle();
   });
 });

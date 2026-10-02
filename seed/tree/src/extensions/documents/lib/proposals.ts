@@ -170,32 +170,11 @@ const KIND_NOUN: Readonly<Record<string, string>> = {
   relate: "relation",
   reason: "reason",
   state: "relation state",
-  claim: "claim",
-  kind: "kind",
-  derive: "derivation",
+  /** BO_0322_013 */
+  gather: "gather",
 };
 
 export const kindNoun = (kind: string): string => KIND_NOUN[kind] ?? "change";
-
-/**
- * The names a derived candidate carries: the system's reading, drawn in the
- * derived idiom, so it names no proposer. A rewrite of a framing that
- * governs says it challenges it rather than replacing it: a fixated block is
- * the framing a person chose (`BO_0246_006`), and a governed one is a derived
- * block whose words a person made their own by editing them (`BO_0258_016`).
- */
-export function derivedNames(
-  kind: string,
-  blockKind: string,
-  fixated: boolean,
-  governed = false,
-): { readonly block: string } {
-  const what = blockKind === "" ? "block" : blockKind;
-  if (kind !== "replace") return { block: `Derived ${what}` };
-  if (fixated) return { block: `Derived ${what}, challenges the fixated framing` };
-  if (governed) return { block: `Derived ${what}, challenges the reader's own words` };
-  return { block: `Derived ${what}, a rewrite` };
-}
 
 /**
  * The names the *Possible relation* card's two answers carry. The card's own

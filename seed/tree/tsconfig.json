@@ -21,7 +21,8 @@
     "jsxImportSource": "@builder.io/qwik",
     "types": ["node", "vite/client"],
     "paths": {
-      "~/*": ["./src/*"]
+      "~/*": ["./src/*"],
+      "#port": ["./adapters/node-server/port.ts"]
     }
   },
   "include": ["src", "tests", "*.ts", "adapters/**/*.ts"],

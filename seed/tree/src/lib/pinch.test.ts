@@ -10,10 +10,10 @@ describe("the pinch", () => {
   });
 
   it("opens on a pinch outward (zoom in) past the threshold, goes back on one inward, and does nothing for less", () => {
-    expect(pinchOutcome(100, 100 * (1 + PINCH_THRESHOLD))).toBe("open");
-    expect(pinchOutcome(100, 180)).toBe("open");
-    expect(pinchOutcome(100, 100 * (1 - PINCH_THRESHOLD))).toBe("back");
-    expect(pinchOutcome(100, 40)).toBe("back");
+    expect(pinchOutcome(100, 100 * (1 + PINCH_THRESHOLD))).toBe("in");
+    expect(pinchOutcome(100, 180)).toBe("in");
+    expect(pinchOutcome(100, 100 * (1 - PINCH_THRESHOLD))).toBe("out");
+    expect(pinchOutcome(100, 40)).toBe("out");
     expect(pinchOutcome(100, 90)).toBeNull();
     expect(pinchOutcome(100, 110)).toBeNull();
   });

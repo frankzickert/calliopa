@@ -43,7 +43,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 describe("uploading a file", () => {
   it("Given a file, Then its name travels percent-encoded with the session's cookie, and the kernel's descriptor comes back", async () => {
     const calls = kernel(() => json(200, docx));
-    const uploaded = await withRequestContext("calliopa_session=abc", () =>
+    const uploaded = await withRequestContext("calliopa_session_0123456789abcdef=abc", () =>
       uploadAttachment(new Uint8Array([1, 2, 3]).buffer, "Grüße.docx", ""),
     );
     expect(uploaded).toEqual({ ok: true, descriptor: docx });
@@ -51,7 +51,7 @@ describe("uploading a file", () => {
     const headers = calls[0]?.init.headers as Record<string, string>;
     expect(headers["x-calliopa-filename"]).toBe("Gr%C3%BC%C3%9Fe.docx");
     expect(headers["content-type"]).toBe("application/octet-stream");
-    expect(headers["cookie"]).toBe("calliopa_session=abc");
+    expect(headers["cookie"]).toBe("calliopa_session_0123456789abcdef=abc");
   });
 
   it("Given a kernel refusal or a file past the bound, Then the refusal is answered in words with its status", async () => {
@@ -70,12 +70,12 @@ describe("uploading a file", () => {
 describe("writing the attachments of a command", () => {
   it("Given two files, Then one attachment node each is written as the person through the kernel's write verb, and their ids answer", async () => {
     const calls = kernel(() => json(200, { status: "established", dataRevision: 42 }));
-    const written = await withRequestContext("calliopa_session=abc", () => writeAttachments([markdown, docx]));
+    const written = await withRequestContext("calliopa_session_0123456789abcdef=abc", () => writeAttachments([markdown, docx]));
     expect(written.ok).toBe(true);
     const ids = written.ok ? written.ids : [];
     expect(ids).toHaveLength(2);
     expect(calls.map((call) => call.url)).toEqual(["http://kernel.test/__kernel/review/write", "http://kernel.test/__kernel/review/write"]);
-    expect((calls[0]?.init.headers as Record<string, string>)["cookie"]).toBe("calliopa_session=abc");
+    expect((calls[0]?.init.headers as Record<string, string>)["cookie"]).toBe("calliopa_session_0123456789abcdef=abc");
     const bodies = calls.map((call) => JSON.parse(String(call.init.body)) as { statement: string; parameters: Record<string, unknown>; rationale: string });
     expect(bodies[0]?.statement).toBe("CREATE (a:attachment {id: $id, filename: $filename, mediaType: $mediaType, size: $size, file: $file, textStatus: $textStatus, status: \"established\"})");
     expect(bodies[0]?.parameters).toMatchObject({

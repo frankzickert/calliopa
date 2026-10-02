@@ -1,16 +1,19 @@
-import { LABEL, readStanding, type Standing } from "../lib/disposition";
+import { readStanding } from "../lib/disposition";
 import { movedDistance, pointerIntent } from "~/lib/drag";
 import {
+  ACTION_LABEL,
   startsAtEdge,
   swipeOutcome,
   swipeReveal,
   thresholds,
+  type SwipeAction,
+  type SwipeRow,
   type Thresholds,
 } from "../lib/swipe";
 
 /**
- * The disposition swipe's adapter: pointer events on a reading row in, one
- * committed standing out. BO_0227_011
+ * The swipe's adapter: pointer events on a reading row in, one committed
+ * action out. BO_0227_011 BO_0315_010
  *
  * It holds no decisions. Whether the gesture is a swipe is the one arbiter's
  * answer (`pointerIntent`, offered the travel's axes); where the thresholds
@@ -22,7 +25,7 @@ import {
  * because a signal the surface renders from would rewrite the row's text on
  * every frame — the rule every slice of the old editor relearned. The reveal
  * is drawn in the page's body, over the row, so nothing is ever written into
- * an element Qwik renders. Only the committed standing goes through the
+ * an element Qwik renders. Only the committed action goes through the
  * surface, once, at release.
  */
 
@@ -46,9 +49,9 @@ interface Gesture {
   readonly pointerType: string;
   readonly row: HTMLElement;
   /** What the release commits against: a block of the document, or the
-   * proposal the swipe answers first. BO_0272_008 */
+   * proposal the swipe answers. BO_0315_010 */
   readonly swiped: Swiped;
-  readonly current: Standing;
+  readonly subject: SwipeRow;
   readonly limits: Thresholds;
   readonly startX: number;
   readonly startY: number;
@@ -60,20 +63,21 @@ interface Gesture {
   reveal: HTMLElement | null;
 }
 
-/** The kinds of proposal a swipe may answer: the three that leave a text
- * block standing to carry the standing. A removal retires its block, and a
- * work item or a relation card is not a block at all. BO_0272_008 */
+/** The kinds of proposal a swipe may answer: the three that are a text block
+ * the reader reads, and a gather, answered whole from its summary or from any
+ * row it moves. A removal retires its block, and a work item or a relation
+ * card is not a block at all. BO_0272_008 BO_0315_010 BO_0322_013 */
 export const SWIPEABLE_PROPOSALS: readonly string[] = [
   "replace",
   "insert",
   "move",
+  "gather",
 ];
 
 /**
  * The row a press began on, when it is one a swipe may move: a text block's
  * reading text, not the block being edited, or a proposed rewrite, insert or
- * move, whose swipe accepts it before the block it becomes takes the standing
- * (BO_0272_008).
+ * move, which a swipe accepts or rejects (BO_0315_010).
  */
 export function rowOf(target: EventTarget | null): HTMLElement | null {
   const element = target instanceof Element ? target : null;
@@ -104,7 +108,7 @@ export function rowOf(target: EventTarget | null): HTMLElement | null {
 function paintReveal(gesture: Gesture, offset: number): void {
   const reveal = gesture.reveal;
   if (reveal === null) return;
-  const { action, armed } = swipeReveal(gesture.current, offset, gesture.limits);
+  const { action, armed } = swipeReveal(gesture.subject, offset, gesture.limits);
   const box = gesture.row.getBoundingClientRect();
   const travel = Math.abs(offset);
   reveal.dataset.direction = offset < 0 ? "left" : "right";
@@ -113,7 +117,7 @@ function paintReveal(gesture: Gesture, offset: number): void {
   reveal.style.left = `${offset < 0 ? box.left + box.width - travel : box.left}px`;
   reveal.style.width = `${travel}px`;
   (reveal.firstElementChild as HTMLElement).textContent =
-    action === null ? "" : LABEL[action];
+    action === null ? "" : ACTION_LABEL[action];
 }
 
 function openReveal(page: Document, gesture: Gesture): void {
@@ -145,18 +149,18 @@ function settle(gesture: Gesture): void {
 }
 
 /** What a swipe was made on: a block of the document, or a proposed change
- * whose acceptance the release asks for. BO_0272_008 */
+ * the release answers. BO_0315_010 */
 export type Swiped =
   | { readonly kind: "block"; readonly blockId: string }
   | { readonly kind: "proposal"; readonly itemId: string };
 
 /**
  * Installs the swipe on a page; answers the uninstall. `commit` hears a
- * released swipe that changes a standing, once.
+ * released swipe that does something, once, with what the reveal named.
  */
 export function installSwipe(
   page: Document,
-  commit: (swiped: Swiped, to: Standing) => void,
+  commit: (swiped: Swiped, action: SwipeAction) => void,
 ): () => void {
   let gesture: Gesture | null = null;
   const frame = page.defaultView;
@@ -181,12 +185,10 @@ export function installSwipe(
         itemId === undefined
           ? { kind: "block", blockId: row.dataset.blockId ?? "" }
           : { kind: "proposal", itemId },
-      // A proposal carries no standing of its own: it starts from keep, the
-      // state the block it becomes would be in. BO_0272_008
-      current:
+      subject:
         itemId === undefined
-          ? readStanding(row.getAttribute("data-standing"))
-          : "keep",
+          ? { kind: "block", standing: readStanding(row.getAttribute("data-standing")) }
+          : { kind: "proposal" },
       limits: thresholds(row.getBoundingClientRect().width, frame.innerWidth),
       startX: event.clientX,
       startY: event.clientY,
@@ -238,12 +240,12 @@ export function installSwipe(
     quietUntil = Date.now() + QUIET_MS;
     settle(live);
     const outcome = swipeOutcome(
-      live.current,
+      live.subject,
       event.clientX - live.startX,
       live.limits,
       live.velocity,
     );
-    if (outcome !== live.current) commit(live.swiped, outcome);
+    if (outcome !== null) commit(live.swiped, outcome);
   };
 
   const cancel = (event: PointerEvent) => {

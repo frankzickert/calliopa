@@ -8,9 +8,9 @@ import {
   type QRL,
 } from "@builder.io/qwik";
 
-import { axesOf, faceOf, menuKey, pick, roomFor, type MenuStep } from "~/lib/agent-menu";
+import { faceOf, menuKey, pick, roomFor, type MenuStep } from "~/lib/agent-menu";
 import type { SelectableRuntime } from "~/lib/connections";
-import { Icon, isIconName } from "./icons";
+import { Icon } from "./icons";
 
 /**
  * Which agent performs the next command: a dropdown of three, each shown by
@@ -42,11 +42,7 @@ export const AgentMenu = component$<{
   onChoose$: QRL<(agent: string) => void>;
   /** Reads the list again, answering it, or null when it could not. */
   refresh$: QRL<() => Promise<readonly SelectableRuntime[] | null>>;
-  /** What the reader has chosen on the chosen sender's axes. BO_0279_007 */
-  options?: Readonly<Record<string, string>>;
-  onOption$?: QRL<(axis: string, value: string) => void>;
-}>(({ runtimes, value, disabled, onChoose$, refresh$, options, onOption$ }) => {
-  const axes = axesOf(runtimes, value);
+}>(({ runtimes, value, disabled, onChoose$, refresh$ }) => {
   const listId = useId();
   const root = useSignal<HTMLElement>();
   const button = useSignal<HTMLButtonElement>();
@@ -165,20 +161,13 @@ export const AgentMenu = component$<{
           else setTimeout(() => void fit(), 0);
         }}
       >
-        {/* An agent wears its own face; a contributed sender wears the icon it
-            declared, because it has no face and a borrowed one would say it
-            was an agent. BO_0273_035 */}
-        {chosen?.icon !== undefined && isIconName(chosen.icon) ? (
-          <Icon name={chosen.icon} size={20} />
-        ) : (
-          <img
-            class="agent-menu__face"
-            src={faceOf(chosen?.id ?? null)}
-            alt=""
-            width={28}
-            height={28}
-          />
-        )}
+        <img
+          class="agent-menu__face"
+          src={faceOf(chosen?.id ?? null)}
+          alt=""
+          width={28}
+          height={28}
+        />
         <Icon name="caret-down" size={12} />
       </button>
       <ul
@@ -207,19 +196,13 @@ export const AgentMenu = component$<{
               button.value?.focus();
             }}
           >
-            {runtime.icon !== undefined && isIconName(runtime.icon) ? (
-              <span class="agent-menu__face agent-menu__face--icon">
-                <Icon name={runtime.icon} size={24} />
-              </span>
-            ) : (
-              <img
-                class="agent-menu__face"
-                src={faceOf(runtime.id)}
-                alt=""
-                width={40}
-                height={40}
-              />
-            )}
+            <img
+              class="agent-menu__face"
+              src={faceOf(runtime.id)}
+              alt=""
+              width={40}
+              height={40}
+            />
             <span class="agent-menu__text">
               <span class="agent-menu__name">{runtime.label}</span>
               {runtime.reason !== null && (
@@ -229,42 +212,6 @@ export const AgentMenu = component$<{
           </li>
         ))}
       </ul>
-      {/* What the chosen sender lets a person decide before the press: its own
-          axes, with the values that model takes (`BO_0279_007`). An agent has
-          none and this draws nothing. The press is *Send*, which stands beside
-          this menu in the same chip — the whole gesture is one.
-
-          They stand in the chip rather than inside the list, because choosing
-          closes the list (`pick`): drawn there they could only ever be seen
-          before a model was chosen, which is to say never. */}
-      {axes.length > 0 && (
-        <div class="agent-menu__options" data-agent-options>
-          {axes.map((axis) => (
-            // The value is what shows — `1:1`, `2k` — because the chip is one
-            // line of 24px controls and a visible label would crowd it out.
-            // The label is the control's name, for a reader who cannot see
-            // which axis a value belongs to.
-            <select
-              key={axis.axis}
-              class="agent-menu__option-control"
-              data-agent-axis={axis.axis}
-              aria-label={axis.label}
-              title={axis.label}
-              value={options?.[axis.axis] ?? axis.start ?? ""}
-              disabled={disabled}
-              onChange$={(_, element) => onOption$?.(axis.axis, element.value)}
-            >
-              {/* An axis with one value is a control rather than a hidden one,
-                  so the chip keeps its shape as the model changes. */}
-              {axis.values.map((held) => (
-                <option key={held} value={held}>
-                  {held}
-                </option>
-              ))}
-            </select>
-          ))}
-        </div>
-      )}
     </div>
   );
 });

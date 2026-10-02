@@ -23,7 +23,6 @@ HERMES_HOME="${HERMES_HOME:-/var/lib/hermes}"
 AGENT_CONFIG_DIR="${CALLIOPA_AGENT_CONFIG_DIR:-/var/lib/calliopa/agent-config}"
 RUNTIME_ENV="$AGENT_CONFIG_DIR/runtime.env"
 PROVIDER_ENV="$AGENT_CONFIG_DIR/provider.env"
-CLAUDE_ENV="$AGENT_CONFIG_DIR/claude.env"
 KERNEL_BEARER_FILE="$HERMES_HOME/kernel-bearer"
 # The kernel toolset, the agent's one toolset since BO_0207_006: CCGW reads
 # and writes, the document tools, and the run-scoped workspace tools. Only
@@ -433,9 +432,12 @@ write_config() {
 
 # The mtimes of the files the settings surface and the kernel bridge write.
 # Comparing them is what makes a configuration change observable without
-# watching tools the image lacks.
+# watching tools the image lacks. The Claude token (claude.env) is not among
+# them: the Claude runner reads it at each run's start and the gateway has no
+# use for it, so a Claude sign-in or sign-out stops no gateway run.
+# BO_0316_002
 stamp() {
-  for file in "$RUNTIME_ENV" "$PROVIDER_ENV" "$CLAUDE_ENV"; do
+  for file in "$RUNTIME_ENV" "$PROVIDER_ENV"; do
     if [ -f "$file" ]; then
       stat -c %Y "$file" 2>/dev/null || echo unreadable
     else
@@ -471,10 +473,28 @@ broker=$!
 ) &
 runner=$!
 
+# The media service reaches Codex's built-in image generation only through
+# this runner, which shares the authenticated Codex home but never exposes it.
+(
+  child=""
+  trap 'kill "$child" 2>/dev/null; exit 0' TERM INT
+  while true; do
+    HERMES_HOME="$HERMES_HOME" \
+      CALLIOPA_CODEX_IMAGE_BEARER_FILE="${CALLIOPA_CODEX_IMAGE_BEARER_FILE:-/run/secrets/calliopa/media_bearer}" \
+      python3 /usr/local/bin/calliopa-codex-image-runner &
+    child=$!
+    wait "$child" || true
+    echo "the Codex image runner stopped; starting it again"
+    sleep 2
+  done
+) &
+codexrunner=$!
+
 pid=""
 shutdown() {
   kill "$broker" 2>/dev/null || true
   kill "$runner" 2>/dev/null || true
+  kill "$codexrunner" 2>/dev/null || true
   if [ -n "$pid" ]; then
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
@@ -485,11 +505,10 @@ trap shutdown TERM INT
 
 while true; do
   current="$(stamp)"
-  # Agent configuration written by the settings surface (runtime.env), the
-  # kernel bridge's provider selection (provider.env) and the login broker's
-  # captured Claude token (claude.env): sourced into the gateway's environment
-  # rather than into the image.
-  for file in "$PROVIDER_ENV" "$RUNTIME_ENV" "$CLAUDE_ENV"; do
+  # Agent configuration written by the settings surface (runtime.env) and the
+  # kernel bridge's provider selection (provider.env): sourced into the
+  # gateway's environment rather than into the image.
+  for file in "$PROVIDER_ENV" "$RUNTIME_ENV"; do
     if [ -f "$file" ]; then
       set -a
       # shellcheck disable=SC1090

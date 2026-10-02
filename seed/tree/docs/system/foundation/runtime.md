@@ -18,7 +18,7 @@
 ## Runtime Shape
 
 - The application is one Qwik City app under `src/`. It serves server-rendered HTML routes and API routes.
-- Since `BO_0207_016` the shell holds no records and no bytes of its own: content is the one graph's through CCGW, bytes are CCGW blobs, working state and secrets are the kernel's. [Episodes And Assets](../../../src/extensions/calliopa-video/docs/system/production/episodes-and-assets.md) owns what a rendition's bytes are, and a referenced blob is permanent in the graph's store.
+- Since `BO_0207_016` the shell holds no records and no bytes of its own: content is the one graph's through CCGW, bytes are CCGW blobs, working state and secrets are the kernel's. A referenced blob is permanent in the graph's store.
 - `/health` is the operational readiness probe. It reports CCGW and the kernel as reached rather than process liveness — `GET /healthz` on `CALLIOPA_CCGW_URL` and the agent bridge's health on `CALLIOPA_KERNEL_URL` — and answers 503 naming whichever did not answer.
 - The application stays valid and renderable while the database holds nothing. An empty instance is a working state, and every gate run proves it.
 - The `Dockerfile` has a `dev` target that runs Vite on 4300 and a `production` target that builds the client bundle and standalone Node server.

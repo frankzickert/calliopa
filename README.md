@@ -3,8 +3,8 @@
 Calliopa is a local-first knowledge system you run on your own machine. Your
 knowledge lives in a versioned graph, and nothing in it changes without a
 proposal someone accepted. The application you work in is itself built from
-that graph — a frame, and extensions over it: documents to write in, settings,
-and publishing. It grows with what you keep in it, and you can add extensions of
+that graph — a frame, and extensions over it: documents to write in, roles
+that give them structure, and settings. It grows with what you keep in it, and you can add extensions of
 your own. And Hermes — an agent that lives in the stack — extends the system
 for you, always through proposals you review and accept.
 
@@ -162,7 +162,7 @@ vocabulary, skills, and declarations. Their source ships in `seed/`, and
 anything you change in them is yours to keep.
 
 - **`ui.shell`** — the application itself: writing in typed blocks,
-  developing and publishing, and working with the agent.
+  developing extensions, and working with the agent.
 - **`settings`** — where you sign the agent in and store your connections.
 - **`calliopa-extension`** — how new extensions are made.
 - **`calliopa-base`** — the conventions every agent run starts from.

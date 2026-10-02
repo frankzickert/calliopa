@@ -1,34 +1,34 @@
 import { contributions as declare, type ViewContribution } from "~/contract";
 
-import { ReferenceList } from "./views/references";
+import { NewSourceView } from "./views/new-source";
 import { StyleSettings } from "./views/settings";
-import { SourcesSection } from "./views/sources/section";
-import { WorkView } from "./views/work";
+import { SourceEnd, SourceProvider } from "./views/source";
 
 /**
- * The client half of `bibliography` (`BO_0291_019`): one library category,
- * Sources, under its own icon, and the `work` kind with its view. The
- * citation's drawing stays `documents`', which owns the run; what this
- * extension answers for it — the styled label, the hover, the reference list
- * — arrives with `BO_0291_020` and the editor's tasks.
+ * The client half of `bibliography` (`BO_0291_019`, reshaped by `BO_0313`):
+ * a source is a document carrying *Source*, listed under *Roles → Source*
+ * and among the documents, so this extension draws no library category of
+ * its own. It contributes *Add source*, the kind the `+` on *Roles → Source*
+ * opens; on the document kind `documents` presents, a source's *Fill from
+ * identifier* in the bar, and at every document's end its reference list
+ * and, on a source, *Cited by*. The citation's drawing stays `documents`',
+ * which owns the run.
  */
 
-const work: ViewContribution = {
-  id: "work",
-  name: "Source",
+const newSource: ViewContribution = {
+  id: "new-source",
+  name: "Add source",
   inspector: "No source open",
   drag: [],
-  component: WorkView,
+  component: NewSourceView,
 };
 
 export const contributions = declare({
-  icon: { title: "Sources", name: "books" },
-  sections: [{ name: "sources", title: "Sources", empty: "No sources yet", kind: "work", component: SourcesSection }],
-  kinds: { work },
+  kinds: { "new-source": newSource },
   settingsSections: [{ name: "citations", title: "Citations", component: StyleSettings }],
-  // The reference list after a document's last block (BO_0291_027), through
-  // the document's `end` place; nothing on its blocks.
+  // The reference list after a document's last block (BO_0291_027), and a
+  // source's Cited by beneath it, through the document's `end` place.
   decorations: {
-    document: { places: {}, documentPlaces: { end: ReferenceList } },
+    document: { provider: SourceProvider, places: {}, documentPlaces: { end: SourceEnd } },
   },
 });

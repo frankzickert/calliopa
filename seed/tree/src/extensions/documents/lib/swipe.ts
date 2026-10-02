@@ -1,8 +1,8 @@
-import { step, type Standing } from "./disposition";
+import type { Standing } from "./disposition";
 
 /**
- * The disposition swipe's physics, as numbers in and a standing out.
- * BO_0227_011 BO_0272_007
+ * The swipe's physics, as numbers in and one action out. BO_0227_011
+ * BO_0272_007 BO_0315_010
  *
  * A horizontal drag with one threshold per direction: the row follows the
  * finger, the reveal names what release would commit, and release short of
@@ -37,7 +37,7 @@ export interface SwipeTable {
  * The table in use. The distance sits between the two `BO_0138` closed on —
  * its near threshold (18% of the room, floored at 64–120px) and its far one
  * (55%, 200–380px) — because with one action each way there is no long pull
- * left to make discard deliberate and no short one left to make fixate cheap.
+ * left to make removal deliberate and no short one left to make fixate cheap.
  * The floors are the load-bearing half: proportion alone collapsed on a phone
  * whose reading column measured 172px. User decision, 2026-09-21.
  */
@@ -83,15 +83,49 @@ export const startsAtEdge = (
   table: SwipeTable = SWIPE,
 ): boolean => x < table.edgeGuard || x > viewportWidth - table.edgeGuard;
 
-/** What travel of `offset` pixels reveals, from where the block stands: the
- * standing it would commit, which is the current one short of the threshold. */
+/** What a swipe is made on: a block of the document, at its standing, or a
+ * proposed rewrite, insert or move. BO_0315_010 */
+export type SwipeRow =
+  | { readonly kind: "block"; readonly standing: Standing }
+  | { readonly kind: "proposal" };
+
+/**
+ * What a swipe does, one action for each direction. Leftward removes: a block
+ * of the document is retired, a proposal is rejected — and a fixated block is
+ * first returned to keep, so a second left swipe removes it. Rightward keeps:
+ * a block is fixated, a proposal is accepted and takes no standing.
+ */
+export type SwipeAction = "remove" | "unfixate" | "fixate" | "accept";
+
+/** What the reveal names each action, in `documents`' words. */
+export const ACTION_LABEL: Readonly<Record<SwipeAction, string>> = {
+  remove: "Remove",
+  unfixate: "Unfixate",
+  fixate: "Fixate",
+  accept: "Keep",
+};
+
+/** The action a direction commits on this row, or null where it would change
+ * nothing: a fixated block swiped right, and a prompt either way — a prompt is
+ * set by *Send* alone (`BO_0267_014`). */
+export function swipeAction(row: SwipeRow, direction: "left" | "right"): SwipeAction | null {
+  if (row.kind === "proposal") return direction === "left" ? "remove" : "accept";
+  if (row.standing === "prompt") return null;
+  if (direction === "left") return row.standing === "fixate" ? "unfixate" : "remove";
+  return row.standing === "fixate" ? null : "fixate";
+}
+
+const directionOf = (offset: number): "left" | "right" => (offset > 0 ? "right" : "left");
+
+/** What travel of `offset` pixels reveals: the action it would commit, or
+ * nothing short of the threshold. */
 export function swipeTarget(
-  current: Standing,
+  row: SwipeRow,
   offset: number,
   limits: Thresholds,
-): Standing {
-  if (Math.abs(offset) < limits.commit) return current;
-  return step(current, offset > 0 ? "right" : "left");
+): SwipeAction | null {
+  if (Math.abs(offset) < limits.commit) return null;
+  return swipeAction(row, directionOf(offset));
 }
 
 /**
@@ -102,33 +136,33 @@ export function swipeTarget(
  * An action that would change nothing is named at no point.
  */
 export function swipeReveal(
-  current: Standing,
+  row: SwipeRow,
   offset: number,
   limits: Thresholds,
-): { readonly action: Standing | null; readonly armed: boolean } {
+): { readonly action: SwipeAction | null; readonly armed: boolean } {
   if (offset === 0) return { action: null, armed: false };
-  const action = step(current, offset > 0 ? "right" : "left");
-  if (action === current) return { action: null, armed: false };
+  const action = swipeAction(row, directionOf(offset));
+  if (action === null) return { action: null, armed: false };
   return { action, armed: Math.abs(offset) >= limits.commit };
 }
 
 /**
- * The standing a release commits: what the travel revealed, or — for a flick
+ * The action a release commits: what the travel revealed, or — for a flick
  * that had not reached the threshold but came most of the way — the action of
- * that direction.
+ * that direction. Null commits nothing.
  */
 export function swipeOutcome(
-  current: Standing,
+  row: SwipeRow,
   offset: number,
   limits: Thresholds,
   velocity: number,
-): Standing {
-  const revealed = swipeTarget(current, offset, limits);
-  if (revealed !== current) return revealed;
+): SwipeAction | null {
+  const revealed = swipeTarget(row, offset, limits);
+  if (revealed !== null) return revealed;
   const flicked =
     Math.abs(velocity) > limits.table.flickVelocity &&
     Math.sign(velocity) === Math.sign(offset) &&
     Math.abs(offset) > limits.commit * limits.table.flickReach;
-  if (!flicked) return current;
-  return step(current, offset > 0 ? "right" : "left");
+  if (!flicked) return null;
+  return swipeAction(row, directionOf(offset));
 }

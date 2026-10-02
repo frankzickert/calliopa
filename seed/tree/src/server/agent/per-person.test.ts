@@ -59,7 +59,7 @@ describe("a process names its person", () => {
       }
       return undefined;
     });
-    const started = await withRequestContext("calliopa_session=ann", () => conductRun({ workspaceId: workspace, goal: "summarise", agent: "codex" }));
+    const started = await withRequestContext("calliopa_session_0123456789abcdef=ann", () => conductRun({ workspaceId: workspace, goal: "summarise", agent: "codex" }));
     expect(started.ok).toBe(true);
     expect(written.length).toBeGreaterThan(0);
     for (const record of written) expect(record["account"]).toBe("ann");
@@ -77,7 +77,7 @@ describe("a process names its person", () => {
       }
       return undefined;
     });
-    await withRequestContext("calliopa_session=gone", () => conductRun({ workspaceId: workspace, goal: "g", agent: "codex" }));
+    await withRequestContext("calliopa_session_0123456789abcdef=gone", () => conductRun({ workspaceId: workspace, goal: "g", agent: "codex" }));
     expect(written[0]).not.toHaveProperty("account");
   });
 });
@@ -95,7 +95,7 @@ describe("the kernel's refusals keep what they are", () => {
   it("Given the intake refusing as forbidden or as a conflict, Then the run answers that, in the kernel's words", async () => {
     kernel((url) => (url === "http://kernel.test/__kernel/agent/runs" ? json(403, { error: "not yours" }) : undefined));
     expect(await conductRun({ workspaceId: workspace, goal: "g", agent: "codex" })).toEqual({ ok: false, reason: "forbidden", detail: "not yours" });
-    const inactive = "the intention refine belongs to calliopa-refine, which is switched off";
+    const inactive = "the intention demo belongs to demo, which is switched off";
     kernel((url) => (url === "http://kernel.test/__kernel/agent/runs" ? json(409, { error: inactive }) : undefined));
     expect(await conductRun({ workspaceId: workspace, goal: "g", agent: "codex" })).toEqual({ ok: false, reason: "conflict", detail: inactive });
   });

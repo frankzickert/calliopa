@@ -23,7 +23,7 @@ const wordsOf = (runs: readonly { readonly text: string }[]): string => {
 /**
  * The documents citing a work, over one read of every document with its
  * contained text blocks (`BO_0291_023`): a block counts when it stands in the
- * document's reading order — contained, not discarded — and one of its runs
+ * document's reading order — contained — and one of its runs
  * carries `cite` naming the work. Documents come in title order, their
  * citing blocks in the document's order, each with its words.
  */
@@ -33,7 +33,7 @@ export function citingDocumentsIn(graph: ReadResult, workId: string): CitingDocu
     if (typeOf(node) !== DOCUMENT_TYPE || node.revision.status !== "established") continue;
     const documentId = bareId(node.id);
     const citations = blocksOf(graph, documentId, CONTAINS)
-      .filter((block) => block.kind === "text" && block.standing !== "discarded" && block.runs.some((run) => run.cite?.work === workId))
+      .filter((block) => block.kind === "text" && block.runs.some((run) => run.cite?.work === workId))
       .map((block) => ({ blockId: block.blockId, words: block.kind === "text" ? wordsOf(block.runs) : "" }));
     if (citations.length === 0) continue;
     const title = contentOf(node)["title"];

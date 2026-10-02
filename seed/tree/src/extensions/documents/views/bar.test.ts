@@ -87,7 +87,7 @@ describe("the document's bar", () => {
   it("Given a document read with no block active, Then the bar holds the view group and the trailing document group", async () => {
     const { root } = await mount();
     expect(groupIds(root)).toEqual(["work", "view", "document"]);
-    const toggles = ["retired-blocks", "discarded-blocks", "proposed-changes"];
+    const toggles = ["removed", "proposed-changes"];
     expect(
       toggles.map((id) => ({
         pressed: bar(root, id)?.getAttribute("aria-pressed"),
@@ -95,8 +95,7 @@ describe("the document's bar", () => {
         icon: bar(root, id)?.querySelector("[data-icon]")?.getAttribute("data-icon"),
       })),
     ).toEqual([
-      { pressed: "false", name: "Show retired blocks", icon: "archive" },
-      { pressed: "false", name: "Show discarded blocks", icon: "eye-slash" },
+      { pressed: "false", name: "Show removed", icon: "archive" },
       { pressed: "false", name: "Show proposed changes", icon: "git-pull-request" },
     ]);
     const trailing = root.querySelector(".view-bar__trailing");
@@ -125,9 +124,9 @@ describe("the document's bar", () => {
       "history",
       "document",
     ]);
-    expect(bar(view.root, "block-retire")?.getAttribute("aria-label")).toBe(
-      "Retire block 1",
-    );
+    // Removing is the block's own bar's and the keys', never the top bar's.
+    // BO_0315_012
+    expect(bar(view.root, "block-retire") ?? null).toBeNull();
     expect(bar(view.root, "block-undo")?.hasAttribute("disabled")).toBe(true);
     expect(bar(view.root, "mark-bold")?.getAttribute("aria-pressed")).toBe("false");
 
@@ -138,13 +137,13 @@ describe("the document's bar", () => {
 
   it("Given the retired toggle pressed twice, Then it reads as pressed and then as released", async () => {
     const view = await mount();
-    await view.userEvent('[data-bar-action="retired-blocks"]', "click");
+    await view.userEvent('[data-bar-action="removed"]', "click");
     await view.settle(
-      () => bar(view.root, "retired-blocks")?.getAttribute("aria-pressed") === "true",
+      () => bar(view.root, "removed")?.getAttribute("aria-pressed") === "true",
     );
-    await view.userEvent('[data-bar-action="retired-blocks"]', "click");
+    await view.userEvent('[data-bar-action="removed"]', "click");
     await view.settle(
-      () => bar(view.root, "retired-blocks")?.getAttribute("aria-pressed") === "false",
+      () => bar(view.root, "removed")?.getAttribute("aria-pressed") === "false",
     );
   });
 
@@ -163,7 +162,6 @@ describe("the document's bar", () => {
       (view.root.querySelector('[data-bar-action="block-standing"]') as HTMLSelectElement | null) ?? null;
     const options = Array.from(select()?.options ?? []);
     expect(options.map((option) => option.getAttribute("value"))).toEqual([
-      "discarded",
       "keep",
       "fixate",
     ]);
@@ -205,7 +203,7 @@ describe("the document's bar", () => {
    * is. This replaces *wherever the bar stands* (`BO_0272_009`), which put it
    * in a group of its own. DO_0010_005
    */
-  it("Given a block focused, Then the info control says the three states and how each is set", async () => {
+  it("Given a block focused, Then the info control says the two states, what Remove does, and how each is set", async () => {
     const view = await mount();
     await activate(view, "blk-a");
     const control = () =>
@@ -216,13 +214,14 @@ describe("the document's bar", () => {
     await view.userEvent('[data-bar-action="standing-info"]', "click");
     const panel = view.root.querySelector('[data-popover-panel="standing-info"]') as HTMLElement | null;
     const terms = Array.from(panel?.querySelectorAll("dt") ?? []).map((term) => term.textContent);
-    expect(terms).toEqual(["Discard", "Keep", "Fixate", "Setting one"]);
+    expect(terms).toEqual(["Keep", "Fixate", "Remove", "Setting one"]);
     const said = Array.from(panel?.querySelectorAll("dd") ?? []).map((line) => line.textContent ?? "");
     // The reader's words and the run's say the same of each state: a fixated
-    // block stands behind every command in its document.
-    expect(said[2]).toContain("every command you give in this document");
-    expect(said[0]).toContain("leaves the page");
-    expect(said[3]).toContain("Alt+Shift");
+    // block stands behind every command in its document. BO_0315_016
+    expect(said[1]).toContain("every command you give in this document");
+    expect(said[2]).toContain("Show removed");
+    expect(said[3]).toContain("Delete");
+    expect(panel?.textContent ?? "").not.toMatch(/[Dd]iscard/u);
     await view.idle();
   });
 });
@@ -231,8 +230,7 @@ describe("the document's bar", () => {
  * The bar before editing (`DO_0006_006`): the groups that act on the whole
  * block come up as soon as the reader turns to one, and only the inline
  * formatting waits for the caret. A proposal is worked with as a block and a
- * press accepts it first; a revealed discarded row is a subject and a
- * revealed retired row is not.
+ * press accepts it first; a revealed removed row is not a subject.
  */
 const withStandings: DocumentView = {
   documentId: "doc-bar",
@@ -247,7 +245,7 @@ const withStandings: DocumentView = {
       containmentId: "c-d",
       order: "d",
       role: "paragraph",
-      standing: "discarded",
+      standing: "keep",
       runs: [{ text: "Set aside." }],
     },
   ],
@@ -307,7 +305,7 @@ const mountFull = async () => {
 };
 
 /** Turns to a row without editing it, as a phone's first tap does. A block
- * row answers `focus`; a proposal and a discarded row answer `focusin`, which
+ * row answers `focus`; a proposal and a removed row answer `focusin`, which
  * is what bubbles from the control the reader actually reached. */
 const turnTo = async (
   view: Awaited<ReturnType<typeof mount>> | Awaited<ReturnType<typeof mountFull>>,
@@ -330,8 +328,8 @@ describe("the bar before editing", () => {
       "standing",
       "document",
     ]);
-    expect(bar(view.root, "block-retire")?.getAttribute("aria-label")).toBe(
-      "Retire block 2",
+    expect(bar(view.root, "block-add-paragraph")?.getAttribute("aria-label")).toBe(
+      "Insert paragraph after block 2",
     );
     expect(bar(view.root, "mark-bold") ?? null).toBeNull();
     expect(bar(view.root, "block-undo") ?? null).toBeNull();
@@ -359,10 +357,10 @@ describe("the bar before editing", () => {
           '[data-bar-group="turn-into"] [data-bar-action], [data-bar-group="block"] [data-bar-action], [data-bar-group="standing"] [data-bar-action]',
         ),
       ).map((control) => control.getAttribute("data-bar-action")),
-    ).toEqual(["block-role", "block-add-paragraph", "block-add-image", "block-add-table", "block-add-equation", "block-add-admonition", "block-add-code", "block-import-table", "block-retire", "block-standing", "standing-info"]);
+    ).toEqual(["block-role", "block-add-paragraph", "block-add-image", "block-add-table", "block-add-equation", "block-add-admonition", "block-add-code", "block-import-table", "block-standing", "standing-info"]);
     // Each says what it is by its symbol, and carries its words as its name.
     expect(
-      ["block-add-paragraph", "block-add-image", "block-add-table", "block-add-equation", "block-add-admonition", "block-import-table", "block-retire"].map((id) => ({
+      ["block-add-paragraph", "block-add-image", "block-add-table", "block-add-equation", "block-add-admonition", "block-import-table"].map((id) => ({
         icon: bar(view.root, id)?.querySelector("[data-icon]")?.getAttribute("data-icon"),
         name: bar(view.root, id)?.getAttribute("aria-label"),
       })),
@@ -373,7 +371,6 @@ describe("the bar before editing", () => {
       { icon: "equals", name: "Insert equation after block 2" },
       { icon: "info", name: "Insert admonition after block 2" },
       { icon: "upload-simple", name: "Import a .csv or .tsv table after block 2" },
-      { icon: "archive", name: "Retire block 2" },
     ]);
     // Nothing in the bar inserts a divider. DO_0010_003
     expect(bar(view.root, "block-add-divider") ?? null).toBeNull();
@@ -399,7 +396,7 @@ describe("the bar before editing", () => {
       Array.from(
         view.root.querySelectorAll('[data-choice="block-standing"] option'),
       ).map((option) => option.getAttribute("value")),
-    ).toEqual(["discarded", "keep", "fixate"]);
+    ).toEqual(["keep", "fixate"]);
   });
 
   it("Given a focused block, Then the standing explanation stands beside the control it explains", async () => {
@@ -415,14 +412,13 @@ describe("the bar before editing", () => {
     await view.settle(() => bar(view.root, "standing-info")?.getAttribute("aria-expanded") === "true");
     expect(
       view.root.querySelector('[data-popover-panel="standing-info"]')?.textContent,
-    ).toContain("Discard");
+    ).toContain("Remove");
   });
 
-  it("Given a document read, Then the two acts that decide what it is lead the bar", async () => {
+  it("Given a document read, Then the act that decides what it is leads the bar", async () => {
     const view = await mount();
-    // *Work in a proposal* is the view's own; `calliopa-refine`'s
-    // *Establish…* joins this same group through the decoration bar, which
-    // is why the group is the view's and leads. DO_0010_001
+    // *Work in a proposal* is the view's own, which is why the group is the
+    // view's and leads. DO_0010_001
     const work = view.root.querySelector('[data-bar-group="work"]');
     expect(work?.getAttribute("aria-label")).toBe("Work");
     expect(
@@ -431,15 +427,12 @@ describe("the bar before editing", () => {
         icon: control.querySelector("[data-icon]")?.getAttribute("data-icon"),
       })),
     ).toEqual([
-      // The working mode's two toggles lead, each wearing the pole in force.
-      // BO_0306_010
-      { id: "working-mode-field", icon: "arrows-out-simple" },
-      { id: "working-mode-work", icon: "pencil-simple-line" },
+      // The working mode is chosen on a block's command line, not here.
+      // DO_0025_009
       { id: "work-in-proposal", icon: "git-branch" },
-      { id: "establish", icon: "lighthouse" },
     ]);
-    // It is no longer in the trailing group, which keeps the two acts on the
-    // document itself.
+    // It is not in the trailing group, which keeps the act on the document
+    // itself.
     expect(
       Array.from(
         view.root.querySelectorAll('.view-bar__trailing [data-bar-action]'),
@@ -588,39 +581,18 @@ describe("the bar before editing", () => {
       "history",
       "document",
     ]);
-    expect(bar(view.root, "block-retire")?.getAttribute("aria-label")).toBe("Retire block 1");
+    expect(bar(view.root, "block-add-paragraph")?.getAttribute("aria-label")).toBe("Insert paragraph after block 1");
     expect(view.root.querySelector("[data-block-editor]")).not.toBeNull();
-  });
-
-  it("Given a revealed discarded row focused, Then the block groups come up with its standing", async () => {
-    const view = await mountFull();
-    await view.userEvent('[data-bar-action="discarded-blocks"]', "click");
-    await view.settle(() => view.root.querySelector("[data-discarded-id]") !== null);
-    await turnTo(view, '[data-discarded-id="blk-d"] .discarded-row__text', "focusin");
-    expect(groupIds(view.root)).toEqual(["work", "view", "turn-into", "block", "standing", "document"]);
-    expect(bar(view.root, "block-retire")?.getAttribute("aria-label")).toBe("Retire block 3");
-    const select = view.root.querySelector('[data-bar-action="block-standing"]') as HTMLSelectElement | null;
-    expect(
-      Array.from(select?.options ?? [])
-        .filter((option) => option.hasAttribute("selected"))
-        .map((option) => option.getAttribute("value")),
-    ).toEqual(["discarded"]);
-    // Every kind of row the bar can act on carries the focused row's ring.
-    // DO_0006_012
-    expect(
-      view.root.querySelector('[data-discarded-id="blk-d"]')?.getAttribute("data-focused"),
-    ).toBe("true");
   });
 
   it("Given a revealed retired row focused, Then only the Add controls come up, and a paragraph goes directly below it", async () => {
     const view = await mountFull();
-    await view.userEvent('[data-bar-action="retired-blocks"]', "click");
+    await view.userEvent('[data-bar-action="removed"]', "click");
     await view.settle(() => view.root.querySelector("[data-retired-id]") !== null);
     await turnTo(view, '[data-retired-id="blk-r"] .retired-row__text', "focusin");
     // Out of the document's flow: a new block can go below it, and that is
     // all. DO_0016_005
     expect(groupIds(view.root)).toEqual(["work", "view", "block", "document"]);
-    expect(bar(view.root, "block-retire")).toBeNull();
     expect(bar(view.root, "block-add-paragraph")?.getAttribute("aria-label")).toBe(
       "Insert paragraph after the retired block",
     );
@@ -629,18 +601,6 @@ describe("the bar before editing", () => {
     await view.settle(() => view.sent.some((command) => command.body["command"] === "insert"));
     expect(view.sent.find((command) => command.body["command"] === "insert")?.body).toMatchObject({
       placement: { between: ["r", null] },
-    });
-  });
-
-  it("Given a revealed discarded row focused, When the plus is pressed, Then a paragraph goes directly below it", async () => {
-    const view = await mountFull();
-    await view.userEvent('[data-bar-action="discarded-blocks"]', "click");
-    await view.settle(() => view.root.querySelector("[data-discarded-id]") !== null);
-    await turnTo(view, '[data-discarded-id="blk-d"] .discarded-row__text', "focusin");
-    await view.userEvent('[data-bar-action="block-add-paragraph"]', "click");
-    await view.settle(() => view.sent.some((command) => command.body["command"] === "insert"));
-    expect(view.sent.find((command) => command.body["command"] === "insert")?.body).toMatchObject({
-      placement: { between: ["d", null] },
     });
   });
 
@@ -689,22 +649,19 @@ describe("the bar before editing", () => {
     });
   });
 
-  it("Given a proposal focused, When Retire is pressed, Then the proposal is accepted first and the block it became is retired", async () => {
+  it("Given a proposal focused, Then the top bar offers no Retire, and its block bar's Remove rejects it", async () => {
     const view = await mountFull();
     await view.userEvent('[data-bar-action="proposed-changes"]', "click");
     await view.settle(() => view.root.querySelector("[data-proposal-id]") !== null);
     await turnTo(view, `[data-proposal-id="${insert}"]`, "focusin");
     expect(groupIds(view.root)).toEqual(["work", "view", "turn-into", "block", "standing", "document"]);
-    expect(bar(view.root, "block-retire")?.getAttribute("aria-label")).toBe(
-      "Retire the proposed block",
-    );
-    await view.userEvent('[data-bar-action="block-retire"]', "click");
-    await view.settle(() => view.sent.some((command) => command.body["command"] === "retire"));
-    const commands = view.sent.map((command) => String(command.body["command"]));
-    expect(commands.indexOf("answerProposal")).toBeGreaterThanOrEqual(0);
-    expect(commands.indexOf("answerProposal")).toBeLessThan(commands.indexOf("retire"));
-    expect(view.sent.find((command) => command.body["command"] === "retire")?.body).toMatchObject({
-      blockId: "blk-n",
+    expect(bar(view.root, "block-retire") ?? null).toBeNull();
+    await view.userEvent(`[data-proposal-id="${insert}"] [data-block-remove]`, "click");
+    await view.settle(() => view.sent.some((command) => command.body["command"] === "answerProposal"));
+    expect(view.sent.find((command) => command.body["command"] === "answerProposal")?.body).toMatchObject({
+      itemId: insert,
+      answer: "rejected",
     });
+    expect(view.sent.some((command) => command.body["command"] === "retire")).toBe(false);
   });
 });

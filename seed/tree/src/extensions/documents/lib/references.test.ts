@@ -18,8 +18,11 @@ import {
   repointPassage,
   serializeMarking,
   toggleDocument,
+  toggleProposal,
+  proposalReferenceFor,
   toggleReference,
   type Marking,
+  type ProposalItemMark,
 } from "./references";
 
 const marks = (marking: Marking, ...blockIds: string[]): Marking =>
@@ -141,7 +144,7 @@ describe("a reference is what was marked", () => {
 
   it("Given what was marked, When the session is written and read back, Then it comes back as it was, out of the mode", () => {
     const marking: Marking = {
-      ...toggleReference(toggleReference(NO_MARKING, "n", proposal), "a", { revisionId: "rev-a", discarded: true }),
+      ...toggleReference(toggleReference(NO_MARKING, "n", proposal), "a", { revisionId: "rev-a", words: "Opening." }),
       mode: "command",
     };
     expect(parseMarking(serializeMarking(marking))).toEqual({ ...marking, mode: "reading" });
@@ -485,5 +488,41 @@ describe("references across documents (BO_0304_007)", () => {
     ]);
     expect(referenceFor(local, "a")).toBe(2);
     expect(passagesIn(local, "b").map((held) => held.number)).toEqual([3]);
+  });
+});
+
+describe("a proposal marked whole (BO_0321_007)", () => {
+  const item = (id: string): ProposalItemMark => ({ item: `chg-1|replace|node:${id}`, blockId: id, revisionId: `cand-${id}` });
+
+  it("Given a proposal marked whole, Then it takes the next number, and a second press takes it back", () => {
+    const marked = toggleProposal(marks(NO_MARKING, "a"), "chg-1", [item("b")], "Codex");
+    expect(proposalReferenceFor(marked, "chg-1")).toBe(2);
+    expect(marked.references[1]).toEqual({ kind: "proposal", group: "chg-1", items: [item("b")], number: 2, proposer: "Codex" });
+    const back = toggleProposal(marked, "chg-1", []);
+    expect(proposalReferenceFor(back, "chg-1")).toBeNull();
+    expect(referenceFor(back, "a")).toBe(1);
+  });
+
+  it("Given an item of it marked on its own, Then both stand, under their own numbers", () => {
+    const single = toggleReference(NO_MARKING, "b", { target: "proposal", group: "chg-1", item: item("b").item, revisionId: "cand-b" });
+    const both = toggleProposal(single, "chg-1", [item("b")]);
+    expect(referenceFor(both, "b", { target: "proposal", item: item("b").item })).toBe(1);
+    expect(proposalReferenceFor(both, "chg-1")).toBe(2);
+  });
+
+  it("Given its group stages more, When the document is read, Then the reference grows; and once answered it stays as marked", () => {
+    const marked = toggleProposal(NO_MARKING, "chg-1", [item("b")]);
+    const grown = followDocument(marked, { ...now(["a"], [item("b").item, item("n").item]), groupItems: new Map([["chg-1", [item("b"), item("n")]]]) });
+    expect(grown.references[0]).toMatchObject({ kind: "proposal", items: [item("b"), item("n")] });
+    const answered = followDocument(grown, { ...now(["a", "b", "n"], []), groupItems: new Map() });
+    expect(answered).toBe(grown);
+  });
+
+  it("Given a record holding a proposal marked whole, Then it is read back whole, and one sent to a run comes back with its items", () => {
+    const marked = toggleProposal(NO_MARKING, "chg-1", [item("b")], "Codex");
+    expect(parseMarking(serializeMarking(marked))).toEqual({ ...marked, mode: "reading" });
+    expect(parseMarking(JSON.stringify({ references: [{ kind: "proposal", number: 1, items: [] }], next: 2 })).references).toEqual([]);
+    const back = markingFromSent([{ kind: "proposal", number: 3, group: "chg-1", items: [item("b")] }]);
+    expect(back.references).toEqual([{ kind: "proposal", group: "chg-1", items: [item("b")], number: 3 }]);
   });
 });

@@ -6,7 +6,6 @@ import type {
   DocumentProposals,
 } from "../server/documents";
 import type { DocumentView, BlockView } from "../server/assemble";
-import type { ReadMark } from "../server/read-mark";
 import type { WorkingMode } from "../lib/working-mode";
 import type { GraphOutcome } from "~/server/outcome";
 import type { BlobReference } from "~/server/ccgw/blobs";
@@ -28,6 +27,12 @@ export const SEPARATION_REFUSED = "separation_of_duties_refused";
  * write: the document is reviewed by someone else now. */
 export const requiresProposal = (outcome: GraphOutcome<unknown>): boolean =>
   outcome.outcome !== "success" && describeRaw(outcome).includes(SEPARATION_REQUIRES_PROPOSAL);
+
+/** Whether a decline was refused because the proposal was already settled:
+ * accepted, declined or closed by an answer that came first. It is gone, not
+ * refused. User decision, 2026-09-30. DO_0024_001 */
+export const alreadySettled = (outcome: GraphOutcome<unknown>): boolean =>
+  outcome.outcome !== "success" && /not an undecided member|is not open|proposal_not_open/u.test(describeRaw(outcome));
 
 function describeRaw(outcome: GraphOutcome<unknown>): string {
   switch (outcome.outcome) {
@@ -105,22 +110,6 @@ export const fetchRetired = async (
 ): Promise<GraphOutcome<readonly BlockView[]>> =>
   readOutcome<readonly BlockView[]>(
     await fetch(`/api/x/documents/d/${id}/retired`),
-  );
-
-/** The reader's mark on the document, read with it. BO_0246_007 */
-export const fetchReadMark = async (id: string): Promise<GraphOutcome<ReadMark>> =>
-  readOutcome<ReadMark>(await fetch(`/api/x/documents/d/${id}/read`));
-
-/** Writes the mark: the derived blocks were in view at this data revision.
- * `keepalive` for the write made as the tab is left. BO_0246_007 */
-export const sendReadMark = async (id: string, dataRevision: number, keepalive = false): Promise<GraphOutcome<ReadMark>> =>
-  readOutcome<ReadMark>(
-    await fetch(`/api/x/documents/d/${id}/read`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ dataRevision }),
-      keepalive,
-    }),
   );
 
 /** The person's working mode on the document, read as it opens. BO_0306_011 */
@@ -213,9 +202,20 @@ export const fetchChanges = async (
 
 export const fetchProposals = async (
   id: string,
+  rejected = false,
 ): Promise<GraphOutcome<DocumentProposals>> =>
   readOutcome<DocumentProposals>(
-    await fetch(withBranch(`/api/x/documents/d/${id}/proposals`, id)),
+    await fetch(withBranch(`/api/x/documents/d/${id}/proposals${rejected ? "?rejected=1" : ""}`, id)),
+  );
+
+/** Stages a rejected proposal again as a new open one. BO_0315_015 */
+export const reopenProposal = async (id: string, itemId: string): Promise<GraphOutcome<unknown>> =>
+  readOutcome<unknown>(
+    await fetch(`/api/x/documents/d/${id}/commands`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(withBranchBody({ command: "reopen", itemId }, id)),
+    }),
   );
 
 /** Moves a proposed change to another place without answering it. BO_0233_007 */

@@ -69,7 +69,7 @@ describe("a panel", () => {
 
   it("Given no icon or one nothing answers to, Then the panel shows its first", () => {
     expect(shownIcon({ shown: true }, icons)).toBe("documents");
-    expect(shownIcon({ shown: true, icon: "calliopa-video" }, icons)).toBe("documents");
+    expect(shownIcon({ shown: true, icon: "demo" }, icons)).toBe("documents");
     expect(shownIcon({ shown: true }, [])).toBeNull();
   });
 

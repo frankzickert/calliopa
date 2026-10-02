@@ -5,23 +5,26 @@ import { isBlobReference } from "~/server/ccgw/blobs";
 import { atDataRevision } from "~/server/ccgw/branch-scope";
 import { isRecordId } from "~/server/uuid";
 
-import { isOutcome, type Outcome } from "../lib/manuscript";
-import { citedWorks, figuresOf, glossaryOf, manuscriptWrite, venueOf } from "./make";
+import { isOutcome, isRenditionType, type Outcome, type RenditionType } from "../lib/rendition";
+import { citedWorks, figuresOf, glossaryOf, renditionWrite } from "./make";
 import { project } from "./project";
+import { MakingRefusal, readMaking } from "./roles-read";
 
 /**
- * This extension's half of a run's manuscript (`BO_0293_023`): `make_manuscript`
+ * This extension's half of a run's manuscript (`BO_0293_023`, and
+ * `calliopa-bootstrap`'s `BO_0312_020`–`BO_0312_021`): `make_manuscript`
  * is the kernel's own tool — a tool's callback holds no person's session and
  * the gate admits a run's grant on no typesetting path, so the kernel is the
  * one caller of the service (user decision, 2026-09-25). The kernel asks two
  * callback routes here, answered only with the callback secret. `project`
- * answers what a press sends the service, read at the run's pin, so the
- * projection is `project.ts`'s and nothing is projected twice. `kept` takes
- * the typesetting's outcome and the blob references the kernel put and
- * answers the statements of one `manuscript` node — the node a press writes,
- * `by` the run's principal — which the kernel stages into the run's group.
- * Nothing here writes: a run's manuscript proposes no block and changes no
- * property.
+ * answers what the service takes for a document carrying *Format* and its
+ * whole reading order, read at the run's pin with the venue and front matter
+ * of the roles the run names — *Format* is taken by documents alone
+ * (`calliopa-bootstrap`'s `BO_0332_030`). `kept` takes the typesetting's
+ * outcome and the blob references the kernel put and answers the statements
+ * of one `formatRendition` node on that document, `by` the run's principal, which the
+ * kernel stages into the run's group. Nothing here writes: a run's manuscript
+ * proposes no block and changes no property.
  */
 
 /** What the kernel posts a route: the input and the run. */
@@ -56,9 +59,15 @@ export function documentOfInput(input: Readonly<Record<string, unknown>>): strin
   return document;
 }
 
+const roleOfInput = (input: Readonly<Record<string, unknown>>, key: "venueRole" | "paperRole"): string | undefined => {
+  const role = text(input[key]);
+  return role === "" ? undefined : role;
+};
+
 /** What the projection answers the kernel: the service's request, and what
  * the kept node and the run need to know about it. */
 export interface Projected {
+  /** The document carrying *Format*, which the rendition is kept on. */
   readonly document: string;
   readonly title: string;
   readonly venue: string;
@@ -68,6 +77,9 @@ export interface Projected {
   /** The figures as blob references with the names the source includes
    * them by, kept beside the source. */
   readonly figures: readonly Record<string, unknown>[];
+  /** The role field keys read, and the ones looked for and not found. */
+  readonly read: readonly string[];
+  readonly missing: readonly string[];
 }
 
 const reasonOf = (outcome: { outcome: string } & Record<string, unknown>): string =>
@@ -75,37 +87,58 @@ const reasonOf = (outcome: { outcome: string } & Record<string, unknown>): strin
     ? (outcome["failures"] as readonly { detail: string }[]).map((failure) => failure.detail).join(" ")
     : `the document could not be read: ${outcome.outcome}`;
 
+const pinned = <T>(pin: number, read: () => Promise<T>): Promise<T> => (pin > 0 ? atDataRevision(pin, read) : read());
+
 /**
- * The document projected at the run's pin for the venue the call names — else
- * the document's own, else the generic article — with the figures' bytes
- * read from the store, ready for the service. Reads through the pin as a
- * press reads through head.
+ * The document carrying *Format* projected whole at the run's pin
+ * (`BO_0332_030`), with the venue and the front matter of the roles the call
+ * names, the figures' bytes read from the store, ready for the service. A
+ * part formatted on its own is a block's focused work, a document of its own.
  */
 export async function projectForKernel(call: ToolCall): Promise<Projected> {
   const documentId = documentOfInput(call.input);
-  const asked = text(call.input["venue"]);
-  const read = call.run.pin > 0 ? await atDataRevision(call.run.pin, () => readDocument(documentId)) : await readDocument(documentId);
+  const read = await pinned(call.run.pin, () => readDocument(documentId));
   if (read.outcome !== "success") throw new ToolRefusal(reasonOf(read));
   const document = read.result;
-  const venue = venueOf(document, asked === "" ? undefined : asked);
   const revision = document.dataRevision ?? call.run.pin;
-  const projection = project(document, await citedWorks(document), revision, await glossaryOf(document));
+  let making;
+  try {
+    making = await readMaking({
+      documentId,
+      ...(roleOfInput(call.input, "venueRole") === undefined ? {} : { venueRole: roleOfInput(call.input, "venueRole") as string }),
+      ...(roleOfInput(call.input, "paperRole") === undefined ? {} : { paperRole: roleOfInput(call.input, "paperRole") as string }),
+      ...(call.run.pin > 0 ? { dataRevision: call.run.pin } : {}),
+    });
+  } catch (error) {
+    if (error instanceof MakingRefusal) throw new ToolRefusal(error.message);
+    throw error;
+  }
+  const projection = project(document, await citedWorks(document), revision, await glossaryOf(document), making.front);
   const figures = await figuresOf(projection);
   if ("failure" in figures) throw new ToolRefusal(figures.failure);
+  // The service sets citations by the venue template's own style, so a
+  // citation style the venue role names is said, not silently dropped.
+  const omitted =
+    making.citationStyle === undefined
+      ? projection.omitted
+      : [...projection.omitted, `The citation style ${making.citationStyle}: the typesetting sets citations by the ${making.venue} template's own style.`];
   return {
     document: documentId,
     title: document.title,
-    venue,
+    venue: making.venue,
     revision,
-    request: { venue, ast: projection.ast, references: projection.references, files: figures.files },
-    omitted: projection.omitted,
+    request: { venue: making.venue, ast: projection.ast, references: projection.references, files: figures.files },
+    omitted,
     figures: figures.kept,
+    read: making.read,
+    missing: making.missing,
   };
 }
 
 /** What the kernel hands `kept`: the projection's facts and the typesetting's outcome. */
 export interface Kept {
   readonly document: string;
+  readonly type: RenditionType;
   readonly title: string;
   readonly venue: string;
   readonly revision: number;
@@ -117,9 +150,11 @@ export interface Kept {
 
 const words = (value: unknown): string[] => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : []);
 
-/** Reads what the kernel hands `kept`, refusing what is not a manuscript's. */
+/** Reads what the kernel hands `kept`, refusing what is not a rendition's. */
 export function keptOfInput(input: Readonly<Record<string, unknown>>): Kept {
   const document = documentOfInput(input);
+  const type = input["type"] === undefined ? "pdf" : input["type"];
+  if (!isRenditionType(type)) throw new ToolRefusal("a kept rendition's type is text, table, image, video, pdf or structured");
   const venue = text(input["venue"]);
   if (venue === "") throw new ToolRefusal("a kept manuscript names its venue");
   const revision = input["revision"];
@@ -136,6 +171,7 @@ export function keptOfInput(input: Readonly<Record<string, unknown>>): Kept {
   }
   return {
     document,
+    type,
     title: text(input["title"]),
     venue,
     revision,
@@ -147,18 +183,20 @@ export function keptOfInput(input: Readonly<Record<string, unknown>>): Kept {
 }
 
 /**
- * The kept manuscript composed for the run: one `manuscript` node, as a
- * press writes it, `by` the run's principal, staged by the kernel into the
- * run's group — listed under Manuscripts with the run's process.
+ * The kept rendition composed for the run: one `formatRendition` node on the
+ * document carrying *Format*, `by` the run's principal, staged by the kernel
+ * into the run's group and listed at the document's end.
  */
 export function keptForKernel(call: ToolCall): ToolAnswer {
   const kept = keptOfInput(call.input);
   const by = text(call.run.principal) !== "" ? text(call.run.principal) : text(call.run.person);
   if (by === "") throw new ToolRefusal("a kept manuscript says who made it: the run names its principal");
-  const manuscriptId = randomUUID();
-  const write = manuscriptWrite({
-    manuscriptId,
+  const renditionId = randomUUID();
+  const write = renditionWrite({
+    renditionId,
+    of: kept.document,
     documentId: kept.document,
+    type: kept.type,
     title: kept.title,
     revision: kept.revision,
     venue: kept.venue,
@@ -170,7 +208,7 @@ export function keptForKernel(call: ToolCall): ToolAnswer {
     omitted: kept.omitted,
   });
   return {
-    result: { manuscriptId, outcome: kept.outcome, files: kept.files.map((file) => file["filename"]) },
+    result: { renditionId, outcome: kept.outcome, files: kept.files.map((file) => file["filename"]) },
     stage: [{ ...write, rationale: `a ${kept.venue} manuscript of ${kept.title === "" ? kept.document : kept.title}` }],
   };
 }

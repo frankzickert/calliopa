@@ -54,6 +54,9 @@ const FIGURE_REF_ATTRIBUTE = "data-figure-ref";
 const TABLE_REF_ATTRIBUTE = "data-table-ref";
 const BLOCK_REF_LABEL_ATTRIBUTE = "data-block-ref-label";
 const BLOCK_REF_ATTRIBUTE = "data-block-ref";
+/** A named keyword's words carry its identity here while edited, and are read
+ * back from it (`calliopa-bootstrap`'s `BO_0310_010`). */
+export const KEYWORD_ATTRIBUTE = "data-keyword";
 
 /** What an atom is drawn from: the markup its source was set as, and the
  * number a reference resolves to. Both are the read's, since the browser does
@@ -173,6 +176,12 @@ export function paintRuns(
       anchor.appendChild(node);
       node = anchor;
     }
+    if (entry.keyword !== undefined) {
+      const named = document.createElement("span");
+      named.setAttribute(KEYWORD_ATTRIBUTE, entry.keyword);
+      named.appendChild(node);
+      node = named;
+    }
     element.appendChild(node);
   }
   // A line break at the very end draws no line of its own until something
@@ -199,6 +208,7 @@ export function runsFrom(element: HTMLElement): Run[] {
     node: Node,
     marks: readonly Mark[],
     link: string | undefined,
+    keyword: string | undefined,
   ): void => {
     // By node type rather than the globals `Node` and `HTMLElement`, which a
     // render harness does not install; a proposal reads a composition back
@@ -210,6 +220,7 @@ export function runsFrom(element: HTMLElement): Run[] {
           text,
           ...(marks.length > 0 ? { marks: [...marks] } : {}),
           ...(link !== undefined ? { link } : {}),
+          ...(keyword !== undefined && link === undefined ? { keyword } : {}),
         });
       }
       return;
@@ -259,13 +270,15 @@ export function runsFrom(element: HTMLElement): Run[] {
     const href = element.tagName === "A" ? element.getAttribute("href") : null;
     const nextMarks = mark === undefined ? marks : [...marks, mark];
     const nextLink = href === null ? link : href;
+    const named = element.getAttribute(KEYWORD_ATTRIBUTE);
+    const nextKeyword = named === null || named === "" ? keyword : named;
     for (const child of Array.from(element.childNodes)) {
-      walk(child, nextMarks, nextLink);
+      walk(child, nextMarks, nextLink, nextKeyword);
     }
   };
 
   for (const child of Array.from(element.childNodes)) {
-    walk(child, [], undefined);
+    walk(child, [], undefined, undefined);
   }
   return normalizeRuns(runs);
 }
@@ -280,7 +293,9 @@ function offsetOf(
   container: Node,
   offset: number,
 ): number {
-  const range = document.createRange();
+  // The element's own document, as `selectRange` reads it: the page's in a
+  // browser, and the harness's where there is no global one.
+  const range = element.ownerDocument.createRange();
   range.selectNodeContents(element);
   range.setEnd(container, offset);
   return [...range.toString()].length;

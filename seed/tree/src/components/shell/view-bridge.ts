@@ -336,6 +336,9 @@ export interface RunChip {
    * staged nothing has none. CA_0061_002 */
   readonly count?: number;
   readonly ended: boolean;
+  /** The number the chip's proposal is marked whole under, while a mark
+   * stands, which the view reports. BO_0321_011 */
+  readonly reference?: number;
   /** Whether the change's proposals are shown in the view, which the chip's
    * pressed state says. CA_0055_002 A session the tab works in is shown: it
    * is the document the tab reads. CA_0057_014 */
@@ -362,6 +365,10 @@ export interface ViewToggleRun {
   seq: number;
   /** The press was a session chip's pencil: work in it, or stop. CA_0057_014 */
   work?: boolean;
+  /** The press was made while a pointing stands: mark the chip's whole
+   * proposal, or take the mark back, instead of showing or hiding it.
+   * BO_0321_011 */
+  mark?: boolean;
 }
 
 /**
@@ -442,10 +449,6 @@ export interface ViewFocus {
 export interface ViewAgents {
   runtimes: SelectableRuntime[];
   agent: string | null;
-  /** What the reader chose on the chosen sender's axes. BO_0279_007 */
-  options: Record<string, string>;
-  /** What the next press would cost, or "" when nothing can say. BO_0279_009 */
-  cost: string;
   /** The next command's speed, the person's. BO_0269_015 */
   speed: Speed;
   sending: boolean;
@@ -464,7 +467,39 @@ export interface ViewCommand {
   readonly source: CommandSource;
   readonly words: string;
   readonly attachments: readonly AttachmentDescriptor[];
+  /** The command's own working mode, chosen on the block it is sent from.
+   * Sent in place of the document's mode in the aim, which stays for the
+   * console's composer and gestures. DO_0025_008 */
+  readonly mode?: WorkingMode;
+  /** The options the `command` places set on it, `profile` among them; absent
+   * when none was set. BO_0311_030 */
+  readonly options?: Readonly<Record<string, string>>;
 }
+
+/**
+ * The options set on each command a view holds, by `commandKey`: what a
+ * `command` place said about the command it is drawn in. They live as long
+ * as the command does in the page, and nothing keeps them past it.
+ * BO_0311_030
+ */
+export interface ViewCommandOptions {
+  byCommand: Record<string, Readonly<Record<string, string>>>;
+}
+
+/** Where a command's options are kept: its target and the block it is written in. */
+export const commandKey = (itemId: string, blockId: string): string => `${itemId}/${blockId}`;
+
+/** The options set on one command, none when nothing set one. */
+export const optionsOf = (options: ViewCommandOptions, itemId: string, blockId: string): Readonly<Record<string, string>> =>
+  options.byCommand[commandKey(itemId, blockId)] ?? {};
+
+/** The options with one set, or cleared by `null`. */
+export const withOption = (held: Readonly<Record<string, string>>, name: string, value: string | null): Readonly<Record<string, string>> => {
+  const next: Record<string, string> = { ...held };
+  if (value === null || value === "") delete next[name];
+  else next[name] = value;
+  return next;
+};
 
 /**
  * A gesture a view offers: a question it asks of one extension about one
@@ -486,6 +521,20 @@ export interface ViewGesture {
    * reads it from the graph at the pin the question is asked at, so the run
    * need not reconstruct the subject. BO_0258_006 */
   readonly context?: string;
+}
+
+/**
+ * A pinch on a block of the view's target (`BO_0322`): a command with no
+ * words, zooming in or out on one block. What each direction asks for is the
+ * base skill's convention, which the kernel names to the run; the view says
+ * the mode the pinch works in. The shell starts it on the chosen agent and
+ * speed and follows it as it follows a command's. BO_0322_016
+ */
+export interface ViewPinch {
+  readonly itemId: string;
+  readonly blockId: string;
+  readonly pinch: "in" | "out";
+  readonly mode: WorkingMode;
 }
 
 /** What sending a command answered: the run it started, or the refusal in
@@ -655,14 +704,10 @@ export interface ViewBridge {
   readonly agents: ViewAgents;
   /** Chooses the agent for the next command, the instance's choice. */
   readonly chooseAgent$: QRL<(agent: string) => void>;
-  /** Turns one axis of the chosen sender. BO_0279_007 */
-  readonly chooseOption$: QRL<(axis: string, value: string) => void>;
-  /**
-   * Asks what a press on this block would cost, for the sender and the axes
-   * chosen now, and keeps it in `agents.cost`. Free, and never a press.
-   * BO_0279_009
-   */
-  readonly quoteSend$: QRL<(documentId: string, blockId: string) => Promise<void>>;
+  /** The options `command` places set on the commands. BO_0311_030 */
+  readonly commandOptions: ViewCommandOptions;
+  /** Sets one option on one command, or clears it with `null`. BO_0311_030 */
+  readonly setCommandOption$: QRL<(itemId: string, blockId: string, name: string, value: string | null) => void>;
   /** Chooses the next command's speed. BO_0269_015 */
   readonly chooseSpeed$: QRL<(speed: Speed) => void>;
   /** Reads the agents again, answering the list, or null when it could not.
@@ -682,13 +727,19 @@ export interface ViewBridge {
    */
   readonly sendGesture$: QRL<(gesture: ViewGesture) => Promise<SentCommand>>;
   /**
-   * Retargets the active tab in place — opening a block as focused work, or
-   * going back along the route — keeping the tab and its view; the shell
-   * rewrites the tab's target, title and route in the workspace record and
-   * remounts the view. `focus` names the block to land on. CA_0047_004
+   * Sends a pinch on a block: a run with no words on the chosen agent and
+   * speed, proposing into the target, followed as a command's is.
+   * BO_0322_016
    */
-  readonly retarget$: QRL<(target: { itemId: string; title: string; route: readonly RouteEntry[]; focus?: string }) => void>;
-  /** The block to focus once the retargeted view shows. CA_0047_004 */
+  readonly sendPinch$: QRL<(pinch: ViewPinch) => Promise<SentCommand>>;
+  /**
+   * Opens a document reached along a route — going back to a crumb — in a tab
+   * of its own beside the active one, or makes the tab already showing it
+   * active; the tab pressed in keeps its target and route. `focus` names the
+   * block to land on. CA_0073_002
+   */
+  readonly openAlongRoute$: QRL<(target: { itemId: string; title: string; route: readonly RouteEntry[]; focus?: string }) => void>;
+  /** The block to focus once the opened or retargeted view shows. CA_0047_004 */
   readonly focus: ViewFocus;
   /**
    * The shell's own controls for one block of the view's target, which the
@@ -699,10 +750,18 @@ export interface ViewBridge {
   readonly blockControls$: QRL<(itemId: string, blockId: string) => Promise<readonly BlockControl[]>>;
   /**
    * Presses one of them. The shell acts — for focused work it opens or finds
-   * the child and retargets the tab, pushing the parent onto the route with
-   * the block it was opened from — and answers the refusal in words for the
+   * the child and opens it in a tab of its own after the parent's, its route
+   * the parent's with the block it was opened from (CA_0073_001) — and answers the refusal in words for the
    * view to show, or `null` when it did what it says. CA_0065_003
    */
+  /**
+   * Opens one block of a target as focused work, or finds the child it has,
+   * without leaving the target: no retarget and no route, so a view can move
+   * a block into it and stay where the reader is. The faces the shell keeps
+   * for the target are read again, so the block's face is ready to draw.
+   * Answers the child's identity, or the refusal in words. CA_0072_005
+   */
+  readonly focusedChild$: QRL<(itemId: string, blockId: string) => Promise<{ itemId: string } | { refusal: string }>>;
   readonly pressBlockControl$: QRL<
     (control: string, target: { itemId: string; blockId: string; title: string; route: readonly RouteEntry[] }) => Promise<string | null>
   >;

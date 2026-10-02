@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { UpdateView } from "~/server/kernel/update";
-import { supersedes, unserved, updateRunning, type Phase } from "./update-view";
+import { migrationNotice, supersedes, unserved, updateRunning, type Phase } from "./update-view";
 
 /**
  * A pending update never blocks another; the tab says which pending update a
@@ -46,5 +46,25 @@ describe("unserved", () => {
     expect(unserved(view({ servedPin: 57, extensionTruth: 57 }))).toBe(false);
     expect(unserved(view({ servedPin: 57 }))).toBe(false);
     expect(unserved(null)).toBe(false);
+  });
+});
+
+// A migration that failed when the served pin was served is said on the tab,
+// by extension and id. BO_0312_003
+describe("migrationNotice", () => {
+  it("says nothing when no migration failed, and names the one that did", () => {
+    expect(migrationNotice(null)).toBeNull();
+    expect(migrationNotice({ release: "", updateCheck: true, updater: {} as never, pending: null })).toBeNull();
+    expect(
+      migrationNotice({
+        release: "",
+        updateCheck: true,
+        updater: {} as never,
+        pending: null,
+        migration: { id: "documents.retire-discarded", extension: "documents", pin: 3300, error: "the route answered 500" },
+      }),
+    ).toBe(
+      "The documents migration documents.retire-discarded could not be applied at pin 3300: the route answered 500. Content it changes stays as it was until it runs; it is tried again the next time a pin is served.",
+    );
   });
 });

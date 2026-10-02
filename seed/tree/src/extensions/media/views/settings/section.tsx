@@ -53,7 +53,11 @@ export const GeneratorsSection = component$(() => {
       fetch("/api/x/media/services"),
       fetch("/api/x/media/offered"),
     ]);
-    services.value = all.ok ? ((await all.json()).services ?? []) : [];
+    // The generators signed in to here; Codex, which the roster also answers,
+    // is signed in under Agents. BO_0312_063
+    services.value = (all.ok ? (((await all.json()) as { services?: readonly ServiceView[] }).services ?? []) : []).filter(
+      (service) => service.service === "higgsfield" || service.service === "openart",
+    );
     if (chosen.ok) {
       const held = (await chosen.json()) as {
         models?: string[];

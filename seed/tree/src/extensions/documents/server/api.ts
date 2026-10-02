@@ -1,7 +1,6 @@
 import { STANDINGS, type Standing } from "~/extensions/documents/lib/disposition";
 import type { DocumentSummary } from "~/lib/library";
 import { readRuns, TEXT_ROLES, type Run, type TextRole } from "~/lib/runs";
-import { readFrontMatter, type FrontMatter } from "../lib/front-matter";
 import type { GraphOutcome, NonEmpty } from "~/server/outcome";
 import { refusal, respond, type OutcomeResponse } from "~/server/outcome";
 import { blobReference, isBlobReference, objectIdOfHash, putBlob, type BlobReference } from "~/server/ccgw/blobs";
@@ -27,7 +26,6 @@ import {
   setFormatCode,
   setLineNumbers,
   setCodeContinues,
-  setFrontMatter,
   reviseTable,
   fillMediaBlock,
   mergeTextBlocks,
@@ -36,12 +34,14 @@ import {
   readDocument,
   readDocumentChanges,
   readDocumentProposals,
+  reopenProposal,
   renameDocument,
-  setDocumentPhase,
   readRetiredBlocks,
   restoreBlock,
+  moveBlockIn,
   moveRetiredBlock,
   retireBlock,
+  retireBlocks,
   reviseTextBlock,
   setBlockDisposition,
   splitTextBlock,
@@ -66,41 +66,19 @@ import {
 } from "./documents";
 import type { BlockView, DocumentView } from "./assemble";
 import {
-  isBlockKind,
   isRelationKind,
   isRelationOrigin,
   isRelationState,
-  historyRead,
-  provenanceRead,
-  relationsOf,
   RELATION_STATES,
-  type BlockHistory,
-  type BlockProvenance,
-  type DocumentRelations,
   type RelationEndInput,
   type RelationInput,
 } from "./work";
-import { readMark, writeMark, type ReadMark } from "./read-mark";
 import { readMode, writeMode } from "./working-mode";
 import type { WorkingMode } from "../lib/working-mode";
-import { classify, documentStates, judgementsOf, resolveJudgement, type DocumentJudgements } from "./judgements";
-import { acceptanceOf, consequencesFor, type Acceptance, type Consequences } from "./phase";
 import { branchOf, documentPolicy, readStanding, signedInAccount, type BranchOfDocument, type BranchStanding, type DocumentPolicy } from "./branch";
 import { withBranch } from "~/server/ccgw/branch-scope";
-import { PHASES, isPhase, type Phase } from "./vocabulary";
-import type { DocumentState } from "~/extensions/documents/lib/judgements";
 import { listAdmonitionPatterns, saveAdmonitionPattern, updateAdmonitionPattern, type AdmonitionPattern } from "./admonitions";
-import {
-  addClaim,
-  declareRelation,
-  dropClaim,
-  reviseClaim,
-  reviseRelationReason,
-  setBlockKind,
-  setRelationState,
-  type WrittenClaim,
-  type WrittenRelation,
-} from "./work-ops";
+import { reviseRelationReason, setRelationState, type WrittenRelation } from "./work-ops";
 
 /**
  * The transport the editor reaches documents through.
@@ -352,7 +330,6 @@ export type DocumentCommand =
   /** A code block set to continue its numbering from the code block above it, or not. BO_0302_008 */
   | { readonly command: "setCodeContinues"; readonly blockId: string; readonly baseRevisionId: string; readonly continues: boolean }
   /** A document's front matter set whole. BO_0293_012 */
-  | { readonly command: "setFrontMatter"; readonly baseRevisionId: string; readonly frontMatter: FrontMatter }
   /** A text block turned into a code block in its place. BO_0289_021 */
   | { readonly command: "turnIntoCode"; readonly blockId: string; readonly baseRevisionId: string }
   | { readonly command: "turnIntoImage"; readonly blockId: string; readonly baseRevisionId: string }
@@ -409,21 +386,21 @@ export type DocumentCommand =
       readonly baseRevisionId: string;
       readonly title: string;
     }
-  | {
-      /** The root's phase, from the transition card; `supersede` names the
-       * accepted root this acceptance supersedes. BO_0249_007 */
-      readonly command: "setDocumentPhase";
-      readonly baseRevisionId: string;
-      readonly phase: Phase;
-      readonly supersede?: string;
-    }
   | { readonly command: "delete"; readonly baseRevisionId: string }
   | { readonly command: "retire"; readonly blockId: string }
+  /** Several blocks retired in one write, each at the revision the reader
+   * saw. DO_0023_004 */
+  | {
+      readonly command: "retireBlocks";
+      readonly blocks: readonly { readonly blockId: string; readonly baseRevisionId: string }[];
+    }
   /** Opens a block as focused work, or answers the child it has. CA_0047_002 */
   | {
       readonly command: "propose";
       readonly items: NonEmpty<DocumentProposalItem>;
     }
+  /** A rejected proposal staged again as a new open one. BO_0315_015 */
+  | { readonly command: "reopen"; readonly itemId: string }
   | {
       readonly command: "answerProposal";
       readonly itemId: string;
@@ -441,6 +418,14 @@ export type DocumentCommand =
       readonly blockId: string;
       readonly placement: Placement;
     }
+  /** A block of another document moved into this one, at the placement.
+   * CA_0072_006 */
+  | {
+      readonly command: "moveIn";
+      readonly blockId: string;
+      readonly fromDocumentId: string;
+      readonly placement: Placement;
+    }
   /** A retired block moved, still retired. BO_0263_012 */
   | {
       readonly command: "moveRetired";
@@ -449,31 +434,16 @@ export type DocumentCommand =
       readonly placement: Placement;
     }
   /** The work operations (`BO_0244_007`). */
-  | { readonly command: "setKind"; readonly blockId: string; readonly baseRevisionId: string; readonly blockKind: string | null }
-  | { readonly command: "addClaim"; readonly blockId: string; readonly baseRevisionId: string; readonly text: readonly Run[] }
-  | { readonly command: "reviseClaim"; readonly blockId: string; readonly claimId: string; readonly baseRevisionId: string; readonly text: readonly Run[] }
-  | { readonly command: "dropClaim"; readonly blockId: string; readonly claimId: string }
-  | { readonly command: "declareRelation"; readonly relation: RelationInput }
   | { readonly command: "reviseReason"; readonly relationId: string; readonly baseRevisionId: string; readonly reason: readonly Run[] }
   | { readonly command: "setRelationState"; readonly relationId: string; readonly baseRevisionId: string; readonly state: (typeof RELATION_STATES)[number] }
-  /** *Seen* on a pressure judgement. BO_0248_008 */
-  | { readonly command: "resolveJudgement"; readonly judgementId: string }
-  /** A person's correction of an edit's classification. BO_0248_009 */
-  | { readonly command: "classify"; readonly blockId: string; readonly outcome: string; readonly explanation: readonly Run[] }
   | { readonly command: "promoteBlock"; readonly group: string; readonly blockId: string };
 
-/** One end of a relation, as a request names it. */
+/** One end of a relation, as a request names it: a block. */
 function readRelationEnd(value: unknown): { readonly end: RelationEndInput } | { readonly failure: string } {
   const input = record(value);
-  if (input === null) return { failure: "A relation's end is an object naming a claim or a block." };
-  const claimId = text(input["claimId"]);
-  if (claimId !== null) return { end: { claimId } };
-  const blockId = text(input["blockId"]);
-  if (blockId === null) return { failure: "A relation's end names a claimId or a blockId." };
-  if (input["claim"] === undefined) return { end: { blockId } };
-  const claim = readRuns(input["claim"]);
-  if ("failure" in claim) return claim;
-  return { end: { blockId, claim: claim.runs } };
+  const blockId = input === null ? null : text(input["blockId"]);
+  if (blockId === null) return { failure: "A relation's end is an object naming a blockId." };
+  return { end: { blockId } };
 }
 
 /** A relation as a request names it: kind, reason, origin and its ends. */
@@ -637,14 +607,6 @@ export function parseDocumentCommand(
           ...(numbered === undefined ? {} : { numbered }),
         },
       };
-    }
-    case "setFrontMatter": {
-      if (baseRevisionId === null) {
-        return { failure: "Setting the front matter names the revision of the document it is based on." };
-      }
-      const read = readFrontMatter(record(input["frontMatter"]) ?? {});
-      if ("failure" in read) return read;
-      return { command: { command: "setFrontMatter", baseRevisionId, frontMatter: read.frontMatter } };
     }
     case "setCitationStyle": {
       if (baseRevisionId === null) {
@@ -823,20 +785,6 @@ export function parseDocumentCommand(
       }
       return { command: { command: "rename", baseRevisionId, title } };
     }
-    case "setDocumentPhase": {
-      if (baseRevisionId === null) {
-        return { failure: "A phase change names the document revision it is based on." };
-      }
-      const phase = input["phase"];
-      if (!isPhase(phase)) {
-        return { failure: `A phase is one of ${PHASES.join(", ")}.` };
-      }
-      const supersede = input["supersede"];
-      if (supersede !== undefined && (typeof supersede !== "string" || supersede === "")) {
-        return { failure: "supersede names the accepted root this acceptance supersedes." };
-      }
-      return { command: { command: "setDocumentPhase", baseRevisionId, phase, ...(typeof supersede === "string" ? { supersede } : {}) } };
-    }
     case "delete": {
       if (baseRevisionId === null) {
         return {
@@ -848,6 +796,23 @@ export function parseDocumentCommand(
     case "retire": {
       if (blockId === null) return { failure: "A retire names a block." };
       return { command: { command: "retire", blockId } };
+    }
+    case "retireBlocks": {
+      const blocks = input["blocks"];
+      if (!Array.isArray(blocks) || blocks.length === 0) {
+        return { failure: "A retirement of several blocks names them." };
+      }
+      const named: { blockId: string; baseRevisionId: string }[] = [];
+      for (const entry of blocks) {
+        const record = typeof entry === "object" && entry !== null ? (entry as Record<string, unknown>) : {};
+        const id = text(record["blockId"]);
+        const base = text(record["baseRevisionId"]);
+        if (id === null || base === null) {
+          return { failure: "Each block retired names itself and the revision it is based on." };
+        }
+        named.push({ blockId: id, baseRevisionId: base });
+      }
+      return { command: { command: "retireBlocks", blocks: named } };
     }
     case "promoteBlock": {
       const group = text(input["group"]);
@@ -873,6 +838,11 @@ export function parseDocumentCommand(
           ],
         },
       };
+    }
+    case "reopen": {
+      const itemId = input["itemId"];
+      if (typeof itemId !== "string") return { failure: "A reopening names the rejected proposal it reopens." };
+      return { command: { command: "reopen", itemId } };
     }
     case "answerProposal": {
       const itemId = input["itemId"];
@@ -906,6 +876,15 @@ export function parseDocumentCommand(
         command: { command: "restore", blockId, placement: placement.placement },
       };
     }
+    case "moveIn": {
+      const fromDocumentId = text(input["fromDocumentId"]);
+      if (blockId === null || fromDocumentId === null) {
+        return { failure: "A move from another document names the block and the document it comes from." };
+      }
+      const placement = readPlacement(input["placement"]);
+      if ("failure" in placement) return placement;
+      return { command: { command: "moveIn", blockId, fromDocumentId, placement: placement.placement } };
+    }
     case "moveRetired": {
       if (blockId === null || baseRevisionId === null) {
         return { failure: "A retired block's move names the block and the revision it is based on." };
@@ -913,35 +892,6 @@ export function parseDocumentCommand(
       const placement = readPlacement(input["placement"]);
       if ("failure" in placement) return placement;
       return { command: { command: "moveRetired", blockId, baseRevisionId, placement: placement.placement } };
-    }
-    case "setKind": {
-      if (blockId === null || baseRevisionId === null) return { failure: "A kind names a block and the revision it is based on." };
-      const blockKind = input["blockKind"];
-      if (blockKind !== null && !isBlockKind(blockKind)) return { failure: `${String(blockKind)} is not a kind a block can be.` };
-      return { command: { command: "setKind", blockId, baseRevisionId, blockKind: blockKind === null ? null : blockKind } };
-    }
-    case "addClaim": {
-      if (blockId === null || baseRevisionId === null) return { failure: "A claim names its block and the revision it is based on." };
-      const runs = readRuns(input["text"]);
-      if ("failure" in runs) return { failure: "A claim carries its words as runs in text." };
-      return { command: { command: "addClaim", blockId, baseRevisionId, text: runs.runs } };
-    }
-    case "reviseClaim": {
-      const claimId = text(input["claimId"]);
-      if (blockId === null || claimId === null || baseRevisionId === null) return { failure: "A claim revision names the block, the claim and the claim's revision it is based on." };
-      const runs = readRuns(input["text"]);
-      if ("failure" in runs) return { failure: "A claim carries its words as runs in text." };
-      return { command: { command: "reviseClaim", blockId, claimId, baseRevisionId, text: runs.runs } };
-    }
-    case "dropClaim": {
-      const claimId = text(input["claimId"]);
-      if (blockId === null || claimId === null) return { failure: "A drop names the block and the claim." };
-      return { command: { command: "dropClaim", blockId, claimId } };
-    }
-    case "declareRelation": {
-      const relation = readRelation(input["relation"]);
-      if ("failure" in relation) return relation;
-      return { command: { command: "declareRelation", relation: relation.relation } };
     }
     case "reviseReason": {
       const relationId = text(input["relationId"]);
@@ -956,18 +906,6 @@ export function parseDocumentCommand(
       const state = input["state"];
       if (!isRelationState(state)) return { failure: `A relation's state is one of ${RELATION_STATES.join(", ")}.` };
       return { command: { command: "setRelationState", relationId, baseRevisionId, state } };
-    }
-    case "resolveJudgement": {
-      const judgementId = text(input["judgementId"]);
-      if (judgementId === null) return { failure: "Seen names the judgement it resolves." };
-      return { command: { command: "resolveJudgement", judgementId } };
-    }
-    case "classify": {
-      const outcome = text(input["outcome"]);
-      if (blockId === null || outcome === null) return { failure: "A classification names the block and the outcome." };
-      const explanation = input["explanation"] === undefined ? { runs: [] as readonly Run[] } : readRuns(input["explanation"]);
-      if ("failure" in explanation) return { failure: "A classification explains itself as runs." };
-      return { command: { command: "classify", blockId, outcome, explanation: explanation.runs } };
     }
     default:
       return { failure: `There is no ${String(name)} command.` };
@@ -1027,24 +965,6 @@ function readProposalItem(
     return { failure: "A proposed change names the block it concerns." };
   }
   if (kind === "remove") return { item: { kind: "remove", blockId } };
-  if (kind === "kind") {
-    const blockKind = input["blockKind"];
-    if (blockKind !== null && !isBlockKind(blockKind)) return { failure: `${String(blockKind)} is not a kind a block can be.` };
-    return { item: { kind: "kind", blockId, blockKind: blockKind === null ? null : blockKind } };
-  }
-  if (kind === "claim") {
-    const runs = readRuns(input["text"]);
-    if ("failure" in runs) return { failure: "A claim carries its words as runs in text." };
-    const claimId = text(input["claimId"]);
-    return { item: { kind: "claim", blockId, ...(claimId === null ? {} : { claimId }), text: runs.runs } };
-  }
-  if (kind === "derive") {
-    const from = input["from"];
-    if (!Array.isArray(from) || from.length === 0 || !from.every((id) => typeof id === "string" && id !== "")) {
-      return { failure: "A derive names the blocks its block rests on, by identity." };
-    }
-    return { item: { kind: "derive", blockId, from: from as string[] } };
-  }
   if (typeof baseRevisionId !== "string") {
     return {
       failure: "A proposed rewrite or move names the revision it is based on.",
@@ -1092,12 +1012,9 @@ export function runDocumentCommand(
     | AnsweredItem
     | StagedProposal
     | PlacedItem
-    | WrittenClaim
     | WrittenRelation
-    | { readonly claimId: string; readonly dataRevision: string }
     | { readonly relationId: string; readonly revisionId: string; readonly dataRevision: string }
-    | { readonly judgementId: string; readonly resolved: string; readonly dataRevision: string }
-    | { readonly judgementId: string; readonly blockId: string; readonly dataRevision: string }
+    | { readonly blockIds: readonly string[]; readonly dataRevision: string }
     | PromotedBlock
   >
 > {
@@ -1117,8 +1034,6 @@ export function runDocumentCommand(
           ? (account as GraphOutcome<never>)
           : promoteBlock({ documentId, group: command.group, blockId: command.blockId, account: account.result }),
       );
-    case "resolveJudgement":
-      return resolveJudgement({ judgementId: command.judgementId });
     case "turnIntoCode":
       return turnIntoCode({ documentId, blockId: command.blockId, baseRevisionId: command.baseRevisionId });
     case "turnIntoImage":
@@ -1152,8 +1067,6 @@ export function runDocumentCommand(
       return setLineNumbers({ documentId, baseRevisionId: command.baseRevisionId, on: command.on });
     case "setCodeContinues":
       return setCodeContinues({ documentId, blockId: command.blockId, baseRevisionId: command.baseRevisionId, continues: command.continues });
-    case "setFrontMatter":
-      return setFrontMatter({ documentId, baseRevisionId: command.baseRevisionId, frontMatter: command.frontMatter });
     case "setFigure":
       return setFigure({
         documentId,
@@ -1172,18 +1085,6 @@ export function runDocumentCommand(
         rows: command.rows,
         ...(command.caption === undefined ? {} : { caption: command.caption }),
       });
-    case "classify":
-      return classify({ documentId, blockId: command.blockId, outcome: command.outcome, explanation: command.explanation });
-    case "setKind":
-      return setBlockKind({ documentId, blockId: command.blockId, baseRevisionId: command.baseRevisionId, blockKind: command.blockKind });
-    case "addClaim":
-      return addClaim({ documentId, blockId: command.blockId, baseRevisionId: command.baseRevisionId, text: command.text });
-    case "reviseClaim":
-      return reviseClaim({ documentId, blockId: command.blockId, claimId: command.claimId, baseRevisionId: command.baseRevisionId, text: command.text });
-    case "dropClaim":
-      return dropClaim({ documentId, blockId: command.blockId, claimId: command.claimId });
-    case "declareRelation":
-      return declareRelation({ documentId, relation: command.relation });
     case "reviseReason":
       return reviseRelationReason({ relationId: command.relationId, baseRevisionId: command.baseRevisionId, reason: command.reason });
     case "setRelationState":
@@ -1245,13 +1146,6 @@ export function runDocumentCommand(
         baseRevisionId: command.baseRevisionId,
         title: command.title,
       });
-    case "setDocumentPhase":
-      return setDocumentPhase({
-        documentId,
-        baseRevisionId: command.baseRevisionId,
-        phase: command.phase,
-        ...(command.supersede !== undefined ? { supersede: command.supersede } : {}),
-      });
     case "delete":
       return deleteDocument({
         documentId,
@@ -1259,11 +1153,15 @@ export function runDocumentCommand(
       });
     case "retire":
       return retireBlock({ documentId, blockId: command.blockId });
+    case "retireBlocks":
+      return retireBlocks({ documentId, blocks: command.blocks });
     case "propose":
       return proposeDocumentChanges({
         documentId,
         items: command.items,
       });
+    case "reopen":
+      return reopenProposal(documentId, command.itemId);
     case "answerProposal":
       return answerDocumentProposal({
         documentId,
@@ -1275,6 +1173,13 @@ export function runDocumentCommand(
       return placeProposedItem({
         documentId,
         itemId: command.itemId,
+        placement: command.placement,
+      });
+    case "moveIn":
+      return moveBlockIn({
+        documentId,
+        fromDocumentId: command.fromDocumentId,
+        blockId: command.blockId,
         placement: command.placement,
       });
     case "moveRetired":
@@ -1344,95 +1249,9 @@ export async function handleDocumentChanges(
  */
 export async function handleProposalsRead(
   documentId: string,
+  rejected = false,
 ): Promise<OutcomeResponse<DocumentProposals>> {
-  return respond(await readDocumentProposals(documentId));
-}
-
-/**
- * A document's claims and the relations anchored on them. Its own read, so a
- * document with no relations pays nothing on the document read. BO_0244_008
- */
-export async function handleRelationsRead(
-  documentId: string,
-): Promise<OutcomeResponse<DocumentRelations>> {
-  const document = await readDocument(documentId);
-  if (document.outcome !== "success") return respond(document as GraphOutcome<never>);
-  return respond(await relationsOf(document.result));
-}
-
-/**
- * The judgements on a document's blocks and relations, with the unresolved
- * pressure per block and the document's derived state: its own read, with
- * the relations, so a document nothing judged pays nothing. BO_0248_010
- */
-export async function handleJudgementsRead(
-  documentId: string,
-): Promise<OutcomeResponse<DocumentJudgements>> {
-  const document = await readDocument(documentId);
-  if (document.outcome !== "success") return respond(document as GraphOutcome<never>);
-  const relations = await relationsOf(document.result);
-  if (relations.outcome !== "success") return respond(relations as GraphOutcome<never>);
-  return respond(await judgementsOf(document.result, relations.result));
-}
-
-/** Every document's derived state, for the library's glyph. BO_0248_012 */
-export async function handleDocumentStates(): Promise<OutcomeResponse<Readonly<Record<string, Exclude<DocumentState, null>>>>> {
-  return respond(await documentStates());
-}
-
-/** A block's provenance, read on request for the depth. BO_0244_009 */
-export async function handleProvenanceRead(
-  documentId: string,
-  blockId: string,
-): Promise<OutcomeResponse<BlockProvenance>> {
-  const document = await readDocument(documentId);
-  if (document.outcome !== "success") return respond(document as GraphOutcome<never>);
-  if (!document.result.blocks.some((block) => block.blockId === blockId)) {
-    return respond({ outcome: "noResult", detail: `No block ${blockId} in document ${documentId}.` });
-  }
-  return respond(await provenanceRead(blockId));
-}
-
-/** What accepting the document would do, for the transition card: the
- * relations reaching other roots, the roots it supersedes, the judgements
- * standing unresolved, whether the signed-in person may establish, and the
- * accepted roots that contradict it. BO_0249_007 */
-export async function handleConsequencesRead(documentId: string): Promise<OutcomeResponse<Consequences>> {
-  const document = await readDocument(documentId);
-  if (document.outcome !== "success") return respond(document as GraphOutcome<never>);
-  const relations = await relationsOf(document.result);
-  if (relations.outcome !== "success") return respond(relations as GraphOutcome<never>);
-  const judgements = await judgementsOf(document.result, relations.result);
-  if (judgements.outcome !== "success") return respond(judgements as GraphOutcome<never>);
-  return respond(await consequencesFor(document.result, judgements.result));
-}
-
-/** What the root's acceptance accepted, derived per claim from the stamp it
- * stored: accepted, changed since, or not accepted — a claim added after the
- * press, or one contradicting a claim accepted elsewhere. BO_0274_006 */
-export async function handleAcceptanceRead(documentId: string): Promise<OutcomeResponse<Acceptance>> {
-  const document = await readDocument(documentId);
-  if (document.outcome !== "success") return respond(document as GraphOutcome<never>);
-  const relations = await relationsOf(document.result);
-  if (relations.outcome !== "success") return respond(relations as GraphOutcome<never>);
-  const judgements = await judgementsOf(document.result, relations.result);
-  if (judgements.outcome !== "success") return respond(judgements as GraphOutcome<never>);
-  return respond(await acceptanceOf(document.result, relations.result, judgements.result));
-}
-
-/** The signed-in person's read mark on a document: read with the document,
- * written when the derived blocks came into view or the tab was left.
- * BO_0246_009 */
-export async function handleReadMark(request: Request, documentId: string): Promise<OutcomeResponse<ReadMark>> {
-  if (request.method === "GET") return respond(await readMark(documentId));
-  let body: { dataRevision?: unknown } = {};
-  try {
-    body = (await request.json()) as { dataRevision?: unknown };
-  } catch {
-    body = {};
-  }
-  const dataRevision = typeof body.dataRevision === "number" ? body.dataRevision : -1;
-  return respond(await writeMark(documentId, dataRevision));
+  return respond(await readDocumentProposals(documentId, { rejected }));
 }
 
 /** The signed-in person's working mode on a document: read as the document
@@ -1446,19 +1265,6 @@ export async function handleWorkingMode(request: Request, documentId: string): P
     body = null;
   }
   return respond(await writeMode(documentId, body));
-}
-
-/** A block's claims' revisions, on request for the depth's history. CA_0046_003 */
-export async function handleHistoryRead(
-  documentId: string,
-  blockId: string,
-): Promise<OutcomeResponse<BlockHistory>> {
-  const document = await readDocument(documentId);
-  if (document.outcome !== "success") return respond(document as GraphOutcome<never>);
-  if (!document.result.blocks.some((block) => block.blockId === blockId)) {
-    return respond({ outcome: "noResult", detail: `No block ${blockId} in document ${documentId}.` });
-  }
-  return respond(await historyRead(blockId));
 }
 
 export async function handleRetiredRead(

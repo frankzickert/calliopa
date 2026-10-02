@@ -8,7 +8,7 @@ import { tabUnnamed } from "./library";
  */
 const sections = [
   { key: "documents:documents", opens: "documents:document" },
-  { key: "calliopa-video:episodes", opens: "calliopa-video:episode" },
+  { key: "demo:things", opens: "demo:thing" },
   { key: "ui.shell:extensions" },
 ];
 
@@ -17,7 +17,7 @@ const data: Record<string, unknown> = {
     { id: "doc-new", label: "Untitled document", unnamed: true },
     { id: "doc-named", label: "Release plan" },
   ],
-  "calliopa-video:episodes": [{ id: "doc-new", label: "Untitled document", unnamed: true }],
+  "demo:things": [{ id: "doc-new", label: "Untitled document", unnamed: true }],
   "ui.shell:extensions": { extensions: [] },
 };
 

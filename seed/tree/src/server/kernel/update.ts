@@ -47,6 +47,9 @@ export interface UpdateView {
   readonly updater: UpdaterStatus;
   readonly pending: PendingUpdate | null;
   readonly promotion?: UpdatePromotion;
+  /** A migration that failed when the served pin was served: unapplied, and
+   * tried again at the next serve. BO_0312_003 */
+  readonly migration?: { readonly id: string; readonly extension: string; readonly pin: number; readonly error: string };
 }
 
 export interface UpdateRequest {

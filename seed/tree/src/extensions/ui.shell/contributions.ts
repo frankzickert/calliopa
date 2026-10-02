@@ -11,8 +11,7 @@ import { AdmonitionPatternsSection } from "~/components/shell/admonition-pattern
  * extension under `BO_0255`.
  * The frame itself — workspace, tabs, dock, drawers, the process registry, the
  * CCGW and kernel clients — is `src/` root source and not a contribution.
- * Episodes, standing assets and destinations are `calliopa-video`'s since
- * `BO_0203`. BO_0202_002
+ * BO_0202_002
  */
 
 const extension: ViewContribution = {

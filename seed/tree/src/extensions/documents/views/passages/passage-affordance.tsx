@@ -35,7 +35,7 @@ export const PassageAffordance = component$<{
   } = useContext(MarkingContext);
   const selected = passages.selected;
   if (selected === null || marking.marking.mode !== "command") return null;
-  // A proposal's, a retired or a discarded row's words are the row's own,
+  // A proposal's or a retired row's words are the row's own,
   // and the passage stands on that row. BO_0263_005
   const marked = selected.marked ?? {};
   const block = surface.document?.blocks.find(

@@ -45,8 +45,9 @@ import {
   moveTab,
   neighbourTab,
   openTab,
+  openAlongRoute,
+  openTabBeside,
   selectTab,
-  retargetTab,
   updateTab,
   type RouteEntry,
   type Tab,
@@ -61,16 +62,25 @@ import { endedForDocuments } from "~/lib/ended-processes";
 import { tabUnnamed } from "~/lib/library";
 import {
   DRAG_MOVE_TOLERANCE_PX,
+  holdMark,
+  holdOver,
+  inMiddle,
   LONG_PRESS_MS,
   movedDistance,
   pointerIntent,
   edgeScroll,
   PANEL_ICON_TARGET,
   resolveDrop,
+  SPRING_HOLD_MS,
+  springAction,
+  springDue,
+  springRepeats,
+  springs,
   tabSwipeStep,
   type DragOperation,
   type DragPayload,
   type DropTarget,
+  type SpringHold,
 } from "~/lib/drag";
 import type { LibraryItem, OpenTarget } from "~/contract";
 import { qualify } from "~/registry";
@@ -87,7 +97,7 @@ import {
   type Pointing,
   type WorkingMode,
 } from "~/lib/command-target";
-import type { BridgeAttachment } from "~/server/agent/bridge";
+import type { BridgeAttachment, RunContextEntry } from "~/server/agent/bridge";
 import type { WorkspaceRecord } from "~/lib/workspace";
 import type { Person } from "~/server/session";
 import { candidates, fetchReleases, parseReleases } from "~/lib/releases";
@@ -152,6 +162,7 @@ import {
   type ViewCommand,
   type SentCommand,
   type ViewGesture,
+  type ViewPinch,
   type ViewBar,
   type ViewSave,
   type SaveState,
@@ -166,6 +177,9 @@ import {
   type ViewReveal,
   type ViewPointing,
   type ViewAcross,
+  type ViewCommandOptions,
+  commandKey,
+  withOption,
 } from "./view-bridge";
 import { chipsFor } from "~/lib/run-chips";
 import {
@@ -200,6 +214,9 @@ interface DragState {
   position: { x: number; y: number };
   overId: string | null;
   operation: DragOperation | null;
+  /** The place a dragged item is held over, which opens after the hold.
+   * CA_0072_001 */
+  hold: SpringHold | null;
   /** A drop the shell did not consume itself, left for the view that declared
    * the target. Kept across the idle reset, because it outlives the gesture. */
   drop: ViewDrop | null;
@@ -219,6 +236,7 @@ const idleDrag = () => ({
   position: { x: 0, y: 0 },
   overId: null,
   operation: null,
+  hold: null,
 });
 
 /** Targets the shell owns. Everything else belongs to the mounted view. */
@@ -243,12 +261,25 @@ function targetUnder(x: number, y: number, iconIds: readonly string[] = []): Dro
     const before = iconDropBefore(iconIds, id.slice(PANEL_ICON_TARGET.length), y > box.top + box.height / 2);
     id = `${PANEL_ICON_TARGET}${before ?? "end"}`;
   }
+  // A target naming a second target for its middle means that one there: a
+  // block row takes a block into it over its middle half. CA_0072_007
+  const middle = element.getAttribute("data-drop-middle");
+  if (middle !== null) {
+    const box = element.getBoundingClientRect();
+    if (inMiddle(y, box.top, box.height)) id = middle;
+  }
   return {
     id,
     accepts: (element.getAttribute("data-accepts") ?? "")
       .split(" ")
       .filter(Boolean) as DragOperation[],
   };
+}
+
+/** The place under the pointer that a held drag opens, by its `data-spring`.
+ * CA_0072_001 */
+function springUnder(x: number, y: number): string | null {
+  return document.elementFromPoint(x, y)?.closest("[data-spring]")?.getAttribute("data-spring") ?? null;
 }
 
 /**
@@ -331,14 +362,6 @@ export const Shell = component$<{
      * running. BO_0225_004 BO_0228_011
      */
     agent: string | null;
-    /** What the reader chose on the chosen sender's axes. BO_0279_007 */
-    options: Record<string, string>;
-    /**
-     * What the next press would cost, in the offering extension's own words,
-     * or "" when nothing can say. It is asked as the reader turns a control
-     * and shown on *Send*, which is the thing that spends. BO_0279_009
-     */
-    cost: string;
     /** The next command's speed, opened on the person's last. BO_0269_015 */
     speed: Speed;
     runtimes: SelectableRuntime[];
@@ -362,8 +385,6 @@ export const Shell = component$<{
     sending: false,
     notice: null,
     agent: null,
-    options: {} as Record<string, string>,
-    cost: "",
     speed: "fast" as Speed,
     runtimes: [],
     awaiting: null,
@@ -424,7 +445,7 @@ export const Shell = component$<{
     tabs: workspace.tabs,
     activeTabId: workspace.activeTabId,
   });
-  const proposed = useStore<ProposedRead>({ processId: null, documents: [], attachments: [], profile: null, events: [] });
+  const proposed = useStore<ProposedRead>({ processId: null, documents: [], attachments: [], profile: null, context: [], events: [] });
   /**
    * The runs of the document in the active tab, for the inspector's
    * *Execution* section: read when the tab changes, when a run this shell
@@ -739,21 +760,23 @@ export const Shell = component$<{
     }
     run.sending = true;
     const branch = aim.branch?.[command.itemId];
-    const mode = aim.mode?.[command.itemId];
+    // The command's own mode, chosen on its block; the document's mode in the
+    // aim when a view sends none. DO_0025_008
+    const mode = command.mode ?? aim.mode?.[command.itemId];
     const started = await startRun$(
       {
         ...(run.agent === null ? {} : { agent: run.agent }),
-        // What the reader chose on the sender's axes, when it has any. An
-        // agent has none and sends none. BO_0279_007
-        ...(Object.keys(run.options).length === 0 ? {} : { options: run.options }),
         speed: run.speed,
         ...blockCommand(command.itemId, command.source, pointing.references),
         // A command issued in a branch proposes into it: the run's group
         // is the person's branch, not one of its own. BO_0250_010
         ...(branch === undefined ? {} : { branch }),
-        // The working mode in force on the document. BO_0306_017
+        // The working mode the command carries. BO_0306_017 DO_0025_008
         ...(mode === undefined ? {} : { mode }),
         ...(command.attachments.length === 0 ? {} : { attachments: command.attachments }),
+        // What the command's places set on it — the profile its chip chose.
+        // An option no one set is not sent. BO_0311_030
+        ...(command.options === undefined || Object.keys(command.options).length === 0 ? {} : { commandOptions: command.options }),
       },
       command.itemId,
     );
@@ -791,39 +814,37 @@ export const Shell = component$<{
     return started;
   });
 
-  const chooseAgent$ = $((agent: string) => chooseAgent(run, agent));
-  /** One axis of the chosen sender, as the reader turns it. BO_0279_007 */
-  const chooseOption$ = $((axis: string, value: string) => {
-    run.options = { ...run.options, [axis]: value };
+  /**
+   * Sends a pinch on a block (`BO_0322`): a run with no words on the chosen
+   * agent and speed, the block its one reference, in the mode the view says
+   * the pinch works in, followed like every other. BO_0322_016
+   */
+  const sendPinch$ = $(async (pinch: ViewPinch): Promise<SentCommand> => {
+    if (run.sending) return { ok: false, error: "A command is already being sent." };
+    run.sending = true;
+    const branch = aim.branch?.[pinch.itemId];
+    const started = await startRun$(
+      {
+        ...(run.agent === null ? {} : { agent: run.agent }),
+        speed: run.speed,
+        pinch: pinch.pinch,
+        artifact: pinch.itemId,
+        block: pinch.blockId,
+        ...(branch === undefined ? {} : { branch }),
+        mode: pinch.mode,
+      },
+      pinch.itemId,
+    );
+    run.sending = false;
+    return started;
   });
 
-  /**
-   * What the next press would cost (`BO_0279_009`). Free — a quote is the
-   * generator's own dry run — and asked as the reader turns a control, so the
-   * number on *Send* is current the moment they look at it rather than after a
-   * wait. An agent, or an extension that cannot say, leaves it empty and
-   * nothing is shown: no number is better than a wrong one.
-   */
-  const quoteSend$ = $(async (documentId: string, blockId: string) => {
-    const sender = run.agent;
-    if (sender === null || workspace.id === "") {
-      run.cost = "";
-      return;
-    }
-    const asked = { sender, options: run.options };
-    const response = await fetch(`/api/workspaces/${workspace.id}/runs/quote`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...asked, documentId, blockId }),
-    });
-    if (!response.ok) {
-      run.cost = "";
-      return;
-    }
-    const answered = (await response.json()) as { ok?: boolean; cost?: string };
-    // A later turn of a control has its own answer; this one is stale.
-    if (run.agent !== sender) return;
-    run.cost = answered.ok === true && typeof answered.cost === "string" ? answered.cost : "";
+  const chooseAgent$ = $((agent: string) => chooseAgent(run, agent));
+  /** What `command` places set on each command, sent with it. BO_0311_030 */
+  const commandOptions = useStore<ViewCommandOptions>({ byCommand: {} });
+  const setCommandOption$ = $((itemId: string, blockId: string, name: string, value: string | null) => {
+    const key = commandKey(itemId, blockId);
+    commandOptions.byCommand = { ...commandOptions.byCommand, [key]: withOption(commandOptions.byCommand[key] ?? {}, name, value) };
   });
   /** The next command's speed; the kernel remembers it for the person when a
    * run starts with it. BO_0269_015 */
@@ -855,15 +876,18 @@ export const Shell = component$<{
     proposed.documents = [];
     proposed.attachments = [];
     proposed.profile = null;
+    proposed.context = [];
     proposed.events = [];
     if (selected === null) return;
 
-    const [response, attached, guided] = await Promise.all([
+    const [response, attached, guided, told] = await Promise.all([
       fetch(`/api/processes/${selected}/proposals`),
       // What the run was sent with, from its own record. BO_0229_011
       fetch(`/api/processes/${selected}/attachments`),
       // The profile that guided it, from the same record. BO_0298_031
       fetch(`/api/processes/${selected}/profile`),
+      // What each extension told it at its start, from the same record. BO_0310_040
+      fetch(`/api/processes/${selected}/context`),
     ]);
     if (response.ok && selectedProcess(registry.selection, tabs.activeTabId) === selected) {
       proposed.documents = (await response.json()) as ProposedItem[];
@@ -873,6 +897,9 @@ export const Shell = component$<{
     }
     if (guided.ok && selectedProcess(registry.selection, tabs.activeTabId) === selected) {
       proposed.profile = (await guided.json()) as { id: string; title: string } | null;
+    }
+    if (told.ok && selectedProcess(registry.selection, tabs.activeTabId) === selected) {
+      proposed.context = (await told.json()) as RunContextEntry[];
     }
   });
   /**
@@ -930,7 +957,78 @@ export const Shell = component$<{
       if (held) drag.payload = drag.candidate;
     }, LONG_PRESS_MS);
   });
-  const trackDrag$ = $((event: PointerEvent) => {
+  /**
+   * Opens a target in a tab, in the view remembered for it. `openTab` reveals
+   * a tab already showing this target rather than opening a second one, so
+   * activating an entry twice lands on the same tab. The kind is qualified as
+   * the registry names it. BO_0202_004
+   */
+  const openTarget$ = $(async (target: OpenTarget, beside = false) => {
+    const tab: Tab = {
+      id: `${target.kind}-${target.itemId}`,
+      kind: target.kind,
+      title: target.title,
+      itemId: target.itemId,
+      viewType: preferredView(REGISTRY, preferred.value, target.itemId, target.kind).id,
+      selection: null,
+      drawerContext: target.kind,
+      unsaved: false,
+    };
+    // A panel is a place to reach for something, not a place to stay. On a
+    // phone the sheet lies over the workspace it has just opened, so it has
+    // done its job the moment it lands the reader on a tab — whether the tab
+    // was made here, opened, or only revealed. Every path a panel opens a tab
+    // by comes through here, the library's rows and create controls and the
+    // Extensions section and the inspector alike, so this is the one place it
+    // is said. The panel itself is untouched: what it shows and whether it is
+    // shown are the workspace record's, so the next press on the handle brings
+    // back the list where it was. CA_0059_001
+    mobile.sheet = null;
+    await applyTabs$(beside ? openTabBeside(tabs, tab) : openTab(tabs, tab));
+  });
+  /**
+   * Opens the place a hold was on once the hold has lasted, if the pointer is
+   * still there and the drag still under way (CA_0072_001): a tab becomes
+   * active, a tab edge steps and keeps stepping while it is held, the library
+   * shows an icon's content (on a phone its sheet opens), and a library entry
+   * opens its document beside the active tab. The drag goes on in what it
+   * opened; its store is the shell's, so a tab switch leaves it whole.
+   */
+  const openSpring$ = $(async (id: string) => {
+    const action = springAction(id);
+    if (action === null) return;
+    if (action.open === "tab") {
+      await applyTabs$(selectTab(tabs, action.tabId));
+    } else if (action.open === "step") {
+      await stepTab$(action.step);
+    } else if (action.open === "sheet") {
+      mobile.sheet = "left";
+    } else if (action.open === "icon") {
+      const left = { shown: true, icon: action.icon };
+      layout.left = left;
+      await save$(tabs, { ...layout, left });
+    } else {
+      const item = Object.values(library.data)
+        .flatMap((data) => (Array.isArray(data) ? (data as readonly LibraryItem[]) : []))
+        .find((candidate) => candidate.id === action.itemId);
+      if (item?.open !== undefined) await openTarget$(item.open, true);
+    }
+  });
+  const armSpring$ = $((hold: SpringHold) => {
+    const wait = (armed: SpringHold) =>
+      setTimeout(async () => {
+        const current = drag.hold;
+        if (drag.payload === null || current === null || current.id !== armed.id || current.since !== armed.since) return;
+        if (!springDue(current, Date.now())) return;
+        const again = springRepeats(current.id);
+        const next = { id: current.id, since: again ? Date.now() : null };
+        drag.hold = next;
+        await openSpring$(current.id);
+        if (again) wait(next);
+      }, SPRING_HOLD_MS);
+    wait(hold);
+  });
+  const trackDrag$ = $(async (event: PointerEvent) => {
     if (drag.candidate === null) return;
     drag.position = { x: event.clientX, y: event.clientY };
     if (drag.payload === null) {
@@ -950,6 +1048,14 @@ export const Shell = component$<{
     drag.overId = target?.id ?? null;
     drag.operation =
       target === null ? null : resolveDrop(drag.payload, target);
+    // A dragged block held over a place opens it. CA_0072_001
+    if (springs(drag.payload)) {
+      const hold = holdOver(drag.hold, springUnder(event.clientX, event.clientY), Date.now());
+      if (hold !== drag.hold) {
+        drag.hold = hold;
+        if (hold !== null) await armSpring$(hold);
+      }
+    }
   });
   // While a drag is under way, a pointer held near the top or the bottom of
   // the area the drag began in scrolls it, and the target under the pointer
@@ -1021,35 +1127,6 @@ export const Shell = component$<{
     }
   });
   const cancelDrag$ = $(() => Object.assign(drag, idleDrag()));
-  /**
-   * Opens a target in a tab, in the view remembered for it. `openTab` reveals
-   * a tab already showing this target rather than opening a second one, so
-   * activating an entry twice lands on the same tab. The kind is qualified as
-   * the registry names it. BO_0202_004
-   */
-  const openTarget$ = $(async (target: OpenTarget) => {
-    const tab: Tab = {
-      id: `${target.kind}-${target.itemId}`,
-      kind: target.kind,
-      title: target.title,
-      itemId: target.itemId,
-      viewType: preferredView(REGISTRY, preferred.value, target.itemId, target.kind).id,
-      selection: null,
-      drawerContext: target.kind,
-      unsaved: false,
-    };
-    // A panel is a place to reach for something, not a place to stay. On a
-    // phone the sheet lies over the workspace it has just opened, so it has
-    // done its job the moment it lands the reader on a tab — whether the tab
-    // was made here, opened, or only revealed. Every path a panel opens a tab
-    // by comes through here, the library's rows and create controls and the
-    // Extensions section and the inspector alike, so this is the one place it
-    // is said. The panel itself is untouched: what it shows and whether it is
-    // shown are the workspace record's, so the next press on the handle brings
-    // back the list where it was. CA_0059_001
-    mobile.sheet = null;
-    await applyTabs$(openTab(tabs, tab));
-  });
   /**
    * *Mark document*, pressed on a library row or a tab while a pointing stands
    * (`BO_0304_014`): the shell hands the press to the mounted document view,
@@ -1172,6 +1249,52 @@ export const Shell = component$<{
     // at, and answering it would act on that one.
     message.current = null;
   });
+  /** What a target's blocks have opened as focused work, read and kept by
+   * target so a control's words can say whether a block has a child.
+   * CA_0065_005 */
+  const readFaces$ = $(async (itemId: string): Promise<FocusedWork> => {
+    const kind = kindOf(tabs, itemId);
+    if (kind === null) return {};
+    const answer = await fetch(`/api/focused-work/${itemId}?kind=${encodeURIComponent(kind)}`);
+    const outcome = (await answer.json()) as { outcome: string; result?: FocusedWork };
+    const work = outcome.outcome === "success" && outcome.result !== undefined ? outcome.result : {};
+    faces.byItem = { ...faces.byItem, [itemId]: work };
+    return work;
+  });
+  /** Opens a block of a target as focused work, or finds the child it has,
+   * through the target kind's contribution: the child, or the refusal in
+   * words. CA_0065_003 CA_0072_005 */
+  const openChild$ = $(async (itemId: string, blockId: string): Promise<{ itemId: string; title: string } | string> => {
+    const kind = kindOf(tabs, itemId);
+    if (kind === null) return "This tab opens no focused work.";
+    const answer = await fetch(`/api/focused-work/${itemId}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind, blockId }),
+    });
+    const outcome = (await answer.json()) as
+      | { outcome: "success"; result: { itemId: string; title: string } }
+      | { outcome: string; failures?: readonly { detail?: string }[]; error?: string };
+    if (outcome.outcome !== "success") {
+      const failures = (outcome as { failures?: readonly { detail?: string }[] }).failures ?? [];
+      return failures[0]?.detail ?? (outcome as { error?: string }).error ?? "That block does not open as focused work.";
+    }
+    return (outcome as { result: { itemId: string; title: string } }).result;
+  });
+  /** Opens a document reached along a route — a block's focused work, or a
+   * crumb going back — in a tab of its own beside the active one, or makes
+   * the tab already showing it active; `focus` lands a block once it shows.
+   * The tab pressed in keeps its target and route. CA_0073_001 CA_0073_002 */
+  const openAlongRoute$ = $(async (target: { itemId: string; title: string; route: readonly RouteEntry[]; focus?: string }) => {
+    const from = activeTab(tabs);
+    if (from === undefined) return;
+    const view = preferredView(REGISTRY, preferred.value, target.itemId, from.kind).id;
+    const next = openAlongRoute(tabs, target, view);
+    focus.itemId = target.itemId;
+    focus.blockId = target.focus ?? null;
+    focus.seq += 1;
+    await applyTabs$(next);
+  });
   const bridge: ViewBridge = {
     workspaceId: workspace.id,
     drag,
@@ -1224,26 +1347,19 @@ export const Shell = component$<{
     composeBlock,
     agents: run,
     chooseAgent$,
-    chooseOption$,
-    quoteSend$,
+    commandOptions,
+    setCommandOption$,
     chooseSpeed$,
     refreshAgents$,
     sendCommand$,
     sendGesture$,
+    sendPinch$,
     // Focused work: the shell's own capability, offered to every view.
     // The kind comes from the tab the target is open in, so a view never
     // names a vocabulary, and the faces a view read are kept so a control's
     // words can say whether the block already has a child. CA_0065_003
     // CA_0065_004 CA_0065_005
-    faces$: $(async (itemId: string) => {
-      const kind = kindOf(tabs, itemId);
-      if (kind === null) return {};
-      const answer = await fetch(`/api/focused-work/${itemId}?kind=${encodeURIComponent(kind)}`);
-      const outcome = (await answer.json()) as { outcome: string; result?: FocusedWork };
-      const work = outcome.outcome === "success" && outcome.result !== undefined ? outcome.result : {};
-      faces.byItem = { ...faces.byItem, [itemId]: work };
-      return work;
-    }),
+    faces$: readFaces$,
     blockControls$: $(async (itemId: string, blockId: string) => {
       if (kindOf(tabs, itemId) === null) return [];
       const held = faces.byItem[itemId]?.[blockId] !== undefined;
@@ -1255,50 +1371,28 @@ export const Shell = component$<{
         },
       ] as const;
     }),
+    focusedChild$: $(async (itemId: string, blockId: string) => {
+      const child = await openChild$(itemId, blockId);
+      if (typeof child === "string") return { refusal: child };
+      await readFaces$(itemId);
+      return { itemId: child.itemId };
+    }),
     pressBlockControl$: $(async (control, target) => {
       if (control !== "focused-work") return `The shell has no control ${control}.`;
-      const kind = kindOf(tabs, target.itemId);
-      if (kind === null) return "This tab opens no focused work.";
-      const answer = await fetch(`/api/focused-work/${target.itemId}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ kind, blockId: target.blockId }),
-      });
-      const outcome = (await answer.json()) as
-        | { outcome: "success"; result: { itemId: string; title: string } }
-        | { outcome: string; failures?: readonly { detail?: string }[]; error?: string };
-      if (outcome.outcome !== "success") {
-        const failures = (outcome as { failures?: readonly { detail?: string }[] }).failures ?? [];
-        return failures[0]?.detail ?? (outcome as { error?: string }).error ?? "That block does not open as focused work.";
-      }
-      const child = (outcome as { result: { itemId: string; title: string } }).result;
-      // The parent is pushed onto the route with the block it was opened
-      // from, so Back returns to it and lands there. CA_0047_003
+      const child = await openChild$(target.itemId, target.blockId);
+      if (typeof child === "string") return child;
+      // The child opens in a tab of its own after the parent's, and the
+      // parent's tab stays as it was. Its route is the parent's with the block
+      // it was opened from, so Back returns there and lands on it.
+      // CA_0047_003 CA_0073_001
       const route = [...target.route];
       const parent = route[route.length - 1];
       if (parent !== undefined) route[route.length - 1] = { ...parent, blockId: target.blockId };
       route.push({ itemId: child.itemId, title: child.title });
-      const id = tabs.activeTabId;
-      if (id !== null) {
-        const next = retargetTab(tabs, id, { itemId: child.itemId, title: child.title, route });
-        tabs.tabs = next.tabs;
-        focus.itemId = child.itemId;
-        focus.blockId = null;
-        focus.seq += 1;
-        await save$(next, layout);
-      }
+      await openAlongRoute$({ itemId: child.itemId, title: child.title, route });
       return null;
     }),
-    retarget$: $(async (target: { itemId: string; title: string; route: readonly RouteEntry[]; focus?: string }) => {
-      const id = tabs.activeTabId;
-      if (id === null) return;
-      const next = retargetTab(tabs, id, target);
-      tabs.tabs = next.tabs;
-      focus.itemId = target.itemId;
-      focus.blockId = target.focus ?? null;
-      focus.seq += 1;
-      await save$(next, layout);
-    }),
+    openAlongRoute$,
     focus,
     raiseMessage$: $((next: Message) => {
       message.current = next;
@@ -1443,6 +1537,7 @@ export const Shell = component$<{
               side="before"
               tabs={tabs}
               onStep$={stepTab$}
+              drag={drag}
             />
             {tabs.tabs.map((tab) => (
               <span
@@ -1463,6 +1558,10 @@ export const Shell = component$<{
                 data-drop-active={
                   drag.overId === `tab:${tab.id}` ? "true" : undefined
                 }
+                // Held over with a dragged block, the tab becomes active.
+                // CA_0072_003
+                data-spring={`tab:${tab.id}`}
+                data-spring-hold={holdMark(drag.hold, `tab:${tab.id}`)}
               >
                 <button
                   class="tab"
@@ -1552,6 +1651,7 @@ export const Shell = component$<{
               side="after"
               tabs={tabs}
               onStep$={stepTab$}
+              drag={drag}
             />
           </nav>
           <HeaderMenu
@@ -1635,6 +1735,9 @@ export const Shell = component$<{
           type="button"
           class="sheet-handle sheet-handle--left"
           aria-label="Open library"
+          // Held over with a dragged block, the sheet opens. CA_0072_004
+          data-spring="library-handle"
+          data-spring-hold={holdMark(drag.hold, "library-handle")}
           // The gesture that opened the sheet closes it: a handle that only
           // ever opened would reopen what the reader meant to put away.
           // CA_0059_002
@@ -1750,6 +1853,7 @@ export const Shell = component$<{
                                 item={item}
                                 current={current}
                                 onOpen$={openTarget$}
+                                held={holdMark(drag.hold, `library:${item.id}`) !== undefined}
                                 pointing={rowPointing(pointing, item.open?.itemId ?? null)}
                                 onMark$={markDocument$}
                               />
@@ -1791,6 +1895,9 @@ export const Shell = component$<{
               chips={chipsFor(runChips.byItem, active)}
               answerAll={answerAll}
               toggleRun={toggleRun}
+              // While a pointing stands anywhere, a chip's press marks its
+              // whole proposal for the prompt. BO_0321_011
+              pointing={pointing.documentId !== null}
             />
           )}
           {active ? (

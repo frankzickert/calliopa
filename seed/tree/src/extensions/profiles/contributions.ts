@@ -1,28 +1,28 @@
 import { contributions as declare } from "~/contract";
 
-import { ProfilesSection } from "./views/section";
-import { ProfileSelector } from "./views/selector";
+import { ProfileChip } from "./views/chip";
+import { ProfileToolsSettings } from "./views/settings";
+import { ProfileToolsProvider, ToolHeadline } from "./views/tools";
 
 /**
- * The client half of `profiles` (`BO_0298_014`, `BO_0298_016`): the Profiles
- * category under its own icon, listing the instance's profiles and creating
- * one, and the selector every document's bar carries — a dropdown attaching
- * a profile to the document, written as the person's own act. A profile is
- * a document and opens in the document tab; the property it is attached by
- * is `documents`' ([Block Document Model](../documents/docs/system/documents/block-document-model.md#profiles)),
- * and what a run receives is the kernel's (`calliopa-bootstrap`'s
- * `ui-kernel.md`, Profiles).
+ * The client half of `profiles` (`calliopa-bootstrap`'s `BO_0298` and
+ * `BO_0311`): the profile chosen per command from a compass in the chip of
+ * the block being edited, and on a profile's own document its code blocks
+ * named as the tools they are, with the owner's grant of outside reach in the
+ * document's bar, and the grants and the tools' secrets in Settings for the
+ * owner alone. A profile is a document carrying the built-in *Profile*
+ * role, so the Roles category lists the profiles and this extension draws no
+ * category of its own (`BO_0308_Q11`); what a run receives is the kernel's
+ * (`ui-kernel.md`, The Profile In The Command, With Tools).
  */
 export const contributions = declare({
-  icon: { title: "Profiles", name: "compass" },
-  // The rows open documents, so the shell re-reads the section when a
-  // document tab is renamed or goes, as it re-reads the Documents section.
-  sections: [{ name: "profiles", title: "Profiles", empty: "No profiles yet", opens: "documents:document", component: ProfilesSection }],
+  sections: [],
   kinds: {},
+  settingsSections: [{ name: "profile-tools", title: "Profile tools", component: ProfileToolsSettings, owner: true }],
   decorations: {
     document: {
-      provider: ProfileSelector,
-      places: {},
+      provider: ProfileToolsProvider,
+      places: { command: ProfileChip, headline: ToolHeadline },
     },
   },
 });

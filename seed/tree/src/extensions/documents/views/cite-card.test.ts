@@ -93,6 +93,6 @@ describe("a citation in reading", () => {
     await view.settle(() => view.root.querySelector('[data-cite-open="wrk-2"]') != null);
     await view.userEvent('[data-cite-open="wrk-2"]', "click");
     await view.settle(() => (view.record.opened ?? []).some((target) => target.itemId === "wrk-2"));
-    expect((view.record.opened ?? []).find((target) => target.itemId === "wrk-2")).toMatchObject({ kind: "bibliography:work", title: "Thermometry" });
+    expect((view.record.opened ?? []).find((target) => target.itemId === "wrk-2")).toMatchObject({ kind: "documents:document", title: "Thermometry" });
   });
 });

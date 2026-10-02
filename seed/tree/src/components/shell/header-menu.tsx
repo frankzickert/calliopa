@@ -19,6 +19,7 @@ import {
   type MenuStatus,
   type MenuStatusChange,
 } from "~/lib/header-mode";
+import { holdMark, type SpringHold } from "~/lib/drag";
 import { tabsBeside, type TabsState } from "~/lib/tabs";
 import { Icon, type IconName } from "./icons";
 import { SAVE_WORD } from "./inspector";
@@ -257,6 +258,9 @@ export const TabEdge = component$<{
   side: "before" | "after";
   tabs: TabsState;
   onStep$: QRL<(step: -1 | 1) => void>;
+  /** The shell's drag store, read here so the hold mark follows it. Held over
+   * with a dragged block, an edge steps once per hold. CA_0072_003 */
+  drag?: { readonly hold: SpringHold | null } | undefined;
 }>((props) => {
   const count = tabsBeside(props.tabs)[props.side];
   const before = props.side === "before";
@@ -265,6 +269,8 @@ export const TabEdge = component$<{
       type="button"
       class={`tab-edge tab-edge--${props.side}`}
       data-tab-edge={props.side}
+      data-spring={`tab-edge:${props.side}`}
+      data-spring-hold={holdMark(props.drag?.hold ?? null, `tab-edge:${props.side}`)}
       aria-label={`${count} ${count === 1 ? "tab" : "tabs"} ${props.side}. ${before ? "Previous" : "Next"} tab`}
       onClick$={() => props.onStep$(before ? -1 : 1)}
     >

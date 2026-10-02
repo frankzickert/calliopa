@@ -80,8 +80,18 @@ const table = (value: unknown): Record<string, string> => {
 export const offeredKey = (service: string, model: string): string => `${service}:${model}`;
 
 export async function readOffered(): Promise<OfferedSet> {
-  const held = await kernelState.read<OfferedSet>("settings", RECORD);
-  if (held === null) return empty;
+  return offeredFrom(await kernelState.read<OfferedSet>("settings", RECORD));
+}
+
+/**
+ * The offered set out of a record as stored. A run's tool is handed the
+ * record with its call (`settings`, `BO_0276_007`), since its callback holds
+ * no session to read the state record with (`calliopa-bootstrap`'s
+ * `BO_0312_063`).
+ */
+export function offeredFrom(value: unknown): OfferedSet {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return empty;
+  const held = value as Partial<OfferedSet>;
   return {
     id: RECORD,
     models: Array.isArray(held.models) ? held.models.filter((one) => typeof one === "string") : [],
@@ -161,8 +171,8 @@ export async function captureAxes(only?: string): Promise<OfferedSet> {
  * The roster as the dropdown should show it: the services, each carrying only
  * the models the owner offers, plus any job type they named for an open set.
  */
-export async function offeredRoster(): Promise<readonly ServiceView[]> {
-  const [services, offered] = await Promise.all([roster(), readOffered()]);
+export async function offeredRoster(given?: OfferedSet): Promise<readonly ServiceView[]> {
+  const [services, offered] = await Promise.all([roster(), given ?? readOffered()]);
   const all = offered.models.length === 0;
   return services.map((service) => {
     const kept = service.models.filter((model) => all || offered.models.includes(offeredKey(service.service, model.model)));

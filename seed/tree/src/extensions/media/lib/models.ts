@@ -1,9 +1,10 @@
 import type { IconName } from "~/components/shell/icons";
 
 /**
- * What a model is called and what it wears (`BO_0273_035`, `BO_0273_037`).
+ * What a model is called and what it wears (`BO_0273_037`), as the settings
+ * view's Generators section lists them.
  *
- * Server-free on purpose: the settings view and the senders both read it, and
+ * Server-free on purpose: the settings view reads it, and
  * a view that reached into a server module would drag the request context into
  * the browser bundle — which is what the contract's two halves exist to stop.
  */

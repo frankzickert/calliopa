@@ -55,7 +55,7 @@ export const InspectorHost = component$(() => {
     tabs: [tab("a"), tab("b")],
     activeTabId: "a",
   });
-  const proposed = useStore<ProposedRead>({ processId: null, documents: [], attachments: [], profile: null, events: [] });
+  const proposed = useStore<ProposedRead>({ processId: null, documents: [], attachments: [], profile: null, context: [], events: [] });
   const read = useStore<ExecutionRead>({ itemId: null, runs: [], error: null });
   const answerAll = useStore<ViewAnswerAll>({ itemId: null, group: null, answer: null, seq: 0 });
   const toggleRun = useStore<ViewToggleRun>({ itemId: null, key: null, seq: 0 });
@@ -71,6 +71,14 @@ export const InspectorHost = component$(() => {
     proposed.processId = selected;
     // The run behind p1 was guided by a profile; p2's was not. BO_0298_031
     proposed.profile = selected === "p1" ? { id: "prof-1", title: "Blog post" } : null;
+    // p1 was told two keywords at its start, and another extension failed. BO_0310_040
+    proposed.context =
+      selected === "p1"
+        ? [
+            { extension: "keywords", tool: "keywords.prompt_keywords", items: [{ id: "kw-1", title: "Quantum computing" }, { id: "kw-2", title: "Qubit" }] },
+            { extension: "glossary", tool: "glossary.prompt", failure: "glossary.prompt: no answer within 10s" },
+          ]
+        : [];
     proposed.events =
       selected === null
         ? []

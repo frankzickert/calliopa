@@ -18,7 +18,6 @@
 - The workspace region renders no heading and no view-name tag. A tag naming the tool is chrome the tab strip already supplies, and the headline belongs to the view that owns the content and can edit it, so a title is rendered once by that view. The region names itself directly, keeping its landmark (`CA_0013_001`).
 - The library arrives shown with its first icon, and the inspector arrives hidden, in a workspace that never chose (`CA_0056_004`).
 - The left drawer holds one top-level category, `Documents`, listing the parentless documents [Block Document Model](../documents/block-document-model.md) answers, each entry naming its document by title. It stands under the *Docs* icon, the library's first, so the library is visible without being opened.
-- A document's row in the `Documents` category carries a glyph for its derived state (`BO_0248_012`; `LibraryItem.glyph`, the documents reader over `GET documents/states`): Phosphor `warning-circle` for *under pressure*, `warning` for *needs review*, named so; a document with neither carries nothing; the section re-reads after a system run ends (the shell's task on the proposed signal).
 - Activating an entry opens that document in a tab. A tab already showing the document is revealed rather than opened a second time, because a tab is found by its target rather than by its identity.
 - The entry for the active tab's document reads as selected, carrying a marker and `aria-current` rather than colour alone.
 - With no document in the graph the category shows an empty-state line under its heading, so the region reads as a place that holds things rather than as something that failed to load.
@@ -168,10 +167,9 @@
 - Verified 2026-09-21: `view-bar.test.ts` in the render harness — the control closed, opened with its panel's heading, terms and lines, the panel labelled by the control, `Escape` closing it and the control closing it again. A press outside is the document's own listener, which this harness does not dispatch; the walk covers it.
 - A popover may carry a body of the view's own in place of its lines (`BO_0291_033`, 2026-09-23, under `calliopa-bootstrap`'s `BO_0291`): `body: { component, props? }` on the action, a component the shell draws inside the panel with the view's props and a `close$` of the shell's, which closes the panel and returns focus to the control as `Escape` does. The shell still draws the control and the panel, places it under the control, and closes it on `Escape` and a press outside; it knows nothing of what the body says or does. The first is the document view's source chooser, which holds a search and the bibliography's works as buttons and closes itself once one is chosen — the user's decision of 2026-09-23 that the panel open directly below the bar's Cite control, where the lines-only kind could not hold a choice. `lines` is optional from here, given only when no body is. Verified in `view-bar.test.ts`: the panel holds the body with the view's props and no `dl`, and the body's press closes it.
 
-- Under `calliopa-bootstrap`'s `BO_0274` (acceptance names a claim), set to draft by the user on
-  2026-09-21 and transferred here the same day: a document-level act may come from an extension that
-  decorates the document rather than from the view that presents it, so the decision extension can
-  name *Establish…* in the bar where the other document acts stand.
+- A document-level act may come from an extension that decorates the document rather than from the
+  view that presents it (`BO_0274`), so an extension can name its act in the bar where the other
+  document acts stand — as `code`'s *Code* and `manuscripts`' *Manuscript* do.
 - A decorating extension may add to the view's bar (`BO_0274_004`). `ViewBridge.decorationBar` is a
   second `ViewBar` store beside `bar`, written by the decoration's provider and cleared with the
   view's on a tab switch; `ViewBarPanel` takes it as `decorations` and folds it in (`merged` in
@@ -185,7 +183,6 @@
   to the view's group in place and running its handler, a contributed group standing after the
   view's with its line, an empty contributed group not drawn, and a view with no group of its own
   getting no bar from a decoration; each shown to fail with the fold taken out.
-  `documents`' `branch.test.ts` pins the whole *Document* group, `Establish…` last.
 
 * The bar scrolls as one. Whenever its groups need more room than the bar has, no group is held at
   an edge: the whole row scrolls, and every control is reached by scrolling it. While they fit, the
@@ -210,8 +207,7 @@
   view pays nothing for it. The contract is unchanged: `trailing` still means drawn last, at the
   trailing edge when there is room, and a view says nothing about the fade.
 - Why it is worth the change: reading, the groups that stand whatever the reader is doing need 430px
-  at a 360px viewport — *View* 158, *Standing* 49, and *Document* 223 with `calliopa-refine`'s
-  *Establish…* in words — so the pinned trailing group left 137px of window for the 1029px of block
+  at a 360px viewport — *View* 158, *Standing* 49, and *Document* 223 — so the pinned trailing group left 137px of window for the 1029px of block
   groups the reader was trying to reach (`CA_0060_004`).
 - Verified 2026-09-22 (`CA_0060_004`): `view-bar.test.ts` holds `moreBeyond` to a bar whose groups
   fit, to both ends of one that overflows, to its middle and to a pixel of slack, and holds a bar
@@ -260,9 +256,9 @@
   `auto`: light dismiss would close it on the same press without returning the focus it took. The
   measurement is read from the panel's own document's view, never a global, and skipped where
   nothing is laid out, so the render harness draws the panel without measuring it.
-- The icon table gained eight Phosphor paths (`DO_0010_011`), regular weight and unaltered:
-  `lighthouse`, `article-ny-times`, `text-h-one`, `text-h-two`, `text-h-three`, `quotes`, `circle`
-  and `diamond`.
+- The icon table gained the Phosphor paths the bar's roles and standings wear (`DO_0010_011`),
+  regular weight and unaltered: `article-ny-times`, `text-h-one`, `text-h-two`, `text-h-three`,
+  `quotes`, `circle` and `diamond`.
 - Verified 2026-09-22 (`DO_0010_012`): `view-bar.test.ts` in the render harness — a choice with
   icons drawn as its symbol and a caret with the label as the select's name on the bar, the same
   choice keeping its label in the inspector, a choice without icons keeping its label on both, and
@@ -351,3 +347,7 @@ the frame is told, never taught the words.
 - A dependency the tree does not hold is said before it is met (`BO_0282_011`, landed 2026-09-23): the extension page tells a non-elevated extension that `package.json`, the lockfile, `vite.config` and `tsconfig` are root-mapped members of `ui.shell`, so a new dependency is a change to the shell. Elevation comes from `isElevated` in `src/server/extensions.ts`, which reads the same snapshot's reflection of the enforced set that the owner document's *Elevated* fact does (`BO_0099_004`).
 - Walked by the user on the served build at pin 1869, 2026-09-23, and they said it works: a staged group's evidence on the extension page with its change document, what it touches and its runs' gates; *Try it* building the group and serving it beside the instance; a change document's status moved from its own tab; and the dependency line on a non-elevated extension. The one thing the walk changed is recorded above — the status control began on the library row and moved to the change's tab.
 - Verified on the tree 2026-09-23: `tsc --noEmit` clean, both bundles built, and the unit project green at 1353 tests but one pre-existing failure in `calliopa-refine`'s block-depth test, which fails the same way on a clean checkout. `extension-groups.test.ts` pins the words the panel stands on — a gate not run never reading as failed, the member counts, and the candidate's address completed from the browser's own host — and `extensions-section.test.ts` presses the status control in Qwik's render harness: every status offered, the move posted with its path and status and nothing written, the row saying acceptance is what lands it, and the kernel's refusal shown in its own words.
+
+## A Held Drag Opens The Library
+
+- The library opens under a held drag (`CA_0072_004`, [Drag And Drop](./drag-and-drop.md), Holding Over A Place Opens It). A library icon carries `data-spring="library-icon:<id>"`, and a hold on it shows that icon's content, the panel shown, saved with the workspace. On a phone the sheet's handle carries `library-handle`, and a hold on it opens the library's sheet, where the icons and entries hold the same way. A document entry (`LibraryRow`) carries `library:<item>`, and a hold on it opens its document as a press would, through `openTarget$` with `beside`: in the tab it is already open in, or in a new tab directly after the active one (`openTabBeside` in `src/lib/tabs.ts`), the sheet closing as for any opened entry. The inspector's icons do not spring. `panel.test.ts` holds over an icon in the render harness and `library-row.test.ts` over a row: each carries the mark and names what it opens, and the others carry none; `tabs.test.ts` proves a new tab after the active one and an open one revealed where it stands.

@@ -16,18 +16,20 @@
 
 ## Fixed
 
-* Nothing bills without a press. A paid call is made only by a person's deliberate press, one call
-  at a time. An agent may quote a cost and propose a generation; it never spends. User decision,
-  2026-09-21 (`calliopa-bootstrap`'s `BO_0273`).
-* The gate is a route-kind boundary, not a convention. The generation route is an ordinary
-  human-session route, permitted to a signed-in person; it is not a `kernelCallback` route, and a
-  callback route is the only kind a run can reach. So the tools can quote and propose and can reach
-  nothing that spends.
-* No hidden default provider or model. The chip carries a dropdown beside the agent menu listing
-  every service and model the owner has configured, and the services and their models are set in
-  Settings. User decision, 2026-09-21.
-* The chosen model decides whether a picture or a moving picture is made. A model declares its
-  kind, so there is no image-or-video toggle to keep in step with it.
+* Nothing bills without a press, and *Send* is the press. A run a person's *Send* started may make
+  one paid generation, and a second needs another *Send*; a run no person started never spends.
+  User decisions, 2026-09-21 (`calliopa-bootstrap`'s `BO_0273`), narrowed on 2026-09-30
+  (`BO_0312_Q6`).
+* The gate is the kernel's, not a convention: `media.generate` is an `ext.tool` marked
+  `spends: true`, which the kernel admits once in a run a person's command started and in no other
+  run, refusing before this extension's route is reached (`calliopa-bootstrap`'s `BO_0312_004`).
+* No hidden default provider or model. A picture or a video is made under a profile the person
+  writes: the profile's type says which, and its saved backend which service makes it
+  (`calliopa-bootstrap`'s `BO_0320_Q4`, `BO_0320_Q5`); the services and the models they offer are
+  set in Settings. The senders that stood in the agent menu are gone. User decisions, 2026-09-21,
+  2026-09-30 (`BO_0308_Q10`) and 2026-10-01 (video as a profile type).
+* The profile's type decides whether a picture or a moving picture is made — an image or a video
+  profile; no *Format* is read (Generation Needs No Format).
 * A generated block records what made it — prompt, service, model, job id, cost and time — and the
   record is shown when the reader turns to the block, not drawn in the document at rest. User
   decision, 2026-09-21.
@@ -113,16 +115,9 @@ controls (`ui.shell`, `BO_0273_007`, `BO_0273_009`) and `BO_0273_017` needs the 
   alone when there is one, a named job type joining with the open set's kind, no duplicate for a
   name the service answers, nothing named for a closed set, what is written kept clean of blanks
   and repeats, and an absent or malformed record read as nothing chosen.
-* The model a command will use is named each time and not remembered. An extension has no
-  per-person store, and the browser's own is per browser rather than per person, so remembering it
-  would be wrong the moment an instance has two people — and naming it each time is what *always
-  ask* meant. User decision, 2026-09-21.
-- The models stand in the agent menu (`BO_0273_035`). `mediaSenders` offers one sender per model
-  the owner offers on each service — `media:<service>:<model>`, a short name, and an icon of its
-  own, `image` for a picture and `film-strip` for a moving one, because a model has no face and a
-  borrowed one would say it was an agent. A signed-out service is listed with the login to run
-  rather than left out: the menu says what could be there. A model the short-name table does not
-  hold — a Higgsfield job type the owner typed — keeps its own id.
+* The backend a generation uses is the profile's, saved with it, never chosen by a run's words
+  (`calliopa-bootstrap`'s `BO_0320_Q4`); the model is the backend's offered default for the kind
+  unless the run names another offered one. User decision, 2026-09-30.
 * A model is called what the owner calls it, and wears the icon they gave it. The extension names
   the models it knows and that is the default; Settings can rename any of them and choose its
   icon, which is the only way a job type the owner typed themselves is called anything but its raw
@@ -132,55 +127,17 @@ controls (`ui.shell`, `BO_0273_007`, `BO_0273_009`) and `BO_0273_017` needs the 
   is the instance's and the kernel keeps it. An icon outside the shell's table is ignored rather
   than taken, because the contract refuses an unknown icon by name and one bad entry would take
   the whole roster down.
-- The table itself is `lib/models.ts`, server-free on purpose: the settings view and the senders
-  both read it, and a view reaching into a server module dragged the request context into the
+- The table itself is `lib/models.ts`, server-free on purpose: the settings view reads it, and a view reaching into a server module dragged the request context into the
   browser bundle — which is what the contract's two halves exist to stop, and what the build said
   when it did.
-- `sendToModel` is what a send to one does: it refuses a command naming no block, since a picture
-  is made from a block's words; refuses a model no longer offered and a service signed out, in
-  their own words; and otherwise makes the picture, answering the process to watch.
-- Nothing of this extension stands in the command chip any more. The model dropdown and the
-  *what would this cost?* button went with the two-press shape, and so did the routes behind them:
-  a person's quote and the press that made a picture from the chip. What the chip carries is the
-  shell's own again.
-- Proven in `server/senders.test.ts`: one sender per offered model with its short name and icon, a
-  signed-out service listed with its reason, an unnamed model keeping its id, a sender id read
-  apart and one that is not ours refused, the block sent to the model, and refusals for no block,
-  a model no longer offered and a service signed out — none of which asks the generator for
-  anything.
-- Proven in `lib/chosen.test.ts`: unchosen to begin with, held once named, round-tripping through
-  the value the control carries, reading nothing back from an empty or malformed one, and carrying
-  the kind. The tree typechecks and this extension's suites pass.
-- What a generation would cost (`BO_0273_016`). `POST /api/x/media/quote` answers the service's
-  own quote, which is free: it is the adapters' dry run, which spends nothing. **The gate is the
-  route's kind, not a convention** — this is an ordinary human-session route, and a run can reach
-  only a `kernelCallback` route, since the kernel holds that secret and strips the header from
-  every browser request it forwards. So an agent reaches a quoting tool and never this.
-- It refuses before anything is sent: without a signed-in person of class `human`, with no model
-  named, and for a block with no words. The kind is the one the chosen model declares and never a
-  third value, because the model is what decides whether a picture or a moving picture is made.
-- Proven in `server/quote.test.ts`: the service's quote answered for a signed-in person, refused
-  without a session and for an agent class with nothing asked of the service, refused in words for
-  no model and for a wordless block, and the declared kind sent rather than whatever was asked for.
-- A generation is proposed before it is made (`BO_0273_017`, first parts).
-  `POST /api/x/media/propose` stages an `image` or `video` block **with no reference** — which is
-  the whole of the pending state — after the block whose words are the prompt, into a group of its
-  own, so the reader answers it as they answer any proposal and rejecting it costs nothing,
-  because nothing has been paid for. The block is `documents`' type and `documents` writes it;
-  this extension declares the dependency that allows the import, and runs the insert inside the
-  group's branch scope so it is staged rather than established.
-- What travels with it is `source` — the service, the model, the prompt and when it was proposed —
-  which the document model stores and never interprets, and which is what the press that spends
-  will read.
 - Proven in `server/propose.test.ts`: staged into its own group and after the prompt, no reference
   written, the prompt trimmed onto both the words and the record, the declared kind and never a
   third value, a fresh group per generation, and refusals without a person, without a model and
   without words that write nothing. The staging was shown to bite by taking the branch scope away.
-* **Send is the press that spends.** A model stands in the agent menu and a block is sent to it
-  the way a block is sent to an agent: one gesture, no confirmation, and what it cost is reported
-  after — on the process while it runs and on the picture's own panel afterwards. User decision,
-  2026-09-22, replacing the two-press shape of 2026-09-21, under which the press that billed named
-  its cost first. *Nothing bills without a press* is unchanged; what changed is which press.
+* **Send is the press that spends.** A block is sent with an image or a video profile the way any
+  command is sent: one gesture, no confirmation, and what it cost is reported after, in the run's
+  answer and on the picture's own panel. User decision, 2026-09-22, carried over to the profile by
+  `calliopa-bootstrap`'s `BO_0312`.
 - The press that spends (`BO_0273_017b`). `POST /api/x/media/make` does four things in an order
   that is what makes a failure survivable: it stages the picture as a pending block, so there is
   something to look at and to reject; it opens a process, so a generation that fails leaves
@@ -258,13 +215,6 @@ controls (`ui.shell`, `BO_0273_007`, `BO_0273_009`) and `BO_0273_017` needs the 
   refuses in words; and **a run is told what to say** — both tools refuse with *sign in to
   Higgsfield or OpenArt in Settings, with your own subscription* before they reach for anything,
   which the skill already tells it to pass on.
-- **An agent names a model; the person sends the block** (`BO_0273_038`, user decision
-  2026-09-22). `propose_generation` went. It staged a picture that was not made yet, for a second
-  press to complete, and that press went into the agent menu with `BO_0273_035` — so the tool
-  proposed into a state nothing completed. An agent writes the words as an ordinary block and says
-  which model it would use; the person sends that block to that model. One press, which spends, and
-  always a person's. Nothing in a document is a picture-not-made-yet any more except a generation
-  already running, which is its own block being filled.
 
 ## What A Model Takes
 
@@ -296,30 +246,20 @@ repository's `docs/system/media-service.md`; the contract's is `ui.shell`'s
   date now, rather than leaving them to press the same thing again. The axis is matched in both
   spellings, because the service's name is hyphenated and the vendor's is not; a refusal about a
   workspace, a plan or an empty prompt says nothing about the captured set and is left alone.
-- **The senders carry their options** (`BO_0279_012`). `mediaSenders()` reads the axes from the
-  offered record and puts the two that get controls on each descriptor — the ratio and the
-  resolution, which is what a reader means by quality — and `sendToModel()` keeps only values the
-  model actually offers and passes them to `makeGeneration` as the request's `options`. A model
-  reports more than two axes, and `background`, `variant` and `genre` are captured and sendable
-  but get no control: a menu is not a form.
-- Walked on the instance at pin 1489, 2026-09-22: the owner opened Generators and saw each model's
-  axes, chose a model in a block's chip, and its ratio and quality stood beside it.
-- **This extension answers what a send would cost** (`BO_0279_013`): the adapters' own dry run for
-  the model and the axes chosen, so `4k` reads as what it costs rather than as what `1k` costs. A
-  value for an axis the model does not offer is dropped rather than sent, as it is on a press. The
-  credits are given in the vendor's own words and the shell only shows them.
+- A run may pass a model's axes as `options` to `media.generate`; a value the model does not offer
+  is the generator's to refuse, in its own words.
+- **What a generation would cost** is the run's `quote_generation` (`BO_0279_013`): the adapters'
+  own dry run for the model and its axes, which spends nothing; the skill quotes before it
+  generates and says the amount. The credits are given in the vendor's own words.
 
 - **A video animates the picture above it** (`BO_0273_045`, user decision 2026-09-22). Neither
   video generator makes a clip from words alone — both refuse with *at least one image, video, or
   audio reference is required* — so a send to a video model takes the nearest picture above the
   block as the clip's first frame, under the adapters' own `--start-image`, and the block's words
-  say what should happen in it. A send with nothing above it to animate is refused in words that
-  say what to do about it, **before the block is proposed and before the press can spend**: no
-  proposal, no process, nothing asked of the generator. A picture that is proposed but not yet
+  say what should happen in it. `media.generate` under a video profile does the same
+  (`calliopa-bootstrap`'s `BO_0312`): with nothing above the block to animate it refuses in words
+  that say what to do about it, **before the block is proposed and before anything is spent**. A picture that is proposed but not yet
   made does not count, because it has no bytes to open on.
-- The video models stay in the menu on every block rather than appearing only where a picture is.
-  A menu whose contents changed from block to block would leave someone looking for a video model
-  on a text block with nothing and no reason; the refusal says the reason.
 
 - **Walked on the instance, 2026-09-22** (`BO_0273_021`), which is the only step that spends and
   the only one that could confirm any of the rest. Signed in to Higgsfield with the owner's own
@@ -332,3 +272,95 @@ repository's `docs/system/media-service.md`; the contract's is `ui.shell`'s
 - What the walk has not covered: a video, which needs a picture to animate and a paid clip of its
   own; *Try again* on a made picture; and the source panel's words. Each is a press away and none
   is blocked.
+
+## Generation Is An Agent's Tool
+
+Under `calliopa-bootstrap`'s `BO_0312` (part 4 of `BO_0308`), landed 2026-10-01: image and video
+generation are made through a profile the person writes, by the agent's tool, and the senders
+left the agent menu (`BO_0308_Q10`). `BO_0320`'s session built the tool for images with its Codex
+backend; `BO_0312` added video and removed the senders.
+
+* A run a person's Send started may make one paid generation, and a second needs another Send; a
+  run no person started never spends. This narrows *Nothing bills without a press* (the Send is the
+  press) and replaces *An agent names a model; the person sends the block* (`BO_0273_038`). User
+  decision, 2026-09-30 (`BO_0312_Q6`). The gate stays in the fixed layer rather than in a
+  convention: the kernel admits one call of a `spends` tool per Send (`ui-kernel.md`
+  `BO_0312_004`).
+* A video is made under a video profile, whose backend is Higgsfield or OpenArt, never Codex. User
+  decision, 2026-10-01.
+- The senders are gone (`BO_0312_040`, landed 2026-10-01): `mediaSenders`, `sendToModel`,
+  `quoteToModel` and `server/senders.ts` with its tests, and with them the shell's sender contract
+  (`ui.shell`'s `BO_0312_061`), so the agent menu lists agents alone. The Generators section in
+  Settings, the offered models, their names, icons and axes stay, since the tool chooses from them.
+- `media.generate` (`BO_0312_041`, landed 2026-10-01; `server/tools.ts`), an `ext.tool` with
+  `spends: true` answered on the `kernelCallback` route `kernel/tools/generate`, takes
+  `{block, model?, options?, words?}` and the run's profile: its `profileType`, image or video, and
+  its saved backend (`imageBackend`, handed by the kernel, `BO_0320_005`). It refuses in words,
+  before anything is composed or spent: no image or video profile with a backend fit for its kind
+  (Codex makes pictures only, and is refused for now, `BO_0320_014`); no block of this Send; a
+  backend signed out; a model not offered for the kind; a block with no words; and, for a
+  video, no picture above the block to animate, or its bytes unreadable. It then composes the
+  pending picture or video after the block, starts the one paid job — a video with the picture
+  above as its start frame (`BO_0273_045`) — puts the job id on the pending block and stages it
+  into the run's group. `collect_generation` reads the job, answers *running* while it runs, and
+  fills the pending block with what was made — a PNG, or the generator's video type — without
+  paying again. The skill `media.pictures` says: quote first where a quote exists, generate once
+  in the Send, follow the job rather than start another, say the cost, use the profile's backend,
+  and make the picture first when a video needs one.
+- Verified 2026-10-01 (`BO_0312_042`, the code half): `server/tools.test.ts` — an image and a video
+  made with the pending block composed before the one paid request, the video carrying the
+  picture above as its start frame; every refusal above made with nothing composed and nothing
+  spent; a refused job said in words; a pending video filled from its finished job and a running
+  one answered as running, with nothing paid again; disabling the picture check fails the suite. The kernel's gate is `calliopa-bootstrap`'s
+  `TestExtensionToolGivenASpendingToolThenOneCallPerPersonsSend` (`BO_0312_007`).
+- A run's generation reaches the service under its grant (`calliopa-bootstrap`'s `BO_0312_063`,
+  2026-10-01, user decision of the same day): the tool route answers each tool through
+  `answerTool`, which runs it under the grant the kernel handed it (`withRunGrant`), so every
+  kernel call it makes presents that grant rather than a session it does not have, and the kernel's
+  gate admits the media extension's grant on the media surface. Before it, every generator read
+  signed out to a run whatever *Settings* showed. `server/tools.test.ts` proves each kernel call
+  of an answered tool carries the grant; `src/server/kernel/client.test.ts` that `call()` sends it.
+  The models the owner offers come with the call too, as `settings` (`BO_0276_007`): the state
+  record they live in refuses a callback, so `generate` reads them through `offeredFrom` rather
+  than `readOffered`, found by the walk at pin 3786 as a run told "sign in first". The suite's
+  state record refuses as the gate does, and a handed offer set decides the model.
+- The Generators section lists Higgsfield and OpenArt alone (`BO_0312_063`): the roster also
+  answers Codex, signed in under Agents, which the section drew as a second row headed *OpenArt*
+  with a *Sign in* its route refuses. `views/settings/section.test.ts` proves it.
+- [ ] BO_0312_042 The walk on the served build, which spends: an *Image* profile written by the
+      user with its backend, a Send producing one picture below the block, a second generation in
+      the same run refused; then a *Video* profile, a prompt block under the picture, and a Send
+      producing a moving picture.
+
+## Codex Image Backend
+
+Under `calliopa-bootstrap`'s `BO_0320` (2026-09-30), an image-generation profile has an explicit
+image type and a saved structured backend choice. The person chooses the backend while setting up
+the profile; prose instructions do not choose it. Codex was added as an intended `media.generate`
+backend using the Codex sign-in already entered in Calliopa. The current Codex app-server route
+does not support image generation, and repeated dev Sends returned no PNG. The user directed that
+setup hide Codex and `media.generate` refuse saved Codex choices before submitting a job, without
+fallback. The user declined a separate API-key route.
+
+- `BO_0320_010`: image profiles persist a structured backend and pass it to `media.generate`.
+  Codex is hidden in profile setup because the current Codex sign-in route cannot generate images.
+- `BO_0320_012`: Codex dispatch was implemented, but end-to-end generation cannot be completed
+  through the current Codex app-server sign-in route; repeated dev Sends returned no PNG. The app
+  refuses saved Codex profiles before submitting a job and does not fall back to another backend.
+- `BO_0320_014`: `media.generate` refuses before any job call when the saved image-profile backend
+  is Codex. It returns a clear temporary-unavailability message with no fallback and preserves the
+  saved profile value.
+
+## Generation Needs No Format
+
+- Under `calliopa-bootstrap`'s `BO_0332` (`docs/changes/BO_0332_FEAT_document-roles-and-block-roles.md`),
+  in implementation on 2026-10-01: *Format* is taken by documents alone
+  ([Roles](../../../doc-block-roles/docs/system/system.md#document-roles-and-block-roles)), so no
+  prompt block can carry it.
+* `media.generate` reads no *Format*: the profile — its type and its backend — says an image or a
+  video is made, and *Format* says only what a whole document is produced as. User decision, 2026-10-01,
+  revising the check that refused a prompt block without *Format* = image.
+- `media.generate` reads no role (`BO_0332_034`, landed 2026-10-01; `server/tools.ts`): after the
+  image profile and the Send's document and block, the next check is the backend's sign-in.
+  `server/tools.test.ts` proves it: the suite mocks no role read, and an image profile's
+  generation, signed out, is refused for the sign-in with nothing spent.

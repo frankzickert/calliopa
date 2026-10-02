@@ -1,34 +1,23 @@
-import { contributions as declare, type ViewContribution } from "~/contract";
+import { contributions as declare } from "~/contract";
 
-import { ManuscriptProvider } from "./views/bar";
-import { ManuscriptPage } from "./views/manuscript";
-import { ManuscriptsSection } from "./views/section";
+import { RenditionsProvider } from "./views/provider";
+import { DocumentRenditions } from "./views/renditions";
 
 /**
- * A manuscript out of the record (`BO_0293_017`, `BO_0293_022`): this
- * extension owns the make — *Make manuscript* in the document's bar — the kept
- * manuscripts, listed in their own library category and each opening in its
- * own tab, and the projection behind them. The document's front matter and
- * the abstract's role are `documents`', so a document stays one with this
- * extension switched off; the typesetting is the stack's service, reached
- * through the kernel.
+ * Manuscripts are formats (`calliopa-bootstrap`'s `BO_0312`): a document
+ * carrying *Format* is made into a PDF by the agent's typesetting tool under a
+ * profile the person writes, and what was made is kept on the document —
+ * *Format* is taken by documents alone (`BO_0332`). This extension owns the
+ * projection behind the tool, the kept renditions and where they are drawn:
+ * at the document's end. *Format* is `doc-block-roles`' built-in, and the
+ * typesetting is the stack's service, reached through the kernel.
  */
-const manuscript: ViewContribution = {
-  id: "manuscript",
-  name: "Manuscript",
-  inspector: "No manuscript open",
-  drag: [],
-  component: ManuscriptPage,
-};
-
 export const contributions = declare({
-  icon: { title: "Manuscripts", name: "files" },
-  sections: [{ name: "manuscripts", title: "Manuscripts", empty: "No manuscripts yet", kind: "manuscript", component: ManuscriptsSection }],
-  kinds: { manuscript },
   decorations: {
     document: {
-      provider: ManuscriptProvider,
+      provider: RenditionsProvider,
       places: {},
+      documentPlaces: { end: DocumentRenditions },
     },
   },
 });

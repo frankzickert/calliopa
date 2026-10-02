@@ -1,7 +1,3 @@
-import { randomUUID } from "node:crypto";
-import { access, mkdir, readFile, writeFile, rename } from "node:fs/promises";
-import { join } from "node:path";
-
 import {
   isAgentId,
   type AgentId,
@@ -9,6 +5,7 @@ import {
   type RuntimeStatus,
   type SelectableRuntime,
 } from "~/lib/connections";
+import { port } from "../port";
 
 /**
  * What the agent container reports about itself, and how a sign-in is asked
@@ -25,14 +22,13 @@ import {
  */
 
 /**
- * Where the agent and the application meet. It is read when it is read rather
- * than when this module loads, so a test can point at a directory of its own
- * and prove what an instance reports without depending on what the machine's
- * own agent happens to have written.
+ * Where the agent and the application meet: the port's agent configuration
+ * files, named relative to the directory they share. The port reads where
+ * that directory is when a file is asked for, so a test can point at one of
+ * its own and prove what an instance reports without depending on what the
+ * machine's own agent happens to have written. CA_0074_002
  */
-const configDir = () =>
-  process.env.CALLIOPA_AGENT_CONFIG_DIR ?? "/var/lib/calliopa/agent-config";
-const loginDir = () => join(configDir(), "login");
+const files = port.agentConfig;
 
 export type LoginRuntime = "codex" | "claude-code";
 
@@ -40,6 +36,8 @@ export interface LoginState {
   readonly runtime: string;
   /** The request that started this flow; the broker stamps it. BO_0261_002 */
   readonly id?: string;
+  /** Present on a sign-out's states; a sign-in's carry none. BO_0316_006 */
+  readonly action?: "logout";
   readonly status: "running" | "succeeded" | "failed";
   /** Where the human signs in. Shown because it is what they must visit. */
   readonly url?: string;
@@ -50,8 +48,10 @@ export interface LoginState {
 }
 
 async function readJson<T>(path: string): Promise<T | null> {
+  const text = await files.read(path);
+  if (text === null) return null;
   try {
-    return JSON.parse(await readFile(path, "utf8")) as T;
+    return JSON.parse(text) as T;
   } catch {
     return null;
   }
@@ -67,9 +67,7 @@ async function readJson<T>(path: string): Promise<T | null> {
 export async function runtimeStatuses(): Promise<
   Record<string, RuntimeStatus>
 > {
-  const answered = await readJson<Record<string, RuntimeStatus>>(
-    join(configDir(), "adapters.json"),
-  );
+  const answered = await readJson<Record<string, RuntimeStatus>>("adapters.json");
   return answered ?? {};
 }
 
@@ -82,9 +80,7 @@ export async function runtimeStatuses(): Promise<
  * about its toolset did not report one registered. CA_0026_001
  */
 export async function agentStatus(): Promise<AgentStatus | null> {
-  const stamped = await readJson<Partial<AgentStatus>>(
-    join(configDir(), "active-runtime.json"),
-  );
+  const stamped = await readJson<Partial<AgentStatus>>("active-runtime.json");
   if (stamped === null || typeof stamped.runtime !== "string") return null;
   // The kernel toolset is the agent's one toolset (BO_0207_015); the stamp
   // names it apart from the shell's retired one, which older stamps may still
@@ -112,13 +108,8 @@ export async function agentStatus(): Promise<AgentStatus | null> {
  * selection names, and what Hermes reasons with when it is set to the API-key
  * model. BO_0228_012
  */
-export async function apiKeyModelConfigured(): Promise<boolean> {
-  try {
-    await access(join(configDir(), "provider.env"));
-    return true;
-  } catch {
-    return false;
-  }
+export function apiKeyModelConfigured(): Promise<boolean> {
+  return files.exists("provider.env");
 }
 
 /**
@@ -185,7 +176,7 @@ export async function selectableRuntimes(runner: RunnerHealth = null): Promise<r
  * null when nothing was chosen or the file names no agent. BO_0228_009
  */
 export async function chosenAgent(): Promise<AgentId | null> {
-  const choice = await readJson<{ agent?: unknown }>(join(configDir(), "agent-choice.json"));
+  const choice = await readJson<{ agent?: unknown }>("agent-choice.json");
   return isAgentId(choice?.agent) ? choice.agent : null;
 }
 
@@ -196,22 +187,30 @@ export async function chosenAgent(): Promise<AgentId | null> {
  * is not running. BO_0228_009
  */
 export async function chooseAgent(agent: AgentId): Promise<void> {
-  await mkdir(configDir(), { recursive: true });
-  const tmp = join(configDir(), "agent-choice.json.tmp");
-  await writeFile(tmp, JSON.stringify({ agent, chosenAt: Date.now() }), { mode: 0o644 });
-  await rename(tmp, join(configDir(), "agent-choice.json"));
+  await files.replace("agent-choice.json", JSON.stringify({ agent, chosenAt: port.now().getTime() }), 0o644);
 }
 
 /**
  * Asks the agent's broker to run a runtime's own sign-in flow, and answers the
  * id the broker stamps on every state of the flow this request starts.
  */
-export async function requestLogin(runtime: LoginRuntime): Promise<string> {
-  const id = randomUUID();
-  await mkdir(loginDir(), { recursive: true });
-  const tmp = join(loginDir(), "request.json.tmp");
-  await writeFile(tmp, JSON.stringify({ runtime, id }), { mode: 0o600 });
-  await rename(tmp, join(loginDir(), "request.json"));
+export function requestLogin(runtime: LoginRuntime): Promise<string> {
+  return request({ runtime });
+}
+
+/**
+ * Asks the broker to sign a runtime out: every copy of its credential on the
+ * instance goes, and nothing is revoked with the provider. The state it
+ * publishes carries this request's id, as a sign-in's does, so the row
+ * follows it the same way. BO_0316_006
+ */
+export function requestLogout(runtime: LoginRuntime): Promise<string> {
+  return request({ runtime, action: "logout" });
+}
+
+async function request(body: { readonly runtime: LoginRuntime; readonly action?: "logout" }): Promise<string> {
+  const id = port.uuid();
+  await files.replace("login/request.json", JSON.stringify({ ...body, id }), 0o600);
   return id;
 }
 
@@ -226,7 +225,7 @@ export async function requestLogin(runtime: LoginRuntime): Promise<string> {
  * stands. BO_0261_002
  */
 export async function loginState(id?: string): Promise<LoginState | null> {
-  const state = await readJson<LoginState>(join(loginDir(), "state.json"));
+  const state = await readJson<LoginState>("login/state.json");
   if (id === undefined || state === null) return state;
   return state.id === id ? state : null;
 }
@@ -238,8 +237,5 @@ export async function loginState(id?: string): Promise<LoginState | null> {
  * code, and the state the surface renders never carries it back.
  */
 export async function sendLoginCode(code: string): Promise<void> {
-  await mkdir(loginDir(), { recursive: true });
-  const tmp = join(loginDir(), "code.tmp");
-  await writeFile(tmp, code, { mode: 0o600 });
-  await rename(tmp, join(loginDir(), "code"));
+  await files.replace("login/code", code, 0o600);
 }

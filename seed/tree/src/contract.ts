@@ -137,6 +137,9 @@ export interface SettingsSection {
   readonly name: string;
   readonly title: string;
   readonly component: Component<Record<string, never>>;
+  /** Drawn for the owner alone, heading and all: what it keeps is the
+   * owner's (`calliopa-bootstrap`'s `BO_0311_040`). */
+  readonly owner?: boolean;
 }
 
 /**
@@ -172,78 +175,6 @@ export interface ClientContributions {
   readonly decorations?: Readonly<Record<string, Decorations>>;
   /** Further views, for a kind that offers several. */
   readonly views?: readonly ViewContribution[];
-}
-
-/**
- * One sender in the agent menu: what it is called, the icon it wears, and
- * whether it can be chosen. `selectable: false` keeps it listed with the reason
- * it cannot run, as an unconfigured runtime is listed. BO_0273_035
- */
-/**
- * One axis a sender offers before it is sent to (`BO_0279_007`).
- *
- * What a model makes is not only who makes it: a picture has a shape and a
- * quality, and which values it takes are the model's own. A sender that has
- * none draws as it always did.
- */
-export interface SenderAxis {
-  /** The service's own name for it, e.g. `aspect-ratio`; sent back unchanged. */
-  readonly axis: string;
-  /** What the reader sees on the control, e.g. *Ratio*. */
-  readonly label: string;
-  readonly values: readonly string[];
-  /** Where the control starts, or null to start on nothing chosen. */
-  readonly start: string | null;
-}
-
-export interface SenderDescriptor {
-  readonly id: string;
-  readonly label: string;
-  readonly icon: IconName;
-  readonly selectable: boolean;
-  readonly reason: string | null;
-  /**
-   * What this sender lets a person choose before the press. Absent or empty
-   * draws no controls, which is every sender that is not a model.
-   * BO_0279_007
-   */
-  readonly options?: readonly SenderAxis[];
-}
-
-/** A command sent to a contributed sender. BO_0273_035 */
-export interface SendRequest {
-  readonly workspaceId: string;
-  readonly sender: string;
-  readonly documentId: string;
-  /** The block the command was written in, whose words are the command. */
-  readonly blockId: string;
-  /**
-   * What the person chose on the sender's axes, by axis name. An axis absent
-   * from here was not chosen, and what that means is the sender's business —
-   * for a model it means the vendor's own default. BO_0279_007
-   */
-  readonly options?: Readonly<Record<string, string>>;
-}
-
-/**
- * What a send would cost, asked before the press (`BO_0279_009`).
- *
- * Free: a quote is the generator's own dry run and spends nothing. Answered as
- * words rather than a number, because what a press costs is the vendor's own
- * unit — credits here, something else elsewhere — and the shell only shows it.
- */
-export interface SendQuote {
-  readonly ok: boolean;
-  /** What it would cost, in the vendor's own words, e.g. `11 credits`. */
-  readonly cost?: string;
-  readonly error?: string;
-}
-
-/** What a sender answers: a process to watch, or why it did nothing. */
-export interface SendOutcome {
-  readonly ok: boolean;
-  readonly processId?: string;
-  readonly error?: string;
 }
 
 export type ApiMethod = "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
@@ -363,45 +294,6 @@ export interface ServerContributions {
   readonly citations?: (request: CitationRequest) => Promise<CitationAnswer>;
   readonly parties?: readonly PartyDescriptor[];
   /**
-   * A party roster read at runtime, for parties that are data rather than
-   * source — a channel the publishing extension holds as a node. Answered on
-   * every listing beside the static descriptors; its ids are namespaced by
-   * the contributing extension (`<ext>-…`) and one outside its namespace, or
-   * one a static descriptor already holds, is dropped from the merge rather
-   * than shadowing anything. A roster that throws contributes nothing for
-   * that read. CA_0049_001
-   */
-  readonly partyRoster?: () => Promise<readonly PartyDescriptor[]>;
-  /**
-   * Senders this extension offers beside the agents (`BO_0273_035`).
-   *
-   * A sender stands in the agent menu and a command is sent to it the way a
-   * command is sent to an agent: the press on *Send* is the whole gesture, and
-   * what the sender does with the block is its own business. The media
-   * extension offers one per model it can make a picture with.
-   *
-   * A roster read at runtime, like `partyRoster`, because which senders exist
-   * depends on what is signed in and what the owner offers. Ids are namespaced
-   * by the contributing extension; one outside its namespace is dropped rather
-   * than shadowing an agent. A roster that throws contributes none.
-   */
-  readonly senders?: () => Promise<readonly SenderDescriptor[]>;
-  /**
-   * What a command sent to one of this extension's senders would cost, asked
-   * as the reader changes what they chose and never as part of a press. It
-   * spends nothing; an extension that cannot say answers `ok: false` and the
-   * shell shows nothing rather than a guess. BO_0279_009
-   */
-  readonly quote?: (request: SendRequest) => Promise<SendQuote>;
-  /**
-   * What happens when a command is sent to one of this extension's senders.
-   * The frame hands over the sender, the block and the workspace, and the
-   * extension answers a process to watch — as an agent run answers one — or a
-   * refusal in words. It is reached only for a sender this extension
-   * contributed. `BO_0273_035`
-   */
-  readonly send?: (request: SendRequest) => Promise<SendOutcome>;
-  /**
    * What a run staged into this extension's content, for the run detail the
    * frame shows. The frame knows a run has a proposal group; what a group
    * touched means is the extension's, so the process surface asks each
@@ -470,8 +362,8 @@ export interface ChildFace {
  * How a child of one target kind is made and read, so the shell can open any
  * block as focused work without writing a vocabulary it does not own.
  *
- * Focused work is the frame's capability — it retargets a tab, pushes a route
- * and lands on a block — but `document`, `text` and `contains` are the
+ * Focused work is the frame's capability — it opens the child's tab, gives it
+ * a route and lands on a block — but `document`, `text` and `contains` are the
  * `documents` extension's and only `focuses` is the shell's declaration. So
  * the extension that contributes a target kind says what a child of it is,
  * which of its blocks may be opened, what the child is called and what it
@@ -500,10 +392,7 @@ export interface FocusedWorkContribution {
  *
  * A view that presents content someone else may have something to say about
  * renders these places and knows nothing of what fills them: the headline of
- * a block, the depth that unfolds beneath it, and the space below it. The
- * decision surfaces — a block's kind, its claims and relations, the pressure
- * on it, a root's phase and the cards that move it — reach a document this
- * way, so the extension that owns the document model ships none of them.
+ * a block and the space below it.
  */
 /** A mark a row carries beside its label, with the words it means. */
 export interface LibraryGlyph {
@@ -512,14 +401,19 @@ export interface LibraryGlyph {
 }
 
 /**
- * Where a contributed decoration is drawn on a block. `headline`, `depth` and
- * `below` stand on a block as it is read; `command` stands in the command chip
+ * Where a contributed decoration is drawn on a block. `headline` and `below`
+ * stand on a block as it is read; `command` stands in the command chip
  * of the block being edited, between *Attach files* and the chips of what the
  * command carries, so an extension may offer a control there without the chip
- * knowing what it is (BO_0273_007); `run` stands beneath a code block's
- * source, where the extension that runs code draws its send (BO_0289_019).
+ * knowing what it is (BO_0273_007); `underCommand` stands in a chip of its own
+ * in the command chip's row — at its right, or on the next row when the row
+ * has no room for both — wherever the command chip is drawn — the
+ * block being edited and the prompt pointed from — and the chip is drawn only
+ * when some extension contributes it (RO_0002_001); `run` stands beneath a
+ * code block's source, where the extension that runs code draws its send
+ * (BO_0289_019).
  */
-export type BlockPlace = "headline" | "depth" | "below" | "command" | "run";
+export type BlockPlace = "headline" | "below" | "command" | "underCommand" | "run";
 
 /** What a decoration is handed: the block it decorates, and whether the
  * reader is editing it. Everything else it reads for itself — the document
@@ -530,6 +424,15 @@ export interface BlockDecorationProps {
   readonly blockId: string;
   readonly revisionId: string;
   readonly active: boolean;
+  /**
+   * In the `command` place alone: sets one option on the command the place
+   * is drawn in, or clears it with `null`. The shell keeps the options with
+   * the command and sends them with it when *Send* is pressed; an option no
+   * one set is not sent, and remembering one across commands is the
+   * contributing extension's. `profile` is the first the kernel reads
+   * (`calliopa-bootstrap`'s `BO_0311_002`). BO_0311_030
+   */
+  readonly setOption$?: QRL<(name: string, value: string | null) => void>;
 }
 
 /** What a provider is handed: the document its decorations draw on. */
@@ -540,10 +443,17 @@ export interface DocumentDecorationProps {
 /**
  * Where a contributed decoration is drawn once on a document rather than on
  * each block (`BO_0291_031`): `end`, after the last block — where the
- * bibliography draws a document's reference list. The presenting view draws
- * the place and knows nothing of what fills it.
+ * bibliography draws a document's reference list; and `title`, the document
+ * header's lines under the title, drawn while reading and editing alike and
+ * carrying nothing of a command's own — where the roles extension shows and
+ * takes the document's roles and their values (`calliopa-bootstrap`'s
+ * `BO_0309_030`) and the keywords extension where a keyword is mentioned.
+ * Each contribution to `title` is a row of its own, in extension order, and
+ * is drawn again in the one-line header that stays under the bar once the
+ * header has scrolled away (`documents`' `DO_0030_001`). The presenting view
+ * draws the place and knows nothing of what fills it.
  */
-export type DocumentPlace = "end";
+export type DocumentPlace = "end" | "title";
 
 /** What a document place is handed: the document, and the data revision it
  * was read at, so a place that reads for itself reads again when the
@@ -551,7 +461,15 @@ export type DocumentPlace = "end";
 export interface DocumentPlaceProps {
   readonly documentId: string;
   readonly dataRevision?: number | undefined;
+  /** Where a `title` contribution is drawn: `full` in the document's header,
+   * `compact` in the one line that stays under the bar once the header has
+   * scrolled away, where it draws only what that line holds, or nothing.
+   * Absent is `full`; `end` is always drawn full. DO_0030_001 */
+  readonly form?: DocumentPlaceForm | undefined;
 }
+
+/** The two forms a `title` contribution is drawn in. DO_0030_001 */
+export type DocumentPlaceForm = "full" | "compact";
 
 /**
  * One extension's decorations for one bare kind. The provider is mounted once

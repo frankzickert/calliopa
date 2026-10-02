@@ -15,7 +15,7 @@ import {
   type PanelSide,
   type PanelWidths,
 } from "~/lib/layout";
-import { PANEL_ICON_KIND, PANEL_ICON_TARGET, type DragPayload } from "~/lib/drag";
+import { holdMark, PANEL_ICON_KIND, PANEL_ICON_TARGET, type DragPayload, type SpringHold } from "~/lib/drag";
 import { applyPanelWidth, readPanelWidth, remPx, writePanelWidth } from "~/lib/panel-width";
 import { Icon, type IconName } from "./icons";
 
@@ -33,6 +33,7 @@ export interface PanelIconEntry {
 export interface PanelIconDrag {
   readonly payload: DragPayload | null;
   readonly overId: string | null;
+  readonly hold?: SpringHold | null;
 }
 
 /**
@@ -96,6 +97,10 @@ export const PanelIcons = component$<{
           data-drop-target={reorders ? `${PANEL_ICON_TARGET}${icon.id}` : undefined}
           data-accepts={reorders ? "move" : undefined}
           data-drop-place={reorders ? dropPlace(drag, ids, icon.id) : undefined}
+          // Held over with a dragged block, the library shows this icon's
+          // content. CA_0072_004
+          data-spring={side === "left" ? `library-icon:${icon.id}` : undefined}
+          data-spring-hold={side === "left" ? holdMark(drag?.hold ?? null, `library-icon:${icon.id}`) : undefined}
           aria-label={icon.title}
           title={icon.title}
           aria-pressed={shown === icon.id}

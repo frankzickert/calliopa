@@ -8,6 +8,8 @@ sessions are opened in them, closed and interrupted; an execution streams its
 output as server-sent events until it is done; the files a document carries go
 in as a tar and the files an execution wrote come out as one. Standard library
 for the server, the Docker SDK and jupyter_client behind it.
+A profile tool's call runs once in a throwaway container and is answered
+whole (`POST /v1/calls`, BO_0311_001).
 `docs/system/code-service.md`. BO_0289_001 BO_0289_002 BO_0289_003 BO_0289_004
 """
 
@@ -29,6 +31,7 @@ from docker.errors import DockerException
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from lib.calls import Calls  # noqa: E402
 from lib.caps import Caps  # noqa: E402
 from lib.format import Formatting, format_source  # noqa: E402
 from lib.runtimes import Refused, Runtimes  # noqa: E402
@@ -68,6 +71,7 @@ class Service:
         self.formatting = formatting or Formatting()
         self.runtimes = Runtimes(client, caps, workdir, scope)
         self.sessions = Sessions(self.runtimes, caps)
+        self.calls = Calls(self.runtimes, caps)
         self.server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(bearer, self))
         self.server.daemon_threads = True
 
@@ -79,9 +83,11 @@ class Service:
         self.runtimes.ensure_network()
         joined = self.runtimes.join_network()
         reaped = self.runtimes.reap_stale_kernels(SESSION_DIR)
+        calls = self.calls.reap()
         print(
             f"code: runtimes' network {self.runtimes.network.name}, "
-            f"{'joined' if joined else 'not in a container, so not joined'}; {reaped} stale kernel(s) reaped",
+            f"{'joined' if joined else 'not in a container, so not joined'}; {reaped} stale kernel(s) reaped, "
+            f"{calls} call container(s) left behind removed",
             file=sys.stderr,
         )
 
@@ -136,6 +142,7 @@ def make_handler(bearer: str, service: Service):
         ("POST", re.compile(r"^/v1/sessions/(?P<session>s-[a-f0-9]+)/interrupt$"), "interrupt"),
         ("POST", re.compile(r"^/v1/sessions/(?P<session>s-[a-f0-9]+)/execute$"), "execute"),
         ("POST", re.compile(r"^/v1/format$"), "format"),
+        ("POST", re.compile(r"^/v1/calls$"), "call"),
         ("PUT", re.compile(r"^/v1/sessions/(?P<session>s-[a-f0-9]+)/files$"), "put_files"),
         ("GET", re.compile(r"^/v1/sessions/(?P<session>s-[a-f0-9]+)/files$"), "get_files"),
     ]
@@ -316,6 +323,20 @@ def make_handler(bearer: str, service: Service):
             with lock:
                 self.wfile.write(b"0\r\n\r\n")
                 self.wfile.flush()
+
+        # -- calls -----------------------------------------------------------
+
+        def call(self) -> None:
+            """One profile tool's code, run once off the person's runtime and answered whole.
+
+            The kernel decides the network and the environment; this answers
+            what the execution produced, as an execution's events, and keeps
+            nothing. BO_0311_001"""
+            body = self._json_body()
+            runtime = body.get("runtime")
+            if not isinstance(runtime, str) or not re.fullmatch(r"[a-f0-9]+", runtime):
+                raise Refused(400, "`runtime` names a runtime by its id")
+            self._json(200, service.calls.run(runtime, body.get("code"), body.get("input"), body.get("network"), body.get("env")))
 
         # -- formatting ------------------------------------------------------
 

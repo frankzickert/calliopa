@@ -10,7 +10,6 @@ import {
 } from "~/extensions/documents/server/documents";
 import { childTitle, DOCUMENT_TARGET_KIND } from "~/extensions/documents/server/focus";
 import { childrenOf, facesOf, focusOf, openFocusedWork } from "~/server/focused-work";
-import { addClaim, setBlockKind } from "~/extensions/documents/server/work-ops";
 import { readGraphEnv } from "~/server/ccgw/env";
 
 /**
@@ -45,21 +44,17 @@ type Doc = {
   documentId: string;
   revisionId: string;
   title: string;
-  blocks: readonly { blockId: string; revisionId: string; kind: string; blockKind?: string; runs?: readonly { text: string }[] }[];
+  blocks: readonly { blockId: string; revisionId: string; kind: string; runs?: readonly { text: string }[] }[];
 };
 
 const revisionOf = async (documentId: string, blockId: string): Promise<string> =>
   ok<Doc>(await readDocument(documentId)).blocks.find((block) => block.blockId === blockId)?.revisionId ?? "";
 
 describe("a child's title", () => {
-  it("is the one claim when the block asserts exactly one, else the words to the first sentence", () => {
-    expect(childTitle("Caching helps. It is also risky.", [{ text: words("Cached authorization stays valid.") }])).toBe(
-      "Cached authorization stays valid.",
-    );
-    expect(childTitle("Caching helps. It is also risky.", [])).toBe("Caching helps.");
-    expect(childTitle("Caching helps. It is also risky.", [{ text: words("One.") }, { text: words("Two.") }])).toBe("Caching helps.");
-    expect(childTitle("No sentence end here", [])).toBe("No sentence end here");
-    expect(childTitle("   ", [])).toBe("Focused work");
+  it("is the block's words to the first sentence", () => {
+    expect(childTitle("Caching helps. It is also risky.")).toBe("Caching helps.");
+    expect(childTitle("No sentence end here")).toBe("No sentence end here");
+    expect(childTitle("   ")).toBe("Focused work");
   });
 });
 
@@ -86,8 +81,6 @@ describe.skipIf(!configured)("focused work over CCGW", () => {
       await insertBlock({ documentId: parent, block: { kind: "text", runs: words("Revision changes complicate this.") }, placement: { at: "end" } }),
     );
     blockB = inserted.blockId;
-    await settle();
-    await addClaim({ documentId: parent, blockId: blockB, baseRevisionId: await revisionOf(parent, blockB), text: words("Revisions invalidate a cache.") });
   });
 
   afterAll(async () => {
@@ -125,27 +118,11 @@ describe.skipIf(!configured)("focused work over CCGW", () => {
     expect(ok<Doc>(await readDocument(parent)).blocks.map((block) => block.blockId)).toEqual([blockA, blockB]);
   });
 
-  it("Given a block asserting one claim, Then its child is titled with the claim", async () => {
-    await settle();
-    const opened = ok<{ itemId: string; title: string }>(await openFocusedWork({ kind: DOCUMENT_TARGET_KIND, targetId: parent, blockId: blockB }));
-    created.push(opened.itemId);
-    expect(opened.title).toBe("Revisions invalidate a cache.");
-  });
-
-  it("Given the child holds a synthesis, Then the parent's face reads it, and the title otherwise", async () => {
+  it("Given focused work, Then the parent's face reads its title and no words", async () => {
     await settle();
     const face = ok<Record<string, { title: string; face: unknown }>>(await facesOf(DOCUMENT_TARGET_KIND, parent));
     expect(face[blockA]?.face).toBeNull();
     expect(face[blockA]?.title).toBe("Request-local caching could reduce repeated checks.");
-
-    const first = ok<Doc>(await readDocument(child)).blocks[0];
-    if (first === undefined) throw new Error("the child has no block");
-    await reviseTextBlock({ documentId: child, blockId: first.blockId, baseRevisionId: first.revisionId, runs: words("Cache per request, keyed by revision.") });
-    await settle();
-    await setBlockKind({ documentId: child, blockId: first.blockId, baseRevisionId: await revisionOf(child, first.blockId), blockKind: "synthesis" });
-    await settle();
-    const after = ok<Record<string, { face: readonly { text: string }[] | null }>>(await facesOf(DOCUMENT_TARGET_KIND, parent));
-    expect(after[blockA]?.face?.map((run) => run.text).join("")).toBe("Cache per request, keyed by revision.");
   });
 
   it("Given a block with focused work, Then retiring it is refused naming the child, and deleting the child closes the edge so the retire goes through", async () => {

@@ -86,7 +86,7 @@ describe("the branch's members and a rejected branch", () => {
   const proposals = {
     groups: [
       { groupId: "node:branch-doc-1-alice", items: [{ itemId: "i-1", blockId: "blk-a", kind: "replace" }, { itemId: "i-2", blockId: "blk-b", kind: "insert" }] },
-      { groupId: "node:run-1", items: [{ itemId: "i-3", blockId: "blk-a", kind: "kind" }] },
+      { groupId: "node:run-1", items: [{ itemId: "i-3", blockId: "blk-a", kind: "replace" }] },
     ],
   };
 

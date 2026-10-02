@@ -1,5 +1,4 @@
 import { readStanding, type Standing } from "~/extensions/documents/lib/disposition";
-import { readFrontMatter, type FrontMatter } from "../lib/front-matter";
 import type { CitationStyles } from "~/contract";
 import type { Proposer } from "~/extensions/documents/lib/proposals";
 import { byOrder, isOrderKey } from "~/lib/order";
@@ -12,11 +11,6 @@ import { lineCount } from "~/extensions/documents/lib/code-lines";
 import { highlightSource } from "~/extensions/documents/lib/highlight";
 import { readColumns, readRows, type TableColumn, type TableRow } from "~/extensions/documents/lib/table";
 import {
-  ACCEPTED_AT_PROPERTY,
-  PHASE_PROPERTY,
-  SUPERSEDED_BY_PROPERTY,
-  isPhase,
-  type Phase,
   DOCUMENT_TYPE,
   normalizeRuns,
   TEXT_ROLES,
@@ -68,14 +62,6 @@ export interface TextBlockView extends BlockCommon {
   readonly mathSvg?: Readonly<Record<string, string>>;
   /** The standing the reader gave the block; neutral when none is stored. BO_0227_010 */
   readonly standing: Standing;
-  /** What the block is in the decision vocabulary — the graph's `kind`
-   * property, named apart from the block type here; absent for plain prose.
-   * BO_0244_006 */
-  readonly blockKind?: string;
-  /** The blocks this one was derived from, when a run maintains it: the one
-   * cost the document read takes for the body's order and the depth's
-   * *Why this matters now*. CA_0046_005 */
-  readonly derivedFrom?: readonly string[];
 }
 
 export interface DividerBlockView extends BlockCommon {
@@ -273,13 +259,6 @@ export interface DocumentView {
   readonly documentId: string;
   readonly revisionId: string;
   readonly title: string;
-  /** The root's phase, absent while proposed (`BO_0249`). */
-  readonly phase?: Phase;
-  /** The root that superseded this one, with `phase` superseded. */
-  readonly supersededBy?: string;
-  /** The dataRevision the acceptance was made at, absent for a root that was
-   * never accepted: what is accepted is derived from it (`BO_0274_005`). */
-  readonly acceptedAt?: number;
   /** The record slot — `profile` for a profile — so the headline paints the
    * minted name the document was given (`BO_0298_014`). */
   readonly record?: string;
@@ -288,9 +267,6 @@ export interface DocumentView {
    * whole document: what a reference run is drawn as. Derived on every read
    * and stored nowhere, so it can never be stale (`BO_0290_011`). */
   readonly equationNumbers?: Readonly<Record<string, number>>;
-  /** The front matter a manuscript's head projects, as the node carries it.
-   * BO_0293_012 */
-  readonly frontMatter?: FrontMatter;
   /** The number of every numbered figure and table, by identity. BO_0295_008 */
   readonly figureNumbers?: Readonly<Record<string, number>>;
   readonly tableNumbers?: Readonly<Record<string, number>>;
@@ -384,7 +360,6 @@ export function toBlock(node: ReadNode, containmentId: string): BlockView {
       ? (stored as TextRole)
       : "paragraph";
     const standing = readStanding(content["disposition"]);
-    const blockKind = content["kind"];
     // The mathematics in the sentence, set once here. BO_0290_015
     const mathSvg: Record<string, string> = {};
     for (const entry of runs) {
@@ -399,7 +374,6 @@ export function toBlock(node: ReadNode, containmentId: string): BlockView {
       runs,
       ...(Object.keys(mathSvg).length > 0 ? { mathSvg } : {}),
       standing,
-      ...(typeof blockKind === "string" && blockKind !== "" ? { blockKind } : {}),
     };
   }
 
@@ -670,14 +644,13 @@ export function documentNodeOf(
  * run answers (`BO_0290_011`).
  *
  * The numbered equations of the reading order are numbered from one, in that
- * order: an equation that asked for none takes none and consumes none, and
- * neither does a discarded one, since it is not in the order a reader reads.
+ * order: an equation that asked for none takes none and consumes none.
  * Inserting, retiring or restoring an equation therefore renumbers the rest by
  * itself — there is no renumbering write, no migration, and no number stored
  * anywhere to go stale.
  *
- * A reference whose equation is gone from the reading order, is discarded or
- * carries no number resolves to nothing, and the surface says its equation is
+ * A reference whose equation is gone from the reading order or carries no
+ * number resolves to nothing, and the surface says its equation is
  * gone rather than drawing a stale number.
  */
 export function numberEquations(blocks: readonly BlockView[]): {
@@ -688,7 +661,7 @@ export function numberEquations(blocks: readonly BlockView[]): {
   let next = 1;
   const numbered = blocks.map((block) => {
     if (block.kind !== "equation") return block;
-    if (block.numbered !== true || block.standing === "discarded") return block;
+    if (block.numbered !== true) return block;
     const number = next;
     next += 1;
     numbers[block.blockId] = number;
@@ -702,8 +675,7 @@ export function numberEquations(blocks: readonly BlockView[]): {
  * rule: the numbered ones of the reading order from one, figures — pictures
  * and the outputs a person numbered — in one sequence and tables in another,
  * a block that asked for none taking none and consuming none. A retired block
- * never reaches this view, and neither kind carries a standing to discard it
- * by, so nothing else is skipped. A reference whose block is gone or carries
+ * never reaches this view, so nothing else is skipped. A reference whose block is gone or carries
  * no number resolves to nothing and draws as missing.
  */
 export function numberFiguresAndTables(blocks: readonly BlockView[]): {
@@ -745,9 +717,9 @@ export function numberFiguresAndTables(blocks: readonly BlockView[]): {
 const HEADING_ROLES: readonly string[] = ["h1", "h2", "h3"];
 const PROSE_ROLES: readonly string[] = ["paragraph", "quote"];
 
-/** Whether a block is in the order a reader reads: not discarded and not a
- * prompt. A retired block never reaches this view. */
-const inReadingOrder = (block: BlockView): boolean => !("standing" in block) || (block.standing !== "discarded" && block.standing !== "prompt");
+/** Whether a block is in the order a reader reads: not a prompt. A retired
+ * block never reaches this view. */
+const inReadingOrder = (block: BlockView): boolean => !("standing" in block) || block.standing !== "prompt";
 
 /**
  * What every reference is drawn as (`BO_0300_010`), after the numbering: for
@@ -855,9 +827,7 @@ export function placeCodeLines(block: BlockView, established: readonly BlockView
 /**
  * The citations' numbers (`BO_0291_013`): the works the reading order cites,
  * numbered from one in the order of their first citation, a work cited twice
- * keeping its number. A discarded block's citations take no number and consume
- * none, since it is not in the order a reader reads; a retired block never
- * reaches this view. A citation names a node the document does not contain,
+ * keeping its number. A retired block never reaches this view. A citation names a node the document does not contain,
  * so `known` says which cited works the read found at the pin: a work not
  * among them is answered as missing and takes no number, never a stale one.
  * With `known` absent nothing was looked up and every cited work is numbered.
@@ -881,7 +851,7 @@ export function numberCitations(
         if (!missing.includes(work)) missing.push(work);
         continue;
       }
-      if (block.standing === "discarded" || numbers[work] !== undefined) continue;
+      if (numbers[work] !== undefined) continue;
       numbers[work] = next;
       next += 1;
     }
@@ -902,12 +872,6 @@ export const LINE_NUMBERS_PROPERTY = "lineNumbers";
 /** Whether the document numbers the lines of its code: on unless the switch is stored off. */
 export const showsLineNumbers = (document: { readonly lineNumbers?: boolean }): boolean => document.lineNumbers !== false;
 
-const frontMatterOf = (content: Record<string, unknown>): { frontMatter?: FrontMatter } => {
-  const read = readFrontMatter(content);
-  if ("failure" in read || Object.keys(read.frontMatter).length === 0) return {};
-  return { frontMatter: read.frontMatter };
-};
-
 export function assembleDocument(
   graph: ReadResult,
   documentId: string,
@@ -918,9 +882,6 @@ export function assembleDocument(
 
   const content = contentOf(node);
   const title = content["title"];
-  const phase = content[PHASE_PROPERTY];
-  const supersededBy = content[SUPERSEDED_BY_PROPERTY];
-  const acceptedAt = content[ACCEPTED_AT_PROPERTY];
   const equations = numberEquations(blocksOf(graph, documentId, CONTAINS));
   const figures = numberFiguresAndTables(equations.blocks);
   const code = numberCodeLines(figures.blocks);
@@ -931,11 +892,7 @@ export function assembleDocument(
     documentId: bareId(node.id),
     revisionId: node.revision.id,
     title: typeof title === "string" ? title : "",
-    ...(isPhase(phase) && phase !== "proposed" ? { phase } : {}),
-    ...(typeof supersededBy === "string" && supersededBy !== "" ? { supersededBy } : {}),
-    ...(typeof acceptedAt === "number" ? { acceptedAt } : {}),
     ...(typeof content["record"] === "string" && content["record"] !== "" ? { record: content["record"] as string } : {}),
-    ...frontMatterOf(content),
     ...(typeof content[CITATION_STYLE_PROPERTY] === "string" && content[CITATION_STYLE_PROPERTY] !== "" ? { citationStyle: content[CITATION_STYLE_PROPERTY] as string } : {}),
     ...(typeof content[FORMAT_CODE_PROPERTY] === "boolean" ? { formatCode: content[FORMAT_CODE_PROPERTY] as boolean } : {}),
     ...(typeof content[LINE_NUMBERS_PROPERTY] === "boolean" ? { lineNumbers: content[LINE_NUMBERS_PROPERTY] as boolean } : {}),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { chipName, fixatedChipName, sent, staleIn, type PointedReference } from "~/lib/command-target";
+import { chipName, sent, staleIn, type PointedReference } from "~/lib/command-target";
 import { anchorAt } from "~/lib/passage";
 import {
   OPENING_CHARS,
@@ -8,7 +8,7 @@ import {
   pointingOf,
   type PointableBlock,
 } from "./pointing";
-import { addPassage, NO_MARKING, toggleDocument, toggleReference } from "./references";
+import { addPassage, NO_MARKING, toggleDocument, toggleProposal, toggleReference } from "./references";
 
 const blocks: PointableBlock[] = [
   { blockId: "a", text: "Opening.", standing: "keep" },
@@ -50,10 +50,8 @@ describe("what a view reports of the reader's pointing", () => {
     ]);
   });
 
-  it("Given fixated blocks, Then they come in reading order, whatever is marked", () => {
-    expect(
-      pointingOf(NO_MARKING, blocks).fixated.map((block) => block.blockId),
-    ).toEqual(["b", "c"]);
+  it("Given fixated blocks, Then the report carries none of them: the command line shows no pin (DO_0025_004)", () => {
+    expect(Object.keys(pointingOf(NO_MARKING, blocks))).toEqual(["references"]);
   });
 
   it("Given a passage whose words were edited away, Then it is reported stale, and the command names it by number", () => {
@@ -103,11 +101,6 @@ describe("the names of the composer's chips", () => {
     expect(chipName(passage!)).toBe("Reference 1, stale: “storm”");
   });
 
-  it("Given a fixated block, Then its chip is named as fixated with its opening", () => {
-    expect(fixatedChipName(pointingOf(NO_MARKING, blocks).fixated[1]!)).toBe(
-      "Fixated: “Tone: dry.”",
-    );
-  });
 });
 
 /**
@@ -141,16 +134,9 @@ describe("what the report says of what was marked", () => {
     expect(pointingOf(restored, blocks).references[0]).toMatchObject({ what: "retired", since: "restored", rowless: true });
   });
 
-  it("Given blocks discarded before or after they were marked, and a block retired since, Then each says what happened", () => {
-    const discardedBlocks: PointableBlock[] = [{ blockId: "a", text: "Opening.", standing: "discarded" }, { blockId: "b", text: "Storm.", standing: "keep" }];
-    const marking = toggleReference(
-      toggleReference(toggleReference(NO_MARKING, "a", { revisionId: "rev-a" }), "b", { revisionId: "rev-b", discarded: true }),
-      "c",
-      { revisionId: "rev-c", words: "Tone: dry." },
-    );
-    const [a, b, c] = pointingOf(marking, discardedBlocks).references;
-    expect([a?.what, a?.since]).toEqual(["discarded", "discarded"]);
-    expect([b?.what, b?.since]).toEqual(["discarded", "reopened"]);
+  it("Given a block retired since it was marked, Then it says so and is taken back from its chip", () => {
+    const marking = toggleReference(NO_MARKING, "gone-since", { revisionId: "rev-g", words: "Tone: dry." });
+    const [c] = pointingOf(marking, blocks).references;
     expect([c?.what, c?.since, c?.rowless, c?.words]).toEqual([undefined, "retired", true, "Tone: dry."]);
   });
 
@@ -191,5 +177,27 @@ describe("the report of references across documents (BO_0304_009)", () => {
     expect(chipName(report.references[1] as PointedReference)).toBe("Reference 2: “Elsewhere, an opening.” in “Second”");
     expect(chipName(report.references[3] as PointedReference)).toBe("Reference 4: document “Third”");
     expect(staleIn(report)).toEqual([]);
+  });
+});
+
+describe("a proposal marked whole, as reported (BO_0321_008)", () => {
+  const items = [
+    { item: "chg-1|replace|node:b", blockId: "b", revisionId: "cand-b" },
+    { item: "chg-1|insert|node:n", blockId: "n", revisionId: "cand-n" },
+  ];
+
+  it("Given it marked while its run still stages, Then it is sent with its items and shown with its proposer, count and that it is staging", () => {
+    const marking = toggleProposal(NO_MARKING, "chg-1", items, "Codex");
+    const [reported] = pointingOf(marking, blocks, new Map([["chg-1|replace|node:b", { words: "x" }]]), new Set(["chg-1"])).references;
+    expect(reported).toMatchObject({ kind: "proposal", number: 1, group: "chg-1", items, count: 2, proposer: "Codex", staging: true, words: "Codex’s proposal · 2, still being staged" });
+    expect(reported?.rowless).toBeUndefined();
+    expect(sent(reported as PointedReference)).toEqual({ kind: "proposal", number: 1, group: "chg-1", items });
+    expect(chipName(reported as PointedReference)).toBe("Reference 1: Codex’s proposal · 2, still being staged");
+  });
+
+  it("Given none of its items open any more, Then it is rowless, answered, and taken back from its chip", () => {
+    const marking = toggleProposal(NO_MARKING, "chg-1", items, "Codex");
+    const [reported] = pointingOf(marking, blocks, new Map()).references;
+    expect(reported).toMatchObject({ rowless: true, since: "answered" });
   });
 });

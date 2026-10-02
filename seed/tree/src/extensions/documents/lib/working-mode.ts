@@ -22,6 +22,14 @@ export interface WorkingMode {
  * modes existed. User decision, 2026-09-29 (`BO_0306_Q2`). */
 export const FIRST_MODE: WorkingMode = { field: "explore", work: "create" };
 
+/** The mode each pinch works in, its own and not the block's: zooming in
+ * searches outside the block and adds to it, zooming out gathers and
+ * summarizes. User decisions, 2026-09-30 (`BO_0322_Q19`, `BO_0322_Q22`). */
+export const PINCH_MODE: Readonly<Record<"in" | "out", WorkingMode>> = {
+  in: { field: "explore", work: "create" },
+  out: { field: "consolidate", work: "understand" },
+};
+
 /** Each pole in words and as the icon its toggle wears while it is in force. */
 export const POLES: Readonly<Record<Pole, { readonly label: string; readonly doing: string; readonly icon: IconName }>> = {
   explore: { label: "Explore", doing: "Exploring", icon: "arrows-out-simple" },

@@ -31,6 +31,12 @@ export interface Run {
   readonly text: string;
   readonly marks?: readonly Mark[];
   readonly link?: string;
+  /** A keyword the person named on purpose by typing `@` (`calliopa-bootstrap`'s
+   * `BO_0310_010`): the identity of the keyword document, over words the
+   * sentence keeps as written, the way a link carries its address. The words
+   * are the sentence's; only the identity follows a rename. With the keywords
+   * extension off it is drawn as plain words. */
+  readonly keyword?: string;
   /** Mathematics set in the line (`BO_0290_009`): the run's text is its exact
    * TeX rather than words, and it is drawn typeset wherever it is read. */
   readonly math?: true;
@@ -137,6 +143,7 @@ const run = (text: string, from: Run): Run => ({
     ? { marks: [...from.marks] }
     : {}),
   ...(from.link !== undefined ? { link: from.link } : {}),
+  ...(from.keyword !== undefined ? { keyword: from.keyword } : {}),
   ...atomOf(from),
 });
 
@@ -161,6 +168,7 @@ export function normalizeRuns(runs: readonly Run[]): Run[] {
       text: candidate.text,
       ...(marks.length > 0 ? { marks } : {}),
       ...(candidate.link !== undefined ? { link: candidate.link } : {}),
+      ...(candidate.keyword !== undefined && !isAtom(candidate) ? { keyword: candidate.keyword } : {}),
       ...atomOf(candidate),
     };
     const last = normalized[normalized.length - 1];
@@ -169,7 +177,8 @@ export function normalizeRuns(runs: readonly Run[]): Run[] {
       !isAtom(last) &&
       !isAtom(next) &&
       sameMarks(last, next) &&
-      last.link === next.link
+      last.link === next.link &&
+      last.keyword === next.keyword
     ) {
       normalized[normalized.length - 1] = run(last.text + next.text, last);
       continue;
@@ -253,6 +262,8 @@ interface Char {
   readonly ch: string;
   readonly marks: readonly Mark[];
   readonly link: string | undefined;
+  /** The keyword the character's words name (`BO_0310_010`). */
+  readonly keyword?: string | undefined;
   /** The whole run, when this character stands for an atom. It carries no
    * marks and no link, so every range operation passes over it unchanged and
    * `implode` puts the run back exactly as it was. `BO_0290_009` */
@@ -271,6 +282,7 @@ function explode(runs: readonly Run[]): Char[] {
         ch,
         marks: normalizeMarks(entry.marks ?? []),
         link: entry.link,
+        keyword: entry.keyword,
       });
     }
   }
@@ -286,6 +298,7 @@ function implode(chars: readonly Char[]): Run[] {
             text: char.ch,
             ...(char.marks.length > 0 ? { marks: [...char.marks] } : {}),
             ...(char.link !== undefined ? { link: char.link } : {}),
+            ...(char.keyword !== undefined ? { keyword: char.keyword } : {}),
           },
     ),
   );
@@ -388,7 +401,10 @@ export function applyLink(
     chars.map((char, index) =>
       index < low || index >= high
         ? char
-        : { ...char, link: link === null ? undefined : link },
+        : // A link and a named keyword never stand on the same words.
+          link === null
+          ? { ...char, link: undefined }
+          : { ...char, link, keyword: undefined },
     ),
   );
 }
@@ -411,10 +427,16 @@ export function replaceRange(
   const chars = explode(runs);
   const [low, high] = bounds(chars, start, end);
   const carrier = chars[low - 1] ?? chars[high] ?? null;
+  // Words typed inside a named keyword belong to it; typed at its edge they
+  // are the sentence's own, so a keyword never grows by what follows it.
+  // BO_0310_010
+  const before = chars[low - 1]?.keyword;
+  const keyword = before !== undefined && before === chars[high]?.keyword ? before : undefined;
   const inserted: Char[] = [...text].map((ch) => ({
     ch,
     marks: carrier === null ? [] : carrier.marks,
     link: carrier === null ? undefined : carrier.link,
+    keyword,
   }));
   return implode([...chars.slice(0, low), ...inserted, ...chars.slice(high)]);
 }
@@ -465,6 +487,7 @@ export function sameRuns(left: readonly Run[], right: readonly Run[]): boolean {
       return (
         entry.text === other.text &&
         entry.link === other.link &&
+        entry.keyword === other.keyword &&
         entry.math === other.math &&
         entry.equationRef === other.equationRef &&
         entry.figureRef === other.figureRef &&
@@ -516,6 +539,23 @@ export function readRuns(
     const link = entry["link"];
     if (link !== undefined && typeof link !== "string") {
       return { failure: `Run ${index} carries a link that is not a location.` };
+    }
+    // A named keyword (`BO_0310_010`): an identity over words the sentence
+    // keeps, never a link or an atom as well.
+    const keyword = entry["keyword"];
+    if (keyword !== undefined) {
+      if (typeof keyword !== "string" || keyword.trim() === "") {
+        return { failure: `Run ${index} names no keyword.` };
+      }
+      if (entry["text"] === "") {
+        return { failure: `Run ${index} names a keyword with no words.` };
+      }
+      if (link !== undefined) {
+        return { failure: `Run ${index} names a keyword or carries a link, never both.` };
+      }
+      if (["math", "equationRef", "figureRef", "tableRef", "blockRef", "cite"].some((key) => entry[key] !== undefined)) {
+        return { failure: `Run ${index} names a keyword with words, and cannot be a reference, mathematics or a citation.` };
+      }
     }
     // Mathematics and a reference to it (`BO_0290_009`). Reading them back is
     // not optional politeness: a read that rebuilt a run from text, marks and
@@ -593,6 +633,7 @@ export function readRuns(
       text: entry["text"],
       ...(marks !== undefined ? { marks: marks as Mark[] } : {}),
       ...(link !== undefined ? { link: link as string } : {}),
+      ...(keyword !== undefined ? { keyword: keyword as string } : {}),
       ...(math === true ? { math: true as const } : {}),
       ...(equationRef !== undefined
         ? { equationRef: equationRef as string }

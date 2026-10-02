@@ -18,7 +18,7 @@ import { readShows } from "../block-editor";
  * its own, `#` offering them, a file dropped on it, words composed into a new
  * block, and *Show prompts*.
  */
-const text = (blockId: string, order: string, words: string, standing: "keep" | "discarded" | "prompt" = "keep"): BlockView => ({
+const text = (blockId: string, order: string, words: string, standing: "keep" | "prompt" = "keep"): BlockView => ({
   kind: "text",
   blockId,
   revisionId: `rev-${blockId}`,
@@ -67,11 +67,14 @@ describe("the command control", () => {
     expect(control?.querySelector("[data-block-send]")?.getAttribute("aria-label")).toBe("Send as prompt");
     // The tooltip names the key that sends. DO_0015_007
     expect(control?.querySelector("[data-block-send]")?.getAttribute("title")).toBe("Send as prompt · Ctrl+Enter");
-    expect(control?.querySelector("[data-block-send-more]")?.getAttribute("aria-label")).toBe("More ways to send");
+    // No caret and no second way to send; the toggle says how. DO_0025_001
+    expect(control?.querySelector("[data-block-send-more]") ?? null).toBeNull();
+    expect(control?.querySelector("[data-block-keep]")?.getAttribute("aria-label")).toBe("Keep as content");
+    expect(control?.querySelector("[data-block-keep]")?.getAttribute("aria-pressed")).toBe("false");
     // The controls are one chip, each an icon named by its label; what the
     // command carries follows it. BO_0267_027
     const controls = control?.querySelector("[data-block-command-controls]");
-    for (const part of ["[data-agent-menu]", "[data-block-point]", "[data-attach-input]", "[data-block-send]", "[data-block-send-more]"]) {
+    for (const part of ["[data-agent-menu]", '[data-block-mode="field"]', '[data-block-mode="work"]', "[data-block-point]", "[data-attach-input]", "[data-block-keep]", "[data-block-send]"]) {
       expect(controls?.querySelector(part) != null).toBe(true);
     }
     expect(control?.querySelector("[data-block-send]")?.textContent?.trim()).toBe("");
@@ -100,7 +103,7 @@ describe("the command control", () => {
     await view.userEvent('[data-block-command="blk-b"] [data-block-send]', "click");
     await view.settle(() => view.writes("setDisposition").length === 1);
     expect(view.record.commands).toEqual([
-      { itemId: "doc-1", source: { block: "blk-b", revisionId: "rev-blk-b" }, words: "Tighten #1.", attachments: [] },
+      { itemId: "doc-1", source: { block: "blk-b", revisionId: "rev-blk-b" }, words: "Tighten #1.", attachments: [], mode: { field: "explore", work: "create" } },
     ]);
     expect(view.writes("setDisposition")).toEqual([
       { command: "setDisposition", blockId: "blk-b", baseRevisionId: "rev-blk-b", standing: "prompt" },
@@ -127,15 +130,76 @@ describe("the command control", () => {
     await view.idle();
   });
 
-  it("When Send, keep as content is chosen, Then the block is sent and stays, with no standing written", async () => {
+  it("When Keep as content is on and Send is pressed, Then Send says so, the block is sent and stays with no standing written, and the toggle stays on", async () => {
     const view = await mount();
     await activateBlock(view, "blk-b");
-    await view.userEvent('[data-block-command="blk-b"] [data-block-send-more]', "click");
-    await view.userEvent('[data-block-command="blk-b"] [data-block-send-keep]', "click");
+    const send = () => view.find('[data-block-command="blk-b"] [data-block-send]');
+    await view.userEvent('[data-block-command="blk-b"] [data-block-keep]', "click");
+    await view.settle(() => view.find('[data-block-command="blk-b"] [data-block-keep]')?.getAttribute("aria-pressed") === "true");
+    expect(send()?.getAttribute("aria-label")).toBe("Send, keep as content");
+    expect(send()?.getAttribute("title")).toBe("Send, keep as content · Ctrl+Enter");
+    await view.userEvent('[data-block-command="blk-b"] [data-block-send]', "click");
     await view.settle(() => (view.record.commands?.length ?? 0) === 1);
     await view.settle();
     expect(view.writes("setDisposition")).toEqual([]);
     expect(view.find('[data-block-id="blk-b"]') != null).toBe(true);
+    expect(view.find('[data-block-command="blk-b"] [data-block-keep]')?.getAttribute("aria-pressed")).toBe("true");
+    await view.idle();
+  });
+
+  it("Given Keep as content on, When Ctrl+Enter is pressed, Then the block is kept as content, and the toggle is this block's alone", async () => {
+    const view = await mount();
+    await activateBlock(view, "blk-b");
+    await view.userEvent('[data-block-command="blk-b"] [data-block-keep]', "click");
+    await view.settle(() => view.find('[data-block-command="blk-b"] [data-block-keep]')?.getAttribute("aria-pressed") === "true");
+    const editor = view.find('[data-block-id="blk-b"] [data-block-editor]') as HTMLElement;
+    const key = editor.ownerDocument.createEvent("Event");
+    key.initEvent("keydown", true, true);
+    Object.defineProperty(key, "key", { value: "Enter" });
+    Object.defineProperty(key, "ctrlKey", { value: true });
+    editor.dispatchEvent(key);
+    await view.settle(() => (view.record.commands?.length ?? 0) === 1);
+    await view.settle();
+    expect(view.writes("setDisposition")).toEqual([]);
+    await activateBlock(view, "blk-c");
+    expect(view.find('[data-block-command="blk-c"] [data-block-keep]')?.getAttribute("aria-pressed")).toBe("false");
+    await view.idle();
+  });
+
+  it("Given a block sent before as content and nothing on this device, Then its toggle reads on and its mode is its latest run's; a block sent as a prompt reads off", async () => {
+    const consolidating = { field: "consolidate", work: "understand" };
+    const view = await mount(draft, [
+      { id: "arun-2", goal: "Tighten #1.", status: "completed", agent: "codex", group: null, source: "blk-b", touched: [], startedAt: 2, references: [], mode: consolidating } as never,
+    ]);
+    await activateBlock(view, "blk-b");
+    await view.settle(() => view.find('[data-block-command="blk-b"] [data-block-keep]')?.getAttribute("aria-pressed") === "true");
+    expect(view.find('[data-block-command="blk-b"] [data-block-mode="field"]')?.getAttribute("data-block-mode-pole")).toBe("consolidate");
+    expect(view.find('[data-block-command="blk-b"] [data-block-mode="work"]')?.getAttribute("data-block-mode-pole")).toBe("understand");
+    await activateBlock(view, "blk-a");
+    expect(view.find('[data-block-command="blk-a"] [data-block-keep]')?.getAttribute("aria-pressed")).toBe("false");
+    await view.idle();
+  });
+
+  it("Given the mode switched on one block, Then that block alone changes, its send carries it, and a block never sent then starts from it", async () => {
+    const view = await mount();
+    await activateBlock(view, "blk-b");
+    const pole = (blockId: string, axis: string) => view.find(`[data-block-command="${blockId}"] [data-block-mode="${axis}"]`)?.getAttribute("data-block-mode-pole");
+    expect([pole("blk-b", "field"), pole("blk-b", "work")]).toEqual(["explore", "create"]);
+    await view.userEvent('[data-block-command="blk-b"] [data-block-mode="field"]', "click");
+    await view.settle(() => pole("blk-b", "field") === "consolidate");
+    expect(view.find('[data-block-command="blk-b"] [data-block-mode="field"]')?.getAttribute("aria-label")).toBe("Consolidating — switch to explore");
+    await activateBlock(view, "blk-c");
+    expect([pole("blk-c", "field"), pole("blk-c", "work")]).toEqual(["explore", "create"]);
+    await activateBlock(view, "blk-b");
+    expect(pole("blk-b", "field")).toBe("consolidate");
+    await view.userEvent('[data-block-command="blk-b"] [data-block-send]', "click");
+    await view.settle(() => (view.record.commands?.length ?? 0) === 1);
+    expect(view.record.commands?.[0]?.mode).toEqual({ field: "consolidate", work: "create" });
+    // The document's last sent mode is written, told to the shell, and is
+    // where a block never sent starts. DO_0025_003 DO_0025_009
+    await view.settle(() => view.record.mode?.field === "consolidate");
+    await activateBlock(view, "blk-a");
+    expect([pole("blk-a", "field"), pole("blk-a", "work")]).toEqual(["consolidate", "create"]);
     await view.idle();
   });
 
@@ -160,7 +224,7 @@ describe("the command control", () => {
     await view.idle();
   });
 
-  it("Given Ctrl+Enter in the block, Then it is sent as a prompt and not split", async () => {
+  it("Given Ctrl+Enter in the block with Keep as content off, Then it is sent as a prompt and not split", async () => {
     const view = await mount();
     await activateBlock(view, "blk-b");
     // The surface hears the key on the page, as the browser delivers it.
@@ -210,12 +274,25 @@ describe("pointing from a prompt block", () => {
     await view.settle(() => view.record.pointing?.references.length === 1);
     expect(view.record.pointing?.references.map((reference) => [reference.number, reference.blockId])).toEqual([[1, "blk-c"]]);
     expect(view.find('[data-block-command="blk-b"] [data-chip="1"]') != null).toBe(true);
-    // One chip holds the line, Send and its caret after what the command
-    // carries. BO_0267_028
-    const order = Array.from(view.root.querySelectorAll('[data-block-command="blk-b"] [data-block-command-controls] [data-agent-menu], [data-block-command="blk-b"] [data-block-command-controls] [data-block-point], [data-block-command="blk-b"] [data-block-command-controls] [data-chip], [data-block-command="blk-b"] [data-block-command-controls] [data-block-send], [data-block-command="blk-b"] [data-block-command-controls] [data-block-send-more]')).map((element) =>
-      element.hasAttribute("data-chip") ? "chip" : element.hasAttribute("data-block-send-more") ? "more" : element.hasAttribute("data-block-send") ? "send" : element.hasAttribute("data-block-point") ? "point" : "agent",
+    // One chip holds the line: agent, speed, the two modes, point, attach,
+    // what the command carries, Keep as content and Send. BO_0267_028
+    // DO_0025_005
+    const line = '[data-block-command="blk-b"] [data-block-command-controls]';
+    const order = Array.from(
+      view.root.querySelectorAll(
+        ["[data-agent-menu]", ".speed-toggle", "[data-block-mode]", "[data-block-point]", "[data-attach-input]", "[data-chip]", "[data-block-keep]", "[data-block-send]"].map((part) => `${line} ${part}`).join(", "),
+      ),
+    ).map((element) =>
+      element.hasAttribute("data-chip") ? "chip"
+      : element.hasAttribute("data-block-keep") ? "keep"
+      : element.hasAttribute("data-block-send") ? "send"
+      : element.hasAttribute("data-block-point") ? "point"
+      : element.hasAttribute("data-attach-input") ? "attach"
+      : element.hasAttribute("data-block-mode") ? `mode-${element.getAttribute("data-block-mode")}`
+      : element.classList.contains("speed-toggle") ? "speed"
+      : "agent",
     );
-    expect(order).toEqual(["agent", "point", "chip", "send", "more"]);
+    expect(order).toEqual(["agent", "speed", "mode-field", "mode-work", "point", "attach", "chip", "keep", "send"]);
     await view.idle();
   });
 
@@ -305,7 +382,6 @@ describe("Show prompts", () => {
     await activateBlock(view, "blk-p");
     const standing = view.find('[data-bar-action="block-standing"]') as HTMLSelectElement | null;
     expect(Array.from(standing?.querySelectorAll("option") ?? []).map((option) => option.getAttribute("value"))).toEqual([
-      "discarded",
       "keep",
       "fixate",
       "prompt",
@@ -371,13 +447,13 @@ describe("what a document shows is remembered (BO_0267_022)", () => {
     await first.userEvent('[data-bar-action="prompts"]', "click");
     await first.userEvent('[data-bar-action="proposed-changes"]', "click");
     await first.settle(() => kept.get("calliopa.shows.doc-1") !== undefined && JSON.parse(kept.get("calliopa.shows.doc-1") ?? "{}").proposals === true);
-    expect(JSON.parse(kept.get("calliopa.shows.doc-1") ?? "{}")).toEqual({ retired: false, discarded: false, proposals: true, prompts: true });
+    expect(JSON.parse(kept.get("calliopa.shows.doc-1") ?? "{}")).toEqual({ removed: false, proposals: true, prompts: true });
     await first.idle();
 
     const again = await mount();
     await again.settle(() => again.find('[data-bar-action="prompts"]')?.getAttribute("aria-pressed") === "true");
     expect(again.find('[data-bar-action="proposed-changes"]')?.getAttribute("aria-pressed")).toBe("true");
-    expect(again.find('[data-bar-action="discarded-blocks"]')?.getAttribute("aria-pressed")).toBe("false");
+    expect(again.find('[data-bar-action="removed"]')?.getAttribute("aria-pressed")).toBe("false");
     await again.userEvent('[data-bar-action="prompts"]', "click");
     await again.userEvent('[data-bar-action="proposed-changes"]', "click");
     await again.settle(() => !kept.has("calliopa.shows.doc-1"));
@@ -387,6 +463,40 @@ describe("what a document shows is remembered (BO_0267_022)", () => {
   it("Given a kept record that cannot be read, Then nothing extra shows", () => {
     expect(readShows("not json")).toBeNull();
     expect(readShows(null)).toBeNull();
-    expect(readShows(JSON.stringify({ prompts: true, retired: "yes" }))).toEqual({ retired: false, discarded: false, proposals: false, prompts: true });
+    expect(readShows(JSON.stringify({ prompts: true, retired: "yes" }))).toEqual({ removed: false, proposals: false, prompts: true });
+    // A record kept under the toggle's old name reads as Show removed.
+    // BO_0315_015
+    expect(readShows(JSON.stringify({ retired: true }))).toEqual({ removed: true, proposals: false, prompts: false });
+  });
+});
+
+describe("a block's command choices on the device (DO_0025_002)", () => {
+  it("Given a choice made on a block, When the document opens again, Then the device brings it back, over what the block was sent with", async () => {
+    const kept = new Map<string, string>();
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: (key: string) => kept.get(key) ?? null,
+        setItem: (key: string, value: string) => void kept.set(key, value),
+        removeItem: (key: string) => void kept.delete(key),
+      },
+    });
+    const first = await mount();
+    await activateBlock(first, "blk-b");
+    await first.userEvent('[data-block-command="blk-b"] [data-block-keep]', "click");
+    await first.userEvent('[data-block-command="blk-b"] [data-block-mode="work"]', "click");
+    await first.settle(() => kept.has("calliopa.command.doc-1.blk-b") && JSON.parse(kept.get("calliopa.command.doc-1.blk-b") ?? "{}").mode?.work === "understand");
+    expect(JSON.parse(kept.get("calliopa.command.doc-1.blk-b") ?? "{}")).toEqual({ keep: true, mode: { field: "explore", work: "understand" } });
+    await first.idle();
+
+    // Sent before as a prompt: what was sent says off, the device says on.
+    const again = await mount({ ...draft, blocks: [text("blk-a", "a", "Opening."), text("blk-b", "b", "Tighten #1.", "prompt"), text("blk-c", "c", "Closing.")] }, [
+      { id: "arun-1", goal: "Tighten #1.", status: "completed", agent: "codex", group: null, source: "blk-b", touched: [], startedAt: 1, references: [] },
+    ]);
+    await again.userEvent('[data-bar-action="prompts"]', "click");
+    await again.settle(() => again.find('[data-block-id="blk-b"]') !== null);
+    await activateBlock(again, "blk-b");
+    await again.settle(() => again.find('[data-block-command="blk-b"] [data-block-keep]')?.getAttribute("aria-pressed") === "true");
+    expect(again.find('[data-block-command="blk-b"] [data-block-mode="work"]')?.getAttribute("data-block-mode-pole")).toBe("understand");
+    await again.idle();
   });
 });

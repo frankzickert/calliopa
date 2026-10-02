@@ -22,9 +22,15 @@ import { isAtom, type Run } from "~/lib/runs";
  *
  * Offsets are character offsets over the run list, an atom one character
  * wide, the same offsets every run operation deals in.
+ *
+ * Before the three, a keyword the person named on purpose by typing `@`
+ * (`calliopa-bootstrap`'s `BO_0310_023`): the words of a `keyword` run are a
+ * mention by the rule `named`, whatever they say, and nothing inside them is
+ * matched again. A named keyword is a mention even when its document no
+ * longer carries *Keyword*; the reader says so.
  */
 
-export type MatchRule = "inflection" | "alias" | "stem";
+export type MatchRule = "named" | "inflection" | "alias" | "stem";
 
 /** A keyword's names: its identity, its title and its aliases. */
 export interface KeywordNames {
@@ -131,7 +137,8 @@ function charsOf(runs: readonly Run[]): { ch: string; matchable: boolean }[] {
       chars.push({ ch: "\u0000", matchable: false });
       continue;
     }
-    const matchable = !(run.marks ?? []).includes("code");
+    // A named keyword's words are its mention, and start no second one.
+    const matchable = !(run.marks ?? []).includes("code") && run.keyword === undefined;
     for (const ch of run.text) chars.push({ ch, matchable });
   }
   return chars;
@@ -149,7 +156,25 @@ interface Name {
   readonly isTitle: boolean;
 }
 
-const RANK: Readonly<Record<MatchRule, number>> = { inflection: 0, alias: 1, stem: 2 };
+const RANK: Readonly<Record<MatchRule, number>> = { named: -1, inflection: 0, alias: 1, stem: 2 };
+
+/** The mentions a block's `keyword` runs name, one per stretch of words
+ * naming the same keyword; `self`'s own are left alone. */
+export function namedMentions(runs: readonly Run[], self: string | null = null): Mention[] {
+  const mentions: Mention[] = [];
+  let at = 0;
+  for (const run of runs) {
+    const width = isAtom(run) ? 1 : [...run.text].length;
+    const keyword = isAtom(run) ? undefined : run.keyword;
+    if (keyword !== undefined && keyword !== self && width > 0) {
+      const last = mentions[mentions.length - 1];
+      if (last !== undefined && last.keyword === keyword && last.end === at) mentions[mentions.length - 1] = { ...last, end: at + width };
+      else mentions.push({ start: at, end: at + width, keyword, rule: "named" });
+    }
+    at += width;
+  }
+  return mentions;
+}
 
 /**
  * The mentions in one block's runs, in reading order and never overlapping.
@@ -162,6 +187,7 @@ export function findMentions(
   stem: Stemmer,
   self: string | null = null,
 ): Mention[] {
+  const named = namedMentions(runs, self);
   const names: Name[] = [];
   for (const keyword of keywords) {
     if (keyword.keyword === self) continue;
@@ -173,7 +199,7 @@ export function findMentions(
     add(keyword.title, true);
     for (const alias of keyword.aliases) add(alias, false);
   }
-  if (names.length === 0) return [];
+  if (names.length === 0) return named;
 
   const tokens = tokenize(charsOf(runs));
   const stems = new Map<string, string>();
@@ -235,5 +261,5 @@ export function findMentions(
     mentions.push({ start: first.start, end: last.end, keyword: chosen.keyword, rule: chosen.rule });
     at += longest;
   }
-  return mentions;
+  return [...named, ...mentions].sort((left, right) => left.start - right.start);
 }

@@ -153,14 +153,14 @@ describe("following a run's events", () => {
     });
 
     const events: string[] = [];
-    const followed = await withRequestContext("calliopa_session=abc", () =>
+    const followed = await withRequestContext("calliopa_session_0123456789abcdef=abc", () =>
       followBridgeEvents("arun-1", (event) => {
         events.push(event.kind);
       }),
     );
 
     expect(followed.ok).toBe(true);
-    expect(seen[0]?.get("cookie")).toBe("calliopa_session=abc");
+    expect(seen[0]?.get("cookie")).toBe("calliopa_session_0123456789abcdef=abc");
     expect(seen[0]?.get("accept")).toBe("text/event-stream");
     expect(events).toEqual(["runStarted"]);
   });
@@ -205,12 +205,12 @@ describe("starting a run aimed at a document", () => {
 
   it("Given an intention, Then it travels with the run, and none is sent when none was named (BO_0258_006)", async () => {
     const bodies = sentBodies();
-    await startBridgeRun({ goal: "Has anything under this moved?", agent: "codex", intention: "calliopa-refine.intention" });
+    await startBridgeRun({ goal: "Has anything under this moved?", agent: "codex", intention: "demo.intention" });
     await startBridgeRun({ goal: "g", agent: "codex", intention: "" });
     await startBridgeRun({ goal: "g", agent: "codex" });
     expect(bodies[0]).toEqual({
       goal: "Has anything under this moved?",
-      intention: "calliopa-refine.intention",
+      intention: "demo.intention",
       context: "",
       agent: "codex",
     });

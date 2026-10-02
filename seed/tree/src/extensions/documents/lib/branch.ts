@@ -190,7 +190,7 @@ export function branchItemsOf(proposals: { readonly groups: readonly BranchGroup
 
 /** The branch member a block is, or null when the block is truth's alone. */
 export function memberOf(items: BranchGroup["items"], blockId: string): BranchGroup["items"][number] | null {
-  return items.find((item) => item.blockId === blockId && item.kind !== "phase") ?? null;
+  return items.find((item) => item.blockId === blockId) ?? null;
 }
 
 /**

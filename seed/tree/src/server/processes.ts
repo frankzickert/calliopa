@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { port } from "./port";
 
 import {
   canTransition,
@@ -174,7 +174,7 @@ async function syncSystemRuns(): Promise<void> {
           state,
           step: state === "running" ? "Running" : state === "completed" ? "Done" : existing.step,
           ...(concluded === "" ? {} : { concluded }),
-          updatedAt: new Date().toISOString(),
+          updatedAt: port.now().toISOString(),
         });
       }
       continue;
@@ -189,10 +189,10 @@ async function systemProcess(run: BridgeRun, state: ProcessState): Promise<Proce
   // identity when none does. BO_0255_007 BO_0264_017
   const documentId = run.artifact !== undefined && run.artifact !== "" ? run.artifact : null;
   const label = documentId === null ? null : await labelOf(DOCUMENT_KIND, documentId);
-  const now = new Date().toISOString();
+  const now = port.now().toISOString();
   const concluded = conclusionOf(run);
   return {
-    id: randomUUID(),
+    id: port.uuid(),
     workspaceId: SYSTEM_WORKSPACE,
     title: run.goal.replace(/\.$/u, ""),
     state,
@@ -218,13 +218,13 @@ async function systemProcess(run: BridgeRun, state: ProcessState): Promise<Proce
 export async function createProcess(
   workspaceId: string,
   input: unknown,
-  id: string = randomUUID(),
+  id: string = port.uuid(),
   /** Whose process: the person whose command started the run. BO_0232_006 */
   account?: string,
 ): Promise<ProcessRecord> {
   const { title, step, itemId, itemKind } = parseProcessInput(input);
   await readWorkspace(workspaceId);
-  const now = new Date().toISOString();
+  const now = port.now().toISOString();
   return store({
     id,
     workspaceId,
@@ -265,7 +265,7 @@ export async function transitionProcess(
     state,
     step: step ?? current.step,
     error,
-    updatedAt: new Date().toISOString(),
+    updatedAt: port.now().toISOString(),
   });
 }
 
@@ -284,14 +284,14 @@ export async function moveProcess(
 ): Promise<ProcessRecord | null> {
   const current = await readStored(id);
   if (current === null) return null;
-  return store({ ...current, ...change, updatedAt: new Date().toISOString() });
+  return store({ ...current, ...change, updatedAt: port.now().toISOString() });
 }
 
 /** Names the kernel run a process reports. BO_0207_015 */
 export async function attachRun(id: string, runId: string): Promise<ProcessRecord | null> {
   const current = await readStored(id);
   if (current === null) return null;
-  return store({ ...current, runId, updatedAt: new Date().toISOString() });
+  return store({ ...current, runId, updatedAt: port.now().toISOString() });
 }
 
 /** Every process of every workspace, for the rare lookup by what it reports. */
@@ -306,5 +306,5 @@ export async function acknowledgeProcess(id: string): Promise<ProcessRecord> {
   if (current.state !== "failed") {
     throw new HttpError(409, "only a failed process can be acknowledged");
   }
-  return store({ ...current, acknowledged: true, updatedAt: new Date().toISOString() });
+  return store({ ...current, acknowledged: true, updatedAt: port.now().toISOString() });
 }

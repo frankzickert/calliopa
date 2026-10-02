@@ -2,21 +2,20 @@ import { randomUUID } from "node:crypto";
 
 import type { ChildFace, ChildPlan, FocusedWorkContribution } from "~/contract";
 import { orderBetween } from "~/lib/order";
-import { runsText, type Run } from "~/lib/runs";
+import { runsText } from "~/lib/runs";
 import { properties } from "~/server/ccgw/script";
 import type { GraphOutcome } from "~/server/outcome";
 import { nodeRef } from "~/server/ccgw/nodes";
-import { CONTAINS, type BlockView } from "./assemble";
+import { CONTAINS } from "./assemble";
 import { readDocument } from "./documents";
-import { readClaims } from "./work";
 import { DOCUMENT_TYPE } from "./vocabulary";
 
 /**
  * What a `document` child is, for the shell's focused-work capability.
  *
  * Opening a block as its own work root is the frame's (`CA_0065`, user
- * decision 2026-09-23): the `focuses` edge, the one-child rule, the reads and
- * the retarget are `src/server/focused-work.ts`. What stays here is the
+ * decision 2026-09-23): the `focuses` edge, the one-child rule and the reads
+ * are `src/server/focused-work.ts`. What stays here is the
  * vocabulary — a child of a `document` is a `document` with a first `text`
  * block it `contains`, and its title is this extension's rule — planned as
  * statements the shell commits with the edge in one script, never committed
@@ -32,14 +31,9 @@ const refuse = <T>(rule: string, detail: string): GraphOutcome<T> => ({
   failures: [{ operation: null, rule, detail }],
 });
 
-/** A child's title: the one claim the block asserts when it asserts exactly
- * one, else the block's words to the first sentence. User decision,
+/** A child's title: the block's words to the first sentence. User decision,
  * 2026-09-13. */
-export function childTitle(blockWords: string, claims: readonly { readonly text: readonly Run[] }[]): string {
-  if (claims.length === 1) {
-    const claim = runsText(claims[0]?.text ?? []).trim();
-    if (claim !== "") return claim;
-  }
+export function childTitle(blockWords: string): string {
   const sentence = /^(.*?[.!?])(\s|$)/u.exec(blockWords.trim());
   const words = (sentence?.[1] ?? blockWords).trim();
   return words === "" ? "Focused work" : words;
@@ -60,9 +54,7 @@ async function planDocumentChild(input: {
   const block = parent.result.blocks.find((candidate) => candidate.blockId === input.blockId);
   if (block === undefined) return refuse("unknownBlock", `Block ${input.blockId} is not in this document.`);
   if (block.kind !== "text") return refuse("blockKind", `A ${block.kind} block does not open as focused work.`);
-  const claims = await readClaims([input.blockId]);
-  if (claims.outcome !== "success") return claims as GraphOutcome<never>;
-  const title = childTitle(runsText(block.runs), claims.result.byBlock[input.blockId] ?? []);
+  const title = childTitle(runsText(block.runs));
   const documentId = randomUUID();
   const blockId = randomUUID();
   const parameters: Record<string, unknown> = { cd: nodeRef(documentId), cb: nodeRef(blockId) };
@@ -76,21 +68,14 @@ async function planDocumentChild(input: {
 
 /**
  * What each of these documents says for itself on the block it focuses: its
- * title and its `synthesis` block's words when it holds one. CA_0065_008
+ * title. A document child wears no face of its words. CA_0065_008
  */
 async function documentFaces(itemIds: readonly string[]): Promise<GraphOutcome<readonly ChildFace[]>> {
   const faces: ChildFace[] = [];
   for (const itemId of itemIds) {
     const read = await readDocument(itemId);
     if (read.outcome !== "success") continue;
-    const synthesis = read.result.blocks.find(
-      (block) => block.kind === "text" && block.blockKind === "synthesis",
-    ) as (BlockView & { kind: "text" }) | undefined;
-    faces.push({
-      itemId,
-      title: read.result.title,
-      face: synthesis === undefined ? null : synthesis.runs,
-    });
+    faces.push({ itemId, title: read.result.title, face: null });
   }
   return { outcome: "success", result: faces };
 }

@@ -22,7 +22,7 @@ import {
 } from "~/lib/process-selection";
 import type { TabsState } from "~/lib/tabs";
 import type { ProposedItem } from "~/server/agent/proposed";
-import type { BridgeAttachment } from "~/server/agent/bridge";
+import type { BridgeAttachment, RunContextEntry } from "~/server/agent/bridge";
 import { deliveredWords, formatSize } from "~/lib/command-target";
 import { Icon } from "./icons";
 import type {
@@ -55,9 +55,16 @@ export interface ProposedRead {
   attachments: BridgeAttachment[];
   /** The profile the run was guided by, from its record; null for none. BO_0298_031 */
   profile: { readonly id: string; readonly title: string } | null;
+  /** What each extension told the run at its start, from its record. BO_0310_040 */
+  context: RunContextEntry[];
   /** What the run did, in the contract's own words. CA_0058_006 */
   events: RunEvent[];
 }
+
+/** An extension's name as the run's detail says it: *Keywords* for
+ * `keywords`. BO_0310_040 */
+export const contextName = (extension: string): string =>
+  extension === "" ? "" : `${extension.charAt(0).toUpperCase()}${extension.slice(1).replace(/[-.]/gu, " ")}`;
 
 /** The process the active tab's inspector shows, when it shows one. */
 export function shownProcess(
@@ -140,6 +147,20 @@ export const InspectorPanel = component$<{
             </button>
           </p>
         )}
+        {/* What each extension told the run at its start, beside the profile:
+            the keywords sent, or that the extension's tool failed. BO_0310_040 */}
+        {proposed.processId === detail.id &&
+          proposed.context.map((entry) =>
+            entry.failure !== undefined ? (
+              <p key={entry.extension} class="process-trigger" data-process-context-failure={entry.extension}>
+                {`${contextName(entry.extension)}: nothing sent — ${entry.failure}`}
+              </p>
+            ) : (entry.items ?? []).length > 0 ? (
+              <p key={entry.extension} class="process-trigger" data-process-context={entry.extension}>
+                {`${contextName(entry.extension)}: ${(entry.items ?? []).map((item) => item.title).join(", ")}`}
+              </p>
+            ) : null,
+          )}
         {/* A system run says which extension started it and after which
             change, and opens the document it proposes into. BO_0264_017 */}
         {detail.triggeredBy !== undefined && (

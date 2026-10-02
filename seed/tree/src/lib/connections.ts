@@ -142,6 +142,69 @@ export interface ConnectionRecord {
    * it. BO_0228_012
    */
   readonly apiKeyModel?: boolean;
+  /**
+   * Why the runtime cannot be signed out yet, in words, or null when it can.
+   * Only the `codex` and `claude-code` rows carry it. BO_0316_006
+   */
+  readonly signOutBlocked?: string | null;
+}
+
+/** The runs in flight by agent, as the kernel's agent health counts them across every person. BO_0316_004 */
+export type ActiveRuns = Readonly<Record<string, number>>;
+
+const AGENT_NAMES: Readonly<Record<string, string>> = {
+  codex: "Codex",
+  hermes: "Hermes",
+  provider: "the API-key model",
+  "claude-code": "Claude Code",
+};
+
+/**
+ * The agents whose runs a runtime's sign-out would stop. Signing Codex out
+ * restarts the gateway, which runs Codex, Hermes and the API-key model alike;
+ * signing Claude out touches the Claude runner's runs alone, since the gateway
+ * has no use for Claude's token (BO_0316_002). BO_0316_006
+ */
+export function stoppedBySignOut(runtime: string): readonly string[] {
+  if (runtime === "codex") return ["codex", "hermes", "provider"];
+  if (runtime === "claude-code") return ["claude-code"];
+  return [];
+}
+
+/**
+ * Why a sign-out has to wait, or null when it may go ahead. A sign-out never
+ * interrupts a run, so a run it would stop holds it until the run ends. No
+ * count at all means the kernel is not answering, and the kernel is what runs
+ * them, so nothing is in flight. BO_0316_006
+ */
+export function signOutBlocker(runtime: string, active: ActiveRuns | null): string | null {
+  if (active === null) return null;
+  const going = stoppedBySignOut(runtime).filter((agent) => (active[agent] ?? 0) > 0);
+  if (going.length === 0) return null;
+  const names = going.map((agent) => AGENT_NAMES[agent] ?? agent);
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  const count = going.reduce((total, agent) => total + (active[agent] ?? 0), 0);
+  return count === 1
+    ? `A run is going on ${list}. Sign out once it ends.`
+    : `${count} runs are going on ${list}. Sign out once they end.`;
+}
+
+/**
+ * What follows a sign-out, said before it happens: the runtime leaves the
+ * agent menu, and Hermes, while it reasons on the ChatGPT subscription,
+ * cannot run without Codex. BO_0316_007
+ */
+export function signOutConsequences(runtime: string, hermesModel?: "subscription" | "provider"): readonly string[] {
+  if (runtime === "codex") {
+    return [
+      "Codex leaves the agent menu.",
+      ...(hermesModel === "provider"
+        ? []
+        : ["Hermes reasons on your ChatGPT subscription through this sign-in, so it cannot run until Codex is signed in again."]),
+    ];
+  }
+  if (runtime === "claude-code") return ["Claude Code leaves the agent menu."];
+  return [];
 }
 
 /**
@@ -208,21 +271,6 @@ export interface SelectableRuntime {
   readonly label: string;
   readonly selectable: boolean;
   readonly reason: string | null;
-  /**
-   * The icon a contributed sender wears in the menu, where an agent wears its
-   * own face. Absent for an agent. BO_0273_035
-   */
-  readonly icon?: string;
-  /**
-   * The axes a contributed sender offers before the press, carried through to
-   * the menu that draws them. Absent for an agent. BO_0279_007
-   */
-  readonly options?: readonly {
-    readonly axis: string;
-    readonly label: string;
-    readonly values: readonly string[];
-    readonly start: string | null;
-  }[];
 }
 
 /** What the agent container reports about one of its runtimes. */

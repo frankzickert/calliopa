@@ -430,9 +430,9 @@ describe("a choice on the bar and in the inspector", () => {
     label: "Standing",
     value: "fixate",
     options: [
-      { value: "discarded", label: "Discard", icon: "x" },
       { value: "keep", label: "Keep", icon: "circle" },
       { value: "fixate", label: "Fixate", icon: "diamond" },
+      { value: "prompt", label: "Prompt", icon: "terminal-window" },
     ],
     run$: $(() => {}),
   };
@@ -470,7 +470,7 @@ describe("a choice on the bar and in the inspector", () => {
     // The words are not lost: they are the select's accessible name, and
     // every option is still there to be chosen.
     expect(drawn.named).toBe("Standing");
-    expect(drawn.options).toEqual(["discarded", "keep", "fixate"]);
+    expect(drawn.options).toEqual(["keep", "fixate", "prompt"]);
   });
 
   it("Given the same choice in the inspector, Then it keeps its label", async () => {

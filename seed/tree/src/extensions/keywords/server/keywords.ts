@@ -1,25 +1,22 @@
-import { listDocumentRoles, rolesOf } from "~/extensions/doc-block-roles/server/roles";
-import { DOCUMENT_ROLE_TYPE, HAS_DOCUMENT_ROLE, type DocumentRoleView } from "~/extensions/doc-block-roles/lib/roles";
+import { documentsCarrying, rolesOf, setRole } from "~/extensions/doc-block-roles/server/roles";
+import { ALIAS_ROLE, DEFINITION_ROLE, KEYWORD_ROLE } from "~/extensions/doc-block-roles/lib/roles";
 import { blocksOf, CONTAINS, type TextBlockView } from "~/extensions/documents/server/assemble";
-import { readDocument } from "~/extensions/documents/server/documents";
+import { createDocument, readDocument } from "~/extensions/documents/server/documents";
 import { DOCUMENT_TYPE } from "~/extensions/documents/server/vocabulary";
 import type { Run } from "~/lib/runs";
-import { atDataRevision, withBranch } from "~/server/ccgw/branch-scope";
-import { query, type ReadNode, type ReadRelation } from "~/server/ccgw/client";
-import { bareId, contentOf, typeOf } from "~/server/ccgw/nodes";
+import { atDataRevision, outsideBranch, withBranch } from "~/server/ccgw/branch-scope";
+import { query, type ReadNode } from "~/server/ccgw/client";
+import { bareId, contentOf, nodeRef, typeOf } from "~/server/ccgw/nodes";
 import { facesOf } from "~/server/focused-work";
 import type { GraphOutcome } from "~/server/outcome";
 
 import {
   type DocumentMentionsView,
   type Keyword,
-  type KeywordsListing,
-  type KeywordsSettings,
   type MentionedInView,
   type MentioningDocument,
 } from "../lib/keywords";
 import { findMentions, type KeywordNames, type Mention } from "../lib/match";
-import { readSettings } from "./settings";
 import { stemEnglish } from "./stem";
 
 /**
@@ -28,9 +25,14 @@ import { stemEnglish } from "./stem";
  * documents mentioning a keyword. A mention is resolved here and stored
  * nowhere (`BO_0291_023`'s rule): a query over the words, so it can never
  * drift from what a block says, and a keyword renamed or given an alias
- * re-matches everything at its next read. An extension declaring `keywords`
- * as a dependency imports these directly; the routes and the tool answer
- * the same shapes.
+ * re-matches everything at its next read. A keyword the person named with
+ * `@` is a mention by its run (`BO_0310_023`). An extension declaring
+ * `keywords` as a dependency imports these directly; the routes and the tool
+ * answer the same shapes.
+ *
+ * *Keyword*, *Definition* and *Alias* are built-in roles found by their fixed
+ * ids (`calliopa-bootstrap`'s `BO_0310_020`): no one chooses which role
+ * means keyword, so there is nothing to set.
  */
 
 const refuse = <T>(rule: string, detail: string): GraphOutcome<T> => ({
@@ -40,18 +42,15 @@ const refuse = <T>(rule: string, detail: string): GraphOutcome<T> => ({
 
 const DOCUMENT_KIND = "documents:document";
 
-const active = (relation: ReadRelation, type: string): boolean =>
-  relation.type === type && relation.validity.status === "active";
-
 const isType = (node: ReadNode, type: string): boolean =>
   node.revision.status === "established" && typeOf(node) === type;
 
 /** The text blocks of a document's reading order that words are read from:
- * contained, neither discarded nor a prompt. */
+ * contained, and not a prompt. */
 const readable = (block: { readonly kind: string; readonly standing?: string }): block is TextBlockView =>
-  block.kind === "text" && block.standing !== "discarded" && block.standing !== "prompt";
+  block.kind === "text" && block.standing !== "prompt";
 
-/** Each line of a block carrying the alias role is one alias. */
+/** Each line of a block carrying *Alias* is one alias. */
 const aliasLines = (runs: readonly Run[]): string[] =>
   runs
     .map((run) => run.text)
@@ -60,61 +59,73 @@ const aliasLines = (runs: readonly Run[]): string[] =>
     .map((line) => line.trim())
     .filter((line) => line !== "");
 
-/** The documents carrying the keyword role, by identity, with their titles. */
-async function keywordDocuments(keywordRole: string): Promise<GraphOutcome<{ id: string; title: string }[]>> {
-  const found = await query({
-    statement: `MATCH (d:${DOCUMENT_TYPE})-[h:${HAS_DOCUMENT_ROLE}]->(r:${DOCUMENT_ROLE_TYPE}) RETURN GRAPH d, h, r`,
-    unbounded: true,
-    purpose: "documents carrying the keyword role",
-  });
-  if (found.outcome === "noResult") return { outcome: "success", result: [] };
-  if (found.outcome !== "success") return found as GraphOutcome<never>;
-  const byId = new Map(found.result.nodes.map((node) => [node.id, node] as const));
-  const keywords: { id: string; title: string }[] = [];
-  for (const relation of found.result.relations) {
-    if (!active(relation, HAS_DOCUMENT_ROLE) || relation.to.nodeId === undefined) continue;
-    if (bareId(relation.to.nodeId) !== keywordRole) continue;
-    const document = byId.get(relation.fromNodeId);
-    if (document === undefined || !isType(document, DOCUMENT_TYPE)) continue;
-    const title = contentOf(document)["title"];
-    keywords.push({ id: bareId(document.id), title: typeof title === "string" ? title : "" });
-  }
-  return { outcome: "success", result: keywords.sort((left, right) => left.title.localeCompare(right.title) || (left.id < right.id ? -1 : 1)) };
+/** The documents carrying *Keyword* as their own, with their titles. */
+async function keywordDocuments(): Promise<GraphOutcome<{ id: string; title: string }[]>> {
+  const carrying = await documentsCarrying(KEYWORD_ROLE);
+  // An instance that has not run the built-ins' migration holds no Keyword.
+  if (carrying.outcome === "validationFailure") return { outcome: "success", result: [] };
+  if (carrying.outcome !== "success") return carrying as GraphOutcome<never>;
+  return { outcome: "success", result: [...carrying.result] };
+}
+
+/** A keyword document read once: its blocks in reading order and the roles
+ * each carries, for the keyword and for what a prompt is sent of it. */
+export interface KeywordReading {
+  readonly blocks: readonly TextBlockView[];
+  readonly rolesOfBlock: ReadonlyMap<string, readonly string[]>;
+  /** The values the document holds for *Keyword*'s own fields, by key. */
+  readonly values: Readonly<Record<string, unknown>>;
+}
+
+export async function readKeywordDocument(id: string): Promise<GraphOutcome<KeywordReading & { readonly title: string; readonly all: Awaited<ReturnType<typeof readDocument>> }>> {
+  const document = await readDocument(id);
+  if (document.outcome !== "success") return document as GraphOutcome<never>;
+  const roles = await rolesOf(id);
+  if (roles.outcome !== "success") return roles as GraphOutcome<never>;
+  // A block carries several roles since the one role type (BO_0309_012).
+  const rolesOfBlock = new Map(roles.result.blocks.map((block) => [block.blockId, block.roles.filter((role) => role.proposed !== "role").map((role) => role.id)] as const));
+  const keyword = roles.result.roles.find((role) => role.id === KEYWORD_ROLE);
+  return {
+    outcome: "success",
+    result: {
+      title: document.result.title,
+      blocks: document.result.blocks.filter(readable),
+      rolesOfBlock,
+      values: keyword?.values ?? {},
+      all: document,
+    },
+  };
 }
 
 /**
- * One keyword read whole: its title, the lines of its blocks carrying the
- * alias role, and its definition — the first block carrying the definition
- * role, else the face of the first focused-work child carrying it as its
- * document role, else its first paragraph (`BO_0301_Q5`).
+ * One keyword read whole: its title, the lines of its blocks carrying
+ * *Alias*, and its definition — the first block carrying *Definition*, else
+ * the face of the first focused-work child carrying it, else its first
+ * paragraph (`BO_0301_Q5`).
  */
-async function readKeyword(id: string, title: string, settings: KeywordsSettings): Promise<GraphOutcome<Keyword>> {
-  const document = await readDocument(id);
-  if (document.outcome !== "success") return document as GraphOutcome<never>;
-  const blocks = document.result.blocks.filter(readable);
-  const roles = await rolesOf(id);
-  if (roles.outcome !== "success") return roles as GraphOutcome<never>;
-  const roleOf = new Map(roles.result.blocks.map((block) => [block.blockId, block.blockRole?.id ?? null] as const));
-  const aliases = settings.aliasRole === null ? [] : blocks.filter((block) => roleOf.get(block.blockId) === settings.aliasRole).flatMap((block) => aliasLines(block.runs));
+async function readKeyword(id: string, title: string): Promise<GraphOutcome<Keyword>> {
+  const read = await readKeywordDocument(id);
+  if (read.outcome !== "success") return read as GraphOutcome<never>;
+  const { blocks, rolesOfBlock } = read.result;
+  const carries = (blockId: string, role: string): boolean => (rolesOfBlock.get(blockId) ?? []).includes(role);
+  const aliases = blocks.filter((block) => carries(block.blockId, ALIAS_ROLE)).flatMap((block) => aliasLines(block.runs));
 
   let definition: readonly Run[] | null = null;
   let source: Keyword["definitionSource"] = null;
-  const choice = settings.definitionRole;
-  if (choice !== null && choice.kind === "block") {
-    const defined = blocks.find((block) => roleOf.get(block.blockId) === choice.id);
-    if (defined !== undefined) {
-      definition = defined.runs;
-      source = "block";
-    }
+  const defined = blocks.find((block) => carries(block.blockId, DEFINITION_ROLE));
+  if (defined !== undefined) {
+    definition = defined.runs;
+    source = "block";
   }
-  if (definition === null && choice !== null && choice.kind === "document") {
+  const whole = read.result.all;
+  if (definition === null && whole.outcome === "success") {
     const faces = await facesOf(DOCUMENT_KIND, id);
     if (faces.outcome === "success") {
-      for (const block of document.result.blocks) {
+      for (const block of whole.result.blocks) {
         const child = faces.result[block.blockId];
         if (child === undefined) continue;
         const childRoles = await rolesOf(child.itemId);
-        if (childRoles.outcome !== "success" || childRoles.result.documentRole?.id !== choice.id) continue;
+        if (childRoles.outcome !== "success" || !childRoles.result.roles.some((role) => role.proposed !== "role" && role.id === DEFINITION_ROLE)) continue;
         definition = child.face ?? [];
         source = "child";
         break;
@@ -122,25 +133,22 @@ async function readKeyword(id: string, title: string, settings: KeywordsSettings
     }
   }
   if (definition === null) {
-    const paragraph = blocks.find((block) => block.role === "paragraph" && block.runs.some((run) => run.text.trim() !== "") && roleOf.get(block.blockId) !== settings.aliasRole);
+    const paragraph = blocks.find((block) => block.role === "paragraph" && block.runs.some((run) => run.text.trim() !== "") && !carries(block.blockId, ALIAS_ROLE));
     if (paragraph !== undefined) {
       definition = paragraph.runs;
       source = "paragraph";
     }
   }
-  return { outcome: "success", result: { id, title: document.result.title || title, aliases, definition, definitionSource: source } };
+  return { outcome: "success", result: { id, title: read.result.title || title, aliases, definition, definitionSource: source } };
 }
 
-/** Every keyword the instance holds, with names and definitions, by title;
- * none while no keyword role is chosen. */
-export async function keywordsOf(settings?: KeywordsSettings): Promise<GraphOutcome<readonly Keyword[]>> {
-  const chosen = settings ?? (await readSettings());
-  if (chosen.keywordRole === null) return { outcome: "success", result: [] };
-  const documents = await keywordDocuments(chosen.keywordRole);
+/** Every keyword the instance holds, with names and definitions, by title. */
+export async function keywordsOf(): Promise<GraphOutcome<readonly Keyword[]>> {
+  const documents = await keywordDocuments();
   if (documents.outcome !== "success") return documents as GraphOutcome<never>;
   const keywords: Keyword[] = [];
   for (const entry of documents.result) {
-    const keyword = await readKeyword(entry.id, entry.title, chosen);
+    const keyword = await readKeyword(entry.id, entry.title);
     if (keyword.outcome !== "success") return keyword as GraphOutcome<never>;
     keywords.push(keyword.result);
   }
@@ -177,10 +185,15 @@ async function readMentions(documentId: string): Promise<GraphOutcome<DocumentMe
   const names = namesOf(keywords.result);
   const named = new Set<string>();
   const blocks = document.result.blocks.filter(readable).map((block) => {
-    const mentions = names.length === 0 ? [] : findMentions(block.runs, names, stemEnglish, documentId);
+    const mentions = findMentions(block.runs, names, stemEnglish, documentId);
     for (const mention of mentions) named.add(mention.keyword);
     return { blockId: block.blockId, mentions };
   });
+  // A keyword named with `@` whose document carries Keyword no more is still
+  // a mention, drawn as not a keyword under the title it has (BO_0310_023).
+  const standing = new Set(keywords.result.map((keyword) => keyword.id));
+  const others = await titlesOf([...named].filter((id) => !standing.has(id)));
+  if (others.outcome !== "success") return others as GraphOutcome<never>;
   return {
     outcome: "success",
     result: {
@@ -188,8 +201,29 @@ async function readMentions(documentId: string): Promise<GraphOutcome<DocumentMe
       dataRevision: document.result.dataRevision ?? 0,
       blocks: blocks.filter((block) => block.mentions.length > 0),
       keywords: indexed(keywords.result.filter((keyword) => named.has(keyword.id))),
+      notKeywords: others.result,
     },
   };
+}
+
+/** The titles of documents by id; an id the graph holds no document under
+ * answers the empty title. */
+async function titlesOf(ids: readonly string[]): Promise<GraphOutcome<Record<string, string>>> {
+  const titles: Record<string, string> = Object.fromEntries(ids.map((id) => [id, ""] as const));
+  if (ids.length === 0) return { outcome: "success", result: titles };
+  const found = await query({
+    statement: "MATCH (d) RETURN GRAPH d ROOT d",
+    roots: ids.map(nodeRef),
+    purpose: "named keywords that are no keyword",
+  });
+  if (found.outcome === "noResult") return { outcome: "success", result: titles };
+  if (found.outcome !== "success") return found as GraphOutcome<never>;
+  for (const node of found.result.nodes) {
+    if (!isType(node, DOCUMENT_TYPE)) continue;
+    const title = contentOf(node)["title"];
+    titles[bareId(node.id)] = typeof title === "string" ? title : "";
+  }
+  return { outcome: "success", result: titles };
 }
 
 /** How much of a mentioning block's words the list shows. */
@@ -244,15 +278,22 @@ export async function mentionedIn(documentId: string): Promise<GraphOutcome<Ment
   return { outcome: "success", result: { keyword, documents } };
 }
 
-/** What the Keywords section is handed: the settings, the catalogue and the
- * keywords by title, or that the graph did not answer. */
-export async function listKeywords(): Promise<KeywordsListing> {
-  const settings = await readSettings();
-  const roles = await listDocumentRoles();
-  if (roles.outcome !== "success") return { reachable: false, settings, roles: [], keywords: [] };
-  const catalogue: readonly DocumentRoleView[] = roles.result;
-  if (settings.keywordRole === null) return { reachable: true, settings, roles: catalogue, keywords: [] };
-  const documents = await keywordDocuments(settings.keywordRole);
-  if (documents.outcome !== "success") return { reachable: false, settings, roles: catalogue, keywords: [] };
-  return { reachable: true, settings, roles: catalogue, keywords: documents.result };
+/** The longest title a keyword is created with from the `@` list. */
+export const TITLE_LENGTH = 200;
+
+/**
+ * *Create keyword "…"* (`BO_0310_024`, `BO_0308_Q6`): a document titled with
+ * what was typed, made through `documents`' own create and taking *Keyword*,
+ * both the person's truth at once, answering the keyword as the `@` list
+ * offers it.
+ */
+export async function createKeyword(typed: string): Promise<GraphOutcome<{ id: string; title: string; aliases: readonly string[] }>> {
+  const title = typed.replace(/\s+/gu, " ").trim();
+  if (title === "" || title.length > TITLE_LENGTH) return refuse("keywordTitle", `A keyword is created with a title of 1 to ${TITLE_LENGTH} characters.`);
+  const created = await outsideBranch(() => createDocument({ title }));
+  if (created.outcome !== "success") return created as GraphOutcome<never>;
+  const documentId = created.result.documentId;
+  const taken = await setRole({ documentId, role: KEYWORD_ROLE, taken: true });
+  if (taken.outcome !== "success") return taken as GraphOutcome<never>;
+  return { outcome: "success", result: { id: documentId, title, aliases: [] } };
 }

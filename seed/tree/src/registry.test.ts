@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Component } from "@builder.io/qwik";
 import type { ApiRoute, ViewContribution } from "~/contract";
-import { buildRegistry, buildServerRegistry, matchRoute, mergeRoster, RegistryError } from "./registry";
+import { buildRegistry, buildServerRegistry, matchRoute, RegistryError } from "./registry";
 
 /**
  * The merge behind the generated registries, over fixture contributions: what
@@ -244,30 +244,6 @@ describe("building the server registry", () => {
     ).toBe("party_collision");
   });
 
-  it("keeps a runtime roster by extension, and merges its answer under its namespace without shadowing", () => {
-    const roster = async () => [party("publishing-c1"), party("publishing-c2")];
-    const registry = buildServerRegistry([
-      { id: "settings", contributions: { parties: [party("honcho")] } },
-      { id: "publishing", contributions: { partyRoster: roster } },
-    ]);
-    expect(registry.rosters).toEqual([{ extension: "publishing", roster }]);
-
-    const held = registry.parties;
-    const merged = mergeRoster(held, "publishing", [
-      party("publishing-c1"),
-      // Outside the roster's namespace: dropped.
-      party("honcho"),
-      party("other-c9"),
-      // Already held: dropped rather than shadowing.
-      party("publishing-c1"),
-      party("publishing-c2"),
-    ]);
-    expect(merged.map((entry) => entry.id)).toEqual(["honcho", "publishing-c1", "publishing-c2"]);
-    expect(merged[1]?.extension).toBe("publishing");
-    // The static roster is untouched.
-    expect(held.map((entry) => entry.id)).toEqual(["honcho"]);
-  });
-
   it("matches a path against the table in order, with named and rest parameters", () => {
     const table = [
       route("GET", "documents"),
@@ -284,41 +260,5 @@ describe("building the server registry", () => {
     expect(matchRoute(table, "GET", "files/a/b/c.png")?.params).toEqual({ path: "a/b/c.png" });
     expect(matchRoute(table, "GET", "documents/a%20b")?.params).toEqual({ id: "a b" });
     expect(matchRoute(table, "DELETE", "documents")).toBeNull();
-  });
-});
-
-/**
- * Senders stand in the agent menu beside the agents, and a command is sent to
- * one the way it is sent to an agent (`BO_0273_035`). Both halves or neither:
- * a sender nothing answers for would be listed and refuse every send.
- */
-describe("contributed senders", () => {
-  const sender = {
-    id: "media:higgsfield:seedream_v5_pro",
-    label: "Seedream",
-    icon: "image" as const,
-    selectable: true,
-    reason: null,
-  };
-
-  it("keeps a roster and its send together", () => {
-    const registry = buildServerRegistry([
-      {
-        id: "media",
-        contributions: { senders: async () => [sender], send: async () => ({ ok: true, processId: "p1" }) },
-      },
-    ]);
-    expect(registry.senders).toHaveLength(1);
-    expect(registry.senders[0]?.extension).toBe("media");
-  });
-
-  it("refuses a roster with nothing to answer a send", () => {
-    expect(() =>
-      buildServerRegistry([{ id: "media", contributions: { senders: async () => [sender] } }]),
-    ).toThrow(RegistryError);
-  });
-
-  it("contributes none when neither half is offered", () => {
-    expect(buildServerRegistry([{ id: "media", contributions: {} }]).senders).toHaveLength(0);
   });
 });

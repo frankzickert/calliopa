@@ -1,35 +1,26 @@
-/* The manuscripts extension's own surfaces (BO_0293_022). */
-.manuscripts-row__meta {
-  display: block;
-  font-size: 0.8125rem;
-  opacity: 0.75;
-}
-
-.manuscript-page {
-  padding: 1rem 1.25rem;
-  max-width: 48rem;
-}
-
-.manuscript-page__facts {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 0.25rem 1rem;
-}
-
-.manuscript-page__facts dt {
-  font-weight: 600;
-}
-
-.manuscript-page__files {
-  padding-left: 1.25rem;
-}
-
-.manuscript-page__size {
-  opacity: 0.75;
+/* The renditions a block carrying Format shows (calliopa-bootstrap's BO_0312_022). */
+.renditions {
+  list-style: none;
+  margin: 0.25rem 0 0.5rem;
+  padding: 0;
   font-size: 0.875rem;
 }
 
-.manuscript-page__log {
+.renditions__item + .renditions__item {
+  margin-top: 0.5rem;
+}
+
+.renditions__facts {
+  margin: 0;
+  opacity: 0.8;
+}
+
+.renditions__files {
+  margin: 0.125rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.renditions__log {
   font-family: var(--font-mono, monospace);
   font-size: 0.8125rem;
   white-space: pre-wrap;

@@ -1,11 +1,15 @@
-import { WORK_KINDS, isWorkKind, type WorkKind, type WorkName, type WorkRecord } from "../lib/work";
+import { WORK_KINDS, dateOf, dateText, isWorkKind, nameLine, namesOf, type WorkKind, type WorkRecord } from "../lib/work";
+
+export { nameLine };
 
 /**
- * The work view's form and the record it stands for (`BO_0291_019`): one
+ * The *Add source* form and the record it stands for (`BO_0291_019`,
+ * `BO_0313_021`): one
  * pure mapping each way, so what a person types is judged by the same
  * `readWorkRecord` the route applies, and a record read back fills the same
  * fields it was edited in. Names are typed one per line as "Family, Given"
- * or a single literal; a year alone is `issued` with one date part.
+ * or a single literal; the date is a year, a year and month or a full date,
+ * or words.
  */
 
 export interface RecordForm {
@@ -46,10 +50,6 @@ export const EMPTY_FORM: RecordForm = {
   tags: "",
 };
 
-/** A name as a person writes it: "Family, Given", or a literal. */
-export const nameLine = (name: WorkName): string =>
-  name.literal !== undefined ? name.literal : name.given !== undefined && name.given !== "" ? `${name.family ?? ""}, ${name.given}` : (name.family ?? "");
-
 /** The year a date carries, or "". */
 export const yearOf = (date: WorkRecord["issued"]): string => {
   const first = date?.["date-parts"]?.[0]?.[0];
@@ -65,7 +65,7 @@ export function formOf(record: WorkRecord): RecordForm {
     kind: record.kind,
     authors: (record.author ?? []).map(nameLine).join("\n"),
     editors: (record.editor ?? []).map(nameLine).join("\n"),
-    year: yearOf(record.issued),
+    year: dateText(record.issued),
     containerTitle: record["container-title"] ?? "",
     volume: record.volume ?? "",
     issue: record.issue ?? "",
@@ -79,19 +79,6 @@ export function formOf(record: WorkRecord): RecordForm {
     tags: (record.tags ?? []).join(", "),
   };
 }
-
-const namesOf = (lines: string): WorkName[] =>
-  lines
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line !== "")
-    .map((line) => {
-      const comma = line.indexOf(",");
-      if (comma === -1) return line.includes(" ") ? { literal: line } : { family: line };
-      const family = line.slice(0, comma).trim();
-      const given = line.slice(comma + 1).trim();
-      return given === "" ? { family } : { family, given };
-    });
 
 const words = (value: string): string | undefined => (value.trim() === "" ? undefined : value.trim());
 
@@ -110,8 +97,8 @@ export function recordOf(form: RecordForm, kept?: Pick<WorkRecord, "fetched" | "
   const editors = namesOf(form.editors);
   if (authors.length > 0) out["author"] = authors;
   if (editors.length > 0) out["editor"] = editors;
-  if (/^\d{4}$/u.test(year)) out["issued"] = { "date-parts": [[Number(year)]] };
-  else if (year !== "") out["issued"] = { raw: year };
+  const issued = dateOf(year);
+  if (issued !== undefined) out["issued"] = issued;
   const plain: readonly (readonly [keyof RecordForm, string])[] = [
     ["containerTitle", "container-title"],
     ["volume", "volume"],
@@ -139,14 +126,14 @@ export function recordOf(form: RecordForm, kept?: Pick<WorkRecord, "fetched" | "
   return out;
 }
 
-/** What a row of the Sources section says: authors, year and title. */
+/** What a source's line says: authors, year and title. */
 export function lineOf(record: WorkRecord): { readonly who: string; readonly year: string; readonly title: string } {
   const names = (record.author ?? record.editor ?? []).map((name) => name.literal ?? name.family ?? "").filter((name) => name !== "");
   const who = names.length === 0 ? "" : names.length === 1 ? (names[0] as string) : names.length === 2 ? `${names[0]} and ${names[1]}` : `${names[0]} et al.`;
   return { who, year: yearOf(record.issued), title: record.title };
 }
 
-/** Whether a work matches what a person typed into the section's search. */
+/** Whether a source matches what a person typed into a search. */
 export function matches(record: WorkRecord, search: string): boolean {
   const needle = search.trim().toLowerCase();
   if (needle === "") return true;

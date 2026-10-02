@@ -17,7 +17,7 @@ const blocks: BlockView[] = [
   words("h", "b", "h2", "The Method"),
   words("p", "c", "paragraph", "The paragraph being edited, which refers to the rest."),
   words("p2", "d", "paragraph", "A long paragraph whose first words are what the list shows, and whose tail is cut off after forty characters."),
-  words("gone", "e", "paragraph", "Discarded.", "discarded"),
+  words("gone", "e", "paragraph", "Sent as a command.", "prompt"),
   { ...common("img", "f"), kind: "image", objectId: "o", numbered: true, number: 1, caption: "The apparatus" } as BlockView,
   { ...common("img2", "g"), kind: "image", objectId: "o2" } as BlockView,
   { ...common("tab", "h"), kind: "table", columns: [], rows: [], numbered: true, number: 1 } as unknown as BlockView,
@@ -28,7 +28,7 @@ const blocks: BlockView[] = [
 ];
 
 describe("the # list's entries", () => {
-  it("offers headings, paragraphs, numbered figures, tables and equations in reading order, and leaves out the block edited, the abstract, the discarded and the unnumbered", () => {
+  it("offers headings, paragraphs, numbered figures, tables and equations in reading order, and leaves out the block edited, the abstract, a prompt and the unnumbered", () => {
     const choices = referenceChoices({ blocks, referenceLabels: { p2: "Remark 1", img: "Figure 1", tab: "Table 1", lst: "Listing 1", lst2: "Listing 2" }, equationNumbers: { eq: 1 } }, "p");
     expect(choices.map((choice) => [choice.blockId, choice.label, choice.glimpse])).toEqual([
       ["h", "The Method", ""],

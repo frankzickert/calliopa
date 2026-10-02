@@ -26,6 +26,10 @@ export interface ExecutionRun {
    * its latest run's (`BO_0267_013`). */
   readonly references: readonly SentMark[];
   readonly startedAt: number;
+  /** The working mode the run was sent with, when it was sent with one: a
+   * block's command line starts from the mode its latest run carried.
+   * DO_0025_008 */
+  readonly mode?: { readonly field: string; readonly work: string };
 }
 
 /** A reference as a run's record keeps it. */
@@ -38,6 +42,8 @@ export interface SentMark {
   readonly group?: string;
   readonly item?: string;
   readonly revisionId?: string;
+  /** A proposal marked whole's items, as the command sent them. BO_0321_007 */
+  readonly items?: readonly { readonly item: string; readonly blockId: string; readonly revisionId: string }[];
 }
 
 /**
@@ -158,6 +164,7 @@ export function executionRun(record: {
   readonly touched?: readonly string[];
   readonly references?: readonly SentMark[];
   readonly startedAt?: number;
+  readonly mode?: { readonly field?: string; readonly work?: string } | null;
 }): ExecutionRun {
   return {
     id: record.id,
@@ -169,5 +176,8 @@ export function executionRun(record: {
     touched: record.touched ?? [],
     references: record.references ?? [],
     startedAt: record.startedAt ?? 0,
+    ...(typeof record.mode?.field === "string" && typeof record.mode.work === "string"
+      ? { mode: { field: record.mode.field, work: record.mode.work } }
+      : {}),
   };
 }

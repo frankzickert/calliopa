@@ -24,9 +24,11 @@ import type { Run } from "~/lib/runs";
 export const BlockControls = component$<{
   itemId: string;
   blockId: string;
+  hasFocusedWork: boolean;
   press$: QRL<(control: string, blockId: string) => void>;
-}>(({ itemId, blockId, press$ }) => {
+}>(({ itemId, blockId, hasFocusedWork, press$ }) => {
   const controls = useSignal<readonly BlockControl[]>([]);
+  const reads = useSignal(0);
   const bridge = useContext(ViewBridgeContext);
   // A visible task, never a `useTask$`: Qwik holds every render the page asks
   // for until a `useTask$` settles, so a read there freezes the tabs, the
@@ -35,7 +37,12 @@ export const BlockControls = component$<{
   // eslint-disable-next-line qwik/no-use-visible-task
   useVisibleTask$(async ({ track }) => {
     track(() => blockId);
-    controls.value = await bridge.blockControls$(itemId, blockId);
+    track(() => hasFocusedWork);
+    // The initial faces read, or a nest that gives this block a child, changes
+    // the shell's label for its focused-work control. DO_0029_001
+    const read = ++reads.value;
+    const answer = await bridge.blockControls$(itemId, blockId);
+    if (read === reads.value) controls.value = answer;
   });
   if (controls.value.length === 0) return null;
   return (

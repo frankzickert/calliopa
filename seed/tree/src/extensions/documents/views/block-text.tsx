@@ -185,8 +185,8 @@ export const Marked = component$<{
 /**
  * A citation in reading, with its hover card (`BO_0291_026`): the pointer
  * over it, or focus from the keyboard, opens a card with the work as
- * *who (year) — title*, a control opening the work's page in the Sources
- * category, its DOI or its address, its PDF when the work holds one, and the
+ * *who (year) — title*, a control opening the source as the document it is
+ * (`BO_0313_030`), its DOI or its address, its file when it holds one, and the
  * locator. Touch opens it on a tap, which focuses it. The card is drawn from
  * what the editor read of the bibliography; with no bibliography there is no
  * card and the number stands alone.
@@ -219,7 +219,7 @@ const CitedRun = component$<{ work: string; locator?: string | undefined; fallba
                 type="button"
                 class="cite-card__open"
                 data-cite-open={work}
-                onClick$={() => bridge.openTarget$({ kind: "bibliography:work", itemId: work, title: card.title })}
+                onClick$={() => bridge.openTarget$({ kind: "documents:document", itemId: work, title: card.title })}
               >
                 Open source
               </button>

@@ -26,6 +26,8 @@ import {
   repointPassage,
   serializeMarking,
   toggleDocument,
+  toggleProposal,
+  type ProposalItemMark,
   toggleReference,
   type Marked,
   type Marking,
@@ -33,6 +35,7 @@ import {
 import { runsText } from "~/lib/runs";
 import type { BlockView } from "../../server/assemble";
 import type { DocumentProposals } from "../../server/documents";
+import { liveGroupsOf, type RunActivity } from "../../lib/agent-at-work";
 
 /**
  * Command mode's marking session: the prompt block the marks belong to, the
@@ -86,6 +89,9 @@ export interface MarkingControls {
   >;
   /** Takes one reference back by its number. */
   readonly removeReference$: QRL<(number: number) => void>;
+  /** Marks a proposal whole, or takes the mark back: the chip line's press
+   * while pointing. BO_0321_008 */
+  readonly toggleProposal$: QRL<(group: string, proposer?: string) => void>;
   /** Drops the record a document kept before marks belonged to a block.
    * Called before the document is read. BO_0267_013 */
   readonly recover$: QRL<() => void>;
@@ -102,6 +108,9 @@ export interface MarkingSurface {
   /** The proposals standing against the document, null until read: what a
    * proposal reference follows once it is answered. BO_0263_004 */
   readonly proposals: DocumentProposals | null;
+  /** The reader's runs as the editor follows them: a proposal marked whole
+   * says whether its group is still being staged. BO_0321_008 */
+  readonly runActivities?: readonly RunActivity[];
 }
 
 /** The text blocks a report reads, in reading order. */
@@ -131,10 +140,44 @@ function openItems(proposals: DocumentProposals | null): ReadonlyMap<string, Ope
   return items;
 }
 
+/** The kinds of item a proposal marked whole carries: the four a single
+ * proposal reference can point at (`BO_0263_005`). */
+const WHOLE_KINDS = new Set(["replace", "insert", "remove", "move"]);
+
+/**
+ * Each group's items as a proposal marked whole carries them, in the group's
+ * order: the item, its block, the revision the reader sees — the candidate,
+ * or for a removal the block it frames — and its opening words. A derived
+ * candidate is referenced by use and is not among them. BO_0321_007
+ */
+function groupItems(
+  proposals: DocumentProposals | null,
+  blocks: readonly BlockView[],
+): ReadonlyMap<string, readonly ProposalItemMark[]> | null {
+  if (proposals === null) return null;
+  const byId = new Map(blocks.map((block) => [block.blockId, block]));
+  const groups = new Map<string, ProposalItemMark[]>();
+  for (const group of proposals.groups) {
+    const items: ProposalItemMark[] = [];
+    for (const item of group.items) {
+      if (!WHOLE_KINDS.has(item.kind)) continue;
+      const shown = item.kind === "remove" ? (byId.get(item.blockId) ?? item.block) : (item.block ?? byId.get(item.blockId) ?? null);
+      if (shown === null || shown === undefined) continue;
+      items.push({
+        item: item.itemId,
+        blockId: item.blockId,
+        revisionId: shown.revisionId,
+        ...(shown.kind === "text" ? { words: openingWords(runsText(shown.runs)) } : {}),
+      });
+    }
+    groups.set(group.groupId, items);
+  }
+  return groups;
+}
+
 /**
  * What a mark on a block of the document keeps of it: the revision the reader
- * saw, its opening words for when its row has gone, and whether it was
- * discarded. A proposal's or a retired block's row says its own. BO_0263_004
+ * saw and its opening words for when its row has gone. A proposal's or a retired block's row says its own. BO_0263_004
  */
 function asMarked(surface: MarkingSurface, blockId: string, marked: Marked): Marked {
   if (marked.target !== undefined || marked.revisionId !== undefined) return marked;
@@ -144,7 +187,6 @@ function asMarked(surface: MarkingSurface, blockId: string, marked: Marked): Mar
     ...marked,
     revisionId: block.revisionId,
     ...(block.kind === "text" ? { words: openingWords(runsText(block.runs)) } : {}),
-    ...(block.kind === "text" && block.standing === "discarded" ? { discarded: true } : {}),
   };
 }
 
@@ -221,11 +263,8 @@ const fromHere = (surface: MarkingSurface, documentId: string | null, marked: Ma
 export function useMarking(input: {
   readonly documentId: string | null;
   readonly surface: MarkingSurface;
-  /** Accepts a derived rewrite of a block as the block is referenced: the
-   * mark is made at once, the acceptance follows. BO_0246_006 */
-  readonly beforeReference$?: QRL<(blockId: string) => Promise<boolean>>;
 }): MarkingControls {
-  const { documentId, surface, beforeReference$ } = input;
+  const { documentId, surface } = input;
   const bridge = useContext(ViewBridgeContext);
   const store = useStore<MarkingStore>({ marking: NO_MARKING, prompt: null, byPrompt: {}, report: NO_POINTING, guest: false, ownPrompt: null });
   const session = bridge.pointing;
@@ -319,7 +358,6 @@ export function useMarking(input: {
    */
   const toggleReference$ = $((blockId: string, marked: Marked = {}) => {
     const held = store.guest ? sessionMarking(session) : store.marking;
-    const before = held.references.length;
     const next = toggleReference(held, blockId, store.guest ? fromHere(surface, documentId, asMarked(surface, blockId, marked)) : asMarked(surface, blockId, marked));
     if (store.guest) {
       writeSession(session, next);
@@ -327,10 +365,6 @@ export function useMarking(input: {
     } else {
       store.marking = next;
     }
-    // Referencing a block that carries a derived rewrite accepts the rewrite
-    // on the way; the mark itself is made at once, as it always was.
-    const added = next.references.length > before;
-    if (added && marked.target === undefined && beforeReference$ !== undefined) void beforeReference$(blockId);
   });
 
   const addPassage$ = $((blockId: string, anchor: PassageAnchor, marked: Marked = {}) => {
@@ -351,6 +385,22 @@ export function useMarking(input: {
       return;
     }
     store.marking = repointPassage(store.marking, number, anchor);
+  });
+
+  /**
+   * The chip line's press while pointing (`BO_0321_008`): the whole proposal
+   * marked with the items standing now, or the mark taken back. A guest
+   * marks for the session, the proposal pointing into its document.
+   */
+  const toggleProposal$ = $((group: string, proposer?: string) => {
+    const items = groupItems(surface.proposals, surface.document?.blocks ?? [])?.get(group) ?? [];
+    if (store.guest) {
+      const next = toggleProposal(sessionMarking(session), group, items, proposer, fromHere(surface, documentId, {}));
+      writeSession(session, next);
+      if (documentId !== null) store.marking = localizeMarking(next, documentId);
+      return;
+    }
+    store.marking = toggleProposal(store.marking, group, items, proposer);
   });
 
   const removeReference$ = $((number: number) => {
@@ -450,6 +500,7 @@ export function useMarking(input: {
     const kept = followDocument(store.marking, {
       blocks: document.blocks,
       openItems: items === null ? null : new Set(items.keys()),
+      groupItems: groupItems(proposals, document.blocks),
     });
     // `followDocument` answers the same session when nothing changed, and
     // only a change is written, so this task does not wake itself.
@@ -489,7 +540,8 @@ export function useMarking(input: {
     // A guest reports nothing: the marks it draws are another prompt's, and
     // the report it last made for its own stands. BO_0304_008
     if (documentId === null || status !== "ready" || document === null || store.guest) return;
-    store.report = pointingOf(marking, pointable(document.blocks), openItems(proposals));
+    const activities = track(() => surface.runActivities);
+    store.report = pointingOf(marking, pointable(document.blocks), openItems(proposals), new Set(liveGroupsOf(activities ?? [])));
     void bridge.setPointing$(documentId, store.report);
   });
 
@@ -501,6 +553,7 @@ export function useMarking(input: {
     addPassage$,
     repointPassage$,
     removeReference$,
+    toggleProposal$,
     recover$,
   };
 }

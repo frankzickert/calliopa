@@ -274,8 +274,9 @@ ENV API_SERVER_ENABLED=true \
 COPY entrypoint.sh /usr/local/bin/hermes-entrypoint
 COPY login_broker.py /usr/local/bin/hermes-login-broker
 COPY claude_runner.py /usr/local/bin/calliopa-claude-runner
-RUN chmod +x /usr/local/bin/hermes-entrypoint /usr/local/bin/hermes-login-broker /usr/local/bin/calliopa-claude-runner
+COPY codex_image_runner.py /usr/local/bin/calliopa-codex-image-runner
+RUN chmod +x /usr/local/bin/hermes-entrypoint /usr/local/bin/hermes-login-broker /usr/local/bin/calliopa-claude-runner /usr/local/bin/calliopa-codex-image-runner
 
-EXPOSE 8642 8643
+EXPOSE 8642 8643 8644
 
 ENTRYPOINT ["/usr/local/bin/hermes-entrypoint"]

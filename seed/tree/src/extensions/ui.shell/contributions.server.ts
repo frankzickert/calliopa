@@ -13,8 +13,7 @@ import { readSession } from "~/server/session";
  * The server half of `ui.shell`'s contributions: the reader behind its
  * Extensions section and its handler table under `/api/x/ui.shell/`, which is
  * extension administration and nothing else. Documents left for the
- * `documents` extension under `BO_0255`, as episodes and publishing left for
- * `calliopa-video` under `BO_0203`. Only the server imports this module.
+ * `documents` extension under `BO_0255`. Only the server imports this module.
  * BO_0202_002 BO_0202_005 BO_0202_006 BO_0255_006
  */
 

@@ -1,15 +1,15 @@
-import { AsyncLocalStorage } from "node:async_hooks";
+import { port } from "../port";
 
 /**
  * The branch a request works in: the open proposal group a person's tab
  * stages every write into and reads through, `node:branch-<document>-<account>`
- * (`block-document-model.md`, `BO_0250_011`). Carried in async-local storage
+ * (`block-document-model.md`, `BO_0250_011`). Carried in the port's request scope
  * so `commit` and `query` find it without every command threading it: in a
  * branch, `commit` stages instead of writing and `query` overlays the branch
  * unless a read names an overlay of its own. Outside a request, and in the
  * behavior suites, `withBranch` sets it around the call.
  */
-const storage = new AsyncLocalStorage<{ readonly branch: string }>();
+const storage = port.scope<{ readonly branch: string }>();
 
 export function withBranch<T>(branch: string | undefined, run: () => Promise<T>): Promise<T> {
   if (branch === undefined || branch === "") return storage.run({ branch: "" }, run);
@@ -18,7 +18,7 @@ export function withBranch<T>(branch: string | undefined, run: () => Promise<T>)
 
 /** The branch the current request works in, or `undefined` for truth. */
 export function currentBranch(): string | undefined {
-  const branch = storage.getStore()?.branch;
+  const branch = storage.current()?.branch;
   return branch === undefined || branch === "" ? undefined : branch;
 }
 
@@ -27,7 +27,7 @@ export function currentBranch(): string | undefined {
  * between two pins reads the same document at each (`BO_0264_012`). A read
  * at a pin reads truth, never a branch.
  */
-const pins = new AsyncLocalStorage<{ readonly dataRevision: number }>();
+const pins = port.scope<{ readonly dataRevision: number }>();
 
 export function atDataRevision<T>(dataRevision: number, run: () => Promise<T>): Promise<T> {
   return outsideBranch(() => pins.run({ dataRevision }, run));
@@ -35,7 +35,7 @@ export function atDataRevision<T>(dataRevision: number, run: () => Promise<T>): 
 
 /** The data revision the current call reads at, or `undefined` for head. */
 export function currentDataRevision(): number | undefined {
-  const pinned = pins.getStore()?.dataRevision;
+  const pinned = pins.current()?.dataRevision;
   return pinned === undefined || pinned <= 0 ? undefined : pinned;
 }
 

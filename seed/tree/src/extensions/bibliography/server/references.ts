@@ -84,7 +84,7 @@ export async function referencesOf(documentId: string, style?: string): Promise<
   if (works.outcome !== "success") return works as GraphOutcome<never>;
   const cited: Cited[] = [];
   for (const block of document.result.blocks) {
-    if (block.kind !== "text" || block.standing === "discarded") continue;
+    if (block.kind !== "text") continue;
     for (const run of block.runs) if (run.cite !== undefined) cited.push({ work: run.cite.work, ...(run.cite.locator === undefined ? {} : { locator: run.cite.locator }) });
   }
   return { outcome: "success", result: referencesFrom(chosen, numbers, missing, works.result, cited) };

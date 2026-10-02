@@ -9,7 +9,7 @@ import { StandingContext, standingOf } from "./use-standing";
  * reveals it, so the label and the bar's control wear one face. */
 const ICON: Readonly<Partial<Record<CardMark, IconName>>> = {
   prompt: "terminal-window",
-  retired: "archive",
+  removed: "archive",
 };
 
 /**

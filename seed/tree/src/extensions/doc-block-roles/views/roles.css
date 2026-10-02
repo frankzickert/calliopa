@@ -1,5 +1,6 @@
-/* Document and block roles (BO_0299): the role page and the label a roled
- * block carries while reading. Colours are the theme's tokens only. */
+/* Roles (BO_0299, one role type since BO_0309): the role page, the pills a
+ * roled block carries, and the role control in a chip. Colours are the
+ * theme's tokens only. */
 
 .role-page {
   display: flex;
@@ -63,7 +64,8 @@
   color: var(--error);
 }
 
-.role-page__block-roles {
+.role-page__fields,
+.role-page__offers {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -71,21 +73,50 @@
   padding: 0 0 0 1.5rem;
 }
 
-.role-page__block-role {
-  display: grid;
-  grid-template-columns: minmax(8rem, 1fr) minmax(8rem, 2fr) auto;
+.role-page__field-row {
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
 }
 
-.role-page__block-role[data-retired="true"] .role-page__block-role-name {
-  text-decoration: line-through;
+.role-page__field-name,
+.role-page__field-type,
+.role-page__field-options,
+.role-page__field-default {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  padding: 0.35rem 0.5rem;
+}
+
+.role-page__field-name {
+  flex: 1 1 10rem;
+}
+
+.role-page__field-options,
+.role-page__field-default {
+  flex: 1 1 8rem;
+}
+
+.role-page__required {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
   color: var(--text-muted);
 }
 
-.role-page__block-role-controls {
+.role-page__field-controls {
   display: inline-flex;
   gap: 0.25rem;
+  align-items: center;
+}
+
+.role-page__offer {
+  display: flex;
+  gap: 0.5rem;
   align-items: center;
 }
 
@@ -117,28 +148,37 @@
   align-items: center;
 }
 
-@media (max-width: 640px) {
-  .role-page__block-role {
-    grid-template-columns: 1fr;
-  }
+/* The pills at a roled block: the register word's idiom — small, quiet,
+ * words rather than a glyph so a screen reader hears them. One per role. */
+.block-roles {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-block-end: 0.1rem;
 }
 
-/* The label at a roled block: the register word's idiom — small, quiet,
- * words rather than a glyph so a screen reader hears it. */
 .block-role {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  margin-block-end: 0.1rem;
+  padding: 0;
+  font: inherit;
   font-size: 0.7rem;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--accent);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
 }
 
 .block-role[data-role-state] {
   color: var(--text-muted);
+}
+
+.block-role__missing {
+  color: var(--error);
 }
 
 .block-role__state {
@@ -149,4 +189,345 @@
 
 .block-role__state::before {
   content: "· ";
+}
+
+.roles-row {
+  display: flex;
+  align-items: center;
+}
+
+.roles-row .library-entry {
+  flex: 1 1 auto;
+}
+
+.roles-row__builtin,
+.role-control__builtin {
+  margin-inline-start: 0.5rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.roles-row__documents {
+  padding-inline-start: 1.5rem;
+}
+
+/* The role control: the roles taken as pills and a `+`, and a popover
+ * beside it, over what follows. */
+.role-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* The roles chip beside the command chip (RO_0002_004): the block's roles as
+   the pills they are while reading, each 24px tall like the command chip's
+   controls, then a round `+`. What is open is marked by its underline. */
+.role-control[data-role-form="pills"] {
+  flex-wrap: wrap;
+  gap: 0.1rem;
+}
+
+.role-control__chip-role {
+  box-sizing: border-box;
+  height: 24px;
+  padding: 0 0.45rem;
+  border-radius: 12px;
+}
+
+.role-control__chip-role:hover,
+.role-control__chip-role:focus-visible,
+.role-control__add:hover,
+.role-control__add:focus-visible {
+  background: var(--panel);
+  outline: none;
+}
+
+.role-control__chip-role[aria-expanded="true"] .block-role__name {
+  text-decoration: underline;
+}
+
+.role-control__add {
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.role-control__add[aria-expanded="true"] {
+  color: var(--accent);
+}
+
+/* Above the phone width the popover is fixed where the control measured it
+   (RO_0004_001): below or above its chip, its height capped to the room on
+   that side, kept inside the visible view. Fixed, it takes no room in the
+   page, so opening it never lengthens or widens the document. Hidden until
+   the control has placed it. */
+.role-control__popover {
+  position: fixed;
+  top: var(--roles-top, auto);
+  right: auto;
+  bottom: var(--roles-bottom, auto);
+  left: var(--roles-left, 0px);
+  /* A popover in the top layer is centred by the browser's own margins. */
+  margin: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  box-sizing: border-box;
+  width: var(--roles-width, min(22rem, calc(100vw - 2rem)));
+  max-height: var(--roles-room, 60vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--text) 22%, transparent);
+}
+
+.role-control__taken,
+.role-control__matches {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.role-control__pill {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.role-control__expand,
+.role-control__clear,
+.role-control__match,
+.role-control__suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  cursor: pointer;
+}
+
+.role-control__expand {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+}
+
+.role-control__clear {
+  padding: 0.15rem;
+}
+
+.role-control__match {
+  width: 100%;
+  justify-content: flex-start;
+  border-radius: 0.25rem;
+  border-color: transparent;
+}
+
+.role-control__match:hover,
+.role-control__match:focus-visible {
+  border-color: var(--border);
+}
+
+.role-control__missing,
+.role-control__refusal {
+  color: var(--error);
+}
+
+.role-control__note,
+.role-control__empty,
+.role-control__heading {
+  color: var(--text-muted);
+}
+
+.role-control__heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+}
+
+.role-control__suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.role-control__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.4rem 0 0.2rem 1.5rem;
+}
+
+.role-control__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.role-control__field-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.role-control__input,
+.role-control__query {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  padding: 0.25rem 0.4rem;
+}
+
+.role-control__input[data-missing="true"] {
+  border-color: var(--error);
+}
+
+.role-control__input[type="checkbox"] {
+  align-self: flex-start;
+}
+
+.role-control__query {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.role-control__empty,
+.role-control__refusal {
+  margin: 0;
+}
+
+/* The document header's rows (DO_0030_004, DO_0030_005): the roles line —
+   the roles from above, muted, then the document's own pills and the `+`,
+   always drawn — and the values line under it, quiet. In the compact header
+   the pills alone, on one line, the rest counted. */
+.title-roles[data-title-roles="full"] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--document-header-gap, 0.35rem);
+}
+
+.title-roles__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.title-values {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.title-values__role {
+  font-weight: 600;
+}
+
+.title-roles--compact {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.title-roles--compact .block-role {
+  flex: none;
+  cursor: inherit;
+}
+
+/* Until the control has measured where it stands. */
+.role-control:not([data-roles-side]) .role-control__popover {
+  visibility: hidden;
+}
+
+/* On a phone the role popover is a sheet from the bottom of the screen, over
+   a dimmed page (RO_0002, after the walk): the block's chip and the title's
+   tag alike. A tap on the dimmed page closes it, and so does its handle
+   swiped down; it rides above the keyboard, the control setting its bottom
+   and its room from the part of the page the keyboard leaves visible. Both
+   stand in the top layer, so the dimmed page covers the shell's bars as well
+   (the walk of RO_0004_005). Wider screens keep the popover beside its chip
+   (RO_0004_001). */
+.role-control__backdrop,
+.role-control__handle {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .role-control__backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    /* In the top layer the browser sizes a popover to its content. */
+    width: auto;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    z-index: 59;
+    background: color-mix(in srgb, var(--text) 28%, transparent);
+    touch-action: none;
+  }
+
+  .role-control .role-control__popover,
+  .role-control:not([data-roles-side]) .role-control__popover {
+    position: fixed;
+    visibility: visible;
+    inset-inline: 0;
+    inset-block-start: auto;
+    bottom: var(--roles-sheet-bottom, 0px);
+    z-index: 60;
+    box-sizing: border-box;
+    width: auto;
+    max-height: min(75vh, calc(var(--roles-sheet-room, 100vh) - 1.5rem));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-block-end: max(0.75rem, env(safe-area-inset-bottom));
+    border-radius: 14px 14px 0 0;
+    transform: translateY(var(--roles-sheet-drag, 0px));
+    transition: transform 160ms ease;
+  }
+
+  .role-control__popover[data-dragging] {
+    transition: none;
+  }
+
+  .role-control__handle {
+    display: block;
+    flex: none;
+    align-self: stretch;
+    height: 1.5rem;
+    margin: -0.25rem 0 0;
+    touch-action: none;
+    cursor: grab;
+    background: linear-gradient(var(--border), var(--border)) center / 2.5rem 4px no-repeat;
+    border-radius: 2px;
+  }
 }

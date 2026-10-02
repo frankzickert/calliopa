@@ -1,14 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ACTION_LABEL,
   startsAtEdge,
   SWIPE,
   swipeOutcome,
   swipeReveal,
+  swipeAction,
   swipeTarget,
   thresholds,
+  type SwipeRow,
   type SwipeTable,
 } from "./swipe";
+
+const kept: SwipeRow = { kind: "block", standing: "keep" };
+const fixated: SwipeRow = { kind: "block", standing: "fixate" };
+const proposal: SwipeRow = { kind: "proposal" };
 
 describe("where the threshold falls", () => {
   it("Given the 172px column a phone measured, Then the floor holds, not the proportion", () => {
@@ -59,37 +66,62 @@ describe("another table", () => {
 
   it("Given a threshold made with one table, Then the flick it allows is that table's", () => {
     const limits = thresholds(414, 414, { ...short, flickVelocity: 10 });
-    expect(swipeOutcome("keep", -limits.commit * 0.7, limits, -3)).toBe("keep");
-    expect(swipeOutcome("keep", -limits.commit * 0.7, thresholds(414, 414, short), -3)).toBe("discarded");
+    expect(swipeOutcome(kept, -limits.commit * 0.7, limits, -3)).toBeNull();
+    expect(swipeOutcome(kept, -limits.commit * 0.7, thresholds(414, 414, short), -3)).toBe("remove");
+  });
+});
+
+/** One action each way, depending on the row. BO_0315_010 BO_0315_017 */
+describe("what each direction does", () => {
+  it("Given a block of the document, Then left removes it and right fixates it", () => {
+    expect(swipeAction(kept, "left")).toBe("remove");
+    expect(swipeAction(kept, "right")).toBe("fixate");
+  });
+
+  it("Given a fixated block, Then left returns it to keep, and right changes nothing", () => {
+    expect(swipeAction(fixated, "left")).toBe("unfixate");
+    expect(swipeAction(fixated, "right")).toBeNull();
+  });
+
+  it("Given a proposal, Then left rejects it and right accepts it alone", () => {
+    expect(swipeAction(proposal, "left")).toBe("remove");
+    expect(swipeAction(proposal, "right")).toBe("accept");
+  });
+
+  it("Given a prompt, Then no swipe reaches it", () => {
+    const prompt: SwipeRow = { kind: "block", standing: "prompt" };
+    expect(swipeAction(prompt, "left")).toBeNull();
+    expect(swipeAction(prompt, "right")).toBeNull();
+  });
+
+  it("Given each action, Then the reveal has a word for it", () => {
+    expect(ACTION_LABEL).toEqual({ remove: "Remove", unfixate: "Unfixate", fixate: "Fixate", accept: "Keep" });
   });
 });
 
 describe("a swipe walked out on a 414px phone", () => {
   const limits = thresholds(414, 414);
 
-  it("Given travel in 30px steps to the left, Then nothing is committed before the threshold and discard at it", () => {
+  it("Given travel in 30px steps to the left, Then nothing is committed before the threshold and removal at it", () => {
     const walked = [30, 60, 90, 120, 150, 180, 210].map((distance) =>
-      swipeTarget("keep", -distance, limits),
+      swipeTarget(kept, -distance, limits),
     );
-    expect(walked.slice(0, 4)).toEqual(["keep", "keep", "keep", "keep"]);
-    expect(walked.at(-1)).toBe("discarded");
-    // One action each way: nothing on the way to discard is committed on the
-    // way, and nothing lies beyond it.
-    expect(new Set(walked)).toEqual(new Set(["keep", "discarded"]));
+    expect(walked.slice(0, 4)).toEqual([null, null, null, null]);
+    expect(walked.at(-1)).toBe("remove");
+    expect(new Set(walked)).toEqual(new Set([null, "remove"]));
   });
 
   it("Given travel to the right at the threshold, Then the block is fixated", () => {
-    expect(swipeTarget("keep", limits.commit - 1, limits)).toBe("keep");
-    expect(swipeTarget("keep", limits.commit, limits)).toBe("fixate");
+    expect(swipeTarget(kept, limits.commit - 1, limits)).toBeNull();
+    expect(swipeTarget(kept, limits.commit, limits)).toBe("fixate");
   });
 
-  it("Given a swipe back from either end, Then it returns to keep", () => {
-    expect(swipeTarget("fixate", -limits.commit, limits)).toBe("keep");
-    expect(swipeTarget("discarded", limits.commit, limits)).toBe("keep");
+  it("Given a fixated block swiped left, Then it returns to keep rather than being removed", () => {
+    expect(swipeTarget(fixated, -limits.commit, limits)).toBe("unfixate");
   });
 
   it("Given a reversal back short of the threshold, Then release commits nothing", () => {
-    expect(swipeOutcome("keep", limits.commit - 1, limits, 0)).toBe("keep");
+    expect(swipeOutcome(kept, limits.commit - 1, limits, 0)).toBeNull();
   });
 });
 
@@ -99,37 +131,23 @@ describe("what the reveal names", () => {
   // Naming the action only once armed left the reader swiping at nothing
   // until it appeared, on a phone where the strip is narrow. BO_0272_016
   it("Given the first movement, Then the action is already named, and not yet armed", () => {
-    expect(swipeReveal("keep", -4, limits)).toEqual({
-      action: "discarded",
-      armed: false,
-    });
-    expect(swipeReveal("keep", 4, limits)).toEqual({
-      action: "fixate",
-      armed: false,
-    });
+    expect(swipeReveal(kept, -4, limits)).toEqual({ action: "remove", armed: false });
+    expect(swipeReveal(kept, 4, limits)).toEqual({ action: "fixate", armed: false });
+    expect(swipeReveal(proposal, 4, limits)).toEqual({ action: "accept", armed: false });
   });
 
   it("Given travel at the threshold, Then the same action is armed", () => {
-    expect(swipeReveal("keep", -limits.commit, limits)).toEqual({
-      action: "discarded",
-      armed: true,
-    });
-    expect(swipeReveal("keep", limits.commit + 5, limits)).toEqual({
-      action: "fixate",
-      armed: true,
-    });
+    expect(swipeReveal(kept, -limits.commit, limits)).toEqual({ action: "remove", armed: true });
+    expect(swipeReveal(kept, limits.commit + 5, limits)).toEqual({ action: "fixate", armed: true });
   });
 
   it("Given no movement at all, Then nothing is named", () => {
-    expect(swipeReveal("keep", 0, limits)).toEqual({ action: null, armed: false });
+    expect(swipeReveal(kept, 0, limits)).toEqual({ action: null, armed: false });
   });
 
   it("Given a fixated block swiped right, Then nothing is named at any distance, since nothing would change", () => {
     for (const offset of [2, limits.commit, limits.commit + 200]) {
-      expect(swipeReveal("fixate", offset, limits)).toEqual({
-        action: null,
-        armed: false,
-      });
+      expect(swipeReveal(fixated, offset, limits)).toEqual({ action: null, armed: false });
     }
   });
 });
@@ -138,23 +156,15 @@ describe("a flick", () => {
   const limits = thresholds(414, 414);
 
   it("Given a fast release most of the way to the threshold, Then the action commits", () => {
-    expect(swipeOutcome("keep", -limits.commit * 0.7, limits, -1.2)).toBe(
-      "discarded",
-    );
-    expect(swipeOutcome("keep", limits.commit * 0.7, limits, 1.2)).toBe(
-      "fixate",
-    );
+    expect(swipeOutcome(kept, -limits.commit * 0.7, limits, -1.2)).toBe("remove");
+    expect(swipeOutcome(kept, limits.commit * 0.7, limits, 1.2)).toBe("fixate");
   });
 
-  it("Given a fast release travelling back towards keep, Then it commits nothing", () => {
-    expect(swipeOutcome("keep", -limits.commit * 0.7, limits, 1.2)).toBe(
-      "keep",
-    );
+  it("Given a fast release travelling back, Then it commits nothing", () => {
+    expect(swipeOutcome(kept, -limits.commit * 0.7, limits, 1.2)).toBeNull();
   });
 
   it("Given a slow release short of the threshold, Then it commits nothing", () => {
-    expect(swipeOutcome("keep", -limits.commit * 0.7, limits, -0.2)).toBe(
-      "keep",
-    );
+    expect(swipeOutcome(kept, -limits.commit * 0.7, limits, -0.2)).toBeNull();
   });
 });

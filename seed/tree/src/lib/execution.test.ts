@@ -123,4 +123,11 @@ describe("an entry's words", () => {
       startedAt: 7,
     });
   });
+
+  it("Given a record sent with a working mode, Then the run carries it, so a block's command line can start from it; one sent with none carries none", () => {
+    const sent = executionRun({ id: "arun-2", goal: "Tighten", status: "completed", mode: { field: "consolidate", work: "understand" } });
+    expect(sent.mode).toEqual({ field: "consolidate", work: "understand" });
+    expect("mode" in executionRun({ id: "arun-3", goal: "Tighten", status: "completed" })).toBe(false);
+    expect("mode" in executionRun({ id: "arun-4", goal: "Tighten", status: "completed", mode: null })).toBe(false);
+  });
 });

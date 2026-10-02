@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { port } from "./port";
 
 /**
  * The kernel's calls into an extension's routes (`BO_0264_002`): a route an
@@ -14,8 +14,6 @@ export const KERNEL_CALLBACK_HEADER = "x-calliopa-kernel-callback";
 export function kernelCallbackRefusal(presented: string | null, secret: string | undefined): string | null {
   if (secret === undefined || secret === "") return "this process was started without a kernel callback secret, so it answers no kernel callback";
   if (presented === null || presented === "") return "only the kernel calls this route";
-  const left = Buffer.from(presented);
-  const right = Buffer.from(secret);
-  if (left.length !== right.length || !timingSafeEqual(left, right)) return "only the kernel calls this route";
+  if (!port.sameSecret(presented, secret)) return "only the kernel calls this route";
   return null;
 }

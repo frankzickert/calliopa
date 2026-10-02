@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY_TABS, activeTab, closeAllTabs, closeTab, moveTab, neighbourTab, openTab, retargetTab, routeOf, selectTab, tabsBeside, type Tab, updateTab } from "./tabs";
+import { EMPTY_TABS, activeTab, closeAllTabs, closeTab, moveTab, neighbourTab, openAlongRoute, openTab, openTabBeside, routeOf, selectTab, tabsBeside, type Tab, updateTab } from "./tabs";
 
 const tab = (
   id: string,
@@ -97,15 +97,47 @@ describe("a tab's route", () => {
     expect(routeOf({ ...tab, route: [{ itemId: "doc-0", title: "Roots" }, { itemId: "doc-1", title: "Caching" }] })).toHaveLength(2);
   });
 
-  it("retargets a tab in place, keeping its identity and view and dropping the old target's selection and unsaved state", () => {
-    const state = { tabs: [tab], activeTabId: "t1" };
-    const next = retargetTab(state as never, "t1", {
-      itemId: "doc-2",
-      title: "Focused",
-      route: [{ itemId: "doc-1", title: "Caching", blockId: "blk-a" }, { itemId: "doc-2", title: "Focused" }],
-    });
-    expect(next.tabs[0]).toMatchObject({ id: "t1", itemId: "doc-2", title: "Focused", viewType: "block-editor", selection: null, unsaved: false });
-    expect(next.tabs[0]?.route?.map((entry) => entry.itemId)).toEqual(["doc-1", "doc-2"]);
+  const other = { ...tab, id: "t9", itemId: "doc-9", title: "Elsewhere", selection: null, unsaved: false };
+  const child = {
+    itemId: "doc-2",
+    title: "Focused",
+    route: [{ itemId: "doc-1", title: "Caching", blockId: "blk-a" }, { itemId: "doc-2", title: "Focused" }],
+  };
+
+  it("opens focused work in a tab of its own right after the parent's, carrying the route, and leaves the parent's tab as it was", () => {
+    const next = openAlongRoute({ tabs: [tab, other], activeTabId: "t1" }, child);
+    expect(next.tabs.map((entry) => entry.itemId)).toEqual(["doc-1", "doc-2", "doc-9"]);
+    expect(next.tabs[0]).toEqual(tab);
+    expect(next.tabs[1]).toMatchObject({ id: "documents:document-doc-2", kind: "documents:document", viewType: "block-editor", title: "Focused", selection: null, unsaved: false });
+    expect(next.tabs[1]?.route?.map((entry) => entry.itemId)).toEqual(["doc-1", "doc-2"]);
+    expect(next.activeTabId).toBe("documents:document-doc-2");
+  });
+
+  it("makes a tab already showing the document active as it stands, its own route kept, instead of opening a second", () => {
+    const open = { ...tab, id: "t2", itemId: "doc-2", title: "Focused", route: [{ itemId: "doc-2", title: "Focused" }] };
+    const state = { tabs: [tab, open], activeTabId: "t1" };
+    const next = openAlongRoute(state, child);
+    expect(next.tabs).toEqual(state.tabs);
+    expect(next.activeTabId).toBe("t2");
+  });
+
+  it("goes back to a parent open in a tab without changing either tab, and opens it beside the child when it is open in none", () => {
+    const inChild = { ...tab, id: "t2", itemId: "doc-2", title: "Focused", route: child.route };
+    const parent = { itemId: "doc-1", title: "Caching", route: [{ itemId: "doc-1", title: "Caching", blockId: "blk-a" }] };
+    const both = { tabs: [tab, inChild], activeTabId: "t2" };
+    const back = openAlongRoute(both, parent);
+    expect(back.tabs).toEqual(both.tabs);
+    expect(back.activeTabId).toBe("t1");
+    const alone = openAlongRoute({ tabs: [inChild], activeTabId: "t2" }, parent);
+    expect(alone.tabs.map((entry) => entry.itemId)).toEqual(["doc-2", "doc-1"]);
+    expect(alone.tabs[0]).toEqual(inChild);
+    expect(alone.activeTabId).toBe(alone.tabs[1]?.id);
+  });
+
+  it("gives another view of a document its own id, so two tabs never share one", () => {
+    const table = { ...tab, id: "documents:document-doc-2", itemId: "doc-2", viewType: "table" };
+    const next = openAlongRoute({ tabs: [tab, table], activeTabId: "t1" }, child);
+    expect(new Set(next.tabs.map((entry) => entry.id)).size).toBe(3);
   });
 });
 
@@ -135,5 +167,18 @@ describe("the one tab on the phone's Minimum header", () => {
     expect(neighbourTab(three("c"), 1).activeTabId).toBe("c");
     expect(neighbourTab(three("a"), -1).activeTabId).toBe("a");
     expect(neighbourTab(three(null), 1).activeTabId).toBeNull();
+  });
+});
+
+describe("a tab opened by a held drag", () => {
+  it("opens a new tab directly after the active one, and reveals a tab already open where it stands", () => {
+    const onFirst = selectTab(openTab(openTab(openTab(EMPTY_TABS, tab("a", "doc-a")), tab("b", "doc-b")), tab("c", "doc-c")), "a");
+    const opened = openTabBeside(onFirst, tab("d", "doc-d"));
+    expect(opened.tabs.map((each) => each.id)).toEqual(["a", "d", "b", "c"]);
+    expect(opened.activeTabId).toBe("d");
+    const revealed = openTabBeside(onFirst, tab("x", "doc-c"));
+    expect(revealed.tabs.map((each) => each.id)).toEqual(["a", "b", "c"]);
+    expect(revealed.activeTabId).toBe("c");
+    expect(openTabBeside(EMPTY_TABS, tab("a", "doc-a")).activeTabId).toBe("a");
   });
 });

@@ -85,7 +85,25 @@ export type SentReference = MarkedTarget &
          * of every kind reads `blockId` without a case. */
         readonly blockId?: undefined;
       }
+    /** A proposal marked whole: its group and the items it carries at the
+     * press of *Send*, each with its block and the revision the reader saw;
+     * the run is told the proposal and each item as marked. BO_0321_012 */
+    | {
+        readonly kind: "proposal";
+        readonly number: number;
+        readonly group: string;
+        readonly items: readonly ProposalItem[];
+        readonly blockId?: undefined;
+      }
   );
+
+/** One item of a proposal marked whole, as the kernel reads it back.
+ * BO_0321_012 */
+export interface ProposalItem {
+  readonly item: string;
+  readonly blockId: string;
+  readonly revisionId: string;
+}
 
 /**
  * A reference as the view reports it: what will be sent, the words it stands
@@ -94,15 +112,15 @@ export type SentReference = MarkedTarget &
  * refuse on; they are never sent.
  *
  * What it is and what has happened to it since are shown too (BO_0263_007):
- * a proposal and who proposed it, a retired or a discarded block, and
- * *since* — rejected, restored, reopened, retired, discarded. A rowless
+ * a proposal and who proposed it, a retired block, and *since* — rejected,
+ * restored, retired. A rowless
  * reference has no row left in the document to carry its number, so its chip
  * is where it is taken back.
  */
 export type PointedReference = SentReference & {
   readonly words: string;
   readonly stale: boolean;
-  readonly what?: "proposal" | "retired" | "discarded";
+  readonly what?: "proposal" | "retired";
   readonly proposer?: string;
   readonly since?: string;
   readonly rowless?: boolean;
@@ -110,23 +128,21 @@ export type PointedReference = SentReference & {
    * command's own, for the chip to say which (`BO_0304_Q4`). Shown, never
    * sent: the kernel reads the title from the graph. BO_0304_013 */
   readonly documentTitle?: string;
+  /** A proposal marked whole's: how many items it carries, and whether the
+   * run staging it is still going, for the chip to say. BO_0321_012 */
+  readonly count?: number;
+  readonly staging?: boolean;
 };
 
-/** A fixated block as the command control shows it. The kernel reads what is
- * fixated
- * from the graph at the run's start, so this is shown and never sent. */
-export interface FixatedBlock {
-  readonly blockId: string;
-  readonly words: string;
-}
-
-/** What the reader is pointing at in one document, as its view last reported. */
+/** What the reader is pointing at in one document, as its view last
+ * reported. A fixated block is not in it: the kernel reads what is fixated
+ * from the graph at the run's start, and the command line shows no chip for
+ * it (`DO_0025_008`). */
 export interface Pointing {
   readonly references: readonly PointedReference[];
-  readonly fixated: readonly FixatedBlock[];
 }
 
-export const NO_POINTING: Pointing = { references: [], fixated: [] };
+export const NO_POINTING: Pointing = { references: [] };
 
 /** The numbers of the passages that no longer match their words. A command
  * carrying one is refused until it is re-pointed or taken back. */
@@ -168,6 +184,14 @@ export const sent = (reference: PointedReference): SentReference => {
   switch (reference.kind) {
     case "document":
       return { kind: "document", number: reference.number, document: reference.document };
+    case "proposal":
+      return {
+        kind: "proposal",
+        number: reference.number,
+        group: reference.group,
+        items: reference.items.map(({ item, blockId, revisionId }) => ({ item, blockId, revisionId })),
+        ...(reference.document === undefined ? {} : { document: reference.document }),
+      };
     case "passage":
       return {
         kind: "passage",
@@ -261,13 +285,21 @@ export type ReadTarget =
  * the other's shape rather than quietly taking it.
  */
 export type RunShape =
-  | { readonly ok: true; readonly gesture: false }
-  | { readonly ok: true; readonly gesture: true; readonly intention: string }
+  | { readonly ok: true; readonly gesture: false; readonly pinch?: undefined }
+  | { readonly ok: true; readonly gesture: true; readonly intention: string; readonly pinch?: undefined }
+  | { readonly ok: true; readonly gesture: false; readonly pinch: "in" | "out" }
   | { readonly ok: false; readonly error: string };
 
-export function readRunShape(body: { readonly goal?: unknown; readonly intention?: unknown }): RunShape {
+export function readRunShape(body: { readonly goal?: unknown; readonly intention?: unknown; readonly pinch?: unknown }): RunShape {
   const goal = typeof body.goal === "string" ? body.goal.trim() : "";
   const intention = typeof body.intention === "string" ? body.intention.trim() : "";
+  // A pinch is a command with no words and no question: zooming in or out
+  // on one block. BO_0322_016
+  if (body.pinch !== undefined) {
+    if (body.pinch !== "in" && body.pinch !== "out") return { ok: false, error: "A pinch zooms in or out." };
+    if (goal !== "" || intention !== "") return { ok: false, error: "A pinch carries no words and asks no question of its own." };
+    return { ok: true, gesture: false, pinch: body.pinch };
+  }
   if (intention === "") {
     return goal === ""
       ? { ok: true, gesture: false }
@@ -293,6 +325,20 @@ export function readGestureTarget(body: { readonly artifact?: unknown }): ReadTa
     return { ok: false, error: "A gesture names the document it was made in." };
   }
   return { ok: true, target: { artifact, delivery: "propose", references: [] } };
+}
+
+/**
+ * A pinch's target (`BO_0322`): the document it was made in, which its run
+ * proposes into, and the one block it was made on, as its one reference. It
+ * names no source, because a pinch is written nowhere. BO_0322_016
+ */
+export function readPinchTarget(body: { readonly artifact?: unknown; readonly block?: unknown }): ReadTarget {
+  const artifact = typeof body.artifact === "string" ? body.artifact.trim() : "";
+  const block = typeof body.block === "string" ? body.block.trim() : "";
+  if (artifact === "" || block === "") {
+    return { ok: false, error: "A pinch names the document and the block it was made on." };
+  }
+  return { ok: true, target: { artifact, delivery: "propose", references: [{ kind: "block", number: 1, blockId: block }] } };
 }
 
 export function readCommandTarget(body: {
@@ -369,7 +415,7 @@ function readSource(value: unknown): CommandSource | string {
 }
 
 const MALFORMED_REFERENCES =
-  "References must be a list of {number, blockId}, a passage also carrying kind and quote, a document marked whole its kind and document.";
+  "References must be a list of {number, blockId}, a passage also carrying kind and quote, a document marked whole its kind and document, a proposal marked whole its kind, group and items.";
 
 /** One reference read back from a body, or the refusal naming what is wrong
  * with it. An entry with no kind is a block reference, as `BO_0226` sent
@@ -389,6 +435,7 @@ function readReference(entry: unknown): SentReference | string {
     if (quote !== undefined) return `Document reference #${number} carries a quote; only a passage does.`;
     return { kind: "document", number, document: document.trim() };
   }
+  if (kind === "proposal") return readWholeProposal(entry as Record<string, unknown>, number);
   const marked = readMarked(entry as Record<string, unknown>, number);
   if (typeof marked === "string") return marked;
   if (typeof blockId !== "string" || blockId.trim() === "") {
@@ -409,6 +456,37 @@ function readReference(entry: unknown): SentReference | string {
     default:
       return `Reference #${number} is neither a block nor a passage.`;
   }
+}
+
+/** A proposal marked whole read back from a body entry, or the refusal
+ * naming what is wrong with it: no group, a block or a single item named, or
+ * an item naming no block or no revision. It may carry no item yet.
+ * BO_0321_012 */
+function readWholeProposal(entry: Record<string, unknown>, number: number): SentReference | string {
+  const { group, items, blockId, item, target, quote, revisionId, document } = entry;
+  const named = (value: unknown) => (typeof value === "string" && value.trim() !== "" ? value.trim() : undefined);
+  const grouped = named(group);
+  if (grouped === undefined) return `Proposal reference #${number} marked whole names no group.`;
+  if (blockId !== undefined || item !== undefined || target !== undefined || quote !== undefined || revisionId !== undefined) {
+    return `Proposal reference #${number} marked whole names a block, a single item or a revision; it names its group and its items.`;
+  }
+  if (items !== undefined && !Array.isArray(items)) return `Proposal reference #${number} marked whole carries items that are not a list.`;
+  const read: ProposalItem[] = [];
+  for (const listed of (items ?? []) as unknown[]) {
+    const fields = typeof listed === "object" && listed !== null ? (listed as Record<string, unknown>) : {};
+    const [id, block, revision] = [named(fields["item"]), named(fields["blockId"]), named(fields["revisionId"])];
+    if (id === undefined || block === undefined || revision === undefined) {
+      return `Proposal reference #${number} marked whole carries an item naming no item, block or revision.`;
+    }
+    read.push({ item: id, blockId: block, revisionId: revision });
+  }
+  return {
+    kind: "proposal",
+    number,
+    group: grouped,
+    items: read,
+    ...(named(document) === undefined ? {} : { document: named(document) as string }),
+  };
 }
 
 /** What was marked, read back from a body entry, or the refusal naming what
@@ -513,12 +591,11 @@ export type RevealTarget =
       readonly documentTitle?: string;
     }
   /** A document marked whole: the chip's press brings it forward. BO_0304_013 */
-  | { readonly kind: "document"; readonly document: string; readonly documentTitle?: string };
+  | { readonly kind: "document"; readonly document: string; readonly documentTitle?: string }
+  /** A proposal marked whole: the chip's press shows its change. BO_0321_010 */
+  | { readonly kind: "proposal"; readonly group: string; readonly document?: string; readonly documentTitle?: string };
 
-export const revealTarget = (
-  shown: PointedReference | FixatedBlock,
-): RevealTarget => {
-  if (!("kind" in shown)) return { kind: "block", blockId: shown.blockId };
+export const revealTarget = (shown: PointedReference): RevealTarget => {
   const where = {
     ...(shown.document === undefined ? {} : { document: shown.document }),
     ...(shown.documentTitle === undefined ? {} : { documentTitle: shown.documentTitle }),
@@ -526,6 +603,8 @@ export const revealTarget = (
   switch (shown.kind) {
     case "document":
       return { kind: "document", document: shown.document, ...where };
+    case "proposal":
+      return { kind: "proposal", group: shown.group, ...where };
     case "passage":
       return { kind: "passage", blockId: shown.blockId, number: shown.number, ...where };
     default:
@@ -570,14 +649,17 @@ export function chipName(reference: PointedReference): string {
       ? `proposed by ${reference.proposer ?? "an agent"}, `
       : reference.what === "retired"
         ? "retired block, "
-        : reference.what === "discarded"
-          ? "discarded block, "
-          : "";
+        : "";
   const since = reference.since === undefined ? "" : `, since ${reference.since}`;
   // Where it points when that is another document, by that document's title
   // (`BO_0304_Q4`); a document marked whole is named as one. BO_0304_013
   if (reference.kind === "document") {
     return `Reference ${reference.number}: document “${reference.documentTitle ?? reference.document}”`;
+  }
+  // A proposal marked whole is named by whose it is and how much it holds.
+  // BO_0321_012
+  if (reference.kind === "proposal") {
+    return `Reference ${reference.number}: ${proposalWords(reference)}${since}`;
   }
   const where = reference.document === undefined ? "" : ` in “${reference.documentTitle ?? reference.document}”`;
   return `Reference ${reference.number}${reference.stale ? ", stale" : ""}: ${what}“${reference.words}”${since}${where}`;
@@ -586,12 +668,6 @@ export function chipName(reference: PointedReference): string {
 /** A rowless reference's ×: it has no row in the document left to press. */
 export const takeBackName = (reference: PointedReference): string =>
   `Take back reference ${reference.number}`;
-
-/** A fixated block's chip, which carries no number: a fixated block is a
- * standing, not a reference. CA_0039_003 */
-export function fixatedChipName(fixated: FixatedBlock): string {
-  return `Fixated: “${fixated.words}”`;
-}
 
 /** The most files one command carries, and the most one file may weigh:
  * decided by the user on 2026-09-10, and refused by the kernel too.
@@ -684,4 +760,13 @@ export function deliveredWords(delivered: string): string {
     default:
       return "name, type and size only";
   }
+}
+
+/** What a proposal marked whole's chip says: whose proposal, how many items
+ * it carries, and that its run is still staging — *Claude Code's proposal ·
+ * 4, still being staged*. BO_0321_012 */
+export function proposalWords(reference: { readonly proposer?: string; readonly count?: number; readonly staging?: boolean }): string {
+  const whose = reference.proposer === undefined ? "A proposal" : `${reference.proposer}’s proposal`;
+  const count = reference.count === undefined ? "" : ` · ${reference.count}`;
+  return `${whose}${count}${reference.staging === true ? ", still being staged" : ""}`;
 }

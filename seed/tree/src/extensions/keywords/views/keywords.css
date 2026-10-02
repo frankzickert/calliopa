@@ -1,6 +1,5 @@
-/* Keywords (BO_0301): a mention over a block's words, its hover card, the
- * Keywords section's choices and the foot of a keyword document. Colours are
- * the theme's tokens only. */
+/* Keywords (BO_0301): a mention over a block's words, its hover card and the
+ * foot of a keyword document. Colours are the theme's tokens only. */
 
 [data-annotation="keyword"] {
   position: relative;
@@ -40,73 +39,68 @@
   pointer-events: none;
 }
 
-.keywords-settings {
+/* The mentions line in a keyword document's header (DO_0030_006): one quiet
+ * line, unfolding the mentioning blocks under it. */
+.keywords-mentions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.keywords-mentions__count {
+  align-self: flex-start;
+  padding: 0;
+  font: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.keywords-mentions__count:hover,
+.keywords-mentions__count:focus-visible,
+.keywords-mentions__count[aria-expanded="true"] {
+  color: var(--text);
+}
+
+.keywords-mentions__list {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-}
-
-.keywords-settings__field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.8125rem;
-  color: var(--text-muted);
-}
-
-.keywords-settings__field select {
-  font: inherit;
-  color: var(--text);
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 0.25rem;
-  padding: 0.25rem 0.4rem;
-}
-
-.keywords-mentioned {
-  margin-top: 2rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--border);
-}
-
-.keywords-mentioned__heading {
-  margin: 0 0 0.5rem;
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.keywords-mentioned__list {
   margin: 0;
   padding: 0;
   list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
 }
 
-.keywords-mentioned__document {
+.keywords-mentions__document {
+  padding: 0;
   font: inherit;
+  font-weight: 600;
   color: var(--text);
+  text-align: left;
   background: transparent;
   border: 0;
-  padding: 0;
-  text-align: left;
   cursor: pointer;
-  font-weight: 600;
 }
 
-.keywords-mentioned__document:hover {
+.keywords-mentions__document:hover {
   text-decoration: underline;
 }
 
-.keywords-mentioned__words {
+.keywords-mentions__words {
   margin: 0.1rem 0 0;
   padding-left: 1rem;
   color: var(--text-muted);
-  font-size: 0.875rem;
+}
+
+/* A keyword named with @ whose document is gone (BO_0310_023): still marked,
+ * pressing opens nothing, the title says so. */
+[data-annotation="keyword-gone"] {
+  text-decoration: underline dotted;
+  text-decoration-color: var(--text-muted);
+  text-underline-offset: 0.18em;
+  color: var(--text-muted);
 }

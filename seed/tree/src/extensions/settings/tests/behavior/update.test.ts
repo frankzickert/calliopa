@@ -57,8 +57,8 @@ describe.skipIf(!configured)("the update, through the kernel as the signed-in pe
       body: JSON.stringify({ name, password: "upd's own long password" }),
     });
     expect(signedIn.status).toBe(200);
-    const cookie = signedIn.headers.get("set-cookie")?.match(/calliopa_session=([^;]+)/)?.[1] ?? "";
-    const asUpd = <T>(run: () => Promise<T>): Promise<T> => withRequestContext(`calliopa_session=${cookie}`, run);
+    const cookie = signedIn.headers.get("set-cookie")?.match(/calliopa_session_[0-9a-f]+=[^;]+/)?.[0] ?? "";
+    const asUpd = <T>(run: () => Promise<T>): Promise<T> => withRequestContext(cookie, run);
 
     expect((await asUpd(readSession))?.owner).toBe(false);
     await expect(asUpd(() => kernelUpdate.read())).rejects.toMatchObject({ status: 403, code: "forbidden" });

@@ -26,7 +26,6 @@ export const AgentMenuHost = component$(() => {
   const run = useStore<AgentList>({
     runtimes: [],
     agent: null,
-    options: {},
     speed: "fast",
     notice: null,
     awaiting: null,

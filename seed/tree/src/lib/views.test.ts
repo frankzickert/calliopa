@@ -57,7 +57,7 @@ describe("the resolved registry", () => {
   it("presents a kind nothing contributes with the placeholder", () => {
     // A tab stored for an extension that left the tree keeps its target and
     // opens in the host's context view rather than stranding the workspace.
-    expect(defaultViewFor(registry, "calliopa-video:episode").id).toBe("context");
+    expect(defaultViewFor(registry, "demo:thing").id).toBe("context");
   });
 });
 

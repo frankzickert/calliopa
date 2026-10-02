@@ -1,6 +1,6 @@
 import { $, component$, useStore } from "@builder.io/qwik";
 
-import type { DragPayload } from "~/lib/drag";
+import type { DragPayload, SpringHold } from "~/lib/drag";
 import {
   INSPECTOR_ICON,
   nextSectionState,
@@ -41,7 +41,7 @@ const ids = (layout: Layout, side: "left" | "right"): string[] =>
  */
 export const PanelHost = component$<{ layout: Layout; over?: string | undefined }>((props) => {
   const layout = useStore<Layout>({ ...props.layout });
-  const drag = useStore<{ payload: DragPayload | null; overId: string | null }>({ payload: null, overId: null });
+  const drag = useStore<{ payload: DragPayload | null; overId: string | null; hold: SpringHold | null }>({ payload: null, overId: null, hold: null });
   const mobile = useStore({ sheet: "left" as Sheet });
   /** What the row opened, so a closing sheet is not mistaken for a press that
    * never reached the tabs. The shell's `openTarget$` opens and closes in the
@@ -60,6 +60,8 @@ export const PanelHost = component$<{ layout: Layout; over?: string | undefined 
     >
       {/* The header is outside the sheet: a press there closes it, and the
           control still does its own work. CA_0059_002 */}
+      {/* A dragged block held over the Publish icon. CA_0072_004 */}
+      <button type="button" data-hold="library-icon:publishing" onClick$={() => (drag.hold = { id: "library-icon:publishing", since: 1 })} />
       <header class="shell-header" onPointerDown$={() => (mobile.sheet = null)}>
         <button type="button" class="settings-control" aria-label="Settings" />
       </header>

@@ -129,12 +129,6 @@ export function rereadAgent(
 export interface AgentList {
   runtimes: SelectableRuntime[];
   agent: string | null;
-  /**
-   * What the reader chose on the chosen sender's axes, by axis name
-   * (`BO_0279_007`). An agent has no axes and leaves this empty; a sender's
-   * axes start where the sender says and change as the reader changes them.
-   */
-  options: Record<string, string>;
   /** The next command's speed. BO_0269_015 */
   speed: Speed;
   notice: string | null;
@@ -203,32 +197,7 @@ export async function refreshAgents(
 export async function chooseAgent(list: AgentList, agent: string): Promise<void> {
   list.agent = agent;
   list.awaiting = null;
-  // A new choice brings its own axes, starting where it says. What was chosen
-  // for another model means nothing here — the values are not even the same
-  // words. BO_0279_007
-  list.options = startingOptions(list.runtimes, agent);
   if (!(await rememberAgent(agent))) list.notice = CHOICE_NOT_REMEMBERED;
-}
-
-/** Where a sender's controls start: its own start value, or nothing chosen. */
-export function startingOptions(
-  runtimes: readonly SelectableRuntime[],
-  agent: string | null,
-): Record<string, string> {
-  const chosen = runtimes.find((runtime) => runtime.id === agent);
-  const starting: Record<string, string> = {};
-  for (const axis of chosen?.options ?? []) {
-    if (axis.start !== null && axis.values.includes(axis.start)) starting[axis.axis] = axis.start;
-  }
-  return starting;
-}
-
-/** The axes the chosen sender offers, or none. */
-export function axesOf(
-  runtimes: readonly SelectableRuntime[],
-  agent: string | null,
-): readonly { readonly axis: string; readonly label: string; readonly values: readonly string[]; readonly start: string | null }[] {
-  return runtimes.find((runtime) => runtime.id === agent)?.options ?? [];
 }
 
 /** What the reader is told when a choice could not be remembered. */

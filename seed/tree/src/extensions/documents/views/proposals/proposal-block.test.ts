@@ -560,15 +560,13 @@ describe("proposed changes in the block editor", () => {
 
 /**
  * The work items (`BO_0244_010`): a possible relation drawn under its source
- * block with its claim, its kind and target quoted with the target's
+ * block with its block, its kind and target quoted with the target's
  * document, its reason and its origin; answered by its icons, and accepted
- * with the reason on top when the reader edits it; a claim and a kind drawn
- * as their words; a relation whose source is elsewhere counted and not drawn.
+ * with the reason on top when the reader edits it; a relation whose source is
+ * elsewhere counted and not drawn.
  */
 describe("work items in the block editor", () => {
-  const relate = "node:run-claude|relate|node:clm-b|node:rel-1";
-  const claimItem = "node:run-claude|claim|node:clm-c";
-  const kindItem = "node:run-claude|kind|node:blk-a";
+  const relate = "node:run-claude|relate|node:rel-1";
   const elsewhere = "node:run-claude|relate|node:rel-2";
   const relation = {
     relationId: "rel-1",
@@ -578,12 +576,12 @@ describe("work items in the block editor", () => {
     reason: [{ text: "revision advancement mid-request is untested" }],
     origin: "inferred",
     state: "declared" as const,
-    source: { claimId: "clm-b", blockId: "blk-b", documentId: "doc-1", documentTitle: "Draft", status: "candidate", text: [{ text: "Revision changes can invalidate a cached result." }] },
-    target: { claimId: "clm-x", blockId: "blk-x", documentId: "doc-2", documentTitle: "Request semantics", status: "established", text: [{ text: "Requests observe one stable revision." }] },
+    source: { blockId: "blk-b", documentId: "doc-1", documentTitle: "Draft", text: [{ text: "Revision changes can invalidate a cached result." }] },
+    target: { blockId: "blk-x", documentId: "doc-2", documentTitle: "Request semantics", text: [{ text: "Requests observe one stable revision." }] },
   };
   const work: DocumentProposals = {
     documentId: "doc-1",
-    unanswered: 4,
+    unanswered: 2,
     groups: [
       {
         groupId: "node:run-claude",
@@ -591,8 +589,6 @@ describe("work items in the block editor", () => {
         proposer: { kind: "agent", agent: "claude-code", executedBy: "claude-code (claude-sonnet-5)" },
         items: [
           { itemId: relate, groupId: "node:run-claude", kind: "relate", blockId: "blk-b", block: null, relation },
-          { itemId: claimItem, groupId: "node:run-claude", kind: "claim", blockId: "blk-c", block: null, claim: { claimId: "clm-c", revisionId: "rev-clm-c", status: "candidate", text: [{ text: "The closing settles nothing." }] } },
-          { itemId: kindItem, groupId: "node:run-claude", kind: "kind", blockId: "blk-a", block: { ...draft.blocks[0], blockKind: "assumption" } as DocumentView["blocks"][number], derivedFrom: ["blk-b"] },
           { itemId: elsewhere, groupId: "node:run-claude", kind: "relate", blockId: "blk-a", block: null, relation: { ...relation, relationId: "rel-2" }, elsewhere: true },
         ],
       },
@@ -617,7 +613,7 @@ describe("work items in the block editor", () => {
     return { ...view, sent, proposal, commands, waitFor };
   };
 
-  it("Given a possible relation, Then it is drawn under its block with its claim, kind, target and reason, and the reason is editable", async () => {
+  it("Given a possible relation, Then it is drawn under its block with its block, kind, target and reason, and the reason is editable", async () => {
     const view = await mountWork();
     const card = view.proposal(relate);
     expect(card?.getAttribute("aria-label")).toBe("Proposed relation by Claude Code (claude-sonnet-5)");
@@ -645,18 +641,9 @@ describe("work items in the block editor", () => {
     // it and nothing stands between its margin and its neighbour's: it is the
     // row the document's flow holds, and the room is its own. DO_0009_001
     const view = await mountWork();
-    for (const itemId of [relate, claimItem, kindItem]) {
+    for (const itemId of [relate]) {
       expect(view.proposal(itemId)?.parentElement?.getAttribute("class") ?? "").not.toContain("drop-slot");
     }
-    await view.settle();
-  });
-
-  it("Given a claim and a kind, Then each is drawn as its words, and the kind says what it was derived from", async () => {
-    const view = await mountWork();
-    expect(view.proposal(claimItem)?.textContent).toContain("Proposed claim");
-    expect(view.proposal(claimItem)?.textContent).toContain("The closing settles nothing.");
-    expect(view.proposal(kindItem)?.textContent).toContain("Proposed kind: assumption");
-    expect(view.proposal(kindItem)?.querySelector("[data-proposal-derived]")?.textContent).toContain("Derived from one block");
     await view.settle();
   });
 
@@ -664,7 +651,7 @@ describe("work items in the block editor", () => {
     const view = await mountWork();
     // The harness's querySelector miss is undefined, not null.
     expect(view.proposal(elsewhere)).toBeFalsy();
-    expect(view.root.querySelectorAll("[data-proposal-id]").length).toBe(3);
+    expect(view.root.querySelectorAll("[data-proposal-id]").length).toBe(1);
     await view.settle();
   });
 

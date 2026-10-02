@@ -64,9 +64,9 @@ describe.skipIf(!configured)("people, through the kernel as the signed-in person
       body: JSON.stringify({ name, password: "set by the owner" }),
     });
     expect(signedIn.status).toBe(200);
-    const cookie = signedIn.headers.get("set-cookie")?.match(/calliopa_session=([^;]+)/)?.[1] ?? "";
+    const cookie = signedIn.headers.get("set-cookie")?.match(/calliopa_session_[0-9a-f]+=[^;]+/)?.[0] ?? "";
     expect(cookie).not.toBe("");
-    const asPip = <T>(run: () => Promise<T>): Promise<T> => withRequestContext(`calliopa_session=${cookie}`, run);
+    const asPip = <T>(run: () => Promise<T>): Promise<T> => withRequestContext(cookie, run);
 
     expect((await asPip(readSession))?.name).toBe(name);
     await expect(asPip(() => kernelAccounts.list())).rejects.toMatchObject({ status: 403, code: "forbidden" });

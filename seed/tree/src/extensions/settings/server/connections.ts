@@ -1,6 +1,7 @@
 import {
   configurationRefusal,
   reasoningParty,
+  signOutBlocker,
   type AgentStatus,
   type ConnectionRecord,
   type ConnectionState,
@@ -11,6 +12,7 @@ import { kernelSecrets, type PartyChange, type PartyView } from "~/server/kernel
 import type { RegisteredParty } from "~/registry";
 import { parties, partyOf } from "~/server/registry";
 import { agentStatus, apiKeyModelConfigured, runtimeStatuses } from "~/server/agent/adapters";
+import { activeRuns } from "~/server/agent/bridge";
 
 /**
  * The store over the parties, kept by the kernel (`ui-kernel.md`,
@@ -203,23 +205,16 @@ export async function assertParty(party: string): Promise<RegisteredParty> {
 }
 
 /**
- * Every party, the contributed ones by credential kind then name and the
- * runtime rosters' — a channel the author made — after them by label: the
+ * Every party the build contributes, by credential kind then name: the
  * roster is the registry's, so a party the kernel holds nothing for still
  * lists, unconfigured. CA_0049_003
  */
 export async function listConnections(): Promise<ConnectionRecord[]> {
-  const every = await parties();
-  const contributed = every.filter((party) => !isDynamic(party));
-  const dynamic = every.filter(isDynamic);
-  const roster = [
-    ...contributed.sort((left, right) =>
-      left.credential === right.credential
-        ? left.id.localeCompare(right.id)
-        : left.credential.localeCompare(right.credential),
-    ),
-    ...dynamic.sort((left, right) => left.label.localeCompare(right.label)),
-  ];
+  const roster = [...(await parties())].sort((left, right) =>
+    left.credential === right.credential
+      ? left.id.localeCompare(right.id)
+      : left.credential.localeCompare(right.credential),
+  );
   const records = await Promise.all(
     roster.map(async (party) => asRecord(party, await kernelSecrets.read(party.id))),
   );
@@ -227,11 +222,16 @@ export async function listConnections(): Promise<ConnectionRecord[]> {
   const reported = status ? await runtimeStatuses() : {};
   const stamped = status ? await agentStatus() : null;
   const apiKeyModel = status ? await apiKeyModelConfigured() : false;
-  return records.map((record) => withStatus(record, reported, stamped, apiKeyModel));
+  // A runtime's row says whether a run holds its sign-out, so the control is
+  // disabled before anyone presses it. BO_0316_006
+  const active = status ? await activeRuns() : null;
+  return records.map((record) => {
+    const withReport = withStatus(record, reported, stamped, apiKeyModel);
+    return record.party === "codex" || record.party === "claude-code"
+      ? { ...withReport, signOutBlocked: signOutBlocker(record.party, active) }
+      : withReport;
+  });
 }
-
-/** A party a runtime roster answered rather than the build: its id is namespaced by its extension. */
-const isDynamic = (party: RegisteredParty): boolean => party.id.startsWith(`${party.extension}-`);
 
 export async function readConnection(party: string): Promise<ConnectionRecord> {
   const registered = await assertParty(party);

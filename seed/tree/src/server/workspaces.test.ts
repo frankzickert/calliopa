@@ -125,11 +125,11 @@ describe("a workspace's section states", () => {
     const before = parseWorkspaceState(withLayout({ filters: undefined }));
     expect(before.layout.filters).toEqual({});
     const stored = parseWorkspaceState(
-      withLayout({ filters: { "ui.shell:extensions": ["idea", "completed"], "ui.shell:episodes": ["x"] } }),
+      withLayout({ filters: { "ui.shell:extensions": ["idea", "completed"], "some-extension:things": ["x"] } }),
     );
     expect(stored.layout.filters).toEqual({
       "ui.shell:extensions": ["idea", "completed"],
-      "calliopa-video:episodes": ["x"],
+      "some-extension:things": ["x"],
     });
     expect(() => parseWorkspaceState(withLayout({ filters: { "ui.shell:extensions": "idea" } }))).toThrow(
       /invalid workspace layout/u,
@@ -137,23 +137,17 @@ describe("a workspace's section states", () => {
   });
 
   it("Given a layout stored before sections were keyed, Then its named fields become keys", () => {
-    // The one migration BO_0202_003 names, applied on read: the five fields a
+    // The one migration BO_0202_003 names, applied on read: the fields a
     // layout carried become the keys the registry names for those sections.
     const parsed = parseWorkspaceState(
       withLayout({
         sections: undefined,
         library: "collapsed",
-        episodes: "expanded",
-        standing: "collapsed",
-        destinations: "expanded",
         extensions: "collapsed",
       }),
     );
     expect(parsed.layout.sections).toEqual({
       "documents:documents": "collapsed",
-      "calliopa-video:episodes": "expanded",
-      "calliopa-video:standing": "collapsed",
-      "calliopa-video:destinations": "expanded",
       "ui.shell:extensions": "collapsed",
     });
     expect(parsed.layout).not.toHaveProperty("library");
@@ -166,16 +160,6 @@ describe("a workspace's section states", () => {
     expect(parsed.layout.sections["some-extension:things"]).toBe("collapsed");
   });
 
-  it("Given the keys ui.shell held for one pin, Then they read as calliopa-video's", () => {
-    const parsed = parseWorkspaceState(
-      withLayout({ sections: { "ui.shell:episodes": "collapsed", "documents:documents": "collapsed" } }),
-    );
-    expect(parsed.layout.sections).toEqual({
-      "calliopa-video:episodes": "collapsed",
-      "documents:documents": "collapsed",
-    });
-  });
-
   it("Given a layout carrying no section state at all, Then a section reads expanded when asked", () => {
     const parsed = parseWorkspaceState(withLayout({ sections: {} }));
     expect(parsed.layout.sections).toEqual({});
@@ -183,10 +167,10 @@ describe("a workspace's section states", () => {
   });
 
   it("Given a section state outside the vocabulary, Then it is refused rather than defaulted", () => {
-    expect(() => parseWorkspaceState(withLayout({ sections: { "ui.shell:episodes": "torn-off" } }))).toThrow(
+    expect(() => parseWorkspaceState(withLayout({ sections: { "some-extension:things": "torn-off" } }))).toThrow(
       HttpError,
     );
-    expect(() => parseWorkspaceState(withLayout({ episodes: "torn-off" }))).toThrow(HttpError);
+    expect(() => parseWorkspaceState(withLayout({ library: "torn-off" }))).toThrow(HttpError);
   });
 });
 
@@ -213,12 +197,11 @@ describe("a tab's kind", () => {
     expect(state.activeTabId).toBe("t");
   });
 
-  it("Given the kinds ui.shell held for one pin, Then they are read as calliopa-video's before the build is asked", () => {
+  it("Given a kind stored under the shell before its extension took it, Then it is read as the extension's before the build is asked", () => {
     // The rewrite is pure and holds whether or not the extension is present;
     // what the parser does with the result — keep the tab, or drop it for an
     // absent extension — is the tolerate rule's, tested above.
-    expect(migrateTabKind("ui.shell:episode")).toBe("calliopa-video:episode");
-    expect(migrateTabKind("front")).toBe("calliopa-video:front");
+    expect(migrateTabKind("ui.shell:document")).toBe("documents:document");
     expect(migrateTabKind("document")).toBe("documents:document");
   });
 

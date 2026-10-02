@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { project } from "./project";
-import { document, works } from "./testing/fixture";
+import { document, front, works } from "./testing/fixture";
 
 /**
  * The projection against the real typesetting service (`BO_0293_019`,
@@ -51,7 +51,7 @@ const pixel = (): string => {
 describe.skipIf(url === undefined)("the projection, typeset by the real service", () => {
   for (const venue of ["generic", "ieee"]) {
     it(`typesets the fixture as ${venue}, with its figures, table, equation and references`, async () => {
-      const projected = project(document, works, 2186);
+      const projected = project(document, works, 2186, [], front);
       const files = Object.fromEntries(projected.files.map((file) => [file.name, pixel()]));
       const answered = await fetch(`${url}/v1/manuscripts`, {
         method: "POST",

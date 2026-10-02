@@ -232,14 +232,14 @@ services:
 
   # The media service: Calliopa's generator. It holds the two vendor CLIs and
   # their credentials so nothing else does, and it is the one place a paid call
-  # is made. Profile-gated: an install whose owner has signed in to neither
-  # service runs no container for it. BO_0273_001
+  # is made. Always on: signing in is taken by the broker inside this
+  # container, so it has to run before anyone can sign in. It holds no
+  # credential until then, and it spends only on a press. BO_0273_001 BO_0317_001
   media:
     image: calliopa-media:${CALLIOPA_RELEASE_VERSION:-local}
     pull_policy: never
     build:
       context: build/media
-    profiles: ["media"]
     depends_on:
       bootstrap:
         condition: service_completed_successfully
@@ -249,6 +249,7 @@ services:
       CALLIOPA_MEDIA_BEARER_FILE: /run/secrets/calliopa/media_bearer
       CALLIOPA_MEDIA_PORT: "8095"
       CALLIOPA_MEDIA_CALLBACK_PORT: "8765"
+      CALLIOPA_CODEX_IMAGE_URL: http://hermes:8644/v1/image
     # The callback port is published on the loopback address, and on the
     # literal one rather than CALLIOPA_HOST_BIND: a vendor login's redirect
     # goes to 127.0.0.1 by definition, so the browser must be on this host,

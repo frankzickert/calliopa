@@ -3,16 +3,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { proposerOf } from "../lib/proposals";
 import type { DocumentView } from "../server/assemble";
 import type { DocumentProposals } from "../server/documents";
-import { documentsApi, mountEditor, type SentCommand } from "./testing/editor-harness";
+import { activateBlock, documentsApi, mountEditor, type SentCommand } from "./testing/editor-harness";
 
 /**
- * The working mode in the document's bar and on a proposal's chip, pressed in
- * Qwik's render harness (`BO_0306`): two toggles lead the *Work* group, each
- * wearing the pole in force; a press switches the pole, writes it for the
- * person and tells the shell, which hands it to every run the document
- * starts; a refused write puts the pole back and says so; and a proposal's
- * chip names the mode its run served and where the run strayed from it.
- * BO_0306_013 BO_0306_015
+ * The working mode on a block's command line and on a proposal's chip,
+ * pressed in Qwik's render harness (`BO_0306`, `DO_0025`): the bar draws no
+ * mode; a block's line starts from the mode last sent in the document; a send
+ * carries the block's mode, writes it as the document's last and tells the
+ * shell, which hands it to the console and gestures; a refused write leaves
+ * the run sent and says so; and a proposal's chip names the mode its run
+ * served and where the run strayed from it. BO_0306_013 BO_0306_015
+ * DO_0025_006 DO_0025_009
  */
 const draft: DocumentView = {
   documentId: "doc-mode",
@@ -43,57 +44,49 @@ const mount = async (options: { mode?: Mode; modeRefused?: boolean; proposals?: 
   return { ...view, modes };
 };
 
-const control = (root: HTMLElement, id: string) => root.querySelector(`[data-bar-action="${id}"]`) as HTMLElement | null;
-const shown = (root: HTMLElement, id: string) => ({
-  icon: control(root, id)?.querySelector("[data-icon]")?.getAttribute("data-icon"),
-  name: control(root, id)?.getAttribute("aria-label"),
-  pressed: control(root, id)?.getAttribute("aria-pressed") ?? null,
-});
+const control = (root: HTMLElement, id: string) => (root.querySelector(`[data-bar-action="${id}"]`) as HTMLElement | null) ?? null;
 
-describe("the working mode's toggles", () => {
-  it("Given a document whose mode was never set, Then the two toggles lead the Work group showing explore and create, and the shell is told", async () => {
+describe("the working mode on the command line (DO_0025)", () => {
+  it("Given a document never sent from, Then the bar draws no mode, a block's line starts at explore and create, and the shell is told", async () => {
     const view = await mount();
     const work = view.root.querySelector('[data-bar-group="work"]');
-    expect(Array.from(work?.querySelectorAll("[data-bar-action]") ?? []).map((action) => action.getAttribute("data-bar-action")).slice(0, 3)).toEqual([
-      "working-mode-field",
-      "working-mode-work",
-      "work-in-proposal",
-    ]);
-    // Neither pole is the pressed one: the control shows the pole in force.
-    expect(shown(view.root, "working-mode-field")).toEqual({ icon: "arrows-out-simple", name: "Exploring — switch to consolidate", pressed: null });
-    expect(shown(view.root, "working-mode-work")).toEqual({ icon: "pencil-simple-line", name: "Creating — switch to understand", pressed: null });
+    expect(Array.from(work?.querySelectorAll("[data-bar-action]") ?? []).map((action) => action.getAttribute("data-bar-action"))).not.toContain("working-mode-field");
+    expect(control(view.root, "working-mode-work")).toBeNull();
     expect(view.record.mode).toEqual({ field: "explore", work: "create" });
+    await activateBlock(view, "blk-a");
+    const field = view.root.querySelector('[data-block-command="blk-a"] [data-block-mode="field"]');
+    expect(field?.querySelector("[data-icon]")?.getAttribute("data-icon")).toBe("arrows-out-simple");
+    expect(field?.getAttribute("aria-label")).toBe("Exploring — switch to consolidate");
   });
 
-  it("Given a mode the person set before, Then the toggles show it as the document opens", async () => {
+  it("Given a mode last sent in the document, Then a block never sent starts from it, and the console and gestures carry it", async () => {
     const view = await mount({ mode: { field: "consolidate", work: "understand" } });
-    expect(shown(view.root, "working-mode-field").icon).toBe("arrows-in-simple");
-    expect(shown(view.root, "working-mode-work").icon).toBe("book-open-text");
     expect(view.record.mode).toEqual({ field: "consolidate", work: "understand" });
+    await activateBlock(view, "blk-b");
+    const poles = Array.from(view.root.querySelectorAll('[data-block-command="blk-b"] [data-block-mode]')).map((toggle) => toggle.getAttribute("data-block-mode-pole"));
+    expect(poles).toEqual(["consolidate", "understand"]);
   });
 
-  it("Given each toggle pressed, Then its pole switches at once, is written for the person and is what the next run carries", async () => {
+  it("Given a switch on a block and a send, Then nothing is written until the send, which writes the mode as the document's last and tells the shell", async () => {
     const view = await mount();
-    await view.userEvent('[data-bar-action="working-mode-field"]', "click");
+    await activateBlock(view, "blk-a");
+    await view.userEvent('[data-block-command="blk-a"] [data-block-mode="work"]', "click");
+    await view.settle(() => view.root.querySelector('[data-block-command="blk-a"] [data-block-mode="work"]')?.getAttribute("data-block-mode-pole") === "understand");
+    expect(view.modes).toEqual([]);
+    await view.userEvent('[data-block-command="blk-a"] [data-block-send]', "click");
     await view.settle(() => view.modes.length === 1);
-    expect(shown(view.root, "working-mode-field")).toEqual({ icon: "arrows-in-simple", name: "Consolidating — switch to explore", pressed: null });
-    expect(view.modes).toEqual([{ field: "consolidate", work: "create" }]);
-    expect(view.record.mode).toEqual({ field: "consolidate", work: "create" });
-
-    await view.userEvent('[data-bar-action="working-mode-work"]', "click");
-    await view.settle(() => view.modes.length === 2);
-    expect(shown(view.root, "working-mode-work").icon).toBe("book-open-text");
-    expect(view.modes[1]).toEqual({ field: "consolidate", work: "understand" });
-    expect(view.record.mode).toEqual({ field: "consolidate", work: "understand" });
+    expect(view.modes).toEqual([{ field: "explore", work: "understand" }]);
+    expect(view.record.mode).toEqual({ field: "explore", work: "understand" });
   });
 
-  it("Given the kernel refuses the write, Then the pole is put back, the shell keeps the mode in force and the bar's notice says so", async () => {
+  it("Given the kernel refuses to keep the mode, Then the run is still sent, and the control's note says the mode was not kept", async () => {
     const view = await mount({ modeRefused: true });
-    await view.userEvent('[data-bar-action="working-mode-work"]', "click");
-    await view.settle(() => view.modes.length === 1 && (view.root.textContent ?? "").includes("could not be switched"));
-    expect(shown(view.root, "working-mode-work").icon).toBe("pencil-simple-line");
-    expect(view.record.mode).toEqual({ field: "explore", work: "create" });
-    expect(view.root.textContent).toContain("The working mode could not be switched to understand");
+    await activateBlock(view, "blk-a");
+    await view.userEvent('[data-block-command="blk-a"] [data-block-keep]', "click");
+    await view.userEvent('[data-block-command="blk-a"] [data-block-send]', "click");
+    await view.settle(() => view.root.querySelector("[data-block-send-refusal]") != null);
+    expect((view.record.commands ?? []).length).toBe(1);
+    expect(view.root.querySelector("[data-block-send-refusal]")?.textContent).toContain("could not be kept as the document's last");
   });
 });
 

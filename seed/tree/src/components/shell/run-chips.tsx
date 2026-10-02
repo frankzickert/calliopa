@@ -43,7 +43,10 @@ export const RunChips = component$<{
   chips: readonly RunChip[];
   answerAll: ViewAnswerAll;
   toggleRun: ViewToggleRun;
-}>(({ itemId, chips, answerAll, toggleRun }) => {
+  /** Whether a pointing stands: a chip's press then marks its whole
+   * proposal. BO_0321_011 */
+  pointing?: boolean;
+}>(({ itemId, chips, answerAll, toggleRun, pointing = false }) => {
   const line = useSignal<HTMLElement>();
   const more = useStore({ start: false, end: false });
   // What the line has shown, and the chip the reader last pressed: a chip that
@@ -63,12 +66,13 @@ export const RunChips = component$<{
     answerAll.answer = answer;
     answerAll.seq += 1;
   });
-  const toggle$ = $((key: string, work = false) => {
+  const toggle$ = $((key: string, work = false, mark = false) => {
     // The chip under the reader's hand needs no scrolling to. CA_0062_004
     turned.pressed = key;
     toggleRun.itemId = itemId;
     toggleRun.key = key;
     toggleRun.work = work;
+    toggleRun.mark = mark;
     toggleRun.seq += 1;
   });
   useVisibleTask$(({ cleanup }) => {
@@ -155,16 +159,18 @@ export const RunChips = component$<{
             type="button"
             class="run-chip__toggle"
             data-run-chip-toggle={chip.key}
-            aria-pressed={chip.shown}
-            aria-label={
-              chip.session === true
+            // While pointing, the press marks the chip's whole proposal and
+            // the chip reads as pressed while it is marked. BO_0321_011
+            aria-pressed={pointing ? chip.reference !== undefined : chip.shown}
+            aria-label={pointing ? markName(chip) : chip.session === true
                 ? `${chip.shown ? "Hide" : "Show"} ${chip.text}`
                 : `${chip.shown ? "Hide" : "Show"} ${chip.name}'s proposals: ${chip.text}`
             }
-            // A run that has staged nothing has nothing to show or hide, and
-            // the session the tab works in is the document it reads.
-            disabled={chip.group === null || chip.working === true}
-            onClick$={() => toggle$(chip.key)}
+            // A run that has staged nothing has nothing to show, hide or
+            // mark, and the session the tab works in is the document it
+            // reads — though it can still be marked while pointing.
+            disabled={chip.group === null || (!pointing && chip.working === true)}
+            onClick$={() => toggle$(chip.key, false, pointing)}
           >
             <span class="run-chip__face" aria-hidden="true">
               {chip.face.kind === "image" ? (
@@ -176,6 +182,13 @@ export const RunChips = component$<{
             <span class="run-chip__text" data-run-chip-text>
               {chip.text}
             </span>
+            {chip.reference !== undefined && (
+              // The number the chip's proposal is marked whole under, in the
+              // reference badge's idiom; the toggle's name says it. BO_0321_011
+              <span class="run-chip__reference" data-run-chip-reference={chip.reference} aria-hidden="true">
+                #{chip.reference}
+              </span>
+            )}
             {chip.count !== undefined && (
               // The number the words count, drawn in their place while the
               // chip is minimized. The toggle's name still says them.
@@ -246,3 +259,10 @@ export const RunChips = component$<{
     </ul>
   );
 });
+
+/** What a chip's press does while pointing, in words: *Mark Codex's
+ * proposal*, or *Unmark Codex's proposal, reference 3*. BO_0321_011 */
+export function markName(chip: RunChip): string {
+  const whose = chip.session === true ? "your proposal" : `${chip.name}'s proposal`;
+  return chip.reference === undefined ? `Mark ${whose}` : `Unmark ${whose}, reference ${chip.reference}`;
+}

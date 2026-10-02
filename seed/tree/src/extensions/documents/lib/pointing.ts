@@ -1,12 +1,12 @@
-import type { PointedReference, Pointing } from "~/lib/command-target";
+import { proposalWords, type PointedReference, type Pointing } from "~/lib/command-target";
 import type { Standing } from "./disposition";
 import { passageState, type Marking, type Reference } from "./references";
 
 /**
  * What a view reports of the reader's pointing in one document: every
  * reference in mark order with the words it stands for and, for a passage,
- * whether its words still stand; and the fixated blocks in reading order.
- * BO_0227_015
+ * whether its words still stand. BO_0227_015 A fixated block is not
+ * reported: the command line shows no chip for it. DO_0025_004
  *
  * Pure, over the marking and the document's text blocks, so the composer's
  * chips and its refusal rest on something a unit test can read.
@@ -49,6 +49,7 @@ export function pointingOf(
   marking: Marking,
   blocks: readonly PointableBlock[],
   items: ReadonlyMap<string, OpenItem> | null = null,
+  staging: ReadonlySet<string> = new Set(),
 ): Pointing {
   const held = new Map(blocks.map((block) => [block.blockId, block]));
   const references = marking.references.map((reference): PointedReference => {
@@ -61,6 +62,29 @@ export function pointingOf(
         document: reference.document,
         words: reference.documentTitle ?? reference.document,
         stale: false,
+        ...(reference.documentTitle === undefined ? {} : { documentTitle: reference.documentTitle }),
+      };
+    }
+    // A proposal marked whole: whose it is and how many items it carries,
+    // whether its run still stages, and rowless once none of its items is
+    // open. It never moves onto a block. BO_0321_008
+    if (reference.kind === "proposal") {
+      const open = items === null || reference.items.some((item) => items.has(item.item));
+      const shown = {
+        count: reference.items.length,
+        ...(reference.proposer === undefined ? {} : { proposer: reference.proposer }),
+        ...(staging.has(reference.group) ? { staging: true } : {}),
+      };
+      return {
+        kind: "proposal",
+        number: reference.number,
+        group: reference.group,
+        items: reference.items,
+        words: proposalWords(shown),
+        stale: false,
+        ...shown,
+        ...(open ? {} : { since: "answered", rowless: true }),
+        ...(reference.document === undefined ? {} : { document: reference.document }),
         ...(reference.documentTitle === undefined ? {} : { documentTitle: reference.documentTitle }),
       };
     }
@@ -112,24 +136,18 @@ export function pointingOf(
       ...shownFields,
     };
   });
-  const fixated = blocks
-    .filter((block) => block.standing === "fixate")
-    .map((block) => ({
-      blockId: block.blockId,
-      words: openingWords(block.text),
-    }));
-  return { references, fixated };
+  return { references };
 }
 
 /** What a reference is now: what to call it, what happened since, whether a
  * row is left to carry its number, and the words that stand where it was
  * marked — null once they have gone. */
 function standingOf(
-  reference: Exclude<Reference, { kind: "document" }>,
+  reference: Exclude<Reference, { kind: "document" } | { kind: "proposal" }>,
   held: ReadonlyMap<string, PointableBlock>,
   items: ReadonlyMap<string, OpenItem> | null,
 ): {
-  readonly what?: "proposal" | "retired" | "discarded";
+  readonly what?: "proposal" | "retired";
   readonly since?: string;
   readonly rowless: boolean;
   readonly text: string | null;
@@ -149,17 +167,6 @@ function standingOf(
         : { what: "retired", since: "restored", rowless: true, text: null };
     default: {
       if (block === undefined) return { since: "retired", rowless: true, text: null };
-      const now = block.standing === "discarded";
-      const was = reference.discarded === true;
-      if (was || now) {
-        return {
-          what: "discarded",
-          ...(was && !now ? { since: "reopened" } : {}),
-          ...(!was && now ? { since: "discarded" } : {}),
-          rowless: false,
-          text: block.text,
-        };
-      }
       return { rowless: false, text: block.text };
     }
   }

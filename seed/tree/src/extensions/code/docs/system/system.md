@@ -60,8 +60,7 @@
   among the running runtimes and *No runtime*, which writes the connection (`PUT
   /api/x/code/connection`); *Restart session*, which closes the session and opens a fresh one;
   and *Interrupt* while an execution runs. The group keeps every other extension's group: the bar
-  is one store per shell, and the provider replaces its own group alone, as
-  `calliopa-refine`'s now does with *Work*.
+  is one store per shell, and the provider replaces its own group alone.
 - **The send beneath a code block** (`views/block/send-control.tsx`): drawn in the `run` place
   `documents` leaves under a code block's source. *Run* settles the block's edit first — the
   field left, and the block's own revise waited for while it says it is sending — then asks the
@@ -85,6 +84,11 @@
   kernel toolset's, and the runtimes are the kernel's.
 - The shell's contract gained the `run` place and nested providers for this extension
   (`ui.shell`'s [Contribution Contract](../../../../../docs/system/workspace/contribution-contract.md)).
+
+## On A Device
+
+* On a device, a code block runs in the device sandbox — Python or JavaScript, no filesystem, no sockets, no secrets, a time and memory limit, the same outputs for the same inputs — answered through the same kernel code surface, so this extension's routes are unchanged. Its only widenings are per-block permissions shown on the block. User decision, 2026-09-30 (`BO_0319`, `calliopa-bootstrap`'s `docs/system/mobile.md`).
+- [ ] BO_0319_046 The block's permissions: on a device, a code block shows what it may do beyond pure compute — reading its attachments, and reaching the hosts the person named — and the person grants or withdraws each there; a result that used the network carries the *not reproducible* mark. The runtime controls that manage a container (start, stop, restart) are absent on a device, since a sandbox run has no runtime to manage. Verified on the device build: a grant shown, used and withdrawn, and the mark on a networked result.
 
 ## Open Work
 

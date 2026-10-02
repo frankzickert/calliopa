@@ -204,21 +204,7 @@ export function sectionState(layout: Layout, key: string): SectionState {
  */
 export const LEGACY_SECTION_KEYS: Readonly<Record<string, string>> = {
   library: "documents:documents",
-  episodes: "calliopa-video:episodes",
-  standing: "calliopa-video:standing",
-  destinations: "calliopa-video:destinations",
   extensions: "ui.shell:extensions",
-};
-
-/**
- * Section keys that changed hands: the three sections `ui.shell` held for one
- * pin before they became `calliopa-video`'s. A stored key on the left is read
- * as the key on the right, once, and stored so on the next save (`BO_0203_006`).
- */
-export const RENAMED_SECTION_KEYS: Readonly<Record<string, string>> = {
-  "ui.shell:episodes": "calliopa-video:episodes",
-  "ui.shell:standing": "calliopa-video:standing",
-  "ui.shell:destinations": "calliopa-video:destinations",
 };
 
 export function nextSectionState(state: SectionState): SectionState {

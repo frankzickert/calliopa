@@ -164,17 +164,6 @@ describe("the numbers the order gives", () => {
     expect(after?.equationNumbers).toEqual({ "blk-new": 1, "blk-e2": 2, "blk-e3": 3 });
   });
 
-  it("gives a discarded equation no number and lets it consume none", () => {
-    const document = assembleDocument(
-      graphOf([
-        equation("blk-gone", "c", { numbered: true, disposition: "discarded" }),
-        equation("blk-e2", "d", { numbered: true }),
-      ]),
-      DOCUMENT,
-    );
-    expect(document?.equationNumbers).toEqual({ "blk-e2": 1 });
-  });
-
   it("answers no numbers at all for a document holding none", () => {
     const document = assembleDocument(
       graphOf([{ id: "blk-p", type: "text", content: { order: "b", runs: [{ text: "prose" }] } }]),

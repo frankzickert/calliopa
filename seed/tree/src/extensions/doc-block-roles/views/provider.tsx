@@ -5,246 +5,149 @@ import {
   Slot,
   useContext,
   useContextProvider,
+  useOnDocument,
   useStore,
-  useTask$,
   useVisibleTask$,
 } from "@builder.io/qwik";
 
-import {
-  ViewBridgeContext,
-  type ViewBarGroup,
-} from "~/components/shell/view-bridge";
 import type { DocumentDecorationProps } from "~/contract";
 import { EditorSurfaceContext } from "~/extensions/documents/views/editor-surface";
 
-import {
-  NO_ROLE,
-  offeredBy,
-  offeredRoles,
-  roleState,
-  type DocumentRolesView,
-  type DocumentRoleView,
-  type RolesListing,
-} from "../lib/roles";
+import type { DocumentRolesView, RolesListing, RoleView } from "../lib/roles";
 
 /**
- * The roles a document's editor draws from (`BO_0299_014`): read once per
- * document — the catalogue and the document's roles — shared with the label
- * on every block through this context, and read again whenever the editor
- * reads the document again. The provider writes the *Roles* group into the
- * shell's decoration bar: *Document role*, and, while a block is active and
- * the document carries a role, *Block role* beside it — the decoration bar
- * and the choice action being the slot, as the profile selector found
- * (`BO_0298_030`). A choice posts and the control shows the answer; a
- * refusal is raised in the route's words and the choice stands.
+ * The roles a document's editor draws from: read once per document — the
+ * catalogue and the document's roles — shared with the label on every block
+ * and the role control in the chip through this context, and read again
+ * whenever the editor reads the document again. Nothing here writes to the
+ * bar: a role is taken from the block's own chip, and the document's from the
+ * chip under its title (`calliopa-bootstrap`'s `BO_0318`, folded into
+ * `BO_0309`).
  */
 
 export interface RolesState {
   loaded: boolean;
   reachable: boolean;
-  catalogue: readonly DocumentRoleView[];
+  catalogue: readonly RoleView[];
   view: DocumentRolesView | null;
   busy: boolean;
+  /** A role a label's press asks the control to open at, on its block;
+   * `""` for the document's own. */
+  opening: { subject: string; role: string } | null;
 }
 
-export const RolesContext = createContextId<RolesState>(
-  "doc-block-roles.roles",
-);
+export const RolesContext = createContextId<RolesState>("doc-block-roles.roles");
 
-/** The choice's value for a block role the document's role does not offer
- * any more, or a retired one: shown, and not offered again. */
-export const STANDING_ROLE = "standing";
-
-type Answer = {
+export type Answer = {
   outcome: string;
   result?: DocumentRolesView;
   detail?: string;
   failures?: readonly { detail: string }[];
 };
 
-const detailOf = (answer: Answer, status: number): string =>
+export const detailOf = (answer: Answer, status: number): string =>
   answer.failures?.map((failure) => failure.detail).join(" ") ??
   answer.detail ??
   `The server answered ${status}.`;
 
-export const RolesProvider = component$<DocumentDecorationProps>(
-  ({ documentId }) => {
-    const bridge = useContext(ViewBridgeContext);
-    const surface = useContext(EditorSurfaceContext);
-    const state = useStore<RolesState>({
-      loaded: false,
-      reachable: false,
-      catalogue: [],
-      view: null,
-      busy: false,
-    });
-    useContextProvider(RolesContext, state);
+/** Reads the catalogue and the document's roles into the state. */
+export async function readRoles(state: RolesState, documentId: string): Promise<void> {
+  const [listing, roles] = await Promise.all([
+    fetch("/api/library/doc-block-roles/roles").catch(() => null),
+    fetch(`/api/x/doc-block-roles/documents/${encodeURIComponent(documentId)}`).catch(() => null),
+  ]);
+  if (listing !== null && listing.ok) {
+    const body = (await listing.json().catch(() => null)) as RolesListing | null;
+    state.reachable = body?.reachable === true;
+    state.catalogue = [...(body?.roles ?? [])];
+  }
+  if (roles !== null && roles.ok) {
+    const answer = (await roles.json().catch(() => ({ outcome: "refused" }))) as Answer;
+    if (answer.outcome === "success" && answer.result !== undefined) state.view = answer.result;
+  }
+  state.loaded = true;
+}
 
-    const read$ = $(async (id: string) => {
-      const [listing, roles] = await Promise.all([
-        fetch("/api/library/doc-block-roles/roles").catch(() => null),
-        fetch(
-          `/api/x/doc-block-roles/documents/${encodeURIComponent(id)}`,
-        ).catch(() => null),
-      ]);
-      if (listing !== null && listing.ok) {
-        const body = (await listing
-          .json()
-          .catch(() => null)) as RolesListing | null;
-        state.reachable = body?.reachable === true;
-        state.catalogue = [...(body?.roles ?? [])];
-      }
-      if (roles !== null && roles.ok) {
-        const answer = (await roles
-          .json()
-          .catch(() => ({ outcome: "refused" }))) as Answer;
-        if (answer.outcome === "success" && answer.result !== undefined)
-          state.view = answer.result;
-      }
-      state.loaded = true;
-    });
+/**
+ * The event a write's answer is announced by. The chip under the title holds
+ * a state of its own, since the title stands outside the document's
+ * decoration provider: whichever state wrote, the other takes the document's
+ * roles it answered, so a document's role taken under the title offers its
+ * roles to the blocks at once.
+ */
+export const ROLES_CHANGED = "doc-block-roles-changed";
 
-    // eslint-disable-next-line qwik/no-use-visible-task -- the roles are read in the browser with the person's session
-    useVisibleTask$(async ({ track }) => {
-      const id = track(() => documentId);
-      track(() => surface.loaded);
-      await read$(id);
-    });
+function announce(view: DocumentRolesView, on: EventTarget | null): void {
+  // Made by the page itself, so the event is the page's own kind.
+  const page = on as Document | null;
+  if (page === null || typeof page.createEvent !== "function") return;
+  const event = page.createEvent("Event");
+  event.initEvent(ROLES_CHANGED, false, false);
+  Object.defineProperty(event, "detail", { value: view });
+  page.dispatchEvent(event);
+}
 
-    const post$ = $(
-      async (path: string, body: Record<string, unknown>, headline: string) => {
-        if (state.busy) return;
-        state.busy = true;
-        try {
-          const response = await fetch(path, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify(body),
-          });
-          const answer = (await response
-            .json()
-            .catch(() => ({ outcome: "refused" }))) as Answer;
-          if (
-            response.ok &&
-            answer.outcome === "success" &&
-            answer.result !== undefined
-          ) {
-            state.view = answer.result;
-            return;
-          }
-          await bridge.raiseMessage$({
-            headline,
-            body: detailOf(answer, response.status),
-            answers: [{ id: "ok", label: "OK" }],
-          });
-        } finally {
-          state.busy = false;
-        }
-      },
-    );
+/** Takes an announced view when it is this document's. */
+export function adopt(state: RolesState, documentId: string, event: Event): void {
+  const view = (event as CustomEvent<DocumentRolesView>).detail;
+  if (view !== undefined && view !== null && view.documentId === documentId) state.view = view;
+}
 
-    const chooseDocumentRole$ = $(async (value: string) => {
-      if (value === STANDING_ROLE) return;
-      await post$(
-        `/api/x/doc-block-roles/documents/${encodeURIComponent(documentId)}/role`,
-        { documentRole: value === NO_ROLE ? null : value },
-        "The document's role was not set",
-      );
-    });
+/**
+ * Posts one act on a document's or a block's roles and takes the document's
+ * roles it answers, or the refusal in the route's words. `on` is the page the
+ * answer is announced on: the pressed control's own document.
+ */
+export async function postRoles(
+  state: RolesState,
+  path: string,
+  body: Record<string, unknown>,
+  on: EventTarget | null = null,
+): Promise<string | null> {
+  if (state.busy) return null;
+  state.busy = true;
+  try {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).catch(() => null);
+    if (response === null) return "The server could not be reached.";
+    const answer = (await response.json().catch(() => ({ outcome: "refused" }))) as Answer;
+    if (response.ok && answer.outcome === "success" && answer.result !== undefined) {
+      state.view = answer.result;
+      announce(answer.result, on);
+      return null;
+    }
+    return detailOf(answer, response.status);
+  } finally {
+    state.busy = false;
+  }
+}
 
-    const chooseBlockRole$ = $(async (value: string) => {
-      const blockId = surface.activeBlockId;
-      if (value === STANDING_ROLE || blockId === null) return;
-      await post$(
-        `/api/x/doc-block-roles/documents/${encodeURIComponent(documentId)}/blocks/${encodeURIComponent(blockId)}/role`,
-        { blockRole: value === NO_ROLE ? null : value },
-        "The block's role was not set",
-      );
-    });
+export const RolesProvider = component$<DocumentDecorationProps>(({ documentId }) => {
+  const surface = useContext(EditorSurfaceContext);
+  const state = useStore<RolesState>({
+    loaded: false,
+    reachable: false,
+    catalogue: [],
+    view: null,
+    busy: false,
+    opening: null,
+  });
+  useContextProvider(RolesContext, state);
 
-    useTask$(({ track }) => {
-      const loaded = track(() => state.loaded);
-      const reachable = track(() => state.reachable);
-      const catalogue = track(() => state.catalogue);
-      const view = track(() => state.view);
-      const activeBlockId = track(() => surface.activeBlockId);
-      const others = bridge.decorationBar.groups.filter(
-        (group) => group.id !== "roles",
-      );
-      // No choices while the roles cannot be read: a dropdown offering nothing
-      // but No role would say the instance has none.
-      if (!loaded || !reachable || view === null) {
-        bridge.decorationBar.groups = others;
-        return;
-      }
-      const chosen = view.documentRole;
-      const chosenRole =
-        chosen === null
-          ? null
-          : (catalogue.find((role) => role.id === chosen.id) ?? null);
-      const standing =
-        chosen !== null && (chosen.retired || chosenRole === null);
-      const documentChoice: ViewBarGroup["actions"][number] = {
-        kind: "choice",
-        id: "document-role",
-        label: "Document role",
-        value: standing ? STANDING_ROLE : (chosen?.id ?? NO_ROLE),
-        options: [
-          { value: NO_ROLE, label: "No role" },
-          ...(standing && chosen !== null
-            ? [{ value: STANDING_ROLE, label: `${chosen.name} (retired)` }]
-            : []),
-          ...offeredRoles(catalogue).map((role) => ({
-            value: role.id,
-            label: role.name,
-          })),
-        ],
-        run$: chooseDocumentRole$,
-      };
-      const actions: ViewBarGroup["actions"][number][] = [documentChoice];
-      const block =
-        activeBlockId === null
-          ? undefined
-          : view.blocks.find(
-              (candidate) => candidate.blockId === activeBlockId,
-            );
-      if (block !== undefined && chosenRole !== null && !chosenRole.retired) {
-        const current = block.blockRole;
-        const currentState = current === null ? null : roleState(current);
-        actions.push({
-          kind: "choice",
-          id: "block-role",
-          label: "Block role",
-          value:
-            current === null
-              ? NO_ROLE
-              : currentState === null
-                ? current.id
-                : STANDING_ROLE,
-          options: [
-            { value: NO_ROLE, label: "No role" },
-            ...(current !== null && currentState !== null
-              ? [
-                  {
-                    value: STANDING_ROLE,
-                    label: `${current.name} (${currentState})`,
-                  },
-                ]
-              : []),
-            ...offeredBy(chosenRole).map((role) => ({
-              value: role.id,
-              label: role.name,
-            })),
-          ],
-          run$: chooseBlockRole$,
-        });
-      }
-      bridge.decorationBar.groups = [
-        ...others,
-        { id: "roles", label: "Roles", actions },
-      ];
-    });
+  // eslint-disable-next-line qwik/no-use-visible-task -- the roles are read in the browser with the person's session
+  useVisibleTask$(async ({ track }) => {
+    const id = track(() => documentId);
+    track(() => surface.loaded);
+    await readRoles(state, id);
+  });
 
-    return <Slot />;
-  },
-);
+  useOnDocument(
+    ROLES_CHANGED,
+    $((event: Event) => adopt(state, documentId, event)),
+  );
+
+  return <Slot />;
+});

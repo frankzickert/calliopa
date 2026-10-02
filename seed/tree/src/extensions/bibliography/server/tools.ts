@@ -1,13 +1,11 @@
-import { randomUUID } from "node:crypto";
-
 import { atDataRevision } from "~/server/ccgw/branch-scope";
 
-import { WORK_TYPE, duplicateOf, readWorkRecord, recordFromCsl, type WorkRecord } from "../lib/work";
+import { duplicateOf, readWorkRecord, recordFromCsl, type WorkRecord } from "../lib/work";
 import { workLineOf } from "../lib/line";
-import { listWorks, pairsOf } from "./works";
+import { listWorks, mintSourceIds, sourceStatements } from "./works";
 
 /**
- * The tools a run holds for the bibliography (`BO_0291_021`), answered on
+ * The tools a run holds for sources (`BO_0291_021`, `BO_0313_022`), answered on
  * this extension's kernel callback route. A run fetches a record with the
  * kernel's own `fetch_record` — the one path it has to the bibliography
  * service (`calliopa-bootstrap`'s `BO_0291_035`) — and proposes it here; it
@@ -43,41 +41,43 @@ export function recordOfInput(input: Readonly<Record<string, unknown>>): WorkRec
     item["kind"] !== undefined
       ? readWorkRecord(item)
       : recordFromCsl(item, { by: "fetch_record", at: new Date().toISOString(), from });
-  if ("failure" in read) throw new ToolRefusal(`the record is not a work's: ${read.failure}`);
+  if ("failure" in read) throw new ToolRefusal(`the record is not a source's: ${read.failure}`);
   return read.record;
 }
 
 /**
- * Proposes one work to the bibliography, staged into the run's group. A
- * record sharing a DOI, an ISBN or a URL with a work the bibliography holds
- * at the run's pin is refused by naming that work, so the run cites it
- * instead of proposing it twice.
+ * Proposes one source, staged into the run's group (`BO_0313_022`): the
+ * source document carrying `record: source` and *Source*, its fields filled
+ * from the record and an empty paragraph for notes, as one statement. A
+ * record sharing a DOI, an ISBN or a URL with a source here at the run's pin
+ * is refused by naming that source, so the run cites it instead of proposing
+ * it twice.
  */
 export async function proposeWork(call: ToolCall): Promise<ToolAnswer> {
   const record = recordOfInput(call.input);
   const held = await atDataRevision(call.run.pin, () => listWorks());
-  if (held.outcome !== "success") throw new ToolRefusal(`the bibliography could not be read: ${held.outcome}`);
+  if (held.outcome !== "success") throw new ToolRefusal(`the sources could not be read: ${held.outcome}`);
   const duplicate = duplicateOf(record, held.result);
   if (duplicate !== undefined) {
-    throw new ToolRefusal(`the bibliography already holds this work as ${duplicate.workId}: ${duplicate.record.title}. Cite that work rather than proposing it again.`);
+    throw new ToolRefusal(`this source is already here as ${duplicate.workId}: ${duplicate.record.title}. Cite that source rather than proposing it again.`);
   }
-  const workId = randomUUID();
-  const parameters: Record<string, unknown> = { w_id: workId };
-  const pairs = ["id: $w_id", ...pairsOf(record, "w", parameters)];
+  const ids = mintSourceIds();
+  const parameters: Record<string, unknown> = {};
+  const statements = sourceStatements(record, ids, parameters, false);
   return {
-    result: { workId, title: record.title, line: workLineOf(record), proposed: true },
-    stage: [{ statement: `CREATE (w:${WORK_TYPE} {${pairs.join(", ")}})`, parameters, rationale: `work: ${record.title}` }],
+    result: { workId: ids.documentId, title: record.title, line: workLineOf(record), proposed: true },
+    stage: [{ statement: statements.join("; "), parameters, rationale: `source: ${record.title}` }],
   };
 }
 
 /**
- * The bibliography's works at the run's pin, for a run drafting a
- * citation: each work's identity, its line and its record but for the
- * abstract, narrowed by every word of an optional query.
+ * The sources at the run's pin, for a run drafting a citation: each source
+ * document's identity, its line and its record but for the abstract,
+ * narrowed by every word of an optional query.
  */
 export async function readWorks(call: ToolCall): Promise<ToolAnswer> {
   const held = await atDataRevision(call.run.pin, () => listWorks());
-  if (held.outcome !== "success") throw new ToolRefusal(`the bibliography could not be read: ${held.outcome}`);
+  if (held.outcome !== "success") throw new ToolRefusal(`the sources could not be read: ${held.outcome}`);
   const query = typeof call.input["query"] === "string" ? call.input["query"].trim().toLowerCase() : "";
   const works = held.result
     .map((work) => {
@@ -88,7 +88,7 @@ export async function readWorks(call: ToolCall): Promise<ToolAnswer> {
   return {
     result: {
       works,
-      note: "Cite a work as a run carrying cite: {work: <workId>, locator?} with empty text, in propose_document_changes. A work that is not here is fetched with fetch_record and proposed with propose_work first.",
+      note: "Each source is a document; cite it as a run carrying cite: {work: <workId>, locator?} with empty text, in propose_document_changes. A source that is not here is fetched with fetch_record and proposed with propose_work first.",
     },
   };
 }

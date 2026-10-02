@@ -30,8 +30,7 @@ export type EditorMode = "reading" | "command";
  * as every record before this change did; a proposal names its group and its
  * item, and a retired block says so. The revision the reader saw is kept so
  * the run is told about it as it was then; the words and the proposer are
- * kept to show a reference whose row has gone, and whether the block was
- * discarded when marked, so what happened since can be said.
+ * kept to show a reference whose row has gone.
  */
 export interface Marked {
   readonly target?: "proposal" | "retired";
@@ -40,7 +39,6 @@ export interface Marked {
   readonly revisionId?: string;
   readonly words?: string;
   readonly proposer?: string;
-  readonly discarded?: boolean;
   /** The document the reference points into when it is not the prompt's
    * own, and its title as the reader saw it — absent for the prompt's own
    * document, so every record before `BO_0304` reads unchanged. BO_0304_007 */
@@ -74,7 +72,33 @@ export interface DocumentReference {
   readonly target?: undefined;
 }
 
-export type Reference = BlockReference | PassageReference | DocumentReference;
+/** One item a proposal marked whole carries: the item, its block, the
+ * revision the reader saw and its opening words. BO_0321_007 */
+export interface ProposalItemMark {
+  readonly item: string;
+  readonly blockId: string;
+  readonly revisionId: string;
+  readonly words?: string;
+}
+
+/** A proposal marked whole (`BO_0321_007`): the group, who proposed it, and
+ * every item it carries — those standing when it was marked and those the
+ * group staged since — numbered in the one sequence with the rest. It names
+ * no block and no single item, so an item marked beside it is other
+ * pointing. */
+export interface ProposalReference {
+  readonly kind: "proposal";
+  readonly group: string;
+  readonly proposer?: string;
+  readonly items: readonly ProposalItemMark[];
+  readonly number: number;
+  readonly document?: string;
+  readonly documentTitle?: string;
+  readonly blockId?: undefined;
+  readonly target?: undefined;
+}
+
+export type Reference = BlockReference | PassageReference | DocumentReference | ProposalReference;
 
 /** A prompt block's marking session: what is marked from it, in mark order,
  * and the number the next mark takes, with the mode the surface is in while
@@ -137,6 +161,11 @@ export const referenceFor = (
  * BO_0304_007 */
 export const documentReferenceFor = (marking: Marking, document: string): number | null =>
   marking.references.find((held) => held.kind === "document" && held.document === document)?.number ?? null;
+
+/** The number of the reference to this proposal marked whole, or null.
+ * BO_0321_008 */
+export const proposalReferenceFor = (marking: Marking, group: string): number | null =>
+  marking.references.find((held) => held.kind === "proposal" && held.group === group)?.number ?? null;
 
 /** The documents marked whole, with their titles and numbers, in mark order:
  * what the library and the tab strip show. BO_0304_007 */
@@ -219,6 +248,36 @@ export function toggleDocument(marking: Marking, document: string, documentTitle
     document,
     number: marking.next,
     ...(documentTitle === undefined ? {} : { documentTitle }),
+  });
+}
+
+/**
+ * Marks a proposal whole, or takes the mark back, under the rules of
+ * `toggleReference`. The reference carries the items standing at the press;
+ * `followDocument` adds those the group stages after it. BO_0321_007
+ */
+export function toggleProposal(
+  marking: Marking,
+  group: string,
+  items: readonly ProposalItemMark[],
+  proposer?: string,
+  at: { readonly document?: string; readonly documentTitle?: string } = {},
+): Marking {
+  const same = (held: Reference) => held.kind === "proposal" && held.group === group && held.document === at.document;
+  if (marking.references.some(same)) {
+    return keeping(
+      marking,
+      marking.references.filter((held) => !same(held)),
+    );
+  }
+  return appending(marking, {
+    kind: "proposal",
+    group,
+    items,
+    number: marking.next,
+    ...(proposer === undefined ? {} : { proposer }),
+    ...(at.document === undefined ? {} : { document: at.document }),
+    ...(at.documentTitle === undefined ? {} : { documentTitle: at.documentTitle }),
   });
 }
 
@@ -318,6 +377,9 @@ export function removeReference(marking: Marking, number: number): Marking {
 export interface DocumentNow {
   readonly blocks: readonly { readonly blockId: string; readonly revisionId: string }[];
   readonly openItems: ReadonlySet<string> | null;
+  /** Each group's open items as a proposal marked whole carries them, null
+   * or absent while they have not been read. BO_0321_007 */
+  readonly groupItems?: ReadonlyMap<string, readonly ProposalItemMark[]> | null;
 }
 
 /**
@@ -325,7 +387,7 @@ export interface DocumentNow {
  * document says what it became (BO_0263_004).
  *
  * A reference is never dropped because its row has gone: a proposal answered,
- * a block retired or discarded, a retired block restored — the run is told it
+ * a block retired, a retired block restored — the run is told it
  * as it was marked, and the reader takes it back from its chip. A proposal
  * that was accepted became a block of the document under the revision the
  * reader marked, so its number moves to that block. Only a reference from
@@ -341,6 +403,21 @@ export function followDocument(marking: Marking, now: DocumentNow): Marking {
     // marked: this document says nothing about it. BO_0304_007
     if (held.kind === "document" || held.document !== undefined) {
       references.push(held);
+      continue;
+    }
+    // A proposal marked whole keeps every item it carries, as marked, and
+    // takes each item its group staged since; it never moves onto a block.
+    // BO_0321_007
+    if (held.kind === "proposal") {
+      const staged = (now.groupItems?.get(held.group) ?? []).filter(
+        (item) => !held.items.some((kept) => kept.item === item.item),
+      );
+      if (staged.length === 0) {
+        references.push(held);
+        continue;
+      }
+      references.push({ ...held, items: [...held.items, ...staged] });
+      changed = true;
       continue;
     }
     if (held.target === undefined && held.revisionId === undefined && !revisions.has(held.blockId)) {
@@ -404,6 +481,9 @@ function samePointing(a: Reference, b: Reference): boolean {
   if (a.kind === "document" || b.kind === "document") {
     return a.kind === "document" && b.kind === "document" && a.document === b.document;
   }
+  if (a.kind === "proposal" || b.kind === "proposal") {
+    return a.kind === "proposal" && b.kind === "proposal" && a.group === b.group && a.document === b.document;
+  }
   if (rowKey(a.blockId, a) !== rowKey(b.blockId, b)) return false;
   if (a.kind === "block") return b.kind === "block";
   return b.kind === "passage" && a.anchor.quote === b.anchor.quote;
@@ -423,7 +503,6 @@ function readMarkedEntry(held: Record<string, unknown>): Marked | null {
     ...(text("revisionId") === undefined ? {} : { revisionId: text("revisionId") as string }),
     ...(text("words") === undefined ? {} : { words: text("words") as string }),
     ...(text("proposer") === undefined ? {} : { proposer: text("proposer") as string }),
-    ...(held["discarded"] === true ? { discarded: true } : {}),
     ...(text("document") === undefined ? {} : { document: text("document") as string }),
     ...(text("documentTitle") === undefined ? {} : { documentTitle: text("documentTitle") as string }),
   };
@@ -447,6 +526,8 @@ function readReference(entry: unknown): Reference | null {
     const title = held["documentTitle"];
     return { kind: "document", document, number, ...(typeof title === "string" && title !== "" ? { documentTitle: title } : {}) };
   }
+  // A proposal marked whole names its group and its items. BO_0321_007
+  if (kind === "proposal") return readProposalEntry(held, number);
   if (typeof blockId !== "string" || blockId === "") return null;
   const marked = readMarkedEntry(held);
   if (marked === null) return null;
@@ -463,6 +544,31 @@ function readReference(entry: unknown): Reference | null {
     default:
       return null;
   }
+}
+
+/** A stored proposal marked whole read back, or null when it names no group
+ * or an item that is not whole. BO_0321_007 */
+function readProposalEntry(held: Record<string, unknown>, number: number): ProposalReference | null {
+  const text = (value: unknown): string | undefined => (typeof value === "string" && value !== "" ? value : undefined);
+  const group = text(held["group"]);
+  if (group === undefined || !Array.isArray(held["items"])) return null;
+  const items: ProposalItemMark[] = [];
+  for (const entry of held["items"] as unknown[]) {
+    const fields = typeof entry === "object" && entry !== null ? (entry as Record<string, unknown>) : {};
+    const [item, blockId, revisionId] = [text(fields["item"]), text(fields["blockId"]), text(fields["revisionId"])];
+    if (item === undefined || blockId === undefined || revisionId === undefined) return null;
+    const words = text(fields["words"]);
+    items.push({ item, blockId, revisionId, ...(words === undefined ? {} : { words }) });
+  }
+  return {
+    kind: "proposal",
+    group,
+    items,
+    number,
+    ...(text(held["proposer"]) === undefined ? {} : { proposer: text(held["proposer"]) as string }),
+    ...(text(held["document"]) === undefined ? {} : { document: text(held["document"]) as string }),
+    ...(text(held["documentTitle"]) === undefined ? {} : { documentTitle: text(held["documentTitle"]) as string }),
+  };
 }
 
 /**
@@ -544,6 +650,7 @@ export function markingFromSent(
     readonly item?: string;
     readonly revisionId?: string;
     readonly document?: string;
+    readonly items?: readonly { readonly item: string; readonly blockId: string; readonly revisionId: string }[];
   }[],
 ): Marking {
   const raw = JSON.stringify({
@@ -560,6 +667,11 @@ export function markingFromSent(
       // again. BO_0304_007
       if (reference.kind === "document") {
         return { kind: "document", number: reference.number, document: reference.document ?? "" };
+      }
+      // A proposal marked whole comes back with the items it was sent with;
+      // its proposer is read again from the group. BO_0321_007
+      if (reference.kind === "proposal") {
+        return { kind: "proposal", number: reference.number, group: reference.group ?? "", items: reference.items ?? [], ...(reference.document === undefined ? {} : { document: reference.document }) };
       }
       return reference.kind === "passage" && reference.quote !== undefined
         ? { kind: "passage", number: reference.number, blockId: reference.blockId, anchor: { quote: reference.quote, prefix: "", suffix: "", hint: 0 }, ...marked }

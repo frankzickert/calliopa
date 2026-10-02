@@ -1,8 +1,7 @@
-import { randomUUID } from "node:crypto";
+import { port } from "./port";
 
 import {
   LEGACY_SECTION_KEYS,
-  RENAMED_SECTION_KEYS,
   readPanel,
   SECTION_STATES,
   type Layout,
@@ -125,7 +124,7 @@ function parseLayout(value: unknown): Layout {
   // A layout stored with a dock position is read without it: the dock is
   // gone and what it stored is no longer anyone's to refuse. CA_0058_004
   // The sections' states are a record keyed `<ext>:<section>`. A layout
-  // stored before the record existed carries the five named fields instead,
+  // stored before the record existed carries named fields instead,
   // rewritten here to their keys (the one migration `BO_0202_003` names,
   // applied on read and stored on the next save); a key whose extension is
   // absent is preserved untouched, so an extension removed and restored
@@ -136,8 +135,7 @@ function parseLayout(value: unknown): Layout {
   }
   if (layout.sections !== undefined) {
     for (const [key, stored] of Object.entries(object(layout.sections))) {
-      // A key that changed hands reads as its new key, once. BO_0203_006
-      sections[RENAMED_SECTION_KEYS[key] ?? key] = asSectionState(stored);
+      sections[key] = asSectionState(stored);
     }
   }
   // A section's filter is a set of strings in the section's own vocabulary;
@@ -150,7 +148,7 @@ function parseLayout(value: unknown): Layout {
       if (!Array.isArray(stored) || stored.some((value) => typeof value !== "string")) {
         throw new HttpError(400, "invalid workspace layout");
       }
-      filters[RENAMED_SECTION_KEYS[key] ?? key] = stored as string[];
+      filters[key] = stored as string[];
     }
   }
   // The library's icon order, extension ids. An id nothing contributes is
@@ -218,14 +216,14 @@ function record(stored: StoredWorkspace): WorkspaceRecord {
 }
 
 async function write(id: string, state: WorkspaceState, createdAt: string): Promise<WorkspaceRecord> {
-  const now = new Date().toISOString();
+  const now = port.now().toISOString();
   const stored: StoredWorkspace = { id, ...state, createdAt, updatedAt: now };
   await kernelState.write("workspaces", stored);
   return record(stored);
 }
 
 export async function createWorkspace(): Promise<WorkspaceRecord> {
-  return write(randomUUID(), DEFAULT_WORKSPACE_STATE, new Date().toISOString());
+  return write(port.uuid(), DEFAULT_WORKSPACE_STATE, port.now().toISOString());
 }
 
 /**
@@ -236,7 +234,7 @@ export async function createWorkspace(): Promise<WorkspaceRecord> {
 export async function readDefaultWorkspace(): Promise<WorkspaceRecord> {
   const stored = await kernelState.read<StoredWorkspace>("workspaces", DEFAULT_WORKSPACE_ID);
   if (stored !== null) return record(stored);
-  return write(DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_STATE, new Date().toISOString());
+  return write(DEFAULT_WORKSPACE_ID, DEFAULT_WORKSPACE_STATE, port.now().toISOString());
 }
 
 export async function readWorkspace(id: string): Promise<WorkspaceRecord> {

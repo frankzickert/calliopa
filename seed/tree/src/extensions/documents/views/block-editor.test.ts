@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DocumentView } from "../server/assemble";
+import { readStanding } from "../lib/disposition";
 import { anchorAt } from "~/lib/passage";
 import { REVEAL_MS } from "./reveal";
 import {
@@ -67,9 +68,18 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+/** A key pressed where the page hears it: the view's surface listens on the
+ * document, which the harness's own events do not reach. */
+const pressKey = (target: HTMLElement, name: string): void => {
+  const key = target.ownerDocument.createEvent("Event");
+  key.initEvent("keydown", true, true);
+  Object.defineProperty(key, "key", { value: name });
+  target.dispatchEvent(key);
+};
+
 /** Mounts the editor on the draft, with one block given a standing first. */
 const mount = async (
-  standings: { readonly fixated?: string; readonly discarded?: string } = {},
+  standings: { readonly fixated?: string; readonly follow?: boolean } = {},
 ) => {
   const sent: SentCommand[] = [];
   const document: DocumentView = {
@@ -79,12 +89,10 @@ const mount = async (
         ? block
         : block.blockId === standings.fixated
           ? { ...block, standing: "fixate" }
-          : block.blockId === standings.discarded
-            ? { ...block, standing: "discarded" }
-            : block,
+          : block,
     ),
   };
-  vi.stubGlobal("fetch", documentsApi(document, sent));
+  vi.stubGlobal("fetch", documentsApi(document, sent, standings.follow === true ? { follow: true } : {}));
   const harness = await mountEditor(document);
   last = harness;
   return { ...harness, sent };
@@ -238,73 +246,59 @@ describe("a block's standing in the render harness", () => {
     });
   });
 
-  it("Given a marked block discarded, Then it leaves the flow and keeps its mark, the panel shows it in place marked, and the undo leaves the mark standing", async () => {
-    const view = await mount();
-    const { root, userEvent, record, settle } = view;
+  it("Given a marked block removed with Delete while reading, Then it is retired, its reference says so, Show removed draws it in place, and Take back restores it where it was drawn", async () => {
+    const view = await mount({ follow: true });
+    const { root, userEvent, record, settle, sent } = view;
     await pointFrom(view, "blk-a");
     await userEvent('[data-block-id="blk-b"]', "click");
-    expect(
-      record.pointing?.references.map((reference) => reference.blockId),
-    ).toEqual(["blk-b"]);
-
-    // One action each way: a single step left discards it. BO_0272_006
-    await userEvent('[data-block-id="blk-b"]', "keydown", chord("ArrowLeft"));
+    await stopPointing(view);
+    // Pointing ends with its prompt still edited, whose keys are its own:
+    // leaving it is what lets Delete remove. BO_0315_011
+    await userEvent('[data-bar-action="block-done"]', "click");
+    await settle(() => root.querySelector("[data-block-editor]") == null);
+    await userEvent('[data-block-id="blk-b"] [data-block-reading]', "focus");
+    await settle();
+    // Delete on the row turned to removes it: one retire, and the reference
+    // it carried says it was retired. BO_0315_011
+    pressKey(row(root, "blk-b") as HTMLElement, "Delete");
     await settle(() => row(root, "blk-b") === null);
-    // A reference is what was marked: discarding keeps it, and says so.
-    // BO_0263_004
-    await settle(() => record.pointing?.references[0]?.since === "discarded");
-    expect(record.pointing?.references.map((reference) => [reference.number, reference.what, reference.since])).toEqual([
-      [1, "discarded", "discarded"],
-    ]);
+    expect(sent.filter((command) => command.body["command"] === "retire").map((command) => command.body["blockId"])).toEqual(["blk-b"]);
+    await settle(() => record.pointing?.references[0]?.since === "retired");
 
-    await userEvent('[data-bar-action="discarded-blocks"]', "click");
-    await settle(
-      () => root.querySelector('[data-discarded-id="blk-b"]') != null,
-    );
-    expect(
-      root.querySelector('[data-discarded-reopen="blk-b"]')?.textContent,
-    ).toBe("Reopen");
-    expect(root.querySelector('[data-discarded-id="blk-b"]')?.getAttribute("data-reference")).toBe("1");
-    await userEvent('[data-bar-action="discarded-blocks"]', "click");
-    await settle(
-      () => root.querySelector('[data-discarded-id="blk-b"]') == null,
-    );
+    await userEvent('[data-bar-action="removed"]', "click");
+    await settle(() => root.querySelector('[data-retired-id="blk-b"]') != null);
+    expect(root.querySelector('[data-retired-id="blk-b"] [data-card-label]')?.getAttribute("data-card-label")).toBe("removed");
 
+    // Take back names the removal and restores the block where it was drawn,
+    // between the keys of the rows around it. BO_0315_012
+    expect(root.querySelector('[data-bar-action="take-back-standing"]')?.getAttribute("aria-label")).toBe(
+      "Take back removing “The storm arrives before the lights go out.”",
+    );
     await userEvent('[data-bar-action="take-back-standing"]', "click");
-    await settle(
-      () => row(root, "blk-b")?.getAttribute("data-standing") === "keep",
-    );
-    await settle(() => record.pointing?.references[0]?.since === undefined);
-    expect(row(root, "blk-b")?.getAttribute("data-reference")).toBe("1");
-  });
-
-  it("Given a discarded block shown in place, When it is reopened, Then it is kept and back in the flow", async () => {
-    const { root, userEvent, sent, settle } = await mount({
-      discarded: "blk-c",
+    await settle(() => row(root, "blk-b") !== null);
+    expect(sent.find((command) => command.body["command"] === "restore")?.body).toMatchObject({
+      blockId: "blk-b",
+      placement: { between: ["a", "c"] },
     });
-    expect(row(root, "blk-c")).toBeNull();
-    await userEvent('[data-bar-action="discarded-blocks"]', "click");
-    await settle(
-      () => root.querySelector('[data-discarded-reopen="blk-c"]') != null,
-    );
-    await userEvent('[data-discarded-reopen="blk-c"]', "click");
-    await settle(() => row(root, "blk-c") !== null);
-    expect(standingWrites(sent)).toEqual([
-      {
-        command: "setDisposition",
-        blockId: "blk-c",
-        baseRevisionId: "rev-c",
-        standing: "keep",
-      },
-    ]);
   });
 
-  it("Given a fixated block, Then the pointing the composer reads carries it with its words", async () => {
+  it("Given a block still stored as discarded, Then it reads as kept, in the flow, until the migration retires it (BO_0315_009)", async () => {
+    const sent: SentCommand[] = [];
+    const document = {
+      ...draft,
+      blocks: draft.blocks.map((block) => (block.blockId === "blk-c" ? { ...block, standing: "keep" } : block)),
+    } as DocumentView;
+    const stored = { ...document, blocks: document.blocks.map((block) => (block.blockId === "blk-c" ? { ...block, standing: readStanding("discarded") } : block)) } as DocumentView;
+    vi.stubGlobal("fetch", documentsApi(stored, sent));
+    const harness = await mountEditor(stored);
+    last = harness;
+    expect(row(harness.root, "blk-c")?.getAttribute("data-standing")).toBe("keep");
+  });
+
+  it("Given a fixated block, Then the pointing the composer reads carries no chip for it (DO_0025_004)", async () => {
     const { record, settle } = await mount({ fixated: "blk-c" });
     await settle(() => record.pointing !== null);
-    expect(record.pointing?.fixated).toEqual([
-      { blockId: "blk-c", words: "Closing." },
-    ]);
+    expect(record.pointing).toEqual({ references: [] });
   });
 });
 
@@ -371,21 +365,25 @@ describe("standing while reading", () => {
     await view.settle();
   };
 
-  it("Given the row turned to, Then it alone carries the three buttons, beside its words and none of it inside a button", async () => {
+  it("Given the row turned to, Then it alone carries the block bar — the arrows, then Remove and Fixate — beside its words and none of it inside a button", async () => {
     const view = await mount();
     const { root } = view;
     expect(root.querySelector("[data-standing-toolbar]") ?? null).toBeNull();
     await turnTo(view, "blk-b");
     expect(toolbar(root, "blk-a")).toBeNull();
     expect(toolbar(root, "blk-c")).toBeNull();
-    const buttons = Array.from(
-      toolbar(root, "blk-b")?.querySelectorAll("button") ?? [],
-    );
+    // In one row on the top border, in order: the shell's focused work, the
+    // arrows, then Remove and Fixate; there is no Keep. BO_0315_013
+    const bar = root.querySelector('[data-block-id="blk-b"] [data-block-bar]');
+    const buttons = Array.from(bar?.querySelectorAll("button") ?? []);
     expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
-      "Discard",
-      "Keep",
+      "Open as focused work",
+      "Move block 2 up",
+      "Move block 2 down",
+      "Remove",
       "Fixate",
     ]);
+    expect(root.querySelectorAll("[data-block-bar]")).toHaveLength(1);
     for (const button of buttons) {
       // A boolean, so a failure prints a line rather than this DOM's element.
       expect(button.parentElement?.closest('[role="button"]') != null).toBe(
@@ -439,9 +437,8 @@ describe("standing while reading", () => {
     expect(option(root, "blk-b", "fixate")?.getAttribute("aria-pressed")).toBe(
       "true",
     );
-    expect(option(root, "blk-b", "keep")?.getAttribute("aria-pressed")).toBe(
-      "false",
-    );
+    // On a fixated block it reads Unfixate. BO_0315_013
+    expect(option(root, "blk-b", "fixate")?.getAttribute("aria-label")).toBe("Unfixate");
 
     const pressed = option(root, "blk-b", "fixate")!;
     await userEvent(pressed, "click", { target: pressed });
@@ -454,7 +451,7 @@ describe("standing while reading", () => {
     ]);
   });
 
-  it("Given a divider turned to, Then it carries no toolbar", async () => {
+  it("Given a divider turned to, Then its bar holds Remove and no Fixate", async () => {
     const sent: SentCommand[] = [];
     const document: DocumentView = {
       ...draft,
@@ -472,9 +469,10 @@ describe("standing while reading", () => {
     vi.stubGlobal("fetch", documentsApi(document, sent));
     const view = await mountEditor(document);
     const { root } = view;
-    await view.userEvent('[data-block-id="blk-d"]', "focus");
+    await view.userEvent('[data-block-id="blk-d"]', "focusin");
     await view.settle();
-    expect(toolbar(root, "blk-d")).toBeNull();
+    expect(toolbar(root, "blk-d")?.querySelector("[data-block-remove]")).toBeTruthy();
+    expect(option(root, "blk-d", "fixate")).toBeNull();
   });
 });
 

@@ -39,9 +39,9 @@
 
 * A `text` role is one of `paragraph`, `h1`, `h2`, `h3`, or `quote`. An absent role means `paragraph`, so an ordinary block stores no role property.
 * A `text` block's standing is its optional `disposition`: `keep`, `pin`, `resolved` or `discarded`. An absent disposition means neutral, as an absent role means paragraph (`BO_0227`).
-* A relation anchors a block, and a relation between two blocks is a node that says why. The unit is the block because any block says something, and a claim only ever existed where refinement had been — which `BO_0274`'s walk found in use, counting claims in a document that held none. A block asserting claims of its own identity was the shape from 2026-09-13 to 2026-09-23; `claim` and `asserts` are `calliopa-refine`'s vocabulary now, and both the relation and the surfaces that read it leave this extension for `relations` (Relations Are Their Own Extension, below). User decisions, 2026-09-13 and 2026-09-23 (`BO_0244`, `BO_0288`).
+* A relation anchors a block, and a relation between two blocks is a node that says why. The unit is the block because any block says something; the relation and the surfaces that read it are `relations`' (Relations Are Their Own Extension, below). User decisions, 2026-09-13 and 2026-09-23 (`BO_0244`, `BO_0288`).
 - A focused work is a document that `focuses` a block: an `ext.relationtype` `focuses` declared by `ui.shell` through `kernel commit --members` as the work vocabulary was (`BO_0244_006`, `CA_0047_001`; the kernel harness's fixture `serve/testdata/ui-shell-vocabulary.json` mirrors it), an edge from the child `document` to the `text` block it elaborates. A block is focused by at most one document — the shell's rule, checked by a read before the write as single containment is — and the block keeps its place in its parent; the child is parentless in the library's sense and lists there under its title. Branch scope is not a visual subtree: opening a block as focused work changes nothing about what is accepted (`CA_0047`).
-- The work vocabulary is `ui.shell`'s members, staged through `kernel commit --members` as `BO_0222_004` widened `document` (`BO_0244_006`). `text` permits `kind` with the material's full list — `assertion`, `question`, `observation`, `assumption`, `alternative`, `argument`, `evidence`, `concern`, `consequence`, `requirement`, `proposal`, `decision`, `synthesis`, `tension`, `frontier`, `next` — absent meaning plain prose; the shell reads it onto `TextBlockView` as `blockKind`, named apart from the block type. A `claim` is a non-block type requiring `id` and `text` (runs): an assertion in canonical words. A `relation` is a non-block type requiring `id`, `kind`, `reason` (runs) and `origin`, permitting `state`: `kind` in `dependsOn`, `supports`, `contradicts`, `qualifies`, `constrains`, `implements`, `supersedes`, `evidences`, `opensQuestionIn`, `affectedBy`; `origin` in `declared`, `derived`, `inferred`; `state` in `declared`, `exercised`, `needsReview`, `orphaned`, `retired`, absent meaning `declared` — *proposed* is the node being a candidate, never a state. Every one keeps one open candidate. Four relation types: `asserts` (a `text` block to each claim it makes), `source` and `target` (a `relation` node to a claim), `derivedFrom` (a block to a block it was derived from). A relation may cross documents, and never anchors on a claim of a retired or discarded block. The reason lives on the node because a `Relation` stores no properties; the edges leave the relation node, so staging one revises neither claim nor block — where an `asserts` edge leaves the block, so drafting a claim on a block in a proposal occupies that block's one open candidate as a rewrite would. The sets are `src/server/documents/work.ts`'s constants beside the declarations.
+- A `relation` is a non-block type `relations` declares, requiring `id`, `kind`, `reason` (runs) and `origin` and permitting `state`: `kind` in `dependsOn`, `supports`, `contradicts`, `qualifies`, `constrains`, `implements`, `supersedes`, `evidences`, `opensQuestionIn`, `affectedBy`; `origin` in `declared`, `derived`, `inferred`; `state` in `declared`, `exercised`, `needsReview`, `orphaned`, `retired`, absent meaning `declared` — *proposed* is the node being a candidate, never a state. It keeps one open candidate, and its `source` and `target` edges leave the relation node for a block each, so staging one revises neither block. A relation may cross documents and never anchors on a retired block. The sets are `server/work.ts`'s constants beside the declarations.
 * A run may carry the marks `bold`, `italic`, `strikethrough`, and `code`, and may carry a link.
 * A run's text may hold `\n`, a line break within its block; a block of several lines stays one block. Every reader of the text receives the character: the editor draws it as a line break ([Block Editor](./block-editor.md)), publishing hands it to the site, which draws it as one, and an agent's reads and a proposal's change view keep it as it is. The run primitives and CCGW's run shape take it as any character. User decision, 2026-09-18 (`DO_0003_003`).
 
@@ -79,13 +79,7 @@
 - List the documents no document contains, each with its title. A `document` is never the target of `CONTAINS` today, so the filter keeps every document; it is written as the parentless rule so nesting documents later narrows the listing rather than rewriting it.
 - Delete a document, archiving its established revision.
 - Answer when a document last changed and how many times.
-- The work operations are `src/server/documents/work-ops.ts`, one named command each on the command route (`setKind`, `addClaim`, `reviseClaim`, `dropClaim`, `declareRelation`, `reviseReason`, `setRelationState`), every one an atomic script through the bridge's `write` verb naming its base (`BO_0244_007`): set a block's kind or clear it; add a claim to a block, revise a claim's words, drop a claim — a `RETIRE` of the claim node, refused while a relation still anchors on it; declare a relation as truth — kind, reason, origin `declared`, source and target each a claim by id or a block whose one claim is meant or with the claim's words to draft in the same script — since a person's declared relation is truth (`BO_0244`, Decided); edit a relation's reason; set a relation's state, `retired` included, which is how a relation ends — never `RETIRE`, which would hide its record from every read, and which the kernel's write verb refuses for a relation node (`ui-kernel.md`, `BO_0244_003`). A split keeps the head's claims on the head and gives the tail none, since the head keeps the identity and a claim's words are canonical rather than a span of the block; a merge moves the absorbed block's claims to the survivor, closing each `asserts` and making it again from the survivor in the same script, so a relation anchored on the claim keeps its end (`mergeTextBlocks`).
-- The relations read is `GET /api/x/ui.shell/documents/[id]/relations` (`relationsOf`, `work.ts`), its own request beside the document read so a document with no claims costs one read (`BO_0244_008`). It answers the document's claims by block and every `relation` node whose `source` or `target` is one of them, with the far end's claim, block, document and title, its words, and whether the relation and each end are established or candidates. It is built for hops and volume: one rooted read from the blocks over `asserts`; one from the claims over the relation edges by reverse propagation, which reaches a relation through the one edge landing here; the same relations forward, rooted at themselves, for the end that may be elsewhere; then the far claims' blocks and those blocks' documents, two more rooted reads only when a relation crosses — never the document's neighbourhood, which the gateway truncates at 500 nodes.
-- The relations read answers each relation's `provenance` (`BO_0247_007`; `RelationProvenance`, `relationProvenanceOf` in `work.ts`, wired into `relationsOf`): `origin`, `draftedBy` — the author of the relation's oldest revision — `editedBy` — the authors, oldest first, of revisions whose reason differs from the one before — and `confirmedBy` — the author of the proposal group's revision whose `memberDecisions` first names the relation accepted, else of the one whose status turned accepted; null for a relation a person wrote as truth or a candidate still undecided. One `INCLUDE HISTORY` read over the relation nodes and one over the distinct groups their revisions name under `_proposal`, which an established revision keeps after acceptance (checked live). A node's revisions are ordered by the revision each was created at (`oldestFirst`, `createdDataRevision`), taken once by id: the history read lists the current revision among the prior ones, answers an archived revision in the current slot once the established one came from an accepted candidate, and moves a revision's `dataRevision` when it is archived — found live in the walk-through, 2026-09-14, when a confirmed relation's drafter and editor came out swapped. `origin: derived` names a relation established mechanically from structure with its derivation as the reason; it propagates once accepted because the derivation is inspectable (`BO_0247`).
-- The judgements read, `GET /api/x/ui.shell/documents/[id]/judgements` (`BO_0248_010`; `judgementsOf` in `src/server/documents/judgements.ts`, one reverse-rooted read over `judges` seeded at the document's blocks and relations plus one history read of the source claims for the premise before and after): per block its unresolved pressure — each with the relation, the outcome, the explanation, the source block and document with its title, the source claim's words before and after, and when it was recorded — and its classification, the newest `change` judgement with its outcome and who recorded it; per relation its record — fired, quiet, corrected, and the reason while it needs review — and the document's derived state, `needsReview` over `underPressure` over none, computed on the read and never stored; the rules are pure in `src/lib/judgements.ts` and the same as the kernel's (`ui-kernel.md` `BO_0248_005`). `GET /api/x/ui.shell/documents/states` (`documentStates`) answers every document's state from one read over judgements for the library's glyph; a system run's end re-reads it.
-- Two commands on the commands route (`BO_0248_011`, `api.ts`): `resolveJudgement` (*Seen*) revises the judgement's `resolved` to *<name> at <time>* as the signed-in person — a human content write, the `judgement` type being content the write verb admits — and `classify` records a `change` judgement as the person's on a block, with the chosen outcome, an explanation naming the correction and no `run`, a human truth write of a `judgement` node with its `judges` edge. Both in `tests/behavior/pressure.test.ts`.
-- The provenance read is `GET /api/x/ui.shell/documents/[id]/blocks/[block]/provenance` (`provenanceRead`, `work.ts`), on request for the depth `CA_0046` draws and never on the document read (`BO_0244_009`): the block's history through a metadata-only `INCLUDE HISTORY` read and its `derivedFrom` edges, answered in one of four words shared with the kernel's `read_document` — *human-authored* (every established revision a person's), *system-drafted* (a run's revision established and unedited since), *system-drafted, human-edited* (a run's revision in the history, the newest a person's), *system-maintained* (every revision a run's, with `derivedFrom` sources) — a run's revision being one the agent principal wrote (`agent:`). Candidates and rejected revisions are not the block's story.
-- The read mark (`BO_0246_009`): `GET`/`PUT /api/x/ui.shell/documents/[id]/read` (`handleReadMark`, `api.ts`; `src/server/documents/read-mark.ts`) answers and writes the signed-in person's mark for the document through the kernel's per-person state route (`ui-kernel.md` `BO_0246_001`), the cookie forwarded as every kernel call is; the document read is unchanged but for `dataRevision` and each block's `revisedAt`, and the history read (`CA_0046_003`) answers, for a derived block, its previous established revision's words (`previous`) beside the claims' revisions.
+- A relation's operations here are `server/work-ops.ts`, one named command each on the command route (`reviseReason`, `setRelationState`), each an atomic script through the bridge's `write` verb naming its base (`BO_0244_007`): edit a relation's reason; set its state, `retired` included, which is how a relation ends — never `RETIRE`, which would hide its record from every read, and which the kernel's write verb refuses for a relation node (`ui-kernel.md`, `BO_0244_003`). A person declares a relation through `relations`' commands route.
 - The model is unchanged by `CA_0065` (2026-09-23) and the code that writes it is split: a focused work is still a `document` that `focuses` a block, one child per block, the child parentless in the library's sense, retiring a focused block refused and deleting the child closing the edge — while the `focuses` edge, the one-child rule and the reads are the shell's ([Focused Work](../workspace/focused-work.md)) and this extension contributes only how a `document` child is made and what it says for itself (`CA_0065_008`). The two lines below describe what is written; which half writes it is there.
 - Open a block as focused work, and read what it has (`CA_0047_002`): `openFocusedWork` in `src/server/documents/focus.ts`, the `openFocusedWork` command on the commands route, one atomic script through the bridge's `write` verb creating the child document — titled with the one claim the block asserts when it asserts exactly one, else the block's words truncated at the first sentence, editable at once (user decision, 2026-09-13) — with its first block and the `focuses` edge; a block already focused by a document answers that document instead of creating one; the operation is a human content write and needs no confirmation. Two reads beside it: the child of a block (`childrenOf`, a rooted reverse read over `focuses` at the block; `focusOf` reads the edge forward from the child for the delete), and, for the parent's face, `GET /api/x/ui.shell/documents/[id]/focused` (`focusedWorkOf`), every focused child of the document's blocks with its title and its `synthesis` block's runs when it has one. Retiring a block that has focused work is refused (`focusedWork`) with the child named until the child is deleted or the edge closed — nothing cascades, as the deletion rule never does (user decision, 2026-09-13) — while moving it stays free; deleting the child document closes its `focuses` edge in the same `RETIRE` script, so a block never points at a document that answers nothing. Reframing is renaming the child's title, which the title already allows: no new operation. `tests/behavior/focus.test.ts` proves the write and the title rule, the one-child rule, the read-back from the block and the face with and without a synthesis, the retire refusal and the delete closing the edge.
 
@@ -98,7 +92,7 @@
 * Restore stays available for as long as the document exists. There is no expiry.
 - No retention, cleanup, or purge process exists for retired blocks. They accumulate with the rest of graph history.
 - Restore re-establishes containment at a valid position under a permitted parent, minting a fresh order key rather than assuming the old position is still free.
-- A block leaves a document only by becoming retired. A merge retires the block it absorbed, so what a structural gesture removed from the reading order stays recoverable rather than becoming unreachable.
+- A block leaves a document by becoming retired or by moving into another document (`moveIn`, Moving A Block Between Documents, below). A merge retires the block it absorbed, so what a structural gesture removed from the reading order stays recoverable rather than becoming unreachable.
 
 ## Deleting A Document
 
@@ -121,74 +115,13 @@
 - This is a count and a time, not a revision browser. Nothing here lets a caller open or read back a past revision.
 - Staged content is not the document's until it is accepted, so an open proposal moves neither the count nor the time. [Proposed Changes To A Document](./proposed-changes.md#proposed-changes-to-a-document) records why.
 
-## The Root's Phase
-
-The shell half of `BO_0249` (acceptance as a phase transition, the eighth part of `BO_0243`), transferred 2026-09-15; the kernel half is `ui-kernel.md`, Acceptance As A Phase Transition. A root's phase is a fact the graph holds, named `phase` because `state` is the document's derived refinement state in the reads (`BO_0248_010`) and a relation's state in the `state` item.
-
-* A root has a phase — proposed, accepted or superseded — and only the root: a block's acceptance is its revision's lifecycle and its standing (`BO_0249`, Decided).
-* Acceptance policy belongs to the block, never to the route; the default is the owner, a policy object referenced by an explicit relation is the extension point, and a child inherits policy only through such a relation (material §27).
-
-- The declaration (`BO_0249_006`, staged as the revised `document` member and two new ones through `kernel commit --members`, 2026-09-15): `document` gained `phase` — optional, permitted `proposed`, `accepted`, `superseded`, absent read as proposed (`assemble.ts` leaves it out of the view when absent or proposed) — and `supersededBy`, the successor's id, written only with `superseded`; a `policy` block type with `rule` permitted `owner`, the one rule today; and an `acceptedBy` relation type from a document to a policy. The constants are `PHASE_PROPERTY`, `SUPERSEDED_BY_PROPERTY`, `PHASES` and `isPhase` in `vocabulary.ts`; `DocumentView` carries `phase?` and `supersededBy?`. Named approvers, reviewers and majorities are each their own change.
-- The phase write and the consequences read (`BO_0249_007`): `setDocumentPhase` in `documents.ts` — the command `{command: "setDocumentPhase", baseRevisionId, phase, supersede?}` on the commands route — compares the base first as `setChangeStatus` does (`conflict`), refuses `notARoot` for a change document and `unknownPhase` for a word outside the three, and for `accepted` reads the accepted roots contradicting this one (`conflictsOf` in `src/server/documents/phase.ts`: a declared, established `contradicts` relation with one end here and the other in a root whose `phase` is accepted, whichever direction) and refuses `contradicted` naming them — *An accepted root contradicts this one: «title» (id). Establish and supersede it, or leave this proposed.* — unless `supersede` names one, in which case the mutation is one statement setting this root's `phase` and, in one `SET`, the other's `phase = superseded, supersededBy = <this id>` (two `SET`s on one node in one mutation are refused by the core as a second established revision); `supersede` naming a root that does not contradict is `notContradicting`. A content write, confirmation-free at the bridge: the press on *Establish* is the confirmation (`BO_0249`, Decided). `GET /api/x/ui.shell/documents/[id]/consequences` (`handleConsequencesRead`, `consequencesFor` in `phase.ts`) answers `{documentId, phase, supersededBy?, permitted, policy: "owner", conflicts: [{documentId, title}], items: [{kind, words, documentId?, documentTitle?, blockId?, relationId?}]}`: `items` from the established relations that reach another document — `constrains` for a `dependsOn`, `implements` or `affectedBy` from elsewhere whose target is here, `supports` for a `supports` or `evidences` sourced here, `contradicts` and `supersedes` sourced here — each with the far claim's words, its block and its document's title, then one `judgement` item per unresolved pressure judgement on this root's blocks (`judgementsOf`) reading *<outcome>: <effect>*; `permitted` is true for a signed-in human account (`readSession`, the owner rule) and false for a class-agent account or no session; `conflicts` is `conflictsOf`. Proven in `tests/behavior/phase.test.ts` under the kernel harness: the write and its base, `notARoot`, the refusal naming the contradicting root, the consequences with the conflict and a `constrains` item, the combined supersede, and a phase proposed then established. A relation whose far claim no block asserts — orphaned, as the carry-forward stamp defect left some (`ccgw.md`) — is skipped: it places nowhere and rests on nothing (found on the served build, 2026-09-15).
-
-- Under `calliopa-bootstrap`'s `BO_0274`, set to draft by the user on 2026-09-21 and transferred
-  here the same day: a press records one stamp on the root and what has moved since is derived from
-  it. The fixed lines are `ui-kernel.md`, *Acceptance Names A Claim*.
-- The stamp and the dropped refusal (`BO_0274_005`): `setDocumentPhase` writes `acceptedAt` in the
-  same mutation as `phase` — the dataRevision the document was read at, which is the base the write
-  was made from, so a claim established after the reader looked at what they were accepting is not
-  accepted by their press — and any phase that is not `accepted` writes it null, so a root moved
-  back to proposed or superseded has no acceptance to derive from. The `contradicted` refusal is
-  gone: a press no longer fails because an accepted root contradicts this one, since the colliding
-  claim is derived as not accepted (`BO_0274_006`). `supersede` stays the deliberate way to replace
-  a direction and keeps `notContradicting`; `conflict`, `notARoot` and `unknownPhase` are
-  unchanged.
-- What has moved since the acceptance, derived and stored nowhere (`BO_0274_006`, revised by the
-  walk on 2026-09-21; `acceptanceOf` in `server/phase.ts`, answered at
-  `GET /api/x/calliopa-refine/documents/[id]/acceptance` beside the consequences read). The unit is
-  the block, not the claim: any block says something, so what matters is whether what it says moved.
-  A block reads as `changed` when `calliopa-refine` judged an edit to it material since the stamp —
-  `changed`, `narrowed` or `broadened`, never a rewording or a clarification — carrying that
-  judgement's outcome and its own sentence; as `edited` when it has moved since the stamp and
-  nothing has judged the words it holds now; and as `notAccepted` when a claim it asserts
-  contradicts a claim accepted in another root, carrying what it collides with. The items stand in
-  the document's own order, so the report reads as the page reads, and a root with no stamp answers
-  none.
-* The hint is free and the answer is asked for (`BO_0274_017`, user decision 2026-09-21). Nothing
-  refines unasked since `BO_0258`, so a page that moved would otherwise pass for one that did not
-  until someone thought to ask. `edited` costs no read — the document carries each block's revision
-  — and says only that the block has moved; what the move meant is the refinement's to say, through
-  *Has this moved since it was accepted?* (`calliopa-refine`'s `system.md`). A judgement older than
-  the block's own revision has been overtaken and the hint comes back, rather than a stale answer
-  standing.
-- The rules that decide it are pure (`judgedSince` and `standingFor` in `lib/phase.ts`), so the
-  line, the card and a run's context cannot disagree about what moved: the newest `change` judgement
-  per block recorded after the stamp, and then the block's own revision against it. The judgements
-  are already read with the document for the pressure marks, so the line costs no read of its own.
-- The first shape counted claims, and the walk retired it the same day: a document nobody has
-  refined holds no claims at all, so an accepted page could be rewritten under the reader while its
-  line went on reading *Accepted*. Claims stay what they are — what relations anchor on — and the
-  report is about blocks. User decision, 2026-09-21.
-- The derivation does not recurse: a far claim counts as accepted when its root is accepted and it
-  has not been revised since that root's stamp, and its own collisions are not walked. Two accepted
-  roots whose claims contradict therefore read as not accepted on both sides, which is the honest
-  answer while they stand in conflict. A far root accepted before this change carries no stamp and
-  so makes no collision until it is stamped.
-- [ ] BO_0274_014 Verification of the write and the derivation under the kernel harness, which needs
-      the instance's one human seat and so waits for the owner: `tests/behavior/phase.test.ts` is
-      written and typechecks — the press accepting what it can with the colliding block reading
-      `notAccepted` and naming what it collides with, the supersession clearing that collision by
-      itself, a block rewritten with nothing judged about it reporting nothing, and the phase moved
-      back clearing the stamp. The rule that decides what moved is proven pure in
-      `lib/phase.test.ts`, and shown to fail when the material filter is taken out.
-
 ## Proposal Branches
 
 The shell half of `BO_0250` in the document model: how every write of a tab in a branch stages, and the core operations the shell wraps (`ccgw.md` `BO_0250_001`–`BO_0250_003`; `document-panel.md`, Proposal Branches, for the controls).
 
 * The person stays human class and stages proposal-scoped, which CCGW admits for any class (`BO_0084_009`); a branch is per document and person (`BO_0250`, Decided).
 
-- Every editor write in a branch stages (`BO_0250_011`): the commands route reads `branch` from every command's body and runs the command inside `withBranch` (`src/server/ccgw/branch-scope.ts`, async-local like the request context), and `commit` in `documents.ts` — the one switch every command passes through: revise, split, merge, insert, remove, move, kind, standing, claims, relations, reasons, states, the phase — sends the statement through `stage` with the branch as its proposal instead of `write`, answering `staged: true` and the candidate's revision; the branch group `node:branch-<document>-<account>` is minted by CCGW at the first staging. Every document read route takes `?branch=` and runs inside the same scope, and `query` overlays the branch on every read that names no overlay of its own, falling back to truth while the group does not exist yet (CCGW answers `unknown_proposal`), so the tab reads the branch as the editor shows it; `promoteBlock` reads outside the scope. A run started from a tab in a branch names it as `branch` and the run route passes it to the bridge as `group` (`ui-kernel.md` `BO_0250_005`). `readDocumentProposals` names a branch group's proposer from its name — `{kind: "person", name: <account>}` — so others see *Proposal · <person>* in their colour with its items answered as any group's; `placeProposals` draws them as any proposal's. A read under a branch that has no group yet, or whose group has been accepted, reads truth (`query` retries outside the branch on `unknown_proposal` and `proposal_not_open`): the tab that just accepted its branch re-read under it and was refused before (found live 2026-09-15; `branch.test.ts`). A branch staging's rationale is prefixed `branch of <document> by <account>:`, so the group names its document and person to the kernel whatever the first command was (found live 2026-09-15).
+- Every editor write in a branch stages (`BO_0250_011`): the commands route reads `branch` from every command's body and runs the command inside `withBranch` (`src/server/ccgw/branch-scope.ts`, carried in the port's request scope like the request context), and `commit` in `documents.ts` — the one switch every command passes through: revise, split, merge, insert, remove, move, kind, standing, claims, relations, reasons, states, the phase — sends the statement through `stage` with the branch as its proposal instead of `write`, answering `staged: true` and the candidate's revision; the branch group `node:branch-<document>-<account>` is minted by CCGW at the first staging. Every document read route takes `?branch=` and runs inside the same scope, and `query` overlays the branch on every read that names no overlay of its own, falling back to truth while the group does not exist yet (CCGW answers `unknown_proposal`), so the tab reads the branch as the editor shows it; `promoteBlock` reads outside the scope. A run started from a tab in a branch names it as `branch` and the run route passes it to the bridge as `group` (`ui-kernel.md` `BO_0250_005`). `readDocumentProposals` names a branch group's proposer from its name — `{kind: "person", name: <account>}` — so others see *Proposal · <person>* in their colour with its items answered as any group's; `placeProposals` draws them as any proposal's. A read under a branch that has no group yet, or whose group has been accepted, reads truth (`query` retries outside the branch on `unknown_proposal` and `proposal_not_open`): the tab that just accepted its branch re-read under it and was refused before (found live 2026-09-15; `branch.test.ts`). A branch staging's rationale is prefixed `branch of <document> by <account>:`, so the group names its document and person to the kernel whatever the first command was (found live 2026-09-15).
 - The core read the shell wraps (`BO_0250_012`; `server/branch.ts`): `readStanding` reads `GET /v1/proposals/<id>/standing` (`ccgw.md` `BO_0250_002`), served as `GET d/[id]/standing?branch=` → `{proposal, status, base, head, members: [{ref, kind, standing}]}`, a branch nothing has been staged into — a group the core answers 404 for, `standing` in `client.ts` reading it as `noResult` — as `status: none` with no members; `branchOf` answers `GET d/[id]/branch` for the signed-in person → `{branch, status: open | accepted | rejected | none, previous?}`, the group looked up by its name. Both routes are `documents`' own (`contributions.server.ts`). The document read with a rejected group as its overlay (`BO_0250_003`) serves what a rejected branch held, since CCGW admits a closed group on reads and refuses it on writes. The shell asks the kernel for no run over a branch.
 
 ## Relations Are Their Own Extension
@@ -196,16 +129,14 @@ The shell half of `BO_0250` in the document model: how every write of a tab in a
 Under `calliopa-bootstrap`'s `BO_0288`, promoted to ready by the user on 2026-09-23 and transferred here the same day: the predictable half of refinement — a reason-bearing relation between two blocks, declared by a person and read as a plain query — becomes `relations`, a `bundled` extension active on a fresh install. What is predictable ships and what is a model's opinion does not, and the line the split follows is refinement's own, written for staleness: *a plain query at the pin — no run, no inference, no cost*. The fixed layer's half is `calliopa-bootstrap`'s `docs/system/ui-kernel.md`, *Relations Anchor A Block* (landed 2026-09-23) and `distribution.md` (`BO_0288_009`, `BO_0288_010`); what arrives in `calliopa-refine` is its own `system.md`.
 
 * A relation anchors a block, not a claim. User decision, 2026-09-23.
-* `claim` is refinement's vocabulary and leaves this extension with `asserts`. User decision, 2026-09-23.
+* No claim is held: refinement and its claims are removed with what they stored (`calliopa-bootstrap`'s `BO_0324`). User decision, 2026-10-01 (`BO_0324_Q1`).
 * The predictable half becomes an extension of its own rather than staying here: `documents` is the editor, and saying why one block matters to another is a capability beside it. User decision, 2026-09-23.
-* `relations` is `bundled` and active on a fresh install, so relations behave the same on every install. It costs an install that never uses them nothing, because depth is invisible while reading and draws only the categories that hold material. User decision, 2026-09-23.
+* `relations` is `bundled` and active on a fresh install, so relations behave the same on every install. It costs an install that never uses them nothing. User decision, 2026-09-23.
 * A relation's ends are declared by a person as truth; a run only proposes one, answered where every proposal is answered. User decision, 2026-09-13, restated 2026-09-23 — and the reason this change exists, since no surface has ever offered the declaration and every relation an instance holds was proposed by a run.
 
 - The `relations` extension exists (`BO_0288_014`, 2026-09-23): a manifest naming `documents` and `ui.shell` as dependencies, and `docs/system/system.md` naming `RL` as its change prefix. It was created by adding its manifest through `kernel commit` rather than from the Extensions section, which is a human-class write an agent cannot make; the shape is `test`'s, proven to stand without an entrypoint — `relations` renders nothing until `BO_0288_019` and `BO_0288_020` give it something to draw. The tasks that are its own moved into its docs with it and are no longer listed here: the declarations, the migration, the work operations, the depth surface, a person's path to declare, and the mark a block carries. What stays below is what this extension keeps or loses.
 - Follow-on work from `BO_0288`, which completed 2026-09-23 having moved the vocabulary and given `relations` its write path. What is open below is what it did not do.
-- [ ] BO_0288_018 `addClaim`, `reviseClaim` and `dropClaim` follow `claim` and `asserts` into `calliopa-refine`, with the reads that serve them.
-- This extension goes on drawing a run's proposed relation (`BO_0288_022`): `proposal-block.tsx` draws `relate`, `reason` and `state` items, including of vocabularies it does not own, and the `claim` and `kind` items it drew went with the kernel's item kinds (`BO_0288_008`). Nothing was invented for ownership's sake, which is what this task decided.
-- `text.kind` ships nowhere (`BO_0288_023`): the sixteen values stay `calliopa-refine`'s, and `setBlockKind` and the `kind` proposal item stay here with no declared values behind them. Widening the bundled vocabulary is its own change, once relations are in use and there is something to say about what a block is.
+- This extension goes on drawing a run's proposed relation (`BO_0288_022`): `proposal-block.tsx` draws `relate`, `reason` and `state` items, including of vocabularies it does not own. Nothing was invented for ownership's sake, which is what this task decided.
 
 ## Sources And Citations
 
@@ -216,36 +147,39 @@ Under `calliopa-bootstrap`'s `BO_0288`, promoted to ready by the user on 2026-09
   the fetch of a record is the fixed layer's ([Bibliography Service](../../../../../../docs/system/bibliography-service.md)
   in `calliopa-bootstrap`); the kernel's half is its `ui-kernel.md`, *Sources And Citations*; how a
   citation is written, drawn and read is [Block Editor View](./block-editor.md#sources-and-citations).
-  The citation run is this extension's, as every run attribute is; the `work` type is the
-  bibliography's, since a work is not a block of a document.
-* The extension is `bibliography`, its change prefix `BI`, its type `work` — not `source`, whose
-  node id `relations`' relation type already holds — and its side-bar category *Sources*. User
-  decisions, 2026-09-23.
+  The citation run is this extension's, as every run attribute is; what a source is, is the
+  bibliography's.
+* The extension is `bibliography`, its change prefix `BI`. A source is a document carrying the
+  built-in *Source*, of any CSL type, listed under *Roles → Source* and among the documents
+  (`calliopa-bootstrap`'s `BO_0308_Q11`, `BO_0313_Q1`, `BO_0313_Q3`). User decisions, 2026-09-23
+  and 2026-09-30.
 * It is `bundled` and active on a fresh install; it needs no credential and bills nothing. User
   decision, 2026-09-23.
 * One bibliography per instance, shared by its people, so a shared document's citations resolve the
   same for everyone. User decision, 2026-09-23.
 * The record is fetched by the Zotero translation server, a fixed-layer service, from a DOI, an
   ISBN, a PMID, an arXiv id or a URL. User decision, 2026-09-23.
-* A work may carry its own file, the paper's PDF, stored as a blob on the work. User decision,
-  2026-09-23.
+* A source may carry its own file, in *Source*'s *File* field. User decisions, 2026-09-23 and
+  2026-09-30.
 * Importing a Zotero, BibTeX or RIS library is the next change, not this one. User decision,
   2026-09-23.
-- What a work is — its record in CSL-JSON shape, the identifier as the identity for duplicates,
-  who writes one — is the bibliography's own truth, in its `system.md`.
-- A citation is a run carrying `cite` — the identity of the work it names and an optional
+- What a source is — a document carrying `record: source` and *Source*, its record in CSL-JSON
+  shape in the role's fields, the identifier as the identity for duplicates, who writes one — is
+  the bibliography's own truth, in its `system.md`.
+- A citation is a run carrying `cite` — the identity of the source document it names, under the
+  key `work`, and an optional
   `locator` — whose `text` is empty, the shape `equationRef` takes and for the same reason: the
   drawn label is derived and stored nowhere. Its number is resolved in the document read, numbering
-  cited works from one in the order of their first citation over the reading order, a work cited
-  twice keeping its number, retired and discarded blocks counting for nothing, a citation in an
+  cited sources from one in the order of their first citation over the reading order, a source
+  cited twice keeping its number, retired and discarded blocks counting for nothing, a citation in an
   open proposal numbered where it would land.
-- A citation names a node its document does not contain, the first such reference in this model
+- A citation names a document its document does not contain, the first such reference in this model
   (Documents And Blocks says no change had introduced one). It is a run attribute and not a
   relation, because it sits at a place in a sentence, as a link does; *cited by* is the reverse
   read, answered from the citations of every document. It is a query over runs, not a maintained
   edge (`BO_0291_023`, 2026-09-24): `server/cited-by.ts` reads every document with the text blocks
   it contains in one unbounded query and keeps the blocks in a document's reading order —
-  contained, not discarded — with a run citing the work, so no `cites` relation is written and
+  contained, not discarded — with a run citing the source, so no `cites` relation is written and
   none can drift from the words. The bibliography's `works/[id]/cited-by` route answers it.
   Proven in `server/cited-by.test.ts` and a case of `tests/behavior/documents.test.ts` over the
   one graph: a cited sentence answered with its document and block, and none once it is retired.
@@ -262,24 +196,27 @@ Under `calliopa-bootstrap`'s `BO_0288`, promoted to ready by the user on 2026-09
   the citation, a citation that is also mathematics or a reference, and one carrying text of its
   own. Proven in `lib/runs.test.ts`, *citations*, and `server/citation-number.test.ts`.
 - Numbering is resolved in the document read (`BO_0291_013`, landed 2026-09-23; `assemble.ts`,
-  `numberCitations`): the works the reading order cites are numbered from one in the order of
-  their first citation, a work cited twice keeping its number, a discarded block's citation taking
+  `numberCitations`): the sources the reading order cites are numbered from one in the order of
+  their first citation, a source cited twice keeping its number, a discarded block's citation taking
   none and consuming none, a retired block never reaching the view, and every view answering
-  `DocumentView.citationNumbers` — by the work's identity, as `equationNumbers` is by the
-  equation's — rather than deriving its own. A citation names a node the document does not
-  contain, so `loadDocument` (`documents.ts`, `citedWorksAt`) reads the cited identities at the pin
-  in one rooted, label-free match, made only when something is cited; a cited work not found there
-  — retired, or never there — stands in `DocumentView.missingWorks`, takes no number and consumes
-  none, so a view draws it as missing rather than with a stale number. Proven in
-  `server/citation-number.test.ts`.
-- Accepting a proposed sentence accepts the works it cites that its own group proposes, first
+  `DocumentView.citationNumbers` — by the source's identity, as `equationNumbers` is by the
+  equation's — rather than deriving its own. A citation names a document the citing document does
+  not contain, so `loadDocument` (`documents.ts`, `citedWorksAt`) reads the cited identities at
+  the pin in one rooted, label-free match, made only when something is cited, and keeps those that
+  are a `document` carrying `record: source` (`vocabulary.ts`, `SOURCE_RECORD`); a cited identity
+  not found there — deleted, never there, or no source — stands in `DocumentView.missingWorks`,
+  takes no number and consumes none, so a view draws it as missing rather than with a stale
+  number. Proven in `server/citation-number.test.ts`.
+- Accepting a proposed sentence accepts the sources it cites that its own group proposes, first
   (`BO_0291_036`, 2026-09-24, user decision; `server/proposed-works.ts` `proposedWorksCited`, in
-  `answerDocumentProposal`): a run that cites a work it found proposes the work into the same
-  group as the sentence, and a work is not a block of the document, so it never stood among the
-  document's proposals to answer — found on the instance when an accepted sentence cited a work
-  still a proposal and drew *[source gone]*. A work another group proposes is that group's to
-  answer, and rejecting a sentence leaves its works proposed. Proven in
-  `server/proposed-works.test.ts`.
+  `answerDocumentProposal`): a run that cites a source it found proposes the source document into
+  the same group as the sentence, and it is not a block of the citing document, so it never stood
+  among that document's proposals to answer — found on the instance when an accepted sentence
+  cited a work still a proposal and drew *[source gone]*. Each source is accepted whole, member by
+  member: the document, then the paragraph it `CONTAINS` and the `roleFields` whose `fieldsOf`
+  reaches it, read from the group's staged relations, their relations travelling with them. A
+  source another group proposes is that group's to answer, and rejecting a sentence leaves its
+  sources proposed. Proven in `server/proposed-works.test.ts`.
 - A document may name its own citation style (`BO_0291_037`, landed 2026-09-24): `document`
   permits `citationStyle`, one of the bibliography's shipped styles' ids, absent meaning the
   instance's default — a widening staged as a member revision through `kernel commit --members`,
@@ -288,19 +225,18 @@ Under `calliopa-bootstrap`'s `BO_0288`, promoted to ready by the user on 2026-09
   to follow the default again, against the document's base, a stale base answering `conflict`.
   The read answers the choice as `citationStyle`, asks the citation resolver in it, and carries
   the resolver's `CitationStyles` as `citationStyles` when the document cites anything. Proven in
-  `server/front-matter.test.ts` and a case of `tests/behavior/documents.test.ts` over the one
+  `server/document-head.test.ts` and a case of `tests/behavior/documents.test.ts` over the one
   graph: set, read back, a stale base and an unshipped id refused, cleared.
-- The `bibliography` extension exists (`BO_0291_014`, 2026-09-23): a manifest naming `documents`
-  and `ui.shell` as dependencies, `category: bundled`, no entrypoint until `BO_0291_019` gives it
-  something to draw, and `docs/system/system.md` naming `BI` as its change prefix and carrying the
-  decisions above with the type as `work`. Created by adding its manifest through `kernel commit`
-  as `relations` was (`BO_0288_014`). Its tasks `BO_0291_015`–`BO_0291_023` — the declaration, the
-  write path, the fetch, the file, the Sources category, the style and the citation route, the
-  tools and the skill, the `structure` convention and *cited by* — moved into its `system.md` in
-  the same proposal, renamed from `source` to `work`; the change document `BO_0291` stands in its
-  `docs/changes/` at the status it holds in `calliopa-bootstrap`. What this extension keeps is
-  the citation run, its numbering and the editor's half ([Block Editor View](./block-editor.md#sources-and-citations),
+- The `bibliography` extension holds sources (`BO_0291_014`, `BO_0313`): its tasks and truth are
+  its own `system.md`. What this extension keeps is the citation run, its numbering and the
+  editor's half ([Block Editor View](./block-editor.md#sources-and-citations),
   `BO_0291_024`–`BO_0291_028`).
+- A citation names a source document (`calliopa-bootstrap`'s `BO_0313_030`, landed 2026-10-01):
+  the `cite` run keeps `{work, locator?}`, `work` naming a document carrying `record: source`, so
+  no stored run and no run schema changes; `documentsCiting` and the read's numbering are
+  unchanged. The cite card's *Open source* opens it as `documents:document`. The Documents
+  listing keeps source documents, since they are listed there too (`BO_0313_Q3`); only profiles
+  stay left out, as `listDocuments` already did.
 
 ## Out Of Scope
 
@@ -330,7 +266,6 @@ Under `calliopa-bootstrap`'s `BO_0288`, promoted to ready by the user on 2026-09
 - Reads are bounded by relation type and one hop, so a document read never walks into the rest of the graph.
 - `tests/behavior/documents.test.ts` proves the operations over the one graph against a real CCGW and a real kernel, skipping without `CALLIOPA_CCGW_URL` and `CALLIOPA_KERNEL_URL`: creation counted as one change, a revise landing and answering the next base with the stale base conflicting, an undeclared role refused by Validation with nothing written, inserts, a split, a move, a merge, a retire and a restore holding identity and order with a second restore refused, a proposal staging nothing into truth and answered per member, and a rename and a delete the listing follows. The repository's kernel harness (`internal/kernel/serve/shell_documents_verification_test.go`) runs it over a scratch graph seeded with the shell's vocabulary, so verification never writes into the dogfood graph (`BO_0207_012`). The previous `tests/integration/block-documents.test.ts` proved creation, deterministic ordering, ranges, identity preservation across every operation, atomic split and merge with no run, mark, or link lost, single-parent refusal, retire, restore, stale-base conflicts that write nothing, and reload from real Postgres.
 - Splitting a text block keeps the role on both halves. Naming the continuation something else is an editing decision, so the editor makes it as a separate role change.
-- `tests/behavior/work.test.ts` proves the work vocabulary over the one graph through the kernel harness's widened fixture (`BO_0244_004`, `BO_0244_012`): a kind set and cleared, and one outside the set refused; a claim added, revised with a stale base conflicting, and its drop refused while a relation anchors on it; a relation declared across documents drafting the far block's claim in the same mutation and read back from both documents with both ends, its reason revised and its state set to `retired` and still read; a relation without a reason and one on itself refused; a relation refused onto a retired and onto a discarded block; a split keeping the head's claims and a merge carrying the absorbed block's over; provenance reading *human-authored*; and the work items staged — `kind`, `claim`, `relate` drafting its source claim, `derive` — read back against their blocks with the derivation on the item that revises its block, the relation accepted per member without a confirmation and established with its drafted claim, the kind landing with its derivation, the claim rejected leaving nothing and closing the group, and a proposed `reason` on an established relation accepted.
 - [ ] CA_0007_010 Extend `moveBlock` to a move between containers once a container block type exists: close the old containment and create the new one in the same mutation, and widen the `contains` origin set to that type. Today every parent is a document, so the operation is a reorder and a cross-container move is unreachable.
 - [ ] CA_0007_011 Close the window where two concurrent restores of the same block could each create a containment. The single-parent check reads before the mutation rather than inside it, so the invariant holds against one writer and not against two racing ones. Decide between a database constraint and a check inside the mutation, and prove the refusal with two overlapping writers.
 - `deleteDocument` in `src/server/documents/documents.ts` retires the document node in one `RETIRE` through the bridge and touches nothing else: its established revision is archived and the node leaves current reads. The listing stops answering it, a read of it answers no result, and its blocks, their revisions, its closed containments and its `retired` relations all stay in the graph. It names the revision it is based on, so a rename that landed first is a conflict rather than a silent delete, and a document that is unknown or already deleted is refused rather than answered as success (`CA_0015_003`).
@@ -608,21 +543,23 @@ Numbered*.
   own, `manuscripts`, which `BO_0293_017` created and whose own docs carry its work
   ([Manuscripts](../../../../manuscripts/docs/system/system.md)); the engine is the fixed layer's
   ([Typesetting Service](../../../../../../docs/system/typesetting-service.md) in
-  `calliopa-bootstrap`); the kernel's half — the document tools carrying the front matter and the
-  `abstract` role — is its `ui-kernel.md`, *A Manuscript Out Of The Record*. The front matter and
-  the abstract are this extension's, since they are the document's own facts and stay readable
-  with the manuscript extension off.
-* The extension is `manuscripts`, its change prefix `MA`, its type `manuscript` — the plural id
-  beside the singular type, as `documents` and `document` stand, because a declaration and a
-  manifest share the `node:<id>` namespace. `bundled` and active on a fresh install, needing no
-  credential. Technical decision at transfer, 2026-09-23.
+  `calliopa-bootstrap`); the kernel's half — the document tools carrying the `abstract` role — is
+  its `ui-kernel.md`, *A Manuscript Out Of The Record*. The abstract is this extension's, since it
+  is the document's own block and stays readable with the manuscript extension off; the front
+  matter is the person's *Paper* role (`BO_0312_Q3`).
+* The extension is `manuscripts`, its change prefix `MA`, its kept output a rendition on the
+  document carrying *Format* (`calliopa-bootstrap`'s `BO_0312`, the type `formatRendition`).
+  `bundled` and active on a fresh install, needing no credential. Technical decision at transfer,
+  2026-09-23, revised by the user's decisions of `BO_0312` on 2026-09-30 and of `BO_0332` on
+  2026-10-01.
 * PDF and LaTeX with its `.bib` ship first, from one pipeline; `.docx` is a second cut. User
   decision, 2026-09-23.
 * A generic article and IEEE ship as venues; adding one is adding a template, never code. User
   decision, 2026-09-23.
-* Front matter is the record's: `authors`, `affiliations`, `keywords` and `venue` are properties
-  of the `document` node, drawn above the first block; the abstract is a `text` block of the role
-  `abstract` in the reading order, proposable like any block. User decision, 2026-09-23.
+* Front matter is a role the person owns: the migration creates *Paper* with *Authors*,
+  *Affiliations* and *Keywords* and moves each document's values there; the abstract is a `text`
+  block of the role `abstract` in the reading order, proposable like any block. User decisions,
+  2026-09-23 and 2026-09-30 (`calliopa-bootstrap`'s `BO_0312_Q3`).
 * Figures and tables are numbered, captioned and referable in the document before a manuscript
   projects them (`calliopa-bootstrap`'s `BO_0295`, idea); the manuscript never numbers what the
   record does not. User decision, 2026-09-23.
@@ -640,7 +577,7 @@ Numbered*.
   references hoisted top-level with their filenames (`manuscript.pdf`, `manuscript.tex`,
   `references.bib`), `made`, `by` the principal or the process, `outcome` and `log` in the
   service's words, and `omitted` — what the projection left out and why, in words. A person's
-  press writes it as truth through the depth, scoped by `withBranch`; a run's tool stages it in
+  press writes it as truth, scoped by `withBranch`; a run's tool stages it in
   the run's group. Technical decision at transfer, 2026-09-23.
 - The projection walks the accepted reading order at the pin, the set the citation numbering
   resolves over: a `text` role becomes a paragraph, a section at three depths or a block quote,
@@ -655,9 +592,19 @@ Numbered*.
   discarded or still proposed — nothing, the left-out ones said by name in `omitted`. Technical
   decision at transfer, 2026-09-23.
 
-- The front matter is declared and written (`BO_0293_012`, landed 2026-09-23). `document` permits `authors`, `affiliations`, `keywords` and `venue`, a member revision staged through `kernel commit --members`. `lib/front-matter.ts`, `readFrontMatter`, is the one reader, used by the validator, the command parser and the read. An author is `{name, affiliations?, email?, corresponding?}` with the affiliations as indexes into the document's list; the lists are words; the venue is a word. It refuses a nameless author, a foreign key, an index outside the list, and a venue that is not a word. `validateDocument` checks it. `setFrontMatter` (`documents.ts`, the commands route) sets the four by property against the document's base, clearing what it leaves out, a stale base answering `conflict`. The document read answers them as `frontMatter` when the node carries any. Proven in `lib/front-matter.test.ts`, `server/front-matter.test.ts`, and a case of `tests/behavior/documents.test.ts` over the one graph: set, read back, a stale base refused, set again clearing what was left out.
-- `text` permits the role `abstract` (`BO_0293_013`, landed 2026-09-23): the declaration's permitted roles widened as a member revision, `TEXT_ROLES` in `src/lib/runs.ts` with it, so the validator, the command parser and the kernel's run schema — which enumerates the declaration — all take it. The `structure` convention of the `ui.shell.documents` skill says a paper's abstract is one text block of that role, and that the front matter is the document's own, set by a person, proposed by no run. Proven beside the front matter's cases, and by the behaviour case writing an abstract and reading its role back.
+- Front matter is no longer the document's (`calliopa-bootstrap`'s `BO_0312_030`, landed
+  2026-10-01): `manuscripts`' formats migration moves it into the person's *Paper* role and clears
+  the properties ([Manuscripts](../../../../manuscripts/docs/system/system.md#formats)). The editor
+  draws no authors and no fields, the read answers none, the validator reads none, and no command
+  writes them. `authors`, `affiliations`,
+  `keywords` and `venue` stay declared on `document`, read by the migration alone, until every
+  install has run it (`calliopa-bootstrap`'s `BO_0312_062`), as `documentRole` stays for
+  `BO_0309`. Proven in `server/document-head.test.ts` — a node still carrying them reads and
+  validates without them, and the command is refused — and `views/abstract.test.ts`, the head
+  drawing no authors and no fields.
+- `text` permits the role `abstract` (`BO_0293_013`, landed 2026-09-23): the declaration's permitted roles widened as a member revision, `TEXT_ROLES` in `src/lib/runs.ts` with it, so the validator, the command parser and the kernel's run schema — which enumerates the declaration — all take it. The `structure` convention of the `ui.shell.documents` skill says a paper's abstract is one text block of that role. Proven in `server/document-head.test.ts`, and by the behaviour case writing an abstract and reading its role back.
 - The extension exists (`BO_0293_017`, landed 2026-09-23): `src/extensions/manuscripts/` with its manifest (`category: bundled`, version `0.1.0`, depending on `documents`, `bibliography` and `ui.shell`), both entrypoint halves, its `docs/system/system.md` naming the prefix `MA`, and this change's document carried into its `docs/changes/`. The extension's tasks moved there with it: the type, the projection, the venues, the make and the keeping, the surface, the tool and the walk ([Manuscripts](../../../../manuscripts/docs/system/system.md)).
+
 
 ## Figures And Tables Are Numbered
 
@@ -710,8 +657,7 @@ Numbered*.
 
 ## A Fixated Block Says Its Words Moved
 
-- [ ] DO_0017_004 A block reports that its words changed after it was fixated, as an accepted root's
-  blocks report that they moved since the stamp (The Root's Phase, `BO_0274_006`). A fixated block is
+- [ ] DO_0017_004 A block reports that its words changed after it was fixated. A fixated block is
   what a run is told as standing context, so a fixated block whose words are no longer the ones the
   reader marked is worth saying out loud — and the loss `DO_0017` came from was invisible for exactly
   as long as nobody looked at the block. It is a hint and nothing else: no lock, no refusal, and no
@@ -740,121 +686,103 @@ Numbered*.
 
 ## Profiles
 
-Under `calliopa-bootstrap`'s `BO_0298` (`docs/changes/BO_0298_FEAT_profiles.md`, promoted to draft
-by the user on 2026-09-25 and transferred here the same day): a person keeps reusable instruction
-documents — profiles — on the instance, attaches one to a document from a selector in the bar, and
-every prompt sent from that document is guided by the profile's accepted content until the
-selection changes. A profile is a document, authored and revised in this editor through the
-proposal loop, and a person can ask an agent to draft or improve one. The kernel's half — the run
-start reading the profile and the record carrying it — is `calliopa-bootstrap`'s
-`docs/system/ui-kernel.md`, *Profiles* (`BO_0298_001`–`BO_0298_006`); the release lines are its
-`distribution.md` (`BO_0298_007`–`BO_0298_008`). The extension is `profiles`, `bundled`, which
-`BO_0298_013` creates; until then its work is listed here, and that task moves `BO_0298_014`–`_018`
-into its own `docs/system/system.md` in the same proposal. The selector's place in the bar is
-`ui.shell`'s `BO_0298_030` ([Contribution Contract](../../../../../../docs/system/workspace/contribution-contract.md#a-control-in-the-view-bar)),
-the bar's drawing of it `BO_0298_020` ([Block Editor View](./block-editor.md#profiles)), and the
-run detail's line `ui.shell`'s `BO_0298_031` ([Processes](../../../../../../docs/system/workspace/processes.md#the-run-used-a-profile)).
+- [x] BO_0320_013 Widen the `document` declaration with optional `profileType` (`instructions` or `image`) and `imageBackend` (`higgsfield`, `openart` or `codex`). Export profile metadata reads and writes for `profiles`; preserve `imageBackend` when changing `profileType` away from `image`. The kernel reads the values at the run's pin for `media.generate` (`calliopa-bootstrap`'s `BO_0320_005`). The profile setup surface and run behavior are `profiles`' and `media`'s graph tasks.
+- `document` permits `video` among `profileType`'s values beside `instructions` and `image`
+  (`calliopa-bootstrap`'s `BO_0312`, 2026-10-01, a member revision): a video profile, whose
+  `imageBackend` names its video generator. `readProfileGeneration` answers it, and
+  `setProfileGeneration` refuses Codex for a video profile and keeps a stored backend when the type
+  changes (`BO_0320_013`).
 
-* A profile has the structure of a document; its authored content is the instructions supplied to
-  the agent when it is selected. The extension is bundled and no starter profile ships. User
-  decisions, 2026-09-24 (`BO_0298_Q3`).
-* The selection stays attached to the document and applies to every later prompt sent from it
-  until the person changes it; **No profile** is a valid choice and clears it. User decisions,
-  2026-09-24 (`BO_0298_Q1`).
+Under `calliopa-bootstrap`'s `BO_0298` (`docs/changes/BO_0298_FEAT_profiles.md`) and `BO_0311`
+(`docs/changes/completed/BO_0311_FEAT_profile-in-the-chip-with-tools.md`): a person keeps reusable
+instruction documents — profiles — on the instance and chooses one for each command from the chip
+of the block it is written in, and the command's run is guided by the profile's accepted content.
+A profile is a document, authored and revised in this editor through the proposal loop, and a
+person can ask an agent to draft or improve one. The extension is `profiles`, whose decisions and
+work are its own ([Profiles](../../../../profiles/docs/system/system.md)); the kernel's half — the
+run start reading the command's profile, its tools and the record — is `calliopa-bootstrap`'s
+`docs/system/ui-kernel.md`, *Profiles* and *The Profile In The Command, With Tools*; the run
+detail's line is `ui.shell`'s ([Processes](../../../../../../docs/system/workspace/processes.md#the-run-used-a-profile)).
+
 * Every run uses the profile's latest accepted content at run start; a run underway keeps what it
   received; a proposed edit awaiting acceptance is not an instruction. User decision, 2026-09-24
   (`BO_0298_Q2`).
-* Anyone who can edit documents creates and maintains profiles, through the same proposal and
-  acceptance loop; profile documents list only in the Profiles category, told apart by a `record`
-  value, and the Documents category leaves them out. User decisions, 2026-09-25 (`BO_0298_Q4`).
-* A profile is a slot beside the document's `intention`, not an intention and not a replacement
-  for skill selection; a document may carry both. The prompt controls the request, the profile
-  guides it, the intention's skills keep their method rules. User decisions, 2026-09-25
-  (`BO_0298_Q5`, `BO_0298_Q6`).
-* Attaching a profile is the person's direct act, established at once with no proposal, and the
-  attachment is the document's — one per document, seen and changeable by everyone with access.
-  User decisions, 2026-09-25 (`BO_0298_Q7`, `BO_0298_Q8`).
-* A profile document shows the selector too, defaulting to **No profile**; with none selected a
-  prompt in it addresses the profile's own instructions. User decision, 2026-09-25 (`BO_0298_Q9`).
-- The `record` value is `profile`, written by `profiles` and read by its category — knowledge,
-  never a fence, the posture every declaration by instance holds, as `calliopa-refine`'s
-  `investigation` is; a document carrying it stays a document when the extension is switched off.
-- The write of the selection and the creation of a profile are `profiles`' routes over this
-  extension's exported server functions, the way `calliopa-refine`'s press imports
-  `openFocusedWork`: the property is declared here, the act is the selection's owner's.
-- Its change documents carry the prefix `PF`, named in its `system.md` when it exists.
-
-- The `document` declaration carries `profile` (`BO_0298_010`, landed 2026-09-25): optional, the id of a document carrying `record: profile`, unconstrained as `intention` and `record` are, staged through `kernel commit --members` as a widening — no established content carried it, so no `ext.migration`. The kernel reads it by this declaration (`calliopa-bootstrap`'s `BO_0298_001`), and `read_document` answers `record` and `profile` with the document.
-- The Documents category leaves profile documents out (`BO_0298_011`, landed 2026-09-25): `listDocuments` drops a `document` carrying `record: profile`, established or started by a run alike, and lists everything else as it did.
-- The writes and reads the selection is made of are this extension's, exported for `profiles` (`BO_0298_012`, landed 2026-09-25; `server/documents.ts`, `lib/profile.ts`): `createDocument` takes an optional `record` beside the title and the first block, so a profile is created as any document is with its record in the same statement; `listProfiles` answers the established documents carrying the record by title; `readProfileSelection` answers a document's `profile` resolved — the profile's id and title, none, or `gone` naming an id the graph no longer holds as a profile; `setProfile` writes a profile's id or `null` as one `SET` as the signed-in person, outside any branch, after refusing in words an id that is not an established document carrying the record. The vocabulary — `PROFILE_RECORD`, `UNNAMED_PROFILE`, the two shapes — is `lib/profile.ts`, client-safe.
-- The extension came into being (`BO_0298_013`, landed 2026-09-25): `src/extensions/profiles/`, `bundled`, depending on `documents` and `ui.shell`, its work and its truth in its own [System](../../../../profiles/docs/system/system.md), and `BO_0298` carried into its `docs/changes/`. Its release lines are `calliopa-bootstrap`'s `BO_0298_007`–`_008`.
+* A profile is told apart by a `record` value, and the Documents category leaves profiles out.
+  User decision, 2026-09-25 (`BO_0298_Q4`).
+* A profile is neither an intention nor a replacement for skill selection; a command may carry
+  both. The prompt controls the request, the profile guides it, the intention's skills keep their
+  method rules. User decisions, 2026-09-25 (`BO_0298_Q5`, `BO_0298_Q6`).
+* The chosen profile belongs to the command, and no document names one (`BO_0308_Q7`, reversing
+  `BO_0298_Q1` and `BO_0298_Q8`); a document's attached profile was dropped on upgrade
+  (`BO_0311_Q1`). User decisions, 2026-09-30.
+- The `record` value is `profile`, written by `profiles` and read by it — knowledge, never a
+  fence, the posture every declaration by instance holds; a document carrying it stays a document
+  when the extension is switched off.
+- The Documents category leaves profile documents out (`BO_0298_011`): `listDocuments` drops a
+  `document` carrying `record: profile`, established or started by a run alike, and lists
+  everything else.
+- What `profiles` is made of here (`BO_0298_012`, `BO_0311_020`; `server/documents.ts`,
+  `lib/profile.ts`): `createDocument` takes an optional `record` beside the title and the first
+  block, so a profile is created as any document is with its record in the same statement;
+  `listProfiles` answers the established documents carrying the record by title;
+  `profileSummary` answers whether a document is a profile, with its id and title; and
+  `clearProfileSlotsStatement` answers one script clearing the `profile` slot every document
+  still carries from before `BO_0311`, or none, which `profiles`' upgrade migration runs. The
+  vocabulary — `PROFILE_RECORD`, `UNNAMED_PROFILE`, `ProfileSummary` — is `lib/profile.ts`,
+  client-safe.
+- The `profile` slot left the `document` declaration (`BO_0311_020`): the property and its
+  description are gone from the member, staged through `kernel commit --members` — dropping an
+  optional property is no breaking change (`calliopa-bootstrap`'s `validation.md`) — and the
+  values documents still carried are cleared by `profiles`' executable migration
+  `migration-bo-0311-profile-in-the-chip` on every instance as it takes the release (a `SET` to
+  null removes the key). Proven by `tests/behavior/profiles.test.ts` over the one graph: a profile listed among
+  the profiles and not the documents, a document told apart as a profile or not, and a slot kept
+  from before cleared by one script and found nowhere after.
 
 ## Document And Block Roles
 
-Under `calliopa-bootstrap`'s `BO_0299` (`docs/changes/BO_0299_FEAT_doc-block-roles.md`, promoted
-to draft by the user on 2026-09-25 and transferred here the same day, its eight questions answered
-the same day): a person gives a document a role — a *Story* — and, under it, gives individual
-blocks the roles that document role offers — *Hook*, *Problem*, *Transformation*, *Closing*. Which
-roles exist and which block roles a document role offers is configured in the app, as profiles are
-(Profiles, above). The extension offers an interface through which other extensions read a
-document's role and its blocks' roles; `profiles` is the first reader, so a profile can say how a
-hook is written and how the closing relates to it. The extension is `doc-block-roles`, `bundled`,
-created under `BO_0299_011` on 2026-09-25; its work and its truth are its own
+A person structures a document with roles, which the `doc-block-roles` extension holds: a block
+takes roles — the document, the root block of its reading order, takes them the same way — a role
+offers roles to the blocks under it, and a role carries fields whose values the block holds
+(`calliopa-bootstrap`'s `BO_0299`, 2026-09-25, and `BO_0309`, with `BO_0318` folded in,
+2026-09-30). The extension is `bundled`; its work and its truth are its own
 [system document](../../../../doc-block-roles/docs/system/system.md), and this section keeps the
-decisions and the pointer. Its release lines are `calliopa-bootstrap`'s `distribution.md`
-(`BO_0299_001`–`BO_0299_002`); nothing else in the fixed layer moves — the kernel already lists an
-active extension's `ext.tool` members and answers them through the callback (`ui-kernel.md`,
-`BO_0264_007`).
+decisions that touch this extension's documents and editor, and the places it draws.
 
-* A person assigns a role to a document from the roles the instance holds; a document role offers
-  a set of block roles, and once a document carries a role the person can give individual blocks
-  one of them. Document roles and their block roles are configured within the app, never in an
-  extension's source. The extension offers an interface through which other extensions read a
-  document's role and its blocks' roles. The request, 2026-09-25.
-* The extension is bundled with Calliopa and arrives switched on. User decision, 2026-09-25
-  (`BO_0299_Q1`).
-* Anyone who can edit documents creates and revises document roles and their block roles, written
-  as truth at once with no proposal, as for profiles (`BO_0298_Q4`). User decision, 2026-09-25
-  (`BO_0299_Q2`).
-* When a document's role changes, block roles assigned under the previous role stay stored and are
-  drawn as not offered by the current role; the person clears or reassigns them, and switching
-  back loses nothing. User decision, 2026-09-25 (`BO_0299_Q3`).
-* A role is retired, never deleted: removing a block role from a document role, or a document role
-  documents carry, stops the choices offering it, while existing assignments stay and are drawn as
-  retired. User decision, 2026-09-25 (`BO_0299_Q4`).
-* A profile that carries a document role is offered on every document, the profiles matching the
-  document's role grouped first in the dropdown; the match is a hint and nothing is hidden. User
-  decision, 2026-09-25 (`BO_0299_Q5`); `profiles`' half is `BO_0299_020`.
-* A run reads roles and never writes them: the tool answers reads alone, and assigning is the
-  person's act. A proposal path is a later change. User decision, 2026-09-25 (`BO_0299_Q6`).
-* A block's role is visible while reading, as a small label at the block, and in the bar while the
-  block is active. User decision, 2026-09-25 (`BO_0299_Q7`).
-* Every block in the reading order can take a block role — text, picture, table, code, equation
-  and the rest — so a picture can be the hook. User decision, 2026-09-25 (`BO_0299_Q8`).
+* Every block in the reading order can take a role that allows blocks — text, picture, table, code,
+  equation and the rest — so a picture can be the hook, and the document takes roles of its own.
+  User decision, 2026-09-25 (`BO_0299_Q8`). A role says whether blocks may take it, and *Keyword*,
+  *Profile*, *Format* and *Source* are taken by documents alone. User decision, 2026-10-01
+  (`calliopa-bootstrap`'s `BO_0332`; `doc-block-roles`' [Roles](../../../../doc-block-roles/docs/system/system.md#document-roles-and-block-roles)).
+* Roles are created and revised by anyone who can edit documents, and taken or given a value by the
+  person as truth at once, in every branch alike, no proposal raised; a run proposes roles and
+  values, which stand once the person accepts them (`BO_0299_Q2`, `BO_0308_Q4`).
+* A block's roles are visible while reading, as small pills at the block; they are taken, cleared
+  and given values from the roles chip beside the command chip of the block being edited
+  (`RO_0002`), and the document's from the roles line of its header, whose control is always
+  drawn (`BO_0299_Q7`, `BO_0318_Q1`, `BO_0318_Q6`, `DO_0030_Q2`).
 - The word *role* is taken: `text.role` is the typographic role — `paragraph`, `h1`, `h2`, `h3`,
-  `quote`, `abstract` — read by the kernel's document tools as `role`. The new concept never
-  shares that name: the surfaces say *document role* and *block role*, the vocabulary
-  `documentRole` and `blockRole`, and the typographic role keeps `role`.
-- The roles are the extension's own nodes and an assignment is a relation, so this extension's
-  declarations do not change: `documentRole`, a root node with `id`, `name`, an optional
-  `description` and an optional `retired`; `blockRole`, a node with `id`, `name`, an optional
-  `description`, an `order` and an optional `retired`, joined to the document role that offers it
-  by `offers`; `hasDocumentRole` from a `document` to a `documentRole`, at most one active per
-  document; `hasBlockRole` from a block to a `blockRole`, at most one active per block. Found at
-  transfer: an `ext.relationtype` declaration carries `id`, `name` and `semantics` and fences
-  neither end, and every block kind is this extension's declaration, so `BO_0299_Q8` costs one
-  dependency, on `documents`, and the *one active per subject* rule is the roles extension's,
-  checked by a read before the write as single containment is. A relation to a role node rather
-  than a property carrying its name means a rename follows everywhere at once.
-- Assigning a role, creating one and revising one are the person's direct act, established at
-  once and shared, as attaching a profile is (`BO_0298_Q7`, `BO_0298_Q8`) and as the root's
-  `phase` is: written as the signed-in person's own truth, no proposal raised, nothing accepted,
-  in every branch alike.
-- Its change documents carry the prefix `RO`, named in its `system.md`.
-- The `ui.shell.documents` skill says nothing of roles: since `calliopa-bootstrap`'s `BO_0299_003`
-  (2026-09-25) a run reads the skills of every active extension that offers it a tool, so the roles
-  extension's own skill reaches every run and the convention this skill carried for a few hours
-  left it at that change's close.
+  `quote`, `abstract` — read by the kernel's document tools as `role`. The roles extension's type
+  keeps the name `blockRole`, and the typographic role keeps `role`.
+- The roles are the roles extension's own nodes and an assignment is a relation from the block or
+  the `document` node, so this extension's declarations do not change for them: an
+  `ext.relationtype` fences neither end, and every block kind is this extension's declaration.
+- The pills are a `headline` block place and the roles chip an `underCommand` block place, drawn
+  in the command chip's row (`RO_0002_002`); nothing of roles is in the document bar or the command
+  chip.
+- The document's place under its title (`BO_0309_031`, landed 2026-09-30, made the header's rows by
+  `DO_0030_002`; `views/block-editor.tsx`, `block-editor.css`): inside the document's header,
+  directly after the title's `h2`, the view draws `.document-title-place`
+  (`data-document-title-place`) holding `.document-title-place__chip`, where each `title` document
+  place a decoration provider contributes is a row of its own (`DocumentDecorations at="title"
+  form="full"`, `ui.shell`'s `BO_0309_030` and `DO_0030_001`). The rows are in the flow and drawn
+  while reading and editing alike; an empty one takes no room. Their presses are their own
+  (`stoppropagation:click`), and a control in them that keeps the caret leaves the title's edit
+  open. The roles extension draws the roles line and the values line there, the keywords extension
+  the mentions line ([Block Editor View](./block-editor.md#the-document-header)).
+- The `ui.shell.documents` skill says nothing of roles: a run reads the skills of every active
+  extension that offers it a tool (`calliopa-bootstrap`'s `BO_0299_003`), so the roles extension's
+  own skill reaches every run.
 
 ## Keywords
 
@@ -921,15 +849,32 @@ an active extension's `ext.tool` members and answers them through the callback (
   guess is not a connection, and the person adds the alias that decides it. A keyword's own
   blocks saying its own names are not connected. Words under the `code` mark, inside an inline
   equation, a citation or any other atom are never matched.
-- The name `keywords` and the front matter's `keywords` are two things: the property is the
-  author's keyword list for the venue (`BO_0293_012`), and this change leaves it alone.
+- The name `keywords` and *Paper*'s *Keywords* are two things: the field is the author's keyword
+  list for the venue (`calliopa-bootstrap`'s `BO_0312_Q3`), and keyword documents leave it alone.
 - Where the mentions are drawn: over their words in the editor through the inline annotations
   the editor draws for any extension ([Block Editor](./block-editor.md), *Inline Annotations*,
   `BO_0301_015`), in a treatment of the keywords extension's own, distinct from a link the person
-  set, with the definition on pointer hover and the keyword opened on a press; *Mentioned in* at
-  the foot of a keyword document through the `end` document place the reference list uses
-  (`BO_0291_031`), not the inspector, whose facts are the view's own typed contribution. Found at
-  transfer, 2026-09-25.
+  set, with the definition on pointer hover and the keyword opened on a press; how many blocks
+  mention a keyword in its document's header, through the `title` document place (`DO_0030_006`),
+  not the inspector, whose facts are the view's own typed contribution.
+
+- Under `calliopa-bootstrap`'s `BO_0310` (transferred 2026-09-30): a person names a keyword on
+  purpose by typing `@`. Its decisions and the keyword side are `keywords`'
+  ([Keyword Is A Built-In Role](../../../../keywords/docs/system/system.md#keyword-is-a-built-in-role)),
+  and the run schema is the kernel's (`ui-kernel.md` `BO_0310_001`).
+- The run primitive (`BO_0310_010`, landed 2026-09-30; `src/lib/runs.ts`, root-mapped `ui.shell`):
+  `keyword` on the `Run` shape, the identity of the keyword document, on a run with words. It is
+  words, not an atom: each character carries it as it carries a link, so marks, splits and slices
+  keep it, `normalizeRuns` joins a run only with a neighbour naming the same keyword, and
+  `sameRuns` tells two keywords apart. Words typed inside it belong to it, words typed at its edge
+  to the sentence (`replaceRange`), and a link set over its words replaces it, since a run names a
+  keyword or carries a link. `readRuns` refuses one naming nothing, one with no words, one beside
+  a link, and one that is also a reference, mathematics or a citation, each in words. The editing
+  surface paints its words inside `span[data-keyword]` and `runsFrom` reads them back naming it
+  (`views/editor-dom.ts`). Reading, it is drawn as plain words, so with `keywords` switched off
+  nothing marks it; with `keywords` on, its mention is drawn over it. The kernel's document tools
+  read and write it (`calliopa-bootstrap`'s `BO_0310_001`). Proven in `src/lib/runs.test.ts` and
+  `views/named-keyword.test.ts`.
 
 ## Code Listings Are Numbered
 
@@ -960,3 +905,24 @@ an active extension's `ext.tool` members and answers them through the callback (
 - `ui.shell.documents`' `structure` convention names a code block's caption and number the way it names a picture's — counted apart, answered by the read as *Listing N* — revised as a member in the same proposal as the code (`BO_0303_009`, 2026-09-25), so a run that reads a listing knows what it is looking at and one that proposes a code block may caption and number it (`calliopa-bootstrap`'s `BO_0303_003`).
 - Verified beside the code (`BO_0303_010`, 2026-09-25): `assemble.test.ts` numbers two listings in reading order with an unnumbered code block between them consuming no number and a picture beside them still figure 1, labels a reference to the second *Listing 2* and leaves one to the unnumbered block without, and answers `listingNumbers`, the label and the listing's caption with the assembled document; `code-content.test.ts` takes a caption and the ask and refuses the three misfits.
 - This change's document stands as a member of this extension, `docs/changes/BO_0303_FEAT_code-listings-numbered.md`, at the status it holds in `calliopa-bootstrap`, and takes every status it takes there afterwards (`AGENTS.md`, The Docs In The Graph).
+
+## Moving A Block Between Documents
+
+* A block dropped into another document is moved there, not copied, and keeps its identity; a block that has focused work keeps its `focuses` edge, so the work travels with it. User decision, 2026-09-29 (`CA_0072`).
+- A move between documents (`CA_0072_006`): `moveIn` on the target document's command route — `{ blockId, fromDocumentId, placement }`, the placement `{between: [low, high]}` as a drop within a document is, or the end — runs `moveBlockIn` in `server/documents.ts`. In one write it sets the block's key minted in the target, closes its containment where it stands and relates the target document to it, leaving its identity, its content and any `focuses` edge untouched. The close names its origin as `cFrom` — the source document, or the callout holding a child — because the kernel's write gate reads a close from the relation's origin and refuses one it cannot see (`write_close_unverifiable`). Nothing is asked of the block's revision: a drag moves the block the reader sees, as a move within one document does. It refuses, in words and moving nothing, a move within one document (`sameDocument`), a block the source does not hold, which is how a retired block is refused, and a target that is the block's own focused work or lies below it along `focuses` (`insideItsOwnWork`), walked to `FOCUSED_WORK_DEPTH`. Proven in `tests/behavior/move-in.test.ts` under the kernel harness: a block moved between two blocks and back to the end with its identity, gone from where it was; a block with focused work moved with the edge intact, and a move into that work and one level below refused; a move within one document and a block its source does not hold refused, both documents as they were.
+
+## Swipe Removes Or Keeps
+
+Under `calliopa-bootstrap`'s `BO_0315` (2026-09-30): the discarded standing goes away, and a block the reader
+discarded becomes a retired block ([Block Editor View](./block-editor.md#swipe-removes-or-keeps)).
+
+* Every `text` block stored with `disposition` `discarded` or `resolved` is retired, keeping its place, and can be
+  restored like any retired block ([Retirement And Restore](#retirement-and-restore)). User decision, 2026-09-30.
+- [ ] BO_0315_008 The `text` declaration's `disposition` permits `fixate` and `prompt`, revised through
+  `kernel commit --members` as `BO_0272_011` revised it. Narrowing a permitted set is a breaking class, so the group
+  carries an `ext.migration` Block naming `text` in `migrates`, and a content operation that retires every block
+  stored as `discarded` or `resolved` and clears its `disposition`. The operation runs on this instance and on every
+  instance that takes the release (`calliopa-bootstrap`'s `extension-model.md`, `validation.md`). This instance is
+  counted over CCGW before and after. `setBlockDisposition` and the command API's `setDisposition` take fixate and
+  keep. The kernel's fixture `serve/testdata/documents-vocabulary.json` mirrors the declaration. The line that names
+  the three values under [Implementation](#implementation) is revised.

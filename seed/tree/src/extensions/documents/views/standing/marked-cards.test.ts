@@ -7,7 +7,8 @@ import { documentsApi, mountEditor, type SentCommand } from "../testing/editor-h
 
 /**
  * A marked block is a card (`DO_0008_005`): a fixated block, a revealed
- * discarded block, a revealed retired block and a revealed prompt each carry
+ * removed row — a retired block or a rejected proposal — and a revealed
+ * prompt each carry
  * their label on the row itself — the mark's glyph and its word — and nothing
  * stands to the left of a block any more. A kept block carries no label at
  * all, and a proposal keeps its own chip on its bottom border, so the
@@ -29,7 +30,7 @@ const text = (blockId: string, order: string, words: string, standing: Standing 
 });
 
 // Drawn: the kept A (a), the retired R (ab), the proposed N (b), the fixated
-// F (c), the prompt P (cb) and the discarded D (d).
+// F (c), the prompt P (cb) and the rejected insert X (d).
 const draft: DocumentView = {
   documentId: "doc-1",
   revisionId: "rev-doc",
@@ -38,11 +39,14 @@ const draft: DocumentView = {
     text("blk-a", "a", "Opening."),
     text("blk-f", "c", "The storm arrives first.", "fixate"),
     text("blk-p", "cb", "Write an intro.", "prompt"),
-    text("blk-d", "d", "Set aside.", "discarded"),
   ],
 };
 const retired = [text("blk-r", "ab", "Gone.")];
 const newBlock = "node:run-claude|insert|node:blk-new";
+const turnedDown = "node:run-old|insert|node:blk-x";
+const rejected = [
+  { itemId: turnedDown, groupId: "node:run-old", kind: "insert", blockId: "blk-x", block: { ...text("blk-x", "d", "Turned down."), containmentId: "" } },
+];
 
 const proposals: DocumentProposals = {
   documentId: "doc-1",
@@ -65,17 +69,27 @@ afterEach(() => {
 
 async function mount() {
   const sent: SentCommand[] = [];
-  vi.stubGlobal("fetch", documentsApi(draft, sent, { proposals, retired }));
+  vi.stubGlobal("fetch", documentsApi(draft, sent, { proposals, retired, rejected }));
   const view = await mountEditor(draft);
-  for (const toggle of ["proposed-changes", "retired-blocks", "discarded-blocks", "prompts"]) {
+  for (const toggle of ["proposed-changes", "removed", "prompts"]) {
     await view.userEvent(`[data-bar-action="${toggle}"]`, "click");
   }
   await view.settle(() => view.root.querySelector('[data-retired-id="blk-r"]') !== null);
   await view.settle(() => view.root.querySelector('[data-block-id="blk-p"]') !== null);
+  await view.settle(() => view.root.querySelector(`[data-rejected-id="${turnedDown}"]`) !== null);
   /** The label a row carries, and the word on it. */
   const label = (row: string) => view.root.querySelector(`${row} [data-card-label]`);
   const word = (row: string) => label(row)?.querySelector(".block-card-label__word")?.textContent ?? null;
-  return { ...view, label, word };
+  return { ...view, sent, label, word };
+}
+
+/** Waits for what a read after an answer draws, past the harness's settle. */
+async function until(view: { settle: () => Promise<unknown> }, done: () => boolean): Promise<void> {
+  for (let tick = 0; tick < 100 && !done(); tick++) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await view.settle();
+  }
+  expect(done()).toBe(true);
 }
 
 describe("a marked block is a card", () => {
@@ -83,10 +97,12 @@ describe("a marked block is a card", () => {
     const view = await mount();
     expect(view.label('[data-block-id="blk-f"]')?.getAttribute("data-card-label")).toBe("fixate");
     expect(view.word('[data-block-id="blk-f"]')).toBe("fixated");
-    expect(view.label('[data-discarded-id="blk-d"]')?.getAttribute("data-card-label")).toBe("discarded");
-    expect(view.word('[data-discarded-id="blk-d"]')).toBe("discarded");
-    expect(view.label('[data-retired-id="blk-r"]')?.getAttribute("data-card-label")).toBe("retired");
-    expect(view.word('[data-retired-id="blk-r"]')).toBe("retired");
+    // A retired block and a rejected proposal are one removed state.
+    // BO_0315_015
+    expect(view.label('[data-retired-id="blk-r"]')?.getAttribute("data-card-label")).toBe("removed");
+    expect(view.word('[data-retired-id="blk-r"]')).toBe("removed");
+    expect(view.label(`[data-rejected-id="${turnedDown}"]`)?.getAttribute("data-card-label")).toBe("removed");
+    expect(view.word(`[data-rejected-id="${turnedDown}"]`)).toBe("removed");
     expect(view.label('[data-block-id="blk-p"]')?.getAttribute("data-card-label")).toBe("prompt");
     expect(view.word('[data-block-id="blk-p"]')).toBe("prompt");
     // A mark means someone acted, so where nobody did there is nothing.
@@ -99,34 +115,33 @@ describe("a marked block is a card", () => {
     expect(view.root.querySelector(".block-standing")).toBeFalsy();
     expect(view.root.querySelector(".block-standing__word")).toBeFalsy();
     expect(view.root.querySelector(".retired-row__mark")).toBeFalsy();
-    expect(view.root.querySelector(".discarded-row__mark")).toBeFalsy();
-    // The two revealed rows keep the one control each offers.
-    expect(view.root.querySelector('[data-discarded-reopen="blk-d"]')).toBeTruthy();
-    expect(view.root.querySelector('[data-retired-id="blk-r"] button')).toBeTruthy();
+    // Nothing of the discarded standing is drawn. BO_0315_009
+    expect(view.root.querySelector(".discarded-row, [data-discarded-id]")).toBeFalsy();
+    expect(view.root.querySelector('[data-bar-action="discarded-blocks"]')).toBeFalsy();
     await view.idle();
   });
 
-  it("Given a revealed discarded row turned to, Then it carries the standing toolbar with discarded pressed, and a retired row carries none", async () => {
+  it("Given a removed row turned to, Then its bar holds Restore and no standing; a retired block's moves, a rejected proposal's reopens it", async () => {
     const view = await mount();
-    const toolbarOn = (row: string) =>
-      (view.root.querySelector(`${row} [data-standing-toolbar]`) as HTMLElement | null) ?? null;
-    expect(toolbarOn('[data-discarded-id="blk-d"]')).toBeNull();
-    await view.userEvent('[data-discarded-id="blk-d"] .discarded-row__text', "focusin");
-    await view.settle();
-    const buttons = Array.from(
-      toolbarOn('[data-discarded-id="blk-d"]')?.querySelectorAll("button") ?? [],
-    );
-    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
-      "Discard",
-      "Keep",
-      "Fixate",
-    ]);
-    expect(
-      buttons.find((button) => button.getAttribute("data-standing-option") === "discarded")
-        ?.getAttribute("aria-pressed"),
-    ).toBe("true");
-    // A retired row is out of the document's flow and is no subject.
-    expect(toolbarOn('[data-retired-id="blk-r"]')).toBeNull();
+    const barOn = (row: string) => (view.root.querySelector(`${row} [data-block-bar]`) as HTMLElement | null) ?? null;
+    expect(barOn('[data-retired-id="blk-r"]')).toBeNull();
+    await view.userEvent('[data-retired-id="blk-r"] .retired-row__text', "focusin");
+    await view.settle(() => barOn('[data-retired-id="blk-r"]') !== null);
+    expect(Array.from(barOn('[data-retired-id="blk-r"]')?.querySelectorAll("button") ?? []).map((button) => button.textContent?.trim())).toEqual(["↑", "↓", "Restore"]);
+    expect(barOn('[data-retired-id="blk-r"]')?.querySelector("[data-standing-option]")).toBeFalsy();
+
+    const row = `[data-rejected-id="${turnedDown}"]`;
+    await view.userEvent(`${row} .retired-row__text`, "focusin");
+    await view.settle(() => barOn(row) !== null);
+    // A rejected proposal is reopened, never moved. BO_0315_015
+    expect(Array.from(barOn(row)?.querySelectorAll("button") ?? []).map((button) => button.textContent?.trim())).toEqual(["Restore"]);
+    await view.userEvent(`${row} [data-block-restore]`, "click");
+    await view.settle(() => view.sent.some((command) => command.body["command"] === "reopen"));
+    expect(view.sent.find((command) => command.body["command"] === "reopen")?.body).toMatchObject({ itemId: turnedDown });
+    // It stands again as an open proposal, and no longer among the removed.
+    // This DOM answers undefined, not null, when nothing matches (BO_0224).
+    await until(view, () => view.root.querySelector(row) == null);
+    expect(view.root.querySelector('[data-proposal-id="node:chg-reopened|insert|node:blk-x"]')).toBeTruthy();
     await view.idle();
   });
 

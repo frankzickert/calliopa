@@ -38,3 +38,15 @@ export const supersedes = (info: UpdateView | null, version: string): string | n
  */
 export const unserved = (info: UpdateView | null): boolean =>
   info?.extensionTruth !== undefined && info.extensionTruth > (info.servedPin ?? 0);
+
+/**
+ * What the Update tab says of a migration that failed when the served pin was
+ * served, or null when none did: the extension and the migration by id, and
+ * that it is tried again at the next serve. BO_0312_003
+ */
+export const migrationNotice = (info: UpdateView | null): string | null => {
+  const failed = info?.migration;
+  if (failed === undefined) return null;
+  const which = failed.id === "" ? "The migrations" : `The ${failed.extension} migration ${failed.id}`;
+  return `${which} could not be applied at pin ${failed.pin}: ${failed.error}. Content it changes stays as it was until it runs; it is tried again the next time a pin is served.`;
+};

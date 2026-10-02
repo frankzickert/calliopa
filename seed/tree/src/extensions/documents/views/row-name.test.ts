@@ -41,8 +41,8 @@ describe("a row's accessible name", () => {
     expect(markingName(facts({ standing: "fixate" }))).toBe(
       "Mark block 3, fixated",
     );
-    expect(readingName(facts({ mode: "reading", standing: "discarded" }))).toBe(
-      "Edit block 3, discarded",
+    expect(readingName(facts({ mode: "reading", standing: "prompt" }))).toBe(
+      "Edit block 3, prompt",
     );
     // Keep is where a block stands unless someone says otherwise, so the row
     // says nothing of it. BO_0272_006

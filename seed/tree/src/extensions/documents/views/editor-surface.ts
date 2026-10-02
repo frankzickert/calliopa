@@ -11,14 +11,12 @@ import type { DocumentProposals } from "../server/documents";
  * A decoration is contributed through `src/contract.ts`, which types the slot
  * and nothing else: the contract is the host's and cannot name a document.
  * The richer surface travels here instead, through a context this extension
- * exports and a decorating extension imports under its declared dependency —
- * the way `calliopa-show` imports `publishing`'s server modules
- * (`contribution-contract.md`, `CS_0001_005`).
+ * exports and a decorating extension imports under its declared dependency
+ * (`contribution-contract.md`), as `manuscripts` and `doc-block-roles` do.
  *
  * It is deliberately narrow: what the editor knows and a decoration cannot
- * read for itself. Everything a decoration is about — kinds, claims,
- * relations, judgements, phases — it reads through its own API, because that
- * content is not this extension's.
+ * read for itself. Everything a decoration is about it reads through its own
+ * API, because that content is not this extension's.
  */
 export interface EditorSurface {
   readonly documentId: string | null;
@@ -38,10 +36,6 @@ export interface EditorSurface {
   /** How many times the document has been read, so a decoration's own caches
    * know when they are older than what the reader sees. */
   readonly loaded: number;
-  /** How far this person has read the document, as a data revision: a
-   * reading fact the editor keeps, which a decoration interprets — what a
-   * derived block said when they last looked. BO_0246_007 */
-  readonly readMark: number | null;
   /** A refusal in words, shown where the editor shows its own. */
   notice: string | null;
   /** Focuses a block, as a press on it would. */

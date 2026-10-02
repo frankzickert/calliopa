@@ -260,3 +260,17 @@ describe("the one tab's faded edges", () => {
     expect(edge("before"), "the first tab has nothing before it").toBeFalsy();
   });
 });
+
+describe("a tab edge held with a dragged block", () => {
+  it("Given a block held over the edge after, Then that edge carries the hold mark and names what it opens, And the other edge carries none", async () => {
+    const view = await mount({ tabs: { ...TABS, tabs: [...TABS.tabs, tab("d")] } });
+    const edge = (side: string) => view.one(`[data-tab-edge="${side}"]`);
+    expect(edge("after")?.getAttribute("data-spring")).toBe("tab-edge:after");
+    expect(edge("before")?.getAttribute("data-spring")).toBe("tab-edge:before");
+    expect(edge("after")?.hasAttribute("data-spring-hold")).toBe(false);
+
+    await view.press("[data-hold]");
+    expect(edge("after")?.getAttribute("data-spring-hold")).toBe("true");
+    expect(edge("before")?.hasAttribute("data-spring-hold")).toBe(false);
+  });
+});

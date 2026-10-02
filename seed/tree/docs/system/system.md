@@ -11,7 +11,7 @@
 
 ## What Calliopa Is
 
-* `calliopa` is `Calliopa`: a graph-backed, versioned, extensible browser workspace — a frame, and extensions over it, where nothing changes without a proposal someone accepted. The recursive decision and refinement system `BO_0243` built is an extension over it, `calliopa-refine`, and is not part of what a release ships. User decision, 2026-09-16 (`BO_0253`, Decided; `BO_0256_005`), replacing the line `BO_0243` set on 2026-09-13, which named the decision system as what Calliopa is.
+* `calliopa` is `Calliopa`: a graph-backed, versioned, extensible browser workspace — a frame, and extensions over it, where nothing changes without a proposal someone accepted. User decision, 2026-09-16 (`BO_0253`, Decided).
 * Calliopa may serve other repos in the Calliopa family; which repos consume which capabilities is decided by the change introducing the first shared capability.
 
 - The workspace shell is the frame the extensions mount in. The one type it declares is `attachment`, the record of a file sent with a command ([Commands And Runs](./workspace/commands-and-runs.md), `BO_0229_007`); documents and every other content model are extensions'.
@@ -19,12 +19,13 @@
 ## Fixed Stack
 
 * TypeScript is the application language.
-* Qwik and Qwik City are the application framework, serving HTML routes and API routes from one application.
+* Qwik and Qwik City are the application framework. On an instance they serve HTML routes and API routes from one application.
 * Vite is the build, development, and preview toolchain.
-* Node is the runtime and pnpm is the package manager.
-* The one graph, through CCGW, is the content store, and the kernel holds working state and party secrets; the shell keeps no database and no bucket of its own (`BO_0207`).
+* pnpm is the package manager. On an instance, Node is the runtime.
+* The one graph, through CCGW, is the content store; the shell keeps no database and no bucket of its own (`BO_0207`). On an instance, the kernel holds working state and party secrets.
 * Bytes are CCGW blobs in the graph's own store, uploaded through CCGW and referenced from the revision that needs them (`binary-content.md`, `BO_0207_016`).
-* Docker Compose is the orchestration layer. Everything runs in containers; a checkout and Docker are the whole prerequisite.
+* On an instance, Docker Compose is the orchestration layer. Everything runs in containers; a checkout and Docker are the whole prerequisite.
+* [ ] CA_0076_004 On a device (the Android and iOS apps, `calliopa-bootstrap`'s `docs/system/mobile.md`), the same tree at the same release pin is built for a WebView inside the native host; its server half runs in the page behind the port, the device cell holds the graph and working state, and secrets are in the platform keystore. No feature has device-specific UI code ([Device](./foundation/device.md)). User decision, 2026-10-01 (`BO_0319`).
 
 - Fixing a provider does not authorize building against it. Each capability is introduced by its own change.
 
@@ -47,7 +48,7 @@
 
 ### documents
 
-- The documents area is `documents`' own `docs/` since `BO_0255_009`; its topics live under the extension's [docs](../../src/extensions/documents/docs/system/system.md) and are linked here for the reader who knew them as the shell's, as the production and publishing areas link `calliopa-video`'s.
+- The documents area is `documents`' own `docs/` since `BO_0255_009`; its topics live under the extension's [docs](../../src/extensions/documents/docs/system/system.md) and are linked here for the reader who knew them as the shell's.
 - [Block Document Model](../../src/extensions/documents/docs/system/documents/block-document-model.md)
 - [Block Editor View](../../src/extensions/documents/docs/system/documents/block-editor.md)
 - [Proposed Changes](../../src/extensions/documents/docs/system/documents/proposed-changes.md)
@@ -84,25 +85,6 @@
 - [Memory](./agent/memory.md)
 - [Run Lifecycle](./agent/run-lifecycle.md)
 
-### production
-
-- The production area is `calliopa-video`'s since `BO_0203_008`; its topics live under the extension's own [docs](../../src/extensions/calliopa-video/docs/system/system.md) and are linked here for the reader who knew them as the shell's.
-- [Episodes And Assets](../../src/extensions/calliopa-video/docs/system/production/episodes-and-assets.md) describes what Calliopa produces: the episode as the canonical unit, the assets inside it, their roles, machine facts and renditions, the bytes in Garage, and serials.
-- [Episodes And Assets](../../src/extensions/calliopa-video/docs/system/production/episodes-and-assets.md)
-- [Deleting Published Records](../../src/extensions/calliopa-video/docs/system/production/deleting-published-records.md)
-- [Episode View](../../src/extensions/calliopa-video/docs/system/production/episode-view.md)
-
-### publishing
-
-- The publishing area is `calliopa-video`'s since `BO_0203_008`, with the production area above.
-- [Publishing](../../src/extensions/calliopa-video/docs/system/publishing/publishing.md) describes what leaves Calliopa: destinations and their mappings and transports, the homepage adapter, the append-only publication log, and what that log protects from deletion.
-- [Publishing](../../src/extensions/calliopa-video/docs/system/publishing/publishing.md)
-- [Destination Bindings](../../src/extensions/calliopa-video/docs/system/publishing/destination-bindings.md)
-- [Adapters](../../src/extensions/calliopa-video/docs/system/publishing/adapters.md)
-- [Homepage Destination](../../src/extensions/calliopa-video/docs/system/publishing/homepage-destination.md)
-- [Homepage Front](../../src/extensions/calliopa-video/docs/system/publishing/homepage-front.md)
-- [Publication Log](../../src/extensions/calliopa-video/docs/system/publishing/publication-log.md)
-
 ### foundation
 
 - [Application Foundation](./foundation/runtime.md) describes the runtime boundary, development environment, verification gate, and the deployed production instance.
@@ -110,6 +92,7 @@
 - [Development Environment](./foundation/development-environment.md)
 - [Production Instance](./foundation/production-instance.md)
 - [Verification](./foundation/verification.md)
+- [Device](./foundation/device.md): the same tree on the Android and iOS apps — the server port, the import rule, the device build and capability states
 
 ## Implementation
 
@@ -124,8 +107,18 @@
 - Proposal writes are implemented and verified. A caller may stage a group of typed changes against a document instead of writing truth, read its own group back laid over truth, and a person answers it item by item in the document itself; the client's identity class decides which of the two a caller may do. [Revisioned Graph](./content-store/revisioned-graph.md), [Graph Gateway](./content-store/proposals.md), [Block Document Model](./documents/proposed-changes.md), [Block Editor View](./documents/proposed-changes.md), and [API Authentication](./identity/api-authentication.md) carry that truth. No caller holds `proposer` yet, because the agent that will is `CA_0022`.
 - The agent layer is implemented; [Calliopa Agent](./agent/calliopa-agent.md) carries its truth, with [Application Foundation](./foundation/development-environment.md), [Graph Gateway](./content-store/external-api.md), and [Workspace Shell](./workspace/commands-and-runs.md) carrying the service, the tool surface, and the console. A block sent as a command reaches an agent that reasons on a subscription runtime, reaches documents only through the authenticated API, and stages what it produces as a proposal a human answers. The process registry has its first producer.
 - What a signed-in subscription proves is proven separately, because the verification stack has no account and must not have one: `pnpm run verify:agent` is the environment-gated gate, and `CA_0022_019` is what remains open there. `pnpm run verify` stays subscription-free and cannot reach it.
-- The production work layer is implemented and verified; [Episodes And Assets](../../src/extensions/calliopa-video/docs/system/production/episodes-and-assets.md) carries its truth. The graph stores episodes holding assets, each episode carrying its own premise and teaser text and naming the asset that stands for it; assets carrying a production role, a medium, machine facts, an optional label and any number of categories; renditions naming their bytes by hash; prose bodies as documents; characters with a portrait and a description; and serials with their positions, their opening prose and their cover. A file is ingested into Garage with its facts read off it, the library lists episodes beside documents, and an episode opens in its own view. `CA_0033_015` and `CA_0033_026` are the open follow-ups there.
-- Publishing is half built. [Publishing](../../src/extensions/calliopa-video/docs/system/publishing/publishing.md) carries it: the append-only publication log, the destination binding holding what a record is worth at one destination and refusing a slug once its address is published, the adapter contract's pure half, the homepage projection and every refusal it makes before a request is sent, and the sweep over superseded bytes no publication protects. All of it is proven by `pnpm run verify` because none of it reaches a destination.
-- Calliopa publishes. An episode is projected onto homepage's document, its media put there, the record delivered, and every attempt recorded in the append-only log; retiring ends what that destination serves and the address stays spent. `pnpm run verify:publish` proves it against a real homepage and refuses on a machine with no channel configured. A film waits on a video host, so what publishes today is stills and prose (`CA_0033_010`, `CA_0037_005`). An episode's view carries its distribution panel: what it is at each destination, the address it has there, and the two acts a person may perform.
-- A platform destination waits on a change that gives the credential store an OAuth kind and answers how a platform's redirect reaches an instance on a Tailscale address. [Settings](../../src/extensions/settings/docs/system/channels.md) records both, and neither is publishing work.
 - Story-development tools, users, and collaboration each arrive through their own change.
+
+## Refine, Show, Video And Test Are Removed
+
+Under `calliopa-bootstrap`'s `BO_0324` (2026-10-01): the frame keeps nothing of `calliopa-refine` or
+`calliopa-video`. The change's document and its decisions stand in `documents`' `system.md` (*Refine,
+Show, Video And Test Are Removed*).
+
+- The frame's traces are gone (`BO_0324_040`): the contract's block places are `headline`, `below`,
+  `command`, `underCommand` and `run`, with no `depth`; no tab or panel key is redirected to
+  `calliopa-video` (`src/lib/tabs.ts`, `src/lib/layout.ts`), and a workspace that still remembers
+  one drops it as it drops any kind nothing contributes; the view bridge has no `retarget$`, since
+  focused work and the route open their own tabs (`openAlongRoute$`); and the icon table has no
+  `lighthouse`, `clock-countdown`, `warning-circle` or `eye-slash`. The unit tests that used the
+  removed ids as fixtures use neutral ones.

@@ -17,18 +17,18 @@ import {
 describe("the disposition scale", () => {
   it("Given a stored value, Then the two dispositions read as themselves and anything else is keep", () => {
     expect(readStanding("fixate")).toBe("fixate");
-    expect(readStanding("discarded")).toBe("discarded");
     expect(readStanding(undefined)).toBe("keep");
     expect(readStanding("keep")).toBe("keep");
     expect(readStanding("banana")).toBe("keep");
   });
 
-  // The values an instance carried before BO_0272 narrowed the scale read as
-  // what the reader decided they become, until the next write stores it.
-  // BO_0272_006 BO_0272_011
+  // The values an instance carried before the scale narrowed read as what
+  // they became, until the next write stores it; a block set aside reads as
+  // keep until the migration has retired it. BO_0272_011 BO_0315_009
   it("Given a value from before the narrowing, Then it reads as what it became", () => {
     expect(readStanding("pin")).toBe("fixate");
-    expect(readStanding("resolved")).toBe("discarded");
+    expect(readStanding("resolved")).toBe("keep");
+    expect(readStanding("discarded")).toBe("keep");
     expect(readStanding("keep")).toBe("keep");
     expect(readStanding("banana")).toBe("keep");
   });
@@ -36,7 +36,6 @@ describe("the disposition scale", () => {
   it("Given a standing, Then keep is written as nothing and the rest as themselves", () => {
     expect(storedValue("keep")).toBeNull();
     expect(storedValue("fixate")).toBe("fixate");
-    expect(storedValue("discarded")).toBe("discarded");
   });
 
   it("Given every standing, Then each has one label, one verb and one meaning, and only an acted-on one a mark", () => {
@@ -46,7 +45,7 @@ describe("the disposition scale", () => {
       expect(MEANING[standing]).not.toBe("");
       expect(CONTROL_GLYPH[standing]).not.toBe("");
     }
-    expect(SCALE).toEqual(["discarded", "keep", "fixate"]);
+    expect(SCALE).toEqual(["keep", "fixate"]);
     // Keep is where a block stands unless someone says otherwise: a mark
     // means someone acted, so it carries neither word nor glyph in the
     // gutter, while the control that offers it still has a face.
@@ -54,6 +53,7 @@ describe("the disposition scale", () => {
     expect(GLYPH.keep).toBeUndefined();
     expect(CONTROL_GLYPH.keep).not.toBe("");
     expect(MARK.fixate).toBe("fixated");
+    expect(MARK.removed).toBe("removed");
   });
 });
 
@@ -64,21 +64,15 @@ describe("a step along the scale", () => {
       from,
     );
 
-  it("Given a kept block, Then one step right fixates it and one step left discards it", () => {
+  it("Given a kept block, Then one step right fixates it and one step left changes nothing", () => {
     expect(step("keep", "right")).toBe("fixate");
-    expect(step("keep", "left")).toBe("discarded");
+    expect(step("keep", "left")).toBe("keep");
   });
 
-  it("Given either end, Then the step back is keep and the ends stay where they are", () => {
+  it("Given a fixated block, Then the step back is keep and the ends stay where they are", () => {
     expect(step("fixate", "left")).toBe("keep");
-    expect(step("discarded", "right")).toBe("keep");
     expect(walk("keep", "right", 4)).toBe("fixate");
-    expect(walk("keep", "left", 4)).toBe("discarded");
-  });
-
-  it("Given one action each way, Then no step crosses the scale in one press", () => {
-    expect(step("fixate", "left")).not.toBe("discarded");
-    expect(step("discarded", "right")).not.toBe("fixate");
+    expect(walk("fixate", "left", 4)).toBe("keep");
   });
 });
 

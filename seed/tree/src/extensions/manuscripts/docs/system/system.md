@@ -2,22 +2,23 @@
 
 ## Purpose
 
-- This document is the entry point of `manuscripts`, the extension that turns a document into a
-  manuscript: the LaTeX source with its `.bib` and the PDF typeset from them, in a venue's
-  format, projected from the document's accepted reading order at a revision, and kept. Every
-  figure in it comes from a block, every citation from a work of the bibliography, every
-  equation from the TeX its block stores; nothing is typed a second time, so a manuscript can
-  never say what the record does not (`calliopa-bootstrap`'s `BO_0293`, requested and decided by
-  the user on 2026-09-23).
+- This document is the entry point of `manuscripts`, the extension that makes a manuscript of a
+  document carrying the built-in *Format* as a PDF: the LaTeX source with its `.bib` and the PDF
+  typeset from them, in a venue's format, projected from the accepted reading order at a
+  revision, and kept on that document. Every figure in it comes from a block, every citation from a
+  work of the bibliography, every equation from the TeX its block stores; nothing is typed a
+  second time, so a manuscript can never say what the record does not (`calliopa-bootstrap`'s
+  `BO_0293`, requested and decided by the user on 2026-09-23, and `BO_0312`, which made
+  manuscripts formats on 2026-10-01).
 - It is `bundled` and active on a fresh install and needs no credential. The typesetting is the
   stack's [Typesetting Service](../../../../../docs/system/typesetting-service.md) — Pandoc and
-  TeX Live behind a front — reached through the kernel's `/__kernel/typeset/` forward, because a
-  TeX distribution is a container and an extension cannot ship one.
-- It depends on `documents`, whose document it projects and whose front matter and `abstract`
-  role it reads ([Block Document Model](../../../documents/docs/system/documents/block-document-model.md#a-manuscript-out-of-the-record)),
-  on `bibliography`, whose works a manuscript cites, and on `ui.shell`, whose frame it contributes
-  into. The document's front matter and the abstract are `documents`', so a document stays a
-  document with this extension switched off.
+  TeX Live behind a front — which only the kernel's `make_manuscript` reaches, because a TeX
+  distribution is a container and an extension cannot ship one.
+- It depends on `documents`, whose document it projects and whose `abstract` role it reads
+  ([Block Document Model](../../../documents/docs/system/documents/block-document-model.md#a-manuscript-out-of-the-record)),
+  on `doc-block-roles`, whose built-in *Format* marks the document and whose roles carry the venue and
+  the front matter, on `bibliography`, whose works a manuscript cites, on `keywords`, whose
+  mentions make its glossary, and on `ui.shell`, whose frame it contributes into.
 - Its change documents carry the prefix `MA`. A change that alters what a release ships writes
   its line in `calliopa-bootstrap`'s `docs/release-notes/unreleased.md`, as every change of a
   `bundled` extension does.
@@ -36,14 +37,141 @@
   decision, 2026-09-23.
 * A run may make and keep a manuscript through a tool; a run's manuscript is never anything but a
   file, proposing no block and changing no property. User decision, 2026-09-23.
-- The type is `manuscript` (`BO_0293_018`): an `ext.blocktype` member of this extension, a root
-  node with no parent and no block flag, as a bibliography's `work` is. It requires `id`, `of`,
-  `revision`, `venue`, `files`, `made`, `by` and `outcome`, and permits `title`, `log` and
-  `omitted`. `outcome` is one of `ok`, `errors`, `failed` and `timed out`. The files are the core's
-  blob references with their filenames, hoisted to a top-level list so the core recognizes them
-  as live references. The plural id beside the singular type follows `documents` and `document`,
-  since a declaration and a manifest share the `node:<id>` namespace.
-- The projection (`BO_0293_019`, `server/project.ts`, pure) turns the document's read and its
+* *Format* is a built-in role whose type is text, table, image, video, PDF or structured. Making a
+  manuscript is a profile that produces a PDF, saying how to evaluate the document carrying
+  *Format* and its reading order. *Venue* is a role the person creates (`BO_0308`).
+* *Format* is taken by documents alone, and its unit is the whole document: the output is made
+  from the document carrying *Format*, its reading order, and kept on that document. A part that
+  should be formatted on its own becomes focused work, and its document takes *Format*. User
+  decision, 2026-10-01 (`calliopa-bootstrap`'s `BO_0332`, `RO_0003_Q2`), revising the block and
+  its children above.
+* No profile ships. A fresh install makes no manuscript until the person writes one (`BO_0312_Q1`).
+  A profile produces its output through the agent's tools, and its own code cannot reach the stack's
+  services (`BO_0312_Q5`).
+* A PDF keeps its LaTeX and `.bib` beside it, and the `.docx` once the service makes one
+  (`BO_0312_Q2`; `.docx` stays this extension's second cut, as above).
+* Front matter moves to a role the person owns: the migration creates *Paper* and moves the values
+  there (`BO_0312_Q3`). Manuscripts already kept are deleted (`BO_0312_Q4`). Both are applied
+  automatically (`BO_0312_Q7`).
+
+## Formats
+
+Under `calliopa-bootstrap`'s `BO_0312` (part 4 of `BO_0308`), landed 2026-10-01: a manuscript is
+the output of a document carrying *Format* (*Formats Per Document*), made by the agent's
+typesetting tool under a profile the person writes. The kernel's half is `calliopa-bootstrap`'s `ui-kernel.md`, *Formats, Migrations
+And Spending*; *Format*'s fields are `doc-block-roles`' ([Roles](../../../doc-block-roles/docs/system/system.md)).
+
+- The tool reads front matter and venue by field key, from the roles the run names: `authors`,
+  `affiliations` and `keywords` from the paper role, and `template` and `citationStyle` from the
+  venue role. It answers the keys it read and the ones missing, so a profile's words can say which
+  roles to name. A key is minted once from a field's first name (`doc-block-roles`), so renaming a
+  field keeps it. Technical decision at transfer, 2026-09-30, since *Venue* and *Paper* are the
+  person's roles and nothing may look a role up by name.
+- The projection's roles (`BO_0312_020`, landed 2026-10-01; `server/tools.ts`,
+  `server/roles-read.ts`, `lib/front.ts`). What is projected is the document (`BO_0332_030`). The
+  roles are read through `doc-block-roles`' `rolesOf` at the pin, on the document; a value is found
+  by its key, or for a field made before keys were minted from names by the key its name would
+  mint. The venue template is the venue role's `template`, else `generic`. The service sets
+  citations by the template's own style, so a `citationStyle` read is said in what was left out
+  rather than dropped silently. The front matter is the paper role's: an author per line, its
+  address in angle brackets; one affiliation is every author's, as many as there are authors pair
+  in order, otherwise each author carries them all; keywords split at commas and semicolons. The
+  answer carries `read` and `missing` beside what it carried before.
+- The kept output is a rendition (`BO_0312_021`, landed 2026-10-01; `lib/rendition.ts`,
+  `server/make.ts`, `server/renditions.ts`). Its type is `formatRendition`, an `ext.blocktype`
+  member (technical decision at implementation). A root node requiring `id`, `of` (the document carrying *Format*; a block's id
+  on one kept on a block before `BO_0332`), `document`, `revision`, `type` (text, table, image, video, pdf or structured),
+  `files`, `made`, `by` and `outcome`, and permitting `title`, `venue`, `log` and `omitted`; the
+  files are blob references with their filenames in a top-level list, as before. The `kept`
+  callback takes `type` (`pdf` when absent) and answers `renditionWrite`'s statement,
+  with no status, which the kernel stages into the run's group as the run. `manuscript` stays
+  declared, read by the migration alone, until every install has run it (`BO_0312_062` in
+  `calliopa-bootstrap`).
+- The surfaces (`BO_0312_022`, landed 2026-10-01; `views/provider.tsx`, `views/renditions.tsx`).
+  The extension draws nothing in the bar, has no library category and no page, and a person makes
+  no manuscript by a press: a profile asks the agent for one. A provider reads a document's renditions
+  once per read of the document (`GET /api/x/manuscripts/renditions?document=`) and shares them;
+  the document's `end` place lists them (`BO_0332_031`): when, by whom, the
+  revision, the outcome, each file as a link (`GET …/renditions/[id]/files/[name]`, the PDF inline,
+  the source and references downloaded), what was left out and what the typesetting said, the last
+  two folded.
+- The migration (`BO_0312_023`, landed 2026-10-01; `server/migrations.ts`, the member
+  `migration-bo-0312-formats`, route `kernel/migrations/formats`, after
+  `migration-bo-0309-one-role-type`): an executable `ext.migration` (`calliopa-bootstrap`'s
+  `BO_0312_001`). It retires every `manuscript` node, its blobs left to the store's collection.
+  When any document holds front matter, it creates one ordinary role *Paper* with *Authors* and
+  *Affiliations* (long text, one per line) and *Keywords* (text), keyed `authors`,
+  `affiliations` and `keywords`, placed after the roles already there; each such document takes it
+  with its values written in — an author per line with the corresponding mark and the address as
+  the manuscript printed them, an affiliation per line, keywords joined by commas — and its four
+  properties are cleared, every clearing before every relation. The venue was a template id and
+  has no field on *Paper*; a person's venue role says it now. An instance with nothing to move
+  answers an empty statement.
+- The skill `manuscripts.making` (`BO_0312_024`, landed 2026-10-01): read the document's roles first;
+  propose *Format* on the document where it is missing rather than calling the tool (`BO_0332_032`); name the venue and paper roles
+  the profile points at; make one rendition; read the omissions, then the missing fields, then the
+  warnings, then the source; and say what the venue still needs as a proposal, never by editing
+  the source.
+- Verified 2026-10-01 (`BO_0312_025`, the code half): `lib/front.test.ts` for the front matter's
+  lines; `server/project.test.ts` for the head from the paper role and none without one;
+  `server/tools.test.ts` for the block's input and the rendition write; `server/migrations.test.ts`
+  for the statement — manuscripts retired, *Paper* made once, each document cleared before it takes
+  *Paper*, nothing without front matter; `views/views.test.ts` for the provider's one read, a
+  block's renditions only while turned to, newest first with their links, and the document's at
+  its end; `tests/behavior/manuscripts.test.ts` over CCGW for a block's projection at its pin with
+  the venue and the paper read by key and the missing keys answered, each refusal in words, the
+  rendition composed and read back on its document, a whole document typeset as IEEE by the
+  stack's real service with its four files kept (run 2026-10-01 against the dogfood stack's
+  service), and the migration moving a document's front matter to *Paper* once, which the person
+  can rename.
+- Walked by the user on the served build at pin 3483, 2026-10-01 (`BO_0312_025`, "worked"): a
+  *Manuscript* profile the user wrote, a venue role with its template, *Paper*, and *Format* (PDF)
+  on the document; a command sent with the profile made the PDF with its LaTeX and `.bib`, kept on
+  the block and listed below it. The migration had run once at 3486, leaving no kept manuscript and
+  the front matter on *Paper*.
+- [ ] BO_0312_026 Close: `calliopa-bootstrap`'s `BO_0312_009` release lines, and this change's
+      document carried at its status in the same proposal.
+
+## Formats Per Document
+
+- Under `calliopa-bootstrap`'s `BO_0332` (`docs/changes/BO_0332_FEAT_document-roles-and-block-roles.md`),
+  set to draft by the user on 2026-10-01 and transferred here the same day: *Format* is taken by
+  documents alone (`doc-block-roles`' [Roles](../../../doc-block-roles/docs/system/system.md#document-roles-and-block-roles)),
+  so a manuscript is made from the document carrying it, never from a block. The kernel's half is
+  `make_manuscript`'s input (`calliopa-bootstrap`'s `ui-kernel.md`, *Document Roles And Block
+  Roles*, `BO_0332_001`).
+- A rendition kept on a block before this change keeps its `of`, and is listed at its document's
+  end with the document's own, since no block draws renditions any more; nothing is migrated, as
+  no role assignment is (`RO_0003_Q3`). Technical decision at transfer.
+- The projection from the document (`BO_0332_030`, landed 2026-10-01; `server/tools.ts`,
+  `server/roles-read.ts`): the kernel's `project` callback takes `{document, venueRole?,
+  paperRole?}` and the run, and projects the document's whole reading order at the pin, its
+  numbers its own. A `block` the input still names is not read. It is refused in words, before
+  anything is projected, when the document carries no *Format* — the refusal says to propose
+  *Format* on the document, and that a part formatted on its own is a block's focused work — when
+  it carries *Format* as anything but PDF, or when a role the run names is not taken on the
+  document. The `kept` callback takes no block, and the rendition's `of` is the document.
+- The surfaces (`BO_0332_031`, landed 2026-10-01; `views/renditions.tsx`, `contributions.ts`): no
+  block place is contributed; the document's `end` place lists every rendition whose `document` is
+  it, newest first as the route answers them, one kept on a block before included.
+- The skill (`BO_0332_032`, landed 2026-10-01; the member `manuscripts.making`): its goal, output,
+  operations, precondition and conventions name the document carrying *Format*; `readTheRolesFirst`
+  says to propose *Format* on the document, never on a block, and that a part formatted on its own
+  is opened as a block's focused work, whose document takes *Format*.
+- Verified 2026-10-01 (`BO_0332_033`): `server/tools.test.ts` — the document's input, a `block`
+  handed to `kept` not read, the rendition on the document; `views/views.test.ts` — every
+  rendition of the document at its end, one kept on a block included and another document's left
+  out, nothing for a document with none, and no block place contributed;
+  `tests/behavior/manuscripts.test.ts` over CCGW under the kernel harness — a document carrying
+  *Format* (PDF), the venue and the paper projected whole at its pin with the abstract in the head,
+  a `block` named and not read, *Format* refused on a block, the refusals for a document without
+  *Format*, a role it does not carry and *Format* as image, the rendition read back on the
+  document and a rendition kept on a block before listed beside it. The real-service case runs
+  when `CALLIOPA_TYPESET_TEST_URL` names a service and was skipped in this run.
+
+## The Projection
+
+- The projection (`BO_0293_019`, `server/project.ts`, pure) turns the read and its
   cited works into a Pandoc JSON AST (API `1.22.1`, the image's Pandoc), the cited works as
   CSL-JSON keyed by their identity, the figures to send and what was left out:
   - A `text` block becomes a paragraph, a section at three depths or a block quote, with its marks,
@@ -69,49 +197,12 @@
   - Left out and said by name in `omitted`: a video, a divider, a picture not made yet or in a
     format TeX does not read, an output with neither picture nor table, code that produced
     neither, a citation of a work the bibliography no longer holds, an equation's caption, and a
-    table's rows past the first hundred its file holds. A discarded block and a prompt are not in
-    the reading order and say nothing.
+    table's rows past the first hundred its file holds. A prompt is not in
+    the reading order and says nothing.
 - The supplementary code is handed to Pandoc as code, not as raw LaTeX (`BO_0296_020`, 2026-09-25, `server/project.ts`): a `sourcecode` block under *Supplementary Material* becomes a `CodeBlock` carrying its language as a class, in place of the `RawBlock` holding `\begin{lstlisting}` it wrote before, so Pandoc's own highlighter sets it in colour through the macros the venues' templates carry, with shell escape still off (`calliopa-bootstrap`'s `BO_0296_008`). A block with no language becomes a `CodeBlock` with no class, which Pandoc sets plainly rather than refusing. Proven in `server/project.test.ts`: the AST holds a code block with its language, and no `lstlisting` remains.
 - The supplementary code is numbered as the document numbers it (`BO_0302_010`, 2026-09-25, `server/project.ts`, `calliopa-bootstrap`'s `BO_0302`): with the document's `lineNumbers` on, the `CodeBlock` carries the `numberLines` class, and `startFrom` with the block's `firstLine` when it is not one, so Pandoc's own highlighter numbers the lines through `fancyvrb`, which the venues' templates already load — checked on the typeset image, which writes `numbers=left` and `firstnumber=40` into the `Highlighting` options; with the switch off, neither is written. The supplementary material prints only the code that produced a figure or a table, so a printed block may start at forty with no block before it on the page: the numbers are the document's, and the print shows them as they are. Proven in `server/project.test.ts`: a numbered document's block carrying the class, a continued one carrying `startFrom`, and a document switched off carrying neither.
-- The venues are the service's (`BO_0293_020`, technical decision at implementation,
-  2026-09-23). The service's `/health` answers each venue's id and name, and this extension
-  offers them from there. The service is the one list, so no copy of a template lives here to
-  drift from it; this replaces the copy held equal by a test that the transfer named.
-- A manuscript is made and kept (`BO_0293_021`, `server/make.ts`, `server/manuscripts.ts`). `POST
-  /api/x/manuscripts/make` with `{document, venue?, branch?}` reads the document as it stands,
-  in the tab's branch when it is in one. It reads the cited works from the bibliography, projects,
-  reads each figure's bytes from the store and sends all of it through the kernel forward. It
-  keeps the answered `manuscript.tex`, `references.bib` and `manuscript.pdf` with `putBlob`, the
-  figures beside them as references to the blocks' own blobs under the names the source includes
-  them by — no new bytes, so the LaTeX a person downloads typesets by hand and a venue takes it
-  whole (found by the walk, 2026-09-25) — and writes one `manuscript` node as the person's truth: `revision` is the dataRevision the read was
-  made at, `by` the signed-in person's name. A typesetting that failed is kept with its source.
-  A service that does not answer is refused in its own words and keeps nothing. The venue is
-  the one asked for, else the document's own, else `generic`. `GET /api/x/manuscripts/manuscripts`
-  lists every kept manuscript newest first, a document's with `?document=`;
-  `GET .../manuscripts/[id]` reads one; `GET .../manuscripts/[id]/files/[name]` streams a file
-  typed and named, the PDF inline and the others as downloads, immutable. `GET
-  /api/x/manuscripts/venues` answers the service's venues. Proven in `server/project.test.ts`
-  (fourteen cases on one document holding every block kind). `server/typeset.integration.test.ts`
-  posts that document's projection to a running service as the generic article and as IEEE, both
-  answering `ok`; it runs when `CALLIOPA_TYPESET_TEST_URL` names one. `tests/behavior/manuscripts.test.ts`
-  runs over the one graph under the kernel harness: a document with front matter, an abstract, a
-  cited work, a numbered picture and a numbered table is made into an IEEE manuscript by the real
-  service and kept, and its three files read back from the store. A service that does not
-  answer is refused and nothing is kept. Run on 2026-09-23 against the built image, both passed.
-- The surface (`BO_0293_022`, technical decision at implementation, 2026-09-23). A document
-  decoration's provider adds a *Manuscript* group to the document's bar: a *Venue* choice among
-  the service's venues or the document's own, and *Make manuscript*, which makes one and opens it
-  in its own tab, or says the refusal as a message. The kept manuscripts are the library category
-  *Manuscripts*, each opening as the kind `manuscript`, whose page shows the document, the
-  revision, the venue, when and by whom, the outcome, the files, what was left out and what the
-  typesetting said. The transfer placed the list in a panel of the bar; the bar's popover carries
-  text only, so the files, which are links, live on the manuscript's own page. Proven in
-  `views/views.test.ts` in Qwik's render harness with the shell's own controls drawing the group:
-  the section's rows and its two empty states, the page's links and lists, the group's options,
-  and the press sending the make and opening the tab. With the service unreachable the group is
-  absent.
-
+- The supplementary code is handed to Pandoc as code, not as raw LaTeX (`BO_0296_020`, 2026-09-25, `server/project.ts`): a `sourcecode` block under *Supplementary Material* becomes a `CodeBlock` carrying its language as a class, so Pandoc's own highlighter sets it in colour through the macros the venues' templates carry, with shell escape still off (`calliopa-bootstrap`'s `BO_0296_008`). A block with no language becomes a `CodeBlock` with no class, which Pandoc sets plainly rather than refusing. Proven in `server/project.test.ts`.
+- The supplementary code is numbered as the document numbers it (`BO_0302_010`, 2026-09-25, `server/project.ts`, `calliopa-bootstrap`'s `BO_0302`): with the document's `lineNumbers` on, the `CodeBlock` carries the `numberLines` class, and `startFrom` with the block's `firstLine` when it is not one, so Pandoc numbers the lines through `fancyvrb`, which the venues' templates already load; with the switch off, neither is written. Proven in `server/project.test.ts`.
 * A code block its author numbers is body material: it prints where it stands as a `listing`
   float holding the coloured code, captioned and labelled, and a reference to it prints *Listing
   N*; the author's number is the author's word that this code is part of the paper. Code nobody
@@ -123,37 +214,34 @@
 * Code alone is a listing; an execution's text output and a traceback stay out, as above. User
   decision, 2026-09-25 (`BO_0303_Q3`).
 
-## Open Work
+- The manuscript prints a numbered listing (`BO_0303_016`, landed 2026-09-25; `server/project.ts`, `codeBlockOf`, `calliopa-bootstrap`'s `BO_0303`): a `sourcecode` block the read numbers becomes, where it stands in the body, `\begin{listing}[htbp]`, the `CodeBlock` the supplement already got — language, `numberLines` and `startFrom` as before — and `\caption{…}\label{lst:<id>}\end{listing}`, the caption the block's or empty; `blockReference` prints a `blockRef` to it as `Listing~\ref{lst:<id>}` and one to a code block nobody numbers as gone, named in `omitted`. A figure or a table a numbered listing produced ends its caption *Produced by Listing~\ref{lst:<id>} at revision R.* in place of the cell's number — the provenance line reaches `captionOf` as LaTeX now, escaped by its caller — and the supplement's loop skips the listing, so the code prints once; producing code nobody numbers keeps its supplementary subsection, and unnumbered code that produced nothing is still said by name. The float is the venues' (`calliopa-bootstrap`'s `BO_0303_006`). Proven in `server/project.test.ts`, *a numbered listing*: the float at its place after the table before it, the reference and the gone one, the produced figure's line naming the listing with no supplement left, and the base fixture's unnumbered producing block still in the supplement.
 
-Transferred from `calliopa-bootstrap`'s `BO_0293` on 2026-09-23 and moved here from
-`documents`' [Block Document Model](../../../documents/docs/system/documents/block-document-model.md#a-manuscript-out-of-the-record)
-when this extension came into being (`BO_0293_017`).
-
-- The run's manuscript is made through the kernel (`BO_0293_023`, landed 2026-09-25; `server/tools.ts`, the callback routes `kernel/manuscripts/project` and `kernel/manuscripts/kept`, the member `manuscripts.making`; `make_manuscript` itself is `calliopa-bootstrap`'s `BO_0293_026`, a tool of the kernel's own, because a tool's callback holds no person's session and the gate admits a run's grant on no typesetting path — user decision, 2026-09-25). `project`, marked `kernelCallback`, takes `{document, venue?}` and the run and answers what a press sends the service — the AST, the references, the figures' bytes — read at the run's pin through `atDataRevision` as a press reads at head, with the venue resolved as a press resolves it (`venueOf`), the revision, what was left out and the figures as blob references (`figuresOf`, shared with the press), so the projection is `project.ts`'s and nothing is projected twice. `kept` takes the outcome, the log, what was left out, the blob references the kernel put and the figures, and answers the `stage` statement of one `manuscript` node — `manuscriptWrite`, the write a press commits, said with no status, since a proposal-scoped write stages a candidate and refuses an explicit `established` (found by the instance check, 2026-09-25; the press's write says `established`) — `by` the run's principal, which the kernel stages into the run's group as the run, so a run's manuscript is the node a press writes, listed under *Manuscripts* with its process, and proposes no block and changes no property. Both refuse in words what is not a document's or a manuscript's (`422`). The skill says to read the document first, to read the omissions before the warnings before the source, to make one manuscript and say what it needs in the document as a proposal, never by editing the source, and that a run's manuscript is a file, not a change. Proven in `server/tools.test.ts` — the inputs and their refusals, the write composed by the run's principal, the figures appended — and in `tests/behavior/manuscripts.test.ts` under the kernel harness: a document projected at a pin it has moved past, its venue and title, a video said in `omitted`, its picture among the figures, a venue given honoured, and the composed write kept and read back as a press's manuscript is. The run's path on the instance is `calliopa-bootstrap`'s `BO_0293_005`.
-- The run's path is verified on the instance (`calliopa-bootstrap`'s `BO_0293_005`, 2026-09-25, pin 2918, from the user's own use in *Ice loss walk*): a run asked to make an IEEE manuscript made one through `make_manuscript` — `typeset` on its record, the manuscript in its group at revision 2920 by the run's principal, `ok`, with its source and PDF, listed under *Manuscripts* with the run's process — and answered what the venue still needs from the source and the omissions.
-- A dry walk ran on 2026-09-25 against the instance at head 2538, read-only and
-  credential-free: every document holding more than text — six, among them a numbered
-  equation referred to from a sentence, three citations with locators, tables of two to seven
-  columns and a nine-megabyte picture — was projected by this code from the live graph and
-  typeset by the service as both venues, twelve answers `ok`; the Greenland source and its
-  `.bib` were typeset again by hand with `latexmk`. It found the two faults folded above and no
-  other. No document on the instance carries front matter, an output's picture or a video, so
-  the document `BO_0293_024` names has to be made first.
 - The glossary (`BO_0301_020`, landed 2026-09-25; `server/project.ts`, `server/make.ts`): this
-  extension declares `keywords` as a dependency, as it declares `bibliography`, and `makeManuscript`
+  extension declares `keywords` as a dependency, as it declares `bibliography`, and `glossaryOf`
   reads `mentionsOf` for the document at the manuscript's revision through the keywords
   extension's own module, one process and no HTTP hop; every keyword mentioned in the accepted
-  reading order — a retired or discarded block counting for nothing, since the read takes the
+  reading order — a retired block counting for nothing, since the read takes the
   reading order — is one entry of a *Glossary* section after the body, once, alphabetically by
   title, the entry's words the definition `keywordsOf` answers as inline content with its marks
   and a keyword with no definition listed by its title alone. The section goes to the typesetting
   front as an unnumbered `Header` and a `DefinitionList` in the Pandoc AST it already takes, so
   every venue's template carries it without a package the service would have to add; the
-  references the template sets last follow it. `make_manuscript` (`BO_0293_023`) carries the
-  glossary because it is the same projection. With `keywords` switched off, no keyword role chosen
-  or no keyword mentioned, the read answers nothing and the manuscript has no glossary section
-  and says nothing about one; the front matter's own `keywords` list is untouched. Proven in
+  references the template sets last follow it. `make_manuscript` carries the glossary. With `keywords` switched off, no document carrying
+  *Keyword* or no keyword mentioned, the read answers nothing and the manuscript has no glossary section
+  and says nothing about one; the paper role's own keywords are untouched. Proven in
   `server/project.test.ts`, *the glossary*.
 - The manuscript carries every reference (`BO_0300_012`, landed 2026-09-25; `server/project.ts`, `blockReference`, `remarked`): a `blockRef` — and the three older keys as before — to a numbered figure, table or equation prints as its number; to a heading as `Section~\ref{<id>}`, the label Pandoc writes for a `Header` from the block's identity; to a paragraph or quote another sentence refers to as `Remark~\ref{par:<id>}`, that block set in the `remark` environment the venues' templates define (`calliopa-bootstrap`'s `BO_0300_013`) with `\label{par:<id>}`, numbered by LaTeX in reading order as the read numbers them (`remarkNumbers`, derived here the same way when a read did not answer them); and a reference to a block outside the reading order, or to one a paper cannot name — an abstract, an unnumbered float or equation, code — prints *(gone)* and is named in `omitted`. Proven in `server/project.test.ts` on the fixture, which gained a heading reference, a referred-to paragraph and a gone one, and in the integration test's manuscript under both venues.
-- Walked by the user on 2026-09-25 (`BO_0293_024`) on the dogfood instance from pin 2552 to 2848, in the document *Ice loss walk* made for it and in *Greenland*: the front matter set — its first shape refused an authors line saved before its affiliations and was reshaped the same day as chips and author rows (`documents`' `BO_0293_025`) — the abstract, the sections, a numbered figure with a caption and a table (`BO_0295`), an equation and a paragraph referred to from a sentence (`BO_0300`), citations, and *Make manuscript* as the generic article (Ice loss walk, revision 2875) and as IEEE (Greenland, revision 2877), both `ok` and kept, opened and read by the user. The kept sources typeset again by hand with `latexmk` inside the service's container: the generic article, exit 0, a PDF of the same 119594 bytes the service kept; the IEEE source stopped at its missing picture, because the figures were sent to the service but not kept — folded the same day into `figuresOf` above, for a press and a run alike. A video left out and said so stands on the projection's tests and the dry walk, since no walk document carried one. The run's half joins with `calliopa-bootstrap`'s `BO_0293_005`.
-- The manuscript prints a numbered listing (`BO_0303_016`, landed 2026-09-25; `server/project.ts`, `codeBlockOf`, `calliopa-bootstrap`'s `BO_0303`): a `sourcecode` block the read numbers becomes, where it stands in the body, `\begin{listing}[htbp]`, the `CodeBlock` the supplement already got — language, `numberLines` and `startFrom` as before — and `\caption{…}\label{lst:<id>}\end{listing}`, the caption the block's or empty; `blockReference` prints a `blockRef` to it as `Listing~\ref{lst:<id>}` and one to a code block nobody numbers as gone, named in `omitted`. A figure or a table a numbered listing produced ends its caption *Produced by Listing~\ref{lst:<id>} at revision R.* in place of the cell's number — the provenance line reaches `captionOf` as LaTeX now, escaped by its caller — and the supplement's loop skips the listing, so the code prints once; producing code nobody numbers keeps its supplementary subsection, and unnumbered code that produced nothing is still said by name. The float is the venues' (`calliopa-bootstrap`'s `BO_0303_006`). Proven in `server/project.test.ts`, *a numbered listing*: the float at its place after the table before it, the reference and the gone one, the produced figure's line naming the listing with no supplement left, and the base fixture's unnumbered producing block still in the supplement.
+- The projection reads a cited source's CSL item from its source document (`calliopa-bootstrap`'s
+  `BO_0313_040`, landed 2026-10-01; `server/make.ts` `citedWorks`): through `bibliography`'s
+  `readWork`, which composes the record from the source document's title and *Source*'s fields,
+  keyed by the document's identity, in place of the `work` node, so nothing here changed but the
+  record's origin. The item carries the source's own CSL type, and the typesetting service's
+  Pandoc converts it to the `.bib` as its BibTeX type, `@misc` for a type BibTeX has none for —
+  checked 2026-10-01 against the instance's service: an interview, a conversation, a dataset, a
+  web page and software each become `@misc` with their authors, title, date and publisher.
+- [ ] BO_0313_041 A `@misc` entry carries its address and its DOI: Pandoc's BibTeX writer drops
+      `URL` and `DOI` from a `@misc` (found 2026-10-01 with `BO_0313_040`), so a web page or a
+      dataset cited in a manuscript reaches the `.bib` without where to find it. The projection,
+      or the service's conversion, puts them in `howpublished` or `note`, as the venue's
+      bibliography style reads them.
+- The run's path is the kernel's `make_manuscript` (`calliopa-bootstrap`'s `BO_0293_026`, `BO_0312_005`): a tool of the kernel's own, because a tool's callback holds no person's session and the gate admits a run's grant on no typesetting path (user decision, 2026-09-25). It asks `project`, posts the projection to the service, puts the files as blobs and asks `kept`, both routes `kernelCallback` and refusing in words what is not a block's or a rendition's (`422`). `server/typeset.integration.test.ts` posts the fixture's projection to a running service as the generic article and as IEEE when `CALLIOPA_TYPESET_TEST_URL` names one.

@@ -4,7 +4,7 @@ import { isExtensionId } from "./extension-id";
 
 describe("the extension id rule", () => {
   it("Given the ids the graph holds, Then every one satisfies it", () => {
-    for (const id of ["ui.shell", "settings", "calliopa-base", "calliopa-extension", "calliopa-video", "demo", "a1.b-c"]) {
+    for (const id of ["ui.shell", "settings", "calliopa-base", "calliopa-extension", "demo", "a1.b-c"]) {
       expect(isExtensionId(id), id).toBe(true);
     }
   });

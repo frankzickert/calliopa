@@ -12,9 +12,8 @@ export type TabKind = string;
 export const HOST_KINDS = ["process-result"] as const;
 
 /**
- * The kinds stored before they were qualified, and what each became, plus the
- * kinds `ui.shell` held for one pin before they became `calliopa-video`'s
- * (`BO_0203_006`). A tab or a process item read back with one of these is
+ * The kinds stored before they were qualified, and what each became. A tab
+ * or a process item read back with one of these is
  * rewritten on the way in, so a workspace saved before opens unchanged; the
  * next save stores the current kind.
  */
@@ -24,12 +23,8 @@ export const LEGACY_TAB_KINDS: Readonly<Record<string, string>> = {
   // a workspace that remembers a document tab opens it rather than falling to
   // the `context` placeholder. BO_0255_006
   "ui.shell:document": "documents:document",
-  episode: "calliopa-video:episode",
-  front: "calliopa-video:front",
   extension: "ui.shell:extension",
   settings: "settings:settings",
-  "ui.shell:episode": "calliopa-video:episode",
-  "ui.shell:front": "calliopa-video:front",
 };
 
 export function migrateTabKind(kind: string): string {
@@ -97,6 +92,50 @@ export function openTab(state: TabsState, tab: Tab): TabsState {
   return existing
     ? { ...state, activeTabId: existing.id }
     : { tabs: [...state.tabs, tab], activeTabId: tab.id };
+}
+
+/** `openTab`, with a new tab placed directly after the active one rather than
+ * at the end, so what the reader came from stays one tab away. A tab already
+ * showing the target is revealed where it stands. CA_0072_004 */
+export function openTabBeside(state: TabsState, tab: Tab): TabsState {
+  const opened = openTab(state, tab);
+  if (opened.tabs.length === state.tabs.length) return opened;
+  const index = state.tabs.findIndex((candidate) => candidate.id === state.activeTabId);
+  if (index < 0) return opened;
+  return {
+    tabs: [...state.tabs.slice(0, index + 1), tab, ...state.tabs.slice(index + 1)],
+    activeTabId: tab.id,
+  };
+}
+
+/** Opens a document reached along a route — a block's focused work, or a
+ * crumb going back — in a tab of its own after the active one, carrying the
+ * route, in the active tab's kind and the view given. A tab already showing
+ * the document becomes active as it stands, its own route kept. The tab the
+ * reader pressed in is left as it is. CA_0073_001 CA_0073_002 */
+export function openAlongRoute(
+  state: TabsState,
+  target: { readonly itemId: string; readonly title: string; readonly route: readonly RouteEntry[] },
+  viewType?: string,
+): TabsState {
+  const from = activeTab(state);
+  if (from === undefined) return state;
+  const view = viewType ?? from.viewType;
+  const plain = `${from.kind}-${target.itemId}`;
+  // The id `openTarget$` gives the same document, unless another view of it
+  // holds that id already.
+  const taken = state.tabs.some((tab) => tab.id === plain && tab.viewType !== view);
+  return openTabBeside(state, {
+    id: taken ? `${plain}-${view}` : plain,
+    kind: from.kind,
+    title: target.title,
+    itemId: target.itemId,
+    viewType: view,
+    selection: null,
+    drawerContext: from.drawerContext,
+    unsaved: false,
+    route: target.route,
+  });
 }
 
 export function selectTab(state: TabsState, id: string): TabsState {
@@ -169,27 +208,6 @@ export function routeOf(tab: Pick<Tab, "route" | "itemId" | "title">, title?: st
   return tab.route !== undefined && tab.route.length > 0
     ? [...tab.route]
     : [{ itemId: tab.itemId ?? "", title: title ?? tab.title }];
-}
-
-/**
- * Retargets a tab in place — opening a block as focused work, or going back
- * to the containing work — keeping the tab's identity and view while its
- * target, title and route change; the selection and unsaved state are the
- * old target's and go. CA_0047_003
- */
-export function retargetTab(
-  state: TabsState,
-  id: string,
-  target: { readonly itemId: string; readonly title: string; readonly route: readonly RouteEntry[] },
-): TabsState {
-  return {
-    ...state,
-    tabs: state.tabs.map((tab) =>
-      tab.id === id
-        ? { ...tab, itemId: target.itemId, title: target.title, route: target.route, selection: null, unsaved: false }
-        : tab,
-    ),
-  };
 }
 
 export function updateTab(

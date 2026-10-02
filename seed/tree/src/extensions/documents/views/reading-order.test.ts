@@ -7,8 +7,7 @@ import { belowPlacement, dropPlacement, placeProposals, positionOf, readingOrder
 /**
  * Where a proposed change is drawn: a rewrite in the place of the block it
  * rewrites, whose own row is then not drawn — unless a removal or a move
- * frames that block, the reader is editing it, or the rewrite is a system
- * run's derived candidate. CA_0055_005
+ * frames that block or the reader is editing it. CA_0055_005
  */
 const block = (blockId: string, order: string): BlockView => ({
   kind: "text",
@@ -20,7 +19,7 @@ const block = (blockId: string, order: string): BlockView => ({
   standing: "keep",
   runs: [{ text: blockId }],
 });
-const entry = (blockId: string, order: string): ReadingEntry => ({ block: block(blockId, order), retired: false, discarded: false });
+const entry = (blockId: string, order: string): ReadingEntry => ({ block: block(blockId, order), retired: false });
 const entries = [entry("a", "a"), entry("b", "b"), entry("c", "c")];
 const item = (kind: string, blockId: string, extra: Partial<ProposedChange> = {}): ProposedChange => ({
   itemId: `node:g|${kind}|node:${blockId}`,
@@ -42,7 +41,7 @@ describe("where a proposed change is drawn", () => {
     expect(dropPlacement(rows, "b")).toEqual({ between: ["a", "b"] });
   });
 
-  it("Given a block a removal or a move frames, the block being edited, or a derived rewrite, Then the block keeps its row and the rewrite follows it", () => {
+  it("Given a block a removal or a move frames, or the block being edited, Then the block keeps its row and the rewrite follows it", () => {
     expect(drawn(placeProposals(entries, [item("replace", "b"), item("remove", "b", { itemId: "node:h|remove|node:b" })]))).toEqual([
       "a",
       "b",
@@ -51,7 +50,6 @@ describe("where a proposed change is drawn", () => {
       "c",
     ]);
     expect(drawn(placeProposals(entries, [item("replace", "b")], "b"))).toEqual(["a", "b", "replace:b", "c"]);
-    expect(drawn(placeProposals(entries, [item("replace", "b", { derived: true })]))).toEqual(["a", "b", "replace:b", "c"]);
   });
 
   it("Given two rewrites of one block, Then the first takes its place and the second follows it", () => {
@@ -65,13 +63,38 @@ describe("prompts in the reading order", () => {
   const prompt = { ...block("p", "b1"), standing: "prompt" } as BlockView;
   it("Given a prompt, Then it is not drawn until Show prompts, and then where it sits, said to be a prompt", () => {
     const blocks = [block("a", "a"), prompt, block("c", "c")];
-    expect(readingOrder(blocks, [], false).map((entry) => entry.block.blockId)).toEqual(["a", "c"]);
-    const shown = readingOrder(blocks, [], false, true);
+    expect(readingOrder(blocks, []).map((entry) => entry.block.blockId)).toEqual(["a", "c"]);
+    const shown = readingOrder(blocks, [], true);
     expect(shown.map((entry) => [entry.block.blockId, entry.prompt === true])).toEqual([
       ["a", false],
       ["p", true],
       ["c", false],
     ]);
+  });
+});
+
+/** A rejected proposal is drawn among the removed rows under *Show removed*,
+ * where its staged key puts it, and has no place to drop on or move to.
+ * BO_0315_015 */
+describe("rejected proposals in the reading order", () => {
+  it("Given a rejected insert and a rejected rewrite, Then each is a removed row at its staged key, and the block rewritten keeps its own row", () => {
+    const insert = item("insert", "n", { block: block("n", "ab") });
+    const rewrite = item("replace", "b", { itemId: "node:g|replace|node:b" });
+    const order = readingOrder([block("a", "a"), block("b", "b"), block("c", "c")], [], false, [insert, rewrite]);
+    expect(order.map((entry) => [entry.block.blockId, entry.retired, entry.rejected?.itemId ?? null])).toEqual([
+      ["a", false, null],
+      ["n", true, insert.itemId],
+      ["b", false, null],
+      ["b", true, rewrite.itemId],
+      ["c", false, null],
+    ]);
+    const rows = placeProposals(order, []);
+    expect(rows.filter((row) => row.kind === "block" && row.rejected !== undefined).map(positionOf)).toEqual([null, null]);
+    expect(rows.map(positionOf).filter((position) => position !== null)).toEqual(["a", "b", "c"]);
+  });
+
+  it("Given a rejected removal, Then nothing is drawn for it", () => {
+    expect(readingOrder([block("a", "a")], [], false, [item("remove", "a")]).map((entry) => entry.block.blockId)).toEqual(["a"]);
   });
 });
 

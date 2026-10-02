@@ -1,10 +1,13 @@
-import { $, component$, Slot, useContext, useTask$, useVisibleTask$ } from "@builder.io/qwik";
+import { $, component$, Slot, useContext, useSignal, useTask$, useVisibleTask$ } from "@builder.io/qwik";
 
 import { ViewBridgeContext } from "~/components/shell/view-bridge";
 import type { DocumentDecorationProps } from "~/contract";
 import type { Annotation } from "~/extensions/documents/lib/annotations";
+import type { TriggerEntry } from "~/extensions/documents/lib/inline-triggers";
 import { EditorSurfaceContext } from "~/extensions/documents/views/editor-surface";
 import { InlineAnnotationsContext } from "~/extensions/documents/views/inline-annotations";
+import { InlineTriggersContext } from "~/extensions/documents/views/inline-triggers";
+import type { Run } from "~/lib/runs";
 
 import { definitionText, type DocumentMentionsView } from "../lib/keywords";
 import "./keywords.css";
@@ -20,6 +23,24 @@ import "./keywords.css";
  */
 export const SOURCE = "keywords";
 export const KIND = "keyword";
+/** A keyword named with `@` whose document is gone: drawn, and a press on it
+ * opens nothing. BO_0310_023 */
+export const GONE_KIND = "keyword-gone";
+
+/** What the `@` list is handed: every keyword with its aliases. */
+interface Listed {
+  readonly id: string;
+  readonly title: string;
+  readonly aliases: readonly string[];
+}
+
+/** A keyword as the `@` list offers it: by its title, found by any name. */
+export const entryOf = (keyword: Listed): TriggerEntry => ({
+  id: keyword.id,
+  label: keyword.title,
+  names: [keyword.title, ...keyword.aliases],
+  ...(keyword.aliases.length === 0 ? {} : { detail: keyword.aliases.join(", ") }),
+});
 
 type Answer = { outcome?: string; result?: DocumentMentionsView };
 
@@ -32,7 +53,16 @@ export function annotationsOf(view: DocumentMentionsView): Record<string, Annota
   for (const block of view.blocks) {
     byBlock[block.blockId] = block.mentions.flatMap((mention) => {
       const keyword = view.keywords[mention.keyword];
-      if (keyword === undefined) return [];
+      if (keyword === undefined) {
+        // Named with `@`, and no keyword any more. BO_0310_023
+        const title = view.notKeywords?.[mention.keyword];
+        if (title === undefined) return [];
+        return [
+          title === ""
+            ? { start: mention.start, end: mention.end, kind: GONE_KIND, id: mention.keyword, title: "Not a keyword", detail: "The keyword's document is gone." }
+            : { start: mention.start, end: mention.end, kind: KIND, id: mention.keyword, title, detail: "Not a keyword: the document no longer carries Keyword." },
+        ];
+      }
       const detail = definitionText(keyword.definition);
       return [
         {
@@ -53,6 +83,47 @@ export const KeywordsProvider = component$<DocumentDecorationProps>(({ documentI
   const bridge = useContext(ViewBridgeContext);
   const surface = useContext(EditorSurfaceContext);
   const annotations = useContext(InlineAnnotationsContext, null);
+  const triggers = useContext(InlineTriggersContext, null);
+
+  /** Bumped when a keyword is created from the `@` list, so the list is read
+   * again with it. */
+  const created = useSignal(0);
+
+  // A keyword named on purpose: its title as the words, its identity on the
+  // run. BO_0310_024
+  const run$ = $((entry: TriggerEntry): Run => ({ text: entry.label, keyword: entry.id }));
+
+  /** *Create keyword "…"*: the document titled with what was typed, taking
+   * Keyword, made by this extension's route; a refusal in its words. */
+  const create$ = $(async (typed: string): Promise<TriggerEntry | { readonly failure: string }> => {
+    const made = await fetch("/api/x/keywords/keywords", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: typed }),
+    }).catch(() => null);
+    const body = (await made?.json().catch(() => null)) as
+      | { outcome?: string; result?: Listed; detail?: string; error?: string; failures?: readonly { detail: string }[] }
+      | null;
+    if (made === null || !made.ok || body?.outcome !== "success" || body.result === undefined)
+      return { failure: body?.failures?.map((failure) => failure.detail).join(" ") ?? body?.detail ?? body?.error ?? "The keyword was not created." };
+    created.value += 1;
+    return entryOf(body.result);
+  });
+
+  /** The keywords the `@` list offers, registered as this extension's inline
+   * trigger. */
+  const list$ = $(async () => {
+    if (triggers === null) return;
+    const response = await fetch("/api/x/keywords/keywords").catch(() => null);
+    if (response === null || !response.ok) return;
+    const answer = (await response.json().catch(() => null)) as { outcome?: string; result?: readonly Listed[] } | null;
+    if (answer?.outcome !== "success" || !Array.isArray(answer.result)) return;
+    triggers.triggers = {
+      ...triggers.triggers,
+      [SOURCE]: { character: "@", entries: answer.result.map(entryOf), createLabel: "Create keyword", run$, create$ },
+    };
+    triggers.version += 1;
+  });
 
   const read$ = $(async (id: string) => {
     if (annotations === null || id === "") return;
@@ -68,7 +139,8 @@ export const KeywordsProvider = component$<DocumentDecorationProps>(({ documentI
   useVisibleTask$(async ({ track }) => {
     const id = track(() => documentId);
     track(() => surface.loaded);
-    await read$(id);
+    track(() => created.value);
+    await Promise.all([read$(id), list$()]);
   });
 
   // A press on a mention is this extension's (`BO_0301_015`): the editor

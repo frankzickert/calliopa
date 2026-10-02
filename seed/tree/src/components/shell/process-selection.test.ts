@@ -111,3 +111,15 @@ describe("a run guided by a profile", () => {
     expect(root.querySelector("[data-process-profile]")).toBeFalsy();
   });
 });
+
+describe("what a run was told at its start", () => {
+  it("Given its detail, Then it lists each extension's keywords sent beside the profile and names a tool that failed, and a run told nothing says nothing", async () => {
+    const { root, row, userEvent } = await mount();
+    await userEvent(row("p1"), "click");
+    expect(root.querySelector('[data-process-context="keywords"]')?.textContent).toBe("Keywords: Quantum computing, Qubit");
+    expect(root.querySelector('[data-process-context-failure="glossary"]')?.textContent).toBe("Glossary: nothing sent — glossary.prompt: no answer within 10s");
+    await userEvent(row("p2"), "click");
+    expect(root.querySelector("[data-process-context]")).toBeFalsy();
+    expect(root.querySelector("[data-process-context-failure]")).toBeFalsy();
+  });
+});

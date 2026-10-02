@@ -13,7 +13,7 @@ import { activateBlock, documentsApi, mountEditor, type SentCommand } from "./te
  * breaks make; a wrapped line and a caret's place across the page are the
  * browser's, and `DO_0003_004` walks them.
  */
-const text = (blockId: string, order: string, words: string, standing: "keep" | "discarded" | "prompt" = "keep"): BlockView => ({
+const text = (blockId: string, order: string, words: string, standing: "keep" | "prompt" = "keep"): BlockView => ({
   kind: "text",
   blockId,
   revisionId: `rev-${blockId}`,
@@ -30,7 +30,6 @@ const draft: DocumentView = {
   title: "Draft",
   blocks: [
     text("blk-a", "a", "Open"),
-    text("blk-d", "b", "Set aside.", "discarded"),
     text("blk-p", "c", "Write it.", "prompt"),
     text("blk-b", "d", "Line one\nLine two"),
     text("blk-c", "e", "Closing."),
@@ -139,7 +138,7 @@ describe("Shift+Enter is a line inside the block (DO_0003_003)", () => {
 });
 
 describe("the arrow keys through the blocks the document draws (DO_0003_002)", () => {
-  it("Given discarded and prompt blocks hidden, When Down leaves a block, Then the caret passes over them into the next drawn block, as many characters in", async () => {
+  it("Given a prompt hidden, When Down leaves a block, Then the caret passes over it into the next drawn block, as many characters in", async () => {
     const view = await mount();
     await activateBlock(view, "blk-a");
     await view.press("ArrowDown");
@@ -174,10 +173,8 @@ describe("the arrow keys through the blocks the document draws (DO_0003_002)", (
     await view.idle();
   });
 
-  it("Given Show discarded blocks, Then Down still passes over the discarded row, which takes no caret; given Show prompts, Then Up steps into the prompt", async () => {
+  it("Given Show prompts, Then Up steps into the prompt", async () => {
     const view = await mount();
-    await view.userEvent('[data-bar-action="discarded-blocks"]', "click");
-    await view.waitFor(() => view.find('[data-discarded-id="blk-d"]') !== null);
     await activateBlock(view, "blk-a");
     await view.press("ArrowDown");
     await view.waitFor(() => view.editing() === "blk-b");

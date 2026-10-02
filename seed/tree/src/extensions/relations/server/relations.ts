@@ -13,13 +13,11 @@ import { RELATION_TYPE, SOURCE, TARGET, type RelationInput } from "../lib/relati
  * `server/work-ops.ts` and re-anchored on blocks in the same step: a person's
  * declared relation is truth, where a run only ever proposes one.
  *
- * Both ends are blocks. The claim resolution this carried until `BO_0288`
- * — reading a document's claims, drafting one where a block asserted none —
- * is gone with the vocabulary, which is `calliopa-refine`'s now.
+ * Both ends are blocks.
  *
  * The read is this extension's own rather than a call into `documents`'
  * server: an end may be a block of any document, so what it needs is that the
- * block stands, is held by an active containment, and is not discarded.
+ * block stands and is held by an active containment.
  */
 
 const refuse = <T>(rule: string, detail: string): GraphOutcome<T> => ({
@@ -38,8 +36,8 @@ const TEXT_TYPE = "text";
 
 /**
  * A block an end may anchor on: it stands at the pin, a document holds it by
- * an active containment — a retired block holds no anchor — and it is not
- * discarded. Answers the node ref to relate to.
+ * an active containment — a retired block holds no anchor. Answers the node
+ * ref to relate to.
  */
 async function anchor(end: { readonly blockId: string }, which: string): Promise<GraphOutcome<string>> {
   const ref = nodeRef(end.blockId);
@@ -63,9 +61,6 @@ async function anchor(end: { readonly blockId: string }, which: string): Promise
     (relation) => relation.type === CONTAINS && relation.validity.status === "active" && relation.to.nodeId === ref,
   );
   if (!held) return refuse("retiredBlock", `Block ${end.blockId} is retired; a relation never anchors on a retired block.`);
-  if (content["disposition"] === "discarded") {
-    return refuse("discardedBlock", `Block ${end.blockId} is discarded; a relation never anchors on a discarded block.`);
-  }
   void which;
   return { outcome: "success", result: bareId(block.id) };
 }

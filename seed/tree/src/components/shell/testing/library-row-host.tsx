@@ -14,6 +14,8 @@ export const LibraryRowHost = component$<{
   /** The pointing the rows show, by document: what the shell derives from the
    * session for each row (`BO_0304_014`). Absent, no pointing stands. */
   pointing?: Readonly<Record<string, RowPointing>>;
+  /** The row a dragged block is held over, by item. CA_0072_004 */
+  held?: string;
 }>((props) => {
   const library = useStore({ items: [] as LibraryItem[], opened: null as OpenTarget | null, marked: null as { document: string; title: string } | null });
   const open$ = $((target: OpenTarget) => {
@@ -42,6 +44,7 @@ export const LibraryRowHost = component$<{
               onOpen$={open$}
               pointing={props.pointing?.[item.id]}
               onMark$={mark$}
+              held={props.held === item.id}
             />
           </li>
         ))}

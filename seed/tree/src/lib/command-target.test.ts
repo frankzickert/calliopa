@@ -12,6 +12,7 @@ import {
   type PointedReference,
   readRunShape,
   readGestureTarget,
+  readPinchTarget,
   readMode,
   type Pointing,
   sent,
@@ -32,7 +33,6 @@ const block = (blockId: string, number: number): PointedReference => ({
 const pointing: Record<string, Pointing> = {
   "doc-1": {
     references: [block("blk-b", 1), block("blk-a", 2)],
-    fixated: [{ blockId: "blk-c", words: "fixated words" }],
   },
 };
 
@@ -63,7 +63,7 @@ describe("aiming a command", () => {
   });
 
   it("Given a tab that is not a document, or one with no target, Then it shows no document to command", () => {
-    expect(documentOf({ kind: "ui.shell:extension", itemId: "calliopa-video" })).toBeNull();
+    expect(documentOf({ kind: "ui.shell:extension", itemId: "demo" })).toBeNull();
     expect(documentOf({ kind: "settings:settings", itemId: null })).toBeNull();
     expect(documentOf(undefined)).toBeNull();
     expect(documentOf({ kind: DOCUMENT_KIND, itemId: "" })).toBeNull();
@@ -307,12 +307,8 @@ describe("a chip asking the view to show its area", () => {
     stale: false,
   };
 
-  it("Given a block reference or a fixated block, Then the view is asked for the block", () => {
+  it("Given a block reference, Then the view is asked for the block", () => {
     expect(revealTarget(block("blk-a", 1))).toEqual({ kind: "block", blockId: "blk-a" });
-    expect(revealTarget({ blockId: "blk-c", words: "fixated words" })).toEqual({
-      kind: "block",
-      blockId: "blk-c",
-    });
   });
 
   it("Given a passage, Then the view is asked for it by its number in its block", () => {
@@ -400,10 +396,10 @@ describe("a gesture and a command are told apart (BO_0258_006)", () => {
   });
 
   it("takes a gesture: a named intention and the question it asks", () => {
-    expect(readRunShape({ goal: "Has anything under this moved?", intention: "calliopa-refine.intention" })).toEqual({
+    expect(readRunShape({ goal: "Has anything under this moved?", intention: "demo.intention" })).toEqual({
       ok: true,
       gesture: true,
-      intention: "calliopa-refine.intention",
+      intention: "demo.intention",
     });
   });
 
@@ -415,7 +411,7 @@ describe("a gesture and a command are told apart (BO_0258_006)", () => {
   });
 
   it("refuses a gesture with no question to ask", () => {
-    expect(readRunShape({ intention: "calliopa-refine.intention" })).toEqual({
+    expect(readRunShape({ intention: "demo.intention" })).toEqual({
       ok: false,
       error: "A gesture carries the question it asks as its goal.",
     });
@@ -510,5 +506,50 @@ describe("the working mode a run body carries", () => {
     for (const value of [undefined, null, "explore", ["explore", "create"], { field: "explore" }, { field: 1, work: "create" }]) {
       expect(readMode(value)).toBeUndefined();
     }
+  });
+});
+
+describe("a proposal marked whole in the body (BO_0321_012)", () => {
+  const body = (reference: Record<string, unknown>) => ({ artifact: "doc-1", delivery: "propose", references: [reference], source });
+
+  it("Given a proposal marked whole, Then it is read back with its group and its items, trimmed", () => {
+    expect(readCommandTarget(body({ kind: "proposal", number: 1, group: " chg-1 ", items: [{ item: " chg-1|insert|node:n ", blockId: " n ", revisionId: " cand-n " }] }))).toEqual({
+      ok: true,
+      target: { artifact: "doc-1", delivery: "propose", references: [{ kind: "proposal", number: 1, group: "chg-1", items: [{ item: "chg-1|insert|node:n", blockId: "n", revisionId: "cand-n" }] }], source },
+    });
+    expect(readCommandTarget(body({ kind: "proposal", number: 1, group: "chg-1" }))).toMatchObject({ ok: true });
+  });
+
+  it("Given one naming no group, a block, or an item with no revision, Then it is refused by name", () => {
+    expect(readCommandTarget(body({ kind: "proposal", number: 1, items: [] }))).toEqual({ ok: false, error: "Proposal reference #1 marked whole names no group." });
+    expect(readCommandTarget(body({ kind: "proposal", number: 1, group: "chg-1", blockId: "b" }))).toMatchObject({ ok: false, error: expect.stringContaining("names a block, a single item or a revision") });
+    expect(readCommandTarget(body({ kind: "proposal", number: 1, group: "chg-1", items: [{ item: "i", blockId: "b" }] }))).toMatchObject({ ok: false, error: expect.stringContaining("naming no item, block or revision") });
+  });
+
+  it("Given its chip pressed, Then the reveal asks for its group", () => {
+    const shown: PointedReference = { kind: "proposal", number: 1, group: "chg-1", items: [], words: "", stale: false };
+    expect(revealTarget(shown)).toEqual({ kind: "proposal", group: "chg-1" });
+  });
+});
+
+describe("a pinch is a command with no words (BO_0322_016)", () => {
+  it("takes a pinch in or out, with no goal and no intention", () => {
+    expect(readRunShape({ pinch: "in" })).toEqual({ ok: true, gesture: false, pinch: "in" });
+    expect(readRunShape({ pinch: "out" })).toEqual({ ok: true, gesture: false, pinch: "out" });
+  });
+
+  it("refuses another direction, and words or a question beside a pinch", () => {
+    expect(readRunShape({ pinch: "sideways" })).toEqual({ ok: false, error: "A pinch zooms in or out." });
+    expect(readRunShape({ pinch: "in", goal: "deepen it" })).toEqual({ ok: false, error: "A pinch carries no words and asks no question of its own." });
+    expect(readRunShape({ pinch: "out", intention: "demo.intention" })).toEqual({ ok: false, error: "A pinch carries no words and asks no question of its own." });
+  });
+
+  it("targets the document and its one block, proposing into it", () => {
+    expect(readPinchTarget({ artifact: " doc-1 ", block: "blk-a" })).toEqual({
+      ok: true,
+      target: { artifact: "doc-1", delivery: "propose", references: [{ kind: "block", number: 1, blockId: "blk-a" }] },
+    });
+    expect(readPinchTarget({ artifact: "doc-1" })).toEqual({ ok: false, error: "A pinch names the document and the block it was made on." });
+    expect(readPinchTarget({ block: "blk-a" })).toEqual({ ok: false, error: "A pinch names the document and the block it was made on." });
   });
 });

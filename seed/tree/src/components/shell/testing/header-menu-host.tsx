@@ -1,5 +1,6 @@
 import { $, component$, useStore } from "@builder.io/qwik";
 
+import type { SpringHold } from "~/lib/drag";
 import { closeAllTabs, neighbourTab, type TabsState } from "~/lib/tabs";
 import type { Person } from "~/server/session";
 import { LicenceWarning, PersonMenu } from "../header-disclosure";
@@ -26,6 +27,9 @@ export const HeaderMenuHost = component$<{
     tabs: [...props.tabs.tabs],
     activeTabId: props.tabs.activeTabId,
   });
+  // The shell's drag store, as far as the edges read it: a press on
+  // `data-hold` holds a dragged block over the named place. CA_0072_003
+  const drag = useStore<{ hold: SpringHold | null }>({ hold: null });
   const closeAll$ = $(() => {
     const next = closeAllTabs(tabs);
     tabs.tabs = next.tabs;
@@ -33,9 +37,11 @@ export const HeaderMenuHost = component$<{
   });
   return (
     <header>
+      <button type="button" data-hold="tab-edge:after" onClick$={() => (drag.hold = { id: "tab-edge:after", since: 1 })} />
       <nav data-active-tab={tabs.activeTabId ?? ""}>
         <TabEdge
           side="before"
+          drag={drag}
           tabs={tabs}
           onStep$={(step) => {
             tabs.activeTabId = neighbourTab(tabs, step).activeTabId;
@@ -44,6 +50,7 @@ export const HeaderMenuHost = component$<{
         <CloseAllTabs place="strip" tabs={tabs} onClose$={closeAll$} />
         <TabEdge
           side="after"
+          drag={drag}
           tabs={tabs}
           onStep$={(step) => {
             tabs.activeTabId = neighbourTab(tabs, step).activeTabId;

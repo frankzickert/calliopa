@@ -8,7 +8,7 @@ import { nodeRef } from "~/server/ccgw/nodes";
 /**
  * The numbers a document's citations are drawn as (`BO_0291_013`): first-
  * citation order over the reading order, a work cited twice keeping its
- * number, a discarded block's citation consuming none, and a work not at the
+ * number, and a work not at the
  * pin answered as missing rather than with a stale number. Nothing stores a
  * number and nothing has to keep one true.
  */
@@ -62,7 +62,7 @@ const sentence = (id: string, order: string, runs: unknown[], extra: Record<stri
 describe("numberCitations", () => {
   const blocks = graphOf([
     sentence("blk-a", "i", [{ text: "Thermometry " }, cite("wrk-2", "p. 54"), { text: " builds on " }, cite("wrk-1"), { text: " and again " }, cite("wrk-2")]),
-    sentence("blk-b", "m", [{ text: "Cut: " }, cite("wrk-3")], { disposition: "discarded" }),
+    sentence("blk-b", "m", [{ text: "Cut: " }, cite("wrk-3")]),
     sentence("blk-c", "u", [{ text: "Later " }, cite("wrk-3"), cite("wrk-nowhere")]),
   ]);
 
@@ -70,18 +70,6 @@ describe("numberCitations", () => {
     const document = assembleDocument(blocks, DOCUMENT);
     expect(document?.citationNumbers).toEqual({ "wrk-2": 1, "wrk-1": 2, "wrk-3": 3, "wrk-nowhere": 4 });
     expect(document?.missingWorks).toBeUndefined();
-  });
-
-  it("gives a discarded block's citation no number and lets it consume none", () => {
-    const view = assembleDocument(blocks, DOCUMENT);
-    // wrk-3 is first cited in the discarded block and takes its number from
-    // the block that reads, blk-c, after wrk-2 and wrk-1.
-    expect(view?.citationNumbers?.["wrk-3"]).toBe(3);
-    const onlyCut = assembleDocument(
-      graphOf([sentence("blk-b", "m", [cite("wrk-3")], { disposition: "discarded" })]),
-      DOCUMENT,
-    );
-    expect(onlyCut?.citationNumbers).toBeUndefined();
   });
 
   it("answers a work not at the pin as missing, with no number and none consumed", () => {

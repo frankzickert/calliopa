@@ -18,7 +18,7 @@ import type { MarkingControls } from "../marking/use-marking";
  * takes it back. BO_0227_011 BO_0227_012 BO_0227_013
  *
  * Every path that changes a standing — the swipe, the bar's control, the key
- * chord, a discarded block's Reopen — goes through `setStanding$`, so there
+ * chord — goes through `setStanding$`, so there
  * is one write, one undo, and one announcement however it was asked for.
  *
  * The write follows the save's rules. On the block being edited, the edit is
@@ -26,8 +26,7 @@ import type { MarkingControls } from "../marking/use-marking";
  * advances; nothing under the caret is re-read, and the new standing shows
  * through `overlay` until the document is next read. On any other block, an
  * edit under way is ended first — as a press outside the block would — and
- * the document is read again. Discarding the block being edited ends the edit
- * too, since a discarded block leaves the flow.
+ * the document is read again.
  */
 
 export interface StandingStore {
@@ -43,21 +42,39 @@ export interface StandingStore {
    * separately named action a saved structural operation is reversed by,
    * never the undo keystroke. CA_0058_011
    */
-  takeBack: {
-    readonly blockId: string;
-    readonly to: Standing;
-    /** What the change said, which is what the control offers to take back. */
-    readonly did: string;
-    /** What taking it back says. */
-    readonly said: string;
-  } | null;
+  takeBack: TakeBack | null;
 }
+
+/** Where a removed block is put back: between the keys of the rows it was
+ * drawn between, or at the end. */
+export type RestorePlacement =
+  | { readonly between: readonly [string | null, string | null] }
+  | { readonly at: "end" };
+
+/**
+ * What the take-back control reverses: a change of standing, which writes the
+ * previous one, or the removal of a block, which restores it where it was
+ * drawn (`BO_0315_012`). */
+export type TakeBack = {
+  readonly blockId: string;
+  /** What the change said, which is what the control offers to take back. */
+  readonly did: string;
+  /** What taking it back says. */
+  readonly said: string;
+} & (
+  | { readonly kind: "standing"; readonly to: Standing }
+  | { readonly kind: "removal"; readonly placement: RestorePlacement }
+);
 
 export interface StandingControls {
   readonly store: StandingStore;
   readonly setStanding$: QRL<(blockId: string, to: Standing) => Promise<void>>;
-  /** Writes the previous standing of the last change and clears the offer. */
+  /** Writes the previous standing of the last change, or restores the last
+   * removed block, and clears the offer. */
   readonly takeBack$: QRL<() => Promise<void>>;
+  /** Records a removal the reader made, so the take-back control offers to
+   * put the block back where it was drawn. BO_0315_012 */
+  readonly removed$: QRL<(block: BlockView, placement: RestorePlacement) => void>;
 }
 
 export const StandingContext = createContextId<StandingControls>(
@@ -95,16 +112,11 @@ export function useStanding(input: {
   readonly save$: QRL<(keepalive?: boolean) => Promise<boolean>>;
   readonly deactivate$: QRL<() => Promise<void>>;
   readonly reload$: QRL<() => Promise<void>>;
-  /** Answers a derived candidate by use before its standing is written: a
-   * pin or a keep accepts it first, a discard rejects it and writes no
-   * standing. `proceed` writes, `skip` counts as done, `stop` failed.
-   * BO_0246_006 */
-  readonly beforeStanding$?: QRL<(blockId: string, to: Standing) => Promise<"proceed" | "skip" | "stop">>;
-  /** Runs after a standing the reader set has landed and the document was
-   * read back — the reader's own act, which is never news to them. BO_0246_007 */
-  readonly afterStanding$?: QRL<() => Promise<void>>;
+  /** Restores a removed block at a placement; answers whether it landed.
+   * BO_0315_012 */
+  readonly restore$?: QRL<(blockId: string, placement: RestorePlacement) => Promise<boolean>>;
 }): StandingControls {
-  const { documentId, surface, editor, save$, deactivate$, reload$, beforeStanding$, afterStanding$ } =
+  const { documentId, surface, editor, save$, deactivate$, reload$, restore$ } =
     input;
   const store = useStore<StandingStore>({ overlay: {}, announcement: "", takeBack: null });
 
@@ -119,14 +131,8 @@ export function useStanding(input: {
    * surface's notice, as a refused structural command is. */
   const write$ = $(async (blockId: string, to: Standing): Promise<boolean> => {
     if (documentId === null) return false;
-    if (beforeStanding$ !== undefined) {
-      const verdict = await beforeStanding$(blockId, to);
-      if (verdict === "stop") return false;
-      if (verdict === "skip") return true;
-    }
-    // A discarded block and a prompt leave the flow, so editing either ends.
-    // BO_0267_014
-    const editing = surface.activeBlockId === blockId && to !== "discarded" && to !== "prompt";
+    // A prompt leaves the flow, so editing it ends. BO_0267_014
+    const editing = surface.activeBlockId === blockId && to !== "prompt";
     if (editing) {
       if (!(await save$())) return false;
     } else if (surface.activeBlockId !== null) {
@@ -157,7 +163,6 @@ export function useStanding(input: {
       store.overlay = { ...store.overlay, [blockId]: to };
     } else {
       await reload$();
-      if (afterStanding$ !== undefined) await afterStanding$();
     }
     return true;
   });
@@ -165,9 +170,8 @@ export function useStanding(input: {
   /**
    * Sets a standing and records what taking it back would write. The inverse
    * writes the previous value — a control of its own in the bar's *History*
-   * group, never the undo keystroke (`block-editor.md`, *Undo*). A discard
-   * keeps the block's marks: a reference is what was marked, and a discarded
-   * block is markable. BO_0263_005 CA_0058_011
+   * group, never the undo keystroke (`block-editor.md`, *Undo*).
+   * CA_0058_011
    */
   const setStanding$ = $(async (blockId: string, to: Standing) => {
     const block = surface.document?.blocks.find(
@@ -178,17 +182,27 @@ export function useStanding(input: {
     if (from === to) return;
     if (!(await write$(blockId, to))) return;
     store.announcement = said(to, block);
-    store.takeBack = { blockId, to: from, did: said(to, block), said: said(from, block) };
+    store.takeBack = { kind: "standing", blockId, to: from, did: said(to, block), said: said(from, block) };
   });
 
-  /** Takes the last change of standing back, writing the previous value. */
+  /** Named by the block as it was before it left the rows. */
+  const removed$ = $((block: BlockView, placement: RestorePlacement) => {
+    const words = block.kind === "text" ? openingWords(runsText(block.runs)) : `a ${block.kind} block`;
+    store.announcement = `Removed “${words}”`;
+    store.takeBack = { kind: "removal", blockId: block.blockId, placement, did: `removing “${words}”`, said: `Restored “${words}”` };
+  });
+
+  /** Takes the last change back: the previous standing written, or the removed
+   * block restored where it was drawn. */
   const takeBack$ = $(async () => {
     const offer = store.takeBack;
     if (offer === null) return;
     store.takeBack = null;
-    if (!(await write$(offer.blockId, offer.to))) return;
+    if (offer.kind === "removal") {
+      if (restore$ === undefined || !(await restore$(offer.blockId, offer.placement))) return;
+    } else if (!(await write$(offer.blockId, offer.to))) return;
     store.announcement = offer.said;
   });
 
-  return { store, setStanding$, takeBack$ };
+  return { store, setStanding$, takeBack$, removed$ };
 }

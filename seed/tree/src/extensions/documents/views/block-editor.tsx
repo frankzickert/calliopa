@@ -21,8 +21,7 @@ import {
   type Standing,
 } from "../lib/disposition";
 import { anchorAt } from "~/lib/passage";
-import { passagesIn, passageState, referenceFor } from "../lib/references";
-import type { FrontMatter } from "../lib/front-matter";
+import { passagesIn, passageState, proposalReferenceFor, referenceFor } from "../lib/references";
 import { isUnnamed, shownTitle, unnamedTitle } from "../lib/naming";
 import { proposedFor, revealFor, type AttachmentDescriptor } from "~/lib/command-target";
 import type { SentCommand } from "~/components/shell/view-bridge";
@@ -32,6 +31,21 @@ import { attachFiles, uploadFile, type AttachmentHolder } from "~/lib/attachment
 /** A block's command files, or none yet. BO_0267_012 */
 const filesOf = (byBlock: Record<string, AttachmentHolder>, blockId: string): AttachmentHolder =>
   byBlock[blockId] ?? { attachments: [], attachNotice: null };
+
+/** A block's command choices: what this page holds for it, else read back
+ * from what was sent and its standing. DO_0025_002 DO_0025_003 */
+const choiceIn = (
+  byBlock: Record<string, CommandChoice>,
+  runs: readonly SentRun[],
+  document: DocumentView | null,
+  blockId: string,
+  lastSent: WorkingMode | null,
+): CommandChoice => {
+  const held = byBlock[blockId];
+  if (held !== undefined) return held;
+  const block = document?.blocks.find((candidate) => candidate.blockId === blockId);
+  return resolveChoice({}, runs, blockId, block !== undefined && "standing" in block ? String(block.standing) : undefined, lastSent);
+};
 import {
   applyLink,
   applyMark,
@@ -56,6 +70,7 @@ import {
 } from "~/lib/runs";
 import {
   ViewBridgeContext,
+  optionsOf,
   type ViewAction,
   type ViewBarGroup,
   type InspectorFact,
@@ -113,14 +128,15 @@ import {
   fetchChanges,
   fetchDocument,
   fetchProposals,
+  reopenProposal,
   fetchRetired,
   sendCommand,
   uploadDocumentFile,
   sendRename,
-  fetchReadMark,
   fetchWorkingMode,
   sendWorkingMode,
-  sendReadMark, requiresProposal, refusedByFloor, afterFloor, WRITE_FLOOR_MS } from "./documents-client";
+  requiresProposal, refusedByFloor, afterFloor, WRITE_FLOOR_MS, alreadySettled } from "./documents-client";
+import { declineNotice } from "../lib/declines";
 import { installSwipe, swipeJustEnded, SWIPEABLE_PROPOSALS } from "./block-swipe";
 import { installPinch } from "./block-pinch";
 import { routeOf } from "~/lib/tabs";
@@ -131,6 +147,7 @@ import {
   passageNumberAt,
 } from "./press";
 import { MarkingContext, useMarking } from "./marking/use-marking";
+import { marksSeveral, useMarkedRows } from "./marked-rows";
 import { RowMarks, rowMarkAttributes, rowMarkingName, rowNumbers } from "./marking/row-marks";
 import { openingWords } from "../lib/pointing";
 import type { Marked as MarkedTarget } from "../lib/references";
@@ -160,23 +177,23 @@ export { HOVER_DEPTH_MS };
 import { belowPlacement, dropPlacement, placeProposals, positionOf, readingOrder, restorePlacement, stepPlacement as stepRowPlacement, type RowTarget } from "./reading-order";
 import { RowGrip } from "./row-grip";
 import { markingName, readingName } from "./row-name";
-import { DiscardedRow } from "./standing/discarded-row";
 import { StandingAnnouncement } from "./standing/standing-announcement";
 import { CardLabel, StandingMark } from "./standing/standing-mark";
-import { FIRST_MODE, POLES, switched, toggleName, type WorkingMode } from "../lib/working-mode";
-import { isAgentPrincipal } from "../lib/agent-at-work";
+import { FIRST_MODE, PINCH_MODE, switched, type WorkingMode } from "../lib/working-mode";
+import { commandChoiceKey, readStoredChoice, resolveChoice, storedChoice, type CommandChoice, type SentRun } from "../lib/command-choices";
 import type { FocusedChild, FocusedWork } from "~/server/focused-work";
-import { BlockControls, BlockFace } from "./block-controls";
-import { StandingToolbar } from "./standing/standing-toolbar";
-import { StandingContext, standingOf, useStanding } from "./standing/use-standing";
+import { BlockFace } from "./block-controls";
+import { BlockBar } from "./block-bar";
+import { StandingContext, standingOf, useStanding, type RestorePlacement } from "./standing/use-standing";
 import { EditorSurfaceContext } from "./editor-surface";
 import { DecorationProvider, DocumentDecorations } from "./decorations";
+import { CompactHeader } from "./document-header";
 import { CitedWorksContext, type CitedWorks } from "./cited-works";
 import { InlineAnnotationsContext, annotationsOn, type InlineAnnotations } from "./inline-annotations";
+import { InlineTriggersContext, type InlineTriggers } from "./inline-triggers";
 import { annotate } from "../lib/annotations";
 import { citeLabel } from "../lib/citation-label";
 import { BranchLine, type BranchAsk } from "./branch/branch-line";
-import { FrontMatterHead } from "./front-matter-head";
 import { referenceChoices, type ReferenceChoice } from "../lib/reference-choices";
 import { sessionChipsOf, type ProposalSession } from "../lib/branch";
 import { branchOf } from "../lib/branch-scope";
@@ -185,6 +202,7 @@ import { landingOffset } from "../lib/lines";
 import {
   groupShown,
   itemWords,
+  GATHERED_WORDS,
   refinerOf,
   revealGroup,
   withdrawerOf,
@@ -258,11 +276,11 @@ const scrollByTab = new Map<string, number>();
 const mountedTabs = new Set<string>();
 
 /** What a document shows beside its blocks, as this device last left it:
- * retired and discarded blocks, proposed changes and prompts. Device-local
- * and per document, as its marks are. BO_0267_022 */
+ * the removed rows, proposed changes and prompts. Device-local and per
+ * document, as its marks are. `removed` is what `retired` was kept as before
+ * the toggle took its new name, and reads the same. BO_0267_022 BO_0315_015 */
 interface DocumentShows {
-  readonly retired: boolean;
-  readonly discarded: boolean;
+  readonly removed: boolean;
   readonly proposals: boolean;
   readonly prompts: boolean;
 }
@@ -276,8 +294,7 @@ export function readShows(raw: string | null): DocumentShows | null {
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
     return {
-      retired: value["retired"] === true,
-      discarded: value["discarded"] === true,
+      removed: value["removed"] === true || value["retired"] === true,
       proposals: value["proposals"] === true,
       prompts: value["prompts"] === true,
     };
@@ -296,7 +313,7 @@ function storedShows(documentId: string): DocumentShows | null {
 
 function keepShows(documentId: string, shows: DocumentShows): void {
   try {
-    const any = shows.retired || shows.discarded || shows.proposals || shows.prompts;
+    const any = shows.removed || shows.proposals || shows.prompts;
     if (any) window.localStorage.setItem(showsKey(documentId), JSON.stringify(shows));
     else window.localStorage.removeItem(showsKey(documentId));
   } catch {
@@ -411,10 +428,16 @@ const ROLE_ICON: Readonly<Record<TextRole, IconName>> = {
  * the bar is drawn from. `GLYPH` and `CONTROL_GLYPH` stay what the card's
  * label and command mode's standing toolbar draw. DO_0010_004 */
 const STANDING_ICON: Readonly<Record<Standing, IconName>> = {
-  discarded: "x",
   keep: "circle",
   fixate: "diamond",
   prompt: "terminal-window",
+};
+
+/** Whether a key lands where it types: a field, a text area or editable
+ * text, where Delete and Backspace are the text's own. BO_0315_011 */
+const typesHere = (target: EventTarget | null): boolean => {
+  const closest = (target as { closest?: (selector: string) => unknown } | null)?.closest;
+  return typeof closest === "function" && closest.call(target, "input, textarea, select, [contenteditable]:not([contenteditable='false'])") != null;
 };
 
 /** A drop a row has already taken, said on the event itself, so the view's
@@ -477,11 +500,16 @@ const shownProposalsOf = (state: DocumentState, ownBranch: string | null): Propo
       ? (state.proposals?.groups.flatMap((group) => group.items) ?? [])
       : // Each change is shown or hidden on its own: the toggle sets them all,
         // a run chip flips one, and the reader's run starts shown as it
-        // stages. A derived candidate shows as before. CA_0055_006 BO_0265_012
+        // stages. CA_0055_006 BO_0265_012
         (state.proposals?.groups.flatMap((group) =>
-          group.items.filter((item) => item.derived === true || groupShown(group.groupId, state)),
+          group.items.filter(() => groupShown(group.groupId, state)),
         ) ?? [])
-  ).filter((item) => item.kind !== "phase" && item.groupId !== ownBranch);
+  ).filter((item) => item.groupId !== ownBranch);
+
+/** The blocks a standing gather moves into another block's focused work.
+ * BO_0322_013 */
+const gatheredBlocks = (proposals: DocumentProposals | null): ReadonlySet<string> =>
+  new Set((proposals?.groups ?? []).flatMap((group) => group.items.flatMap((item) => (item.kind === "gather" ? (item.gathered ?? []) : []))));
 
 /** The open changes each group holds, for the number a minimized chip draws
  * in place of its words. CA_0061_007 */
@@ -527,14 +555,19 @@ const keepOneExpanded = (state: DocumentState): void => {
 /** The rows the editor draws, in the order it draws them. */
 const drawnRows = (state: DocumentState, doc: DocumentView, ownBranch: string | null) =>
   placeProposals(
-    readingOrder(doc.blocks, state.retiredOpen ? state.retired : [], state.discardedOpen, state.promptsOpen),
+    readingOrder(
+      doc.blocks,
+      state.retiredOpen ? state.retired : [],
+      state.promptsOpen,
+      state.retiredOpen ? (state.proposals?.rejected ?? []) : [],
+    ),
     shownProposalsOf(state, ownBranch),
     // The block being edited keeps its row under the caret. CA_0055_005
     state.activeBlockId,
   );
 
-/** Every order key the document knows, drawn or not: its blocks, discarded
- * and prompts among them, the retired ones read, and every open proposal's,
+/** Every order key the document knows, drawn or not: its blocks, prompts
+ * among them, the retired ones read, and every open proposal's,
  * shown or hidden — the bound a new block is placed under, so a row the
  * reader cannot see still follows it. DO_0016_001 */
 const knownKeys = (state: DocumentState): string[] =>
@@ -558,9 +591,6 @@ export interface DocumentState {
   codeLines: Record<string, number>;
   retired: BlockView[];
   retiredOpen: boolean;
-  /** Whether the blocks the reader set aside as discarded are drawn where
-   * they sit. They are otherwise not drawn at all. BO_0227_014 */
-  discardedOpen: boolean;
   /** Whether the blocks sent as prompts are drawn where they sit, and blocks
    * kept as content after a send carry the prompt glyph. BO_0267_015 */
   promptsOpen: boolean;
@@ -572,14 +602,13 @@ export interface DocumentState {
    * work was there. */
   proposals: DocumentProposals | null;
   proposalsOpen: boolean;
-  /** The data revision at which this person last had the document's derived
-   * blocks in view, read with the document; null when never. A derived block
-   * revised above it carries the changed marker. BO_0246_007 */
-  readonly readMark: number | null;
-  /** The working mode in force on the document for this person: explore or
-   * consolidate, understand or create, which every run the document starts
-   * carries. BO_0306_010 */
+  /** The working mode last sent in the document by this person: a block's
+   * command line starts from it, and the console and a gesture carry it.
+   * BO_0306_010 DO_0025_003 */
   mode: WorkingMode;
+  /** The document's runs the person may see, as its run list answers them:
+   * a block's command choices read back from them. DO_0025_002 */
+  runs: SentRun[];
   status: "loading" | "ready" | "failed";
   /** True when the document this tab names is not in the graph any more, which
    * is what a stored tab naming a deleted document arrives as. */
@@ -598,8 +627,9 @@ export interface DocumentState {
    * active block, cleared when the tab is left, by command mode and by
    * activation, never persisted. CA_0046_001 */
   focusedBlockId: string | null;
-  /** What the target's blocks have opened as focused work, read on the first
-   * focus. The shell answers it; this view draws the faces. CA_0065_010 */
+  /** What the target's blocks have opened as focused work. The shell answers
+   * it; this view reads it as the document enters reading presentation and
+   * draws the faces. CA_0065_010 DO_0029_001 */
   faces: FocusedWork | null;
   /** The proposal the reader has turned to, when it is a proposal rather
    * than a block: the bar's block groups act on it, accepting it first.
@@ -766,12 +796,11 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     codeLines: {},
     retired: [],
     retiredOpen: false,
-    discardedOpen: false,
     promptsOpen: false,
     sources: [],
+    runs: [],
     proposals: null,
     proposalsOpen: false,
-    readMark: null,
     mode: FIRST_MODE,
     status: "loading",
     missing: false,
@@ -832,6 +861,12 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   const proposalEdit = useStore({
     settling: [] as string[],
     timer: 0,
+    /** A proposals read under way, and whether another is due after it: a
+     * call while one runs waits for the one that follows rather than
+     * starting its own, so a burst of calls costs at most two reads.
+     * DO_0024_002 */
+    reading: false,
+    due: false,
     /** Which proposals read is the newest, and how many local changes to
      * the list this editor has made: a read that is overtaken by either is
      * older than what the reader sees, and is dropped. BO_0233_013 */
@@ -873,6 +908,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   const importAfter = useSignal<RowTarget | null>(null);
   /** The title field, whose text one writer owns. DO_0012_002 */
   const titleField = useSignal<HTMLElement>();
+  const documentHeader = useSignal<HTMLElement>();
   const documentId = tab.itemId;
   const remembered = tab.selection;
 
@@ -965,6 +1001,15 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
         bridge.inspector.text = null;
         return;
       }
+      // A block a standing gather moves is not edited while the gather
+      // stands: it is focused, and the gather is answered from its frame.
+      // BO_0322_013
+      if (gatheredBlocks(state.proposals).has(block.blockId)) {
+        Object.assign(editor, idleEditor());
+        state.activeBlockId = null;
+        state.focusedBlockId = block.blockId;
+        return;
+      }
       Object.assign(editor, idleEditor());
       editor.blockId = block.blockId;
       editor.position =
@@ -1031,10 +1076,6 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       return;
     }
     await adopt$(outcome.result, "keep", true);
-    // The reader's mark, read once with the document: what changed since
-    // they last read is judged against it. BO_0246_007
-    const mark = await fetchReadMark(documentId);
-    if (mark.outcome === "success") (state as { readMark: number | null }).readMark = mark.result.dataRevision;
     // The person's working mode, read once with the document and told to the
     // shell, which hands it to every run the document starts. A read that
     // fails leaves the first mode in force, which is what the toggles show.
@@ -1042,25 +1083,6 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     const mode = await fetchWorkingMode(documentId);
     if (mode.outcome === "success") state.mode = mode.result;
     await bridge.setMode$(documentId, state.mode);
-  });
-
-  /**
-   * Switches one axis of the working mode to its other pole: drawn at once,
-   * told to the shell and written for the person. A write that fails puts the
-   * pole back and says so, so the toggles never show a mode the next run
-   * would not carry. BO_0306_010 BO_0306_011
-   */
-  const switchMode$ = $(async (axis: "field" | "work") => {
-    if (documentId === null) return;
-    const before = state.mode;
-    const after = switched(before, axis);
-    state.mode = after;
-    await bridge.setMode$(documentId, after);
-    const written = await sendWorkingMode(documentId, after);
-    if (written.outcome === "success") return;
-    state.mode = before;
-    await bridge.setMode$(documentId, before);
-    state.notice = `The working mode could not be switched to ${POLES[axis === "field" ? after.field : after.work].label.toLowerCase()}: ${describeOutcome(written)}`;
   });
 
   const reloadRetired$ = $(async () => {
@@ -1084,17 +1106,35 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
    */
   const reloadProposals$ = $(async () => {
     if (documentId === null) return;
-    // A read a local change overtook is read again, a few times at most; a
-    // QRL cannot call itself, so the retry is a loop.
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const read = ++proposalEdit.reads;
-      const changes = proposalEdit.changes;
-      const outcome = await fetchProposals(documentId);
-      if (outcome.outcome !== "success" || read !== proposalEdit.reads) return;
-      if (changes === proposalEdit.changes && proposalEdit.settling.length === 0) {
-        state.proposals = withoutItems(outcome.result, proposalEdit.answered);
-        return;
-      }
+    // A read already under way is not doubled: this call marks one more read
+    // due and waits for it, and that read serves every call made meanwhile.
+    // DO_0024_002
+    if (proposalEdit.reading) {
+      proposalEdit.due = true;
+      while (proposalEdit.reading) await new Promise((resolve) => setTimeout(resolve, 20));
+      return;
+    }
+    proposalEdit.reading = true;
+    try {
+      do {
+        proposalEdit.due = false;
+        // A read a local change overtook is read again, a few times at most; a
+        // QRL cannot call itself, so the retry is a loop.
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const read = ++proposalEdit.reads;
+          const changes = proposalEdit.changes;
+          // *Show removed* asks for the rejected proposals in the same read.
+          // BO_0315_015
+          const outcome = await fetchProposals(documentId, state.retiredOpen);
+          if (outcome.outcome !== "success" || read !== proposalEdit.reads) break;
+          if (changes === proposalEdit.changes && proposalEdit.settling.length === 0) {
+            state.proposals = withoutItems(outcome.result, proposalEdit.answered);
+            break;
+          }
+        }
+      } while (proposalEdit.due);
+    } finally {
+      proposalEdit.reading = false;
     }
   });
 
@@ -1333,63 +1373,20 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
 
   // Command mode's marking session: the mode, the marks, their record and
   // the dock's toggle. The rows read it from the context. BO_0227_006
-  /**
-   * A derived candidate is answered by use (`BO_0246_006`): pinning, keeping,
-   * editing into or referencing it accepts it, discarding it rejects it, and
-   * no icon ever asks. The acceptance goes through the one answer path every
-   * proposal takes, then the document is read again so the block stands
-   * where the standing or the mark lands.
-   */
-  /** The reader's own act is not news to them: after an answer by use, and
-   * after a standing they set has landed, the read mark moves to the revision
-   * the document was read back at, so the block they pinned or edited into
-   * carries no changed marker on their next read. BO_0246_007 */
-  const markOwnAct$ = $(async () => {
-    const at = state.document?.dataRevision;
-    if (documentId === null || at === undefined) return;
-    (state as { readMark: number | null }).readMark = at;
-    await sendReadMark(documentId, at);
-  });
-
-  const settleDerived$ = $(async (blockId: string, intent: "accept" | "reject"): Promise<"proceed" | "skip" | "stop"> => {
-    if (documentId === null) return "proceed";
-    const item = state.proposals?.groups.flatMap((group) => group.items).find((candidate) => candidate.derived === true && candidate.blockId === blockId);
-    if (item === undefined) return "proceed";
-    if (proposalEdit.answered.includes(item.itemId)) return intent === "reject" ? "skip" : "proceed";
-    const outcome = await answerProposal(documentId, item.itemId, intent === "accept" ? "accepted" : "rejected");
-    if (outcome.outcome !== "success") {
-      state.notice = describeOutcome(outcome);
-      return "stop";
-    }
-    proposalEdit.answered = [...proposalEdit.answered, item.itemId];
-    if (intent === "accept") proposalEdit.accepted = [...proposalEdit.accepted, item.itemId];
-    proposalEdit.changes += 1;
-    if (state.proposals !== null) state.proposals = withoutItems(state.proposals, [item.itemId]);
-    if (intent === "reject") return "skip";
-    await reload$();
-    await markOwnAct$();
-    return "proceed";
-  });
-
-  /** A derived candidate a run staged and nobody has answered: it is not a
-   * block truth holds, so a standing or a reference on it is refused and the
-   * reader is asked to answer it. Using it no longer accepts it
-   * (`BO_0258`, Decided). BO_0258_014 */
-  const unanswered$ = $((blockId: string): boolean => {
-    const item = state.proposals?.groups.flatMap((group) => group.items).find((candidate) => candidate.derived === true && candidate.blockId === blockId);
-    return item !== undefined && !proposalEdit.answered.includes(item.itemId);
-  });
-
   const marking = useMarking({
     documentId,
     surface: state,
-    beforeReference$: $(async (blockId: string) => {
-      if (!(await unanswered$(blockId))) return true;
-      state.notice = "Answer this suggestion before referring to it.";
-      return false;
-    }),
   });
   useContextProvider(MarkingContext, marking);
+  // The rows the reader's text selection marks, and the press the page is
+  // in: while several rows are marked none is the bar's subject, and while
+  // a press is under way no row takes the focus. DO_0023_002
+  const selectionMarks = useMarkedRows({ root, marking: marking.store });
+  /** A focus asked for during a press, given when the press ends — unless the
+   * press marked several rows, which leaves every row unfocused. Redrawing a
+   * row mid-press moves its words, and a selection started in them would lose
+   * its start. DO_0023_001 */
+  const deferredFocus = useStore({ blockId: null as string | null, itemId: null as string | null });
 
   // A block's standing: every path that changes one — the swipe, the bar,
   // the chord, Reopen — writes through here. BO_0227_011
@@ -1401,12 +1398,20 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     save$,
     deactivate$,
     reload$,
-    beforeStanding$: $(async (blockId: string): Promise<"proceed" | "skip" | "stop"> => {
-      if (!(await unanswered$(blockId))) return "proceed";
-      state.notice = "Answer this suggestion before giving it a standing.";
-      return "stop";
+    // Taking a removal back restores the block where it was drawn.
+    // BO_0315_012
+    restore$: $(async (blockId: string, placement: RestorePlacement): Promise<boolean> => {
+      if (documentId === null || !(await save$())) return false;
+      const outcome = await sendCommand(documentId, { command: "restore", blockId, placement });
+      if (outcome.outcome !== "success") {
+        state.notice = describeOutcome(outcome);
+        return false;
+      }
+      state.notice = null;
+      await reload$();
+      if (state.retiredOpen) await reloadRetired$();
+      return true;
     }),
-    afterStanding$: markOwnAct$,
   });
   useContextProvider(StandingContext, standing);
 
@@ -1419,6 +1424,10 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   // rows; a press on one is the extension's. BO_0301_015
   const inlineAnnotations = useStore<InlineAnnotations>({ sources: {}, version: 0, pressed: null });
   useContextProvider(InlineAnnotationsContext, inlineAnnotations);
+  // A character an extension registers — keywords' `@` — which opens a list
+  // while a text block is edited, as `#` does. BO_0310_011
+  const inlineTriggers = useStore<InlineTriggers>({ triggers: {}, version: 0 });
+  useContextProvider(InlineTriggersContext, inlineTriggers);
   // The document's numbering, handed to the editing surface and to the
   // proposals drawn beside it. BO_0291_025
   useTask$(({ track }) => {
@@ -1445,14 +1454,44 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   });
 
 
-  /** A derived candidate used from its own line: the standing path answers
-   * it first (`settleDerived$`) and then writes the standing. BO_0246_006 */
-  const useDerived$ = $(async (blockId: string, use: "fixate" | "discard") => {
-    // A candidate is not yet a block the standing can name: it is answered
-    // first, and the standing then lands on the block the acceptance
-    // established. BO_0246_006
-    const verdict = await settleDerived$(blockId, use === "fixate" ? "accept" : "reject");
-    if (verdict === "proceed" && use === "fixate") await standing.setStanding$(blockId, "fixate");
+  /** Each block's command choices as this page holds them: *Keep as content*
+   * and the working mode. DO_0025_002 DO_0025_003 */
+  const commandChoices = useStore<{ byBlock: Record<string, CommandChoice> }>({ byBlock: {} });
+  /** Holds a block's choices for the page and keeps them on the device. */
+  const keepChoice$ = $((blockId: string, choice: CommandChoice) => {
+    commandChoices.byBlock = { ...commandChoices.byBlock, [blockId]: choice };
+    if (documentId === null) return;
+    try {
+      window.localStorage.setItem(commandChoiceKey(documentId, blockId), storedChoice(choice));
+    } catch {
+      // A device that keeps nothing still holds the choice for the page.
+    }
+  });
+  /** *Keep as content* switched on one block. DO_0025_001 */
+  const setKeep$ = $(async (blockId: string, keep: boolean) => {
+    const choice = choiceIn(commandChoices.byBlock, state.runs, state.document, blockId, state.mode);
+    await keepChoice$(blockId, { ...choice, keep, stored: true });
+  });
+  /** One axis of one block's mode switched; no other block changes and
+   * nothing is written to the kernel until it is sent. DO_0025_003 */
+  const switchCommandMode$ = $(async (blockId: string, axis: "field" | "work") => {
+    const choice = choiceIn(commandChoices.byBlock, state.runs, state.document, blockId, state.mode);
+    await keepChoice$(blockId, { ...choice, mode: switched(choice.mode, axis), stored: true });
+  });
+
+  /**
+   * A pinch on a block (`BO_0322`): a run with no words, zooming in to
+   * deepen the block or out to gather its neighbours into its focused work,
+   * in the pinch's own mode, on the agent and speed the command line shows.
+   * Nothing is written to the block's standing or its remembered choices. A
+   * refusal is said where the document says what went wrong. BO_0322_010
+   * BO_0322_012
+   */
+  const pinch$ = $(async (pinch: "in" | "out", blockId: string): Promise<SentCommand> => {
+    if (documentId === null) return { ok: false, error: "The document is not open." };
+    const sent = await bridge.sendPinch$({ itemId: documentId, blockId, pinch, mode: PINCH_MODE[pinch] });
+    if (!sent.ok) state.notice = sent.error;
+    return sent;
   });
 
   /**
@@ -1463,8 +1502,10 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
    * the flow, and *keep as content* writes nothing; a refusal writes nothing.
    * BO_0267_012
    */
-  const sendBlock$ = $(async (blockId: string, asPrompt: boolean, attachments: readonly AttachmentDescriptor[]): Promise<SentCommand> => {
+  const sendBlock$ = $(async (blockId: string, asPrompt: boolean, attachments: readonly AttachmentDescriptor[]): Promise<SentCommand & { readonly note?: string }> => {
     if (documentId === null) return { ok: false, error: "The document is not open." };
+    // The command's own mode, chosen on its line. DO_0025_003
+    const choice = choiceIn(commandChoices.byBlock, state.runs, state.document, blockId, state.mode);
     let revisionId: string;
     let words: string;
     if (editor.blockId === blockId) {
@@ -1478,11 +1519,31 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       words = runsText(held.runs);
     }
     if (words.trim() === "") return { ok: false, error: "Write the command in the block before sending it." };
-    const sent = await bridge.sendCommand$({ itemId: documentId, source: { block: blockId, revisionId }, words, attachments });
+    // What the block's command places set on it — the profile its chip
+    // chose. BO_0311_030
+    const options = optionsOf(bridge.commandOptions, documentId, blockId);
+    const sent = await bridge.sendCommand$({
+      itemId: documentId,
+      source: { block: blockId, revisionId },
+      words,
+      attachments,
+      mode: choice.mode,
+      ...(Object.keys(options).length === 0 ? {} : { options }),
+    });
     if (!sent.ok) return sent;
     if (!state.sources.includes(blockId)) state.sources = [...state.sources, blockId];
     if (marking.store.marking.mode === "command") await marking.point$(null);
     if (asPrompt) await standing.setStanding$(blockId, "prompt");
+    // The block remembers how it was sent, and its mode is now the one the
+    // document last sent: the start of a block never sent, and what the
+    // console and a gesture carry. DO_0025_002 DO_0025_003 DO_0025_009
+    await keepChoice$(blockId, { keep: !asPrompt, mode: choice.mode, stored: true });
+    state.mode = choice.mode;
+    await bridge.setMode$(documentId, choice.mode);
+    const written = await sendWorkingMode(documentId, choice.mode);
+    if (written.outcome !== "success") {
+      return { ...sent, note: `Sent. The mode it carried could not be kept as the document's last: ${describeOutcome(written)}` };
+    }
     return sent;
   });
 
@@ -1492,6 +1553,31 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     const active = track(() => state.activeBlockId);
     if (active !== null && commandFiles.byBlock[active] === undefined) {
       commandFiles.byBlock = { ...commandFiles.byBlock, [active]: { attachments: [], attachNotice: null } };
+    }
+  });
+
+  // A block's command choices, from the device, once it is edited or pointed
+  // from: what the person chose there wins over what was sent. DO_0025_002
+  // eslint-disable-next-line qwik/no-use-visible-task
+  useVisibleTask$(({ track }) => {
+    const active = track(() => state.activeBlockId);
+    const prompt = track(() => (marking.store.marking.mode === "command" ? marking.store.prompt : null));
+    if (documentId === null) return;
+    for (const blockId of [active, prompt]) {
+      if (blockId === null || commandChoices.byBlock[blockId] !== undefined) continue;
+      let raw: string | null = null;
+      try {
+        raw = window.localStorage.getItem(commandChoiceKey(documentId, blockId));
+      } catch {
+        raw = null;
+      }
+      const stored = readStoredChoice(raw);
+      if (stored.keep === undefined && stored.mode === undefined) continue;
+      const block = state.document?.blocks.find((candidate) => candidate.blockId === blockId);
+      commandChoices.byBlock = {
+        ...commandChoices.byBlock,
+        [blockId]: resolveChoice(stored, state.runs, blockId, block !== undefined && "standing" in block ? String(block.standing) : undefined, state.mode),
+      };
     }
   });
 
@@ -1511,8 +1597,9 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     try {
       const response = await fetch(`/api/runs?artifact=${encodeURIComponent(documentId)}`);
       if (!response.ok) return;
-      const body = (await response.json()) as { runs?: { source: string | null }[] };
-      state.sources = [...new Set((body.runs ?? []).flatMap((run) => (run.source === null ? [] : [run.source])))];
+      const body = (await response.json()) as { runs?: SentRun[] };
+      state.runs = [...(body.runs ?? [])];
+      state.sources = [...new Set(state.runs.flatMap((run) => (run.source === null ? [] : [run.source])))];
     } catch {
       // The glyph is a convenience: a read that fails leaves the ones known.
     }
@@ -1535,19 +1622,36 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
    * stays the gesture it is. CA_0046_001 BO_0256_011
    */
   const focus$ = $(async (blockId: string) => {
+    if (selectionMarks.pressed) {
+      deferredFocus.blockId = blockId;
+      deferredFocus.itemId = null;
+      return;
+    }
     state.focusedItemId = null;
     if (state.focusedBlockId === blockId) return;
     state.focusedBlockId = blockId;
-    // The faces of what the target's blocks have opened as focused work,
-    // read on the first focus and never on the document read, so faces cost
-    // nothing until a reader turns to a block. CA_0065_010
-    if (state.faces === null && documentId !== null) state.faces = await bridge.faces$(documentId);
+  });
+
+  // Read all focused-work faces once the document is available. This visible
+  // task starts after the reading surface has rendered, so a slow answer
+  // cannot hold the page or block activation (`DO_0001`). DO_0029_001
+  // eslint-disable-next-line qwik/no-use-visible-task
+  useVisibleTask$(async ({ track }) => {
+    const status = track(() => state.status);
+    const faces = track(() => state.faces);
+    if (documentId === null || status !== "ready" || faces !== null) return;
+    try {
+      state.faces = await bridge.faces$(documentId);
+    } catch {
+      // A missing face is only a convenience; the control can still open it.
+    }
   });
 
   /**
    * Presses one of the shell's own block controls — *Open as focused work* is
-   * the one there is. The shell opens or finds the child and retargets the
-   * tab; a refusal is shown as the editor's notice. CA_0065_009
+   * the one there is. The shell opens or finds the child and opens it in a tab
+   * of its own; a refusal is shown as the editor's notice. CA_0065_009
+   * CA_0073_003
    */
   const pressBlockControl$ = $(async (control: string, blockId: string) => {
     if (documentId === null || state.document === null) return;
@@ -1564,6 +1668,11 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
    * a proposal the reader has turned to as they act on a block, and the two
    * focuses are one, so focusing either lets the other go. DO_0006_004 */
   const focusItem$ = $((itemId: string) => {
+    if (selectionMarks.pressed) {
+      deferredFocus.itemId = itemId;
+      deferredFocus.blockId = null;
+      return;
+    }
     if (state.focusedItemId === itemId) return;
     state.focusedItemId = itemId;
     state.focusedBlockId = null;
@@ -1607,6 +1716,10 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     // by this QRL, which cannot cross the boundary.
     if (editor.blockId !== null || state.editingItemId !== null) return;
     if (marking.store.marking.mode !== "reading") return;
+    // Nothing is taken during a press or while a selection marks several
+    // rows: the row the selection started in would be drawn again under it.
+    // DO_0023_001 DO_0023_002
+    if (selectionMarks.pressed || marksSeveral(selectionMarks.rows)) return;
     if (itemId !== null) {
       if (state.focusedItemId === itemId) return;
       state.focusedItemId = itemId;
@@ -1616,6 +1729,19 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     if (blockId === null || state.focusedBlockId === blockId) return;
     state.focusedItemId = null;
     state.focusedBlockId = blockId;
+  });
+
+  /** The focus a press asked for, given once it ends — unless it marked
+   * several rows. DO_0023_001 */
+  useTask$(({ track }) => {
+    const pressed = track(() => selectionMarks.pressed);
+    if (pressed) return;
+    const { blockId, itemId } = deferredFocus;
+    deferredFocus.blockId = null;
+    deferredFocus.itemId = null;
+    if (marksSeveral(selectionMarks.rows)) return;
+    if (itemId !== null) void focusItem$(itemId);
+    else if (blockId !== null) void focus$(blockId);
   });
 
   /** A proposal's text taking or losing the caret. While it holds one the
@@ -1633,15 +1759,16 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
 
 
   /**
-   * Goes back along the route to the crumb at `index`: the route is popped
-   * to it and the tab retargeted, with the block that was opened from there
-   * focused once the parent shows. CA_0047_004
+   * Goes back along the route to the crumb at `index`: that document's tab
+   * becomes active, or it opens in a tab of its own with the route popped to
+   * it, and the block that was opened from there is focused once it shows.
+   * This tab stays as it is. CA_0047_004 CA_0073_003
    */
   const back$ = $(async (index: number) => {
     const route = routeOf(tab, state.document?.title);
     const target = route[index];
     if (target === undefined || index >= route.length - 1) return;
-    await bridge.retarget$({
+    await bridge.openAlongRoute$({
       itemId: target.itemId,
       title: target.title,
       route: route.slice(0, index + 1),
@@ -1719,7 +1846,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   );
 
   /** A new block directly below a drawn row — a block of any kind, standing
-   * or state, a revealed retired or discarded row, or a proposal, which
+   * or state, a revealed removed row, or a proposal, which
    * stays open (DO_0016_003). The placement is worked out after the save, so
    * it reads the rows the save left. */
   const insert$ = $(async (kind: "text" | "divider" | "table" | "code" | "equation" | "admonition" | "image", below: RowTarget) => {
@@ -1900,25 +2027,6 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       await readBack$(null);
     },
   );
-
-  /**
-   * The whole front matter written from the head (`BO_0293_016`,
-   * `BO_0293_025`) on the document's base, the document read back so the head
-   * redraws; a refusal goes to the notice line and writes nothing. Answers
-   * whether it was written, so a chip's field is cleared only then.
-   */
-  const saveFront$ = $(async (next: FrontMatter): Promise<boolean> => {
-    if (documentId === null || state.document === null) return false;
-    await writesSettled(tab.id);
-    const outcome = await sendCommand(documentId, { command: "setFrontMatter", baseRevisionId: state.document.revisionId, frontMatter: next });
-    if (outcome.outcome !== "success") {
-      state.notice = describeOutcome(outcome);
-      return false;
-    }
-    state.notice = null;
-    await readBack$(null);
-    return true;
-  });
 
   /**
    * The document's own citation style chosen in the bar (`BO_0291_037`): the
@@ -2237,12 +2345,10 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       return;
     }
     const rows = drawnRows(state, doc, branchOf(documentId, tab.id));
-    const body = rows.filter((row) => row.section === undefined);
-    const lowest = body[body.length - 1];
+    const lowest = rows[rows.length - 1];
     if (
       lowest?.kind === "block" &&
       !lowest.retired &&
-      !lowest.discarded &&
       lowest.prompt !== true &&
       isText(lowest.block) &&
       runsLength(lowest.block.runs) === 0
@@ -2719,8 +2825,8 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
 
   /** Moves the caret across a block boundary to the nearest text block the
    * document draws for editing, in the order it draws them: a prompt only
-   * under *Show prompts*, and never a row that takes no caret — a discarded
-   * row, shown or not, a retired row, a proposal row or a divider. Up and
+   * under *Show prompts*, and never a row that takes no caret — a removed
+   * row, a proposal row or a divider. Up and
    * Down arrive at the same place across the page on the nearest line, or as
    * many characters in where nothing is measured; Left and Right at the
    * block's end or start. DO_0003_002 */
@@ -2728,7 +2834,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     const doc = state.document;
     if (doc === null) return;
     const rows = drawnRows(state, doc, branchOf(documentId, tab.id)).flatMap((row) =>
-      row.kind === "block" && !row.retired && !row.discarded && isText(row.block) ? [row.block] : [],
+      row.kind === "block" && !row.retired && isText(row.block) ? [row.block] : [],
     );
     const at = rows.findIndex((block) => block.blockId === editor.blockId);
     if (at === -1) return;
@@ -2750,6 +2856,22 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
 
   const retire$ = $(async (blockId: string) => {
     await structural$({ command: "retire", blockId }, null);
+  });
+
+  /**
+   * *Remove* on one block — the left swipe, the bar's button, Delete while
+   * reading: the block is retired, a fixated one included, and the take-back
+   * control offers to restore it where it was drawn, which is read before the
+   * block leaves the rows. BO_0315_010 BO_0315_011 BO_0315_012
+   */
+  const removeBlock$ = $(async (blockId: string) => {
+    const doc = state.document;
+    const block = doc?.blocks.find((candidate) => candidate.blockId === blockId);
+    if (doc === null || block === undefined) return;
+    const placement: RestorePlacement = restorePlacement(drawnRows(state, doc, branchOf(documentId, tab.id)), blockId);
+    if (!(await structural$({ command: "retire", blockId }, null))) return;
+    if (state.focusedBlockId === blockId) state.focusedBlockId = null;
+    await standing.removed$(block, placement);
   });
 
   /**
@@ -2789,13 +2911,24 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   });
 
 
+  /** *Show removed*: the retired blocks and the rejected proposals, each
+   * where it stood. BO_0315_015 */
   const toggleRetired$ = $(async (on: boolean) => {
     state.retiredOpen = on;
-    if (state.retiredOpen) await reloadRetired$();
+    if (state.retiredOpen) await Promise.all([reloadRetired$(), reloadProposals$()]);
   });
 
-  const toggleDiscarded$ = $((on: boolean) => {
-    state.discardedOpen = on;
+  /** *Restore* on a rejected proposal: staged again as a new open proposal
+   * of the reader's, and the proposals read again. BO_0315_015 */
+  const reopen$ = $(async (itemId: string) => {
+    if (documentId === null) return;
+    const outcome = await reopenProposal(documentId, itemId);
+    if (outcome.outcome !== "success") {
+      state.notice = describeOutcome(outcome);
+      return;
+    }
+    state.notice = null;
+    await reloadProposals$();
   });
 
   const togglePrompts$ = $((on: boolean) => {
@@ -2809,8 +2942,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   useVisibleTask$(({ track }) => {
     const restored = track(() => shows.restored);
     const kept: DocumentShows = {
-      retired: track(() => state.retiredOpen),
-      discarded: track(() => state.discardedOpen),
+      removed: track(() => state.retiredOpen),
       proposals: track(() => state.proposalsOpen),
       prompts: track(() => state.promptsOpen),
     };
@@ -2910,6 +3042,64 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
 
 
 
+  /**
+   * Delete or Backspace on a selection marking several rows (`DO_0023_004`, `BO_0315_011`):
+   * every marked block of the document retires in one write — fixated ones
+   * too, since fixation guards words and not the block — and every marked
+   * proposal is declined, which is how a block not yet in the document leaves
+   * its reading order. The proposals are answered after the write, through the
+   * path that answers one, since an answer is the kernel's decision on a group
+   * and cannot travel in the document's script; a refused write declines
+   * nothing. Then the selection clears and nothing is focused. User decision,
+   * 2026-09-29.
+   *
+   * The marked proposals are declined together, not one after another: each
+   * leaves the list at once, every answer is sent without waiting on the
+   * others, and the document and its proposals are read again once, when all
+   * the answers are in. One already settled by an earlier answer is gone; any
+   * other refusal puts its proposal back and is named in one notice. User
+   * decision, 2026-09-30. DO_0024_001
+   */
+  const retireMarked$ = $(async () => {
+    const doc = state.document;
+    if (documentId === null || doc === null) return;
+    const { blocks: blockIds, items: marked } = selectionMarks.rows;
+    const blocks = blockIds.flatMap((blockId) => {
+      const block = doc.blocks.find((candidate) => candidate.blockId === blockId);
+      return block === undefined ? [] : [{ blockId, baseRevisionId: block.revisionId }];
+    });
+    if (blocks.length > 0 && !(await structural$({ command: "retireBlocks", blocks }, null))) return;
+    // An edit that is accepting a proposal, or has, made the decision.
+    const items = marked.filter((itemId) => !proposalEdit.settling.includes(itemId) && !proposalEdit.accepted.includes(itemId));
+    if (items.length > 0) {
+      const listed = new Map(
+        (state.proposals?.groups ?? []).flatMap((group) => group.items).map((item) => [item.itemId, item] as const),
+      );
+      for (const itemId of items) await flushProposalStep$(itemId);
+      for (const itemId of items) await dropProposal$(itemId);
+      const answers = await Promise.all(
+        items.map(async (itemId) => ({ itemId, outcome: await answerProposal(documentId, itemId, "rejected", false) })),
+      );
+      const stayed = answers.filter((answer) => answer.outcome.outcome !== "success" && !alreadySettled(answer.outcome));
+      if (stayed.length > 0) {
+        const back = stayed.map((answer) => answer.itemId);
+        proposalEdit.answered = proposalEdit.answered.filter((itemId) => !back.includes(itemId));
+        proposalEdit.changes += 1;
+        state.notice = declineNotice(
+          stayed.map((answer) => ({ item: listed.get(answer.itemId), outcome: answer.outcome })),
+          describeOutcome,
+        );
+      }
+      // Reading the document again reads the changes and the proposals once
+      // after it (the task on `state.loaded`), so nothing reads them here.
+      await reload$();
+      if (state.retiredOpen) void reloadRetired$();
+    }
+    root.value?.ownerDocument.getSelection?.()?.removeAllRanges();
+    state.focusedBlockId = null;
+    state.focusedItemId = null;
+  });
+
   /** What a press in one of the bar's block groups does, named rather than
    * handed over as a function: a proposal's press carries it across its
    * acceptance, and nothing but data crosses. DO_0006_004 */
@@ -2966,11 +3156,10 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     void reloadChanges$();
   });
 
-  /** A swipe on a proposal: the acceptance, then the standing the release
-   * committed — the same path a press in the bar's block groups takes, since
-   * both are the reader working with a proposal as a block. BO_0272_008
-   * DO_0006_004 */
-  const swipeProposal$ = $(async (itemId: string, to: Standing) => {
+  /** *Fixate* on a proposal: the acceptance, then the standing — the same
+   * path a press in the bar's block groups takes, since both are the reader
+   * working with a proposal as a block. DO_0006_004 */
+  const standProposal$ = $(async (itemId: string, to: Standing) => {
     await acceptThenAct$(itemId, { act: "standing", to });
   });
 
@@ -3213,6 +3402,9 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
         source: "workspace",
         operations: ["move"],
         preview,
+        // The document it leaves, so a view it is dropped into tells it from
+        // one of its own blocks. CA_0072_002
+        from: documentId ?? undefined,
       };
       return bridge.startDrag$(payload, event);
     },
@@ -3255,7 +3447,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   /**
    * One arrow press on a row's grip: the row lands directly before the row
    * drawn above it, or after the one below, as its kind moves — a block by its
-   * move (a discarded one stays discarded), a retired block without
+   * move, a retired block without
    * restoring it, a proposal staged into its group unanswered. BO_0263_013
    */
   const stepRow$ = $(async (position: string, direction: -1 | 1) => {
@@ -3410,11 +3602,9 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     track(() => state.status);
     track(() => state.document);
     track(() => state.retiredOpen);
-    track(() => state.discardedOpen);
     track(() => state.promptsOpen);
     track(() => state.proposalsOpen);
     track(() => state.branchGroup);
-    track(() => state.mode);
     track(() => state.focusedBlockId);
     track(() => state.focusedItemId);
     track(() => state.proposals);
@@ -3429,45 +3619,26 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     track(() => editor.future.length);
     track(() => standing.store.overlay);
     track(() => standing.store.takeBack);
+    track(() => selectionMarks.rows);
 
     if (state.status !== "ready" || state.document === null) {
       bridge.bar.groups = [];
       return;
     }
 
-    // The two acts that decide what the document is rather than what one of
-    // its blocks says, at the bar's leading edge: *Work in a proposal* here,
-    // and `calliopa-refine`'s *Establish…* appended to this same group
-    // through the shell's decoration bar. A decoration can only join a group
-    // the view already contributes, so this group is what puts *Establish…*
-    // at the leading edge too. Never on a change document, whose members are
-    // read-only (`CA_0057_005`). DO_0010_001
+    // The act that decides what the document is rather than what one of its
+    // blocks says, at the bar's leading edge: *Work in a proposal*. A
+    // decoration can only join a group the view already contributes. Never on
+    // a change document, whose members are read-only (`CA_0057_005`).
+    // DO_0010_001
     const groups: ViewBarGroup[] = [];
     if ((state.document as { change?: string }).change === undefined) {
       groups.push({
         id: "work",
         label: "Work",
         actions: [
-          // The working mode leads, one control per axis, each wearing the
-          // pole in force so what the person sees is what is active; a press
-          // switches to the other pole. Not pressed toggles: neither pole is
-          // the pressed one. BO_0306_010
-          {
-            kind: "button",
-            id: "working-mode-field",
-            label: POLES[state.mode.field].label,
-            icon: POLES[state.mode.field].icon,
-            name: toggleName(state.mode.field),
-            run$: $(() => switchMode$("field")),
-          },
-          {
-            kind: "button",
-            id: "working-mode-work",
-            label: POLES[state.mode.work].label,
-            icon: POLES[state.mode.work].icon,
-            name: toggleName(state.mode.work),
-            run$: $(() => switchMode$("work")),
-          },
+          // The working mode is chosen on a block's command line, not here.
+          // DO_0025_009
           {
             kind: "toggle",
             id: "work-in-proposal",
@@ -3486,19 +3657,11 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
         actions: [
           {
             kind: "toggle",
-            id: "retired-blocks",
-            label: "Show retired blocks",
+            id: "removed",
+            label: "Show removed",
             icon: "archive",
             on: state.retiredOpen,
             run$: toggleRetired$,
-          },
-          {
-            kind: "toggle",
-            id: "discarded-blocks",
-            label: "Show discarded blocks",
-            icon: "eye-slash",
-            on: state.discardedOpen,
-            run$: toggleDiscarded$,
           },
           {
             kind: "toggle",
@@ -3525,13 +3688,17 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     // whole block act on it; *Format* and *History* wait for the caret.
     // DO_0006_001 DO_0006_004
     const editing = editor.blockId !== null;
+    // Several rows marked by the selection: no row is the subject and the
+    // single-block controls stand disabled; Delete removes them all.
+    // DO_0023_003 BO_0315_011
+    const several = !editing && marksSeveral(selectionMarks.rows);
     const item =
-      state.focusedItemId === null
+      several || state.focusedItemId === null
         ? undefined
         : (state.proposals?.groups.flatMap((group) => group.items) ?? []).find(
             (candidate) => candidate.itemId === state.focusedItemId,
           );
-    const blockId = editor.blockId ?? (item === undefined ? state.focusedBlockId : item.blockId);
+    const blockId = editor.blockId ?? (several ? null : item === undefined ? state.focusedBlockId : item.blockId);
     // A proposal acts through its acceptance, so every press on it goes
     // through one wrapper; a block of the document acts directly. What the
     // press does travels as data, never as a function handed across.
@@ -3617,7 +3784,25 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       blockId === null
         ? undefined
         : state.document.blocks.find((candidate) => candidate.blockId === blockId);
-    if (blockId !== null) {
+    if (several) {
+      const idle = (id: string, label: string, icon: IconName): ViewAction => ({ kind: "button", id, label, icon, disabled: true, run$: $(() => undefined) });
+      groups.push(
+        { id: "turn-into", label: "Turn into", actions: [idle("block-role", "Block type", ROLE_ICON.paragraph)] },
+        {
+          id: "block",
+          label: "Block",
+          actions: [
+            idle("block-add-paragraph", "Add paragraph", "plus"),
+            idle("block-add-image", "Add image", "image"),
+            idle("block-add-table", "Add table", "table"),
+            idle("block-add-equation", "Add equation", "equals"),
+            idle("block-add-code", "Add code", "code"),
+            idle("block-import-table", "Import table", "upload-simple"),
+          ],
+        },
+        { id: "standing", label: "Standing", actions: [idle("block-standing", "Standing", STANDING_ICON.keep)] },
+      );
+    } else if (blockId !== null) {
       // The subject's place in the document's order, which names the block
       // its controls act on. `editor.position` holds it only for the block
       // being edited. DO_0006_001
@@ -3735,15 +3920,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                 tableFile.value?.click();
               }),
             },
-            {
-              kind: "button",
-              id: "block-retire",
-              label: "Retire",
-              icon: "archive",
-              name: `Retire ${named}`,
-              run$: press$({ act: "retire" }),
-            },
-          ] satisfies ViewAction[]).filter((action) => !retiredSubject || action.id !== "block-retire"),
+          ] satisfies ViewAction[]),
         };
       groups.push(...(retiredSubject ? [blockGroup] : [turnInto, blockGroup]));
       // A picture, a table or an accepted output asks for a number here: a
@@ -3813,15 +3990,19 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
               id: "standing-info",
               label: "What a standing means",
               icon: "info",
-              heading: "A block stands in one of three states.",
+              heading: "A block is kept or fixated, or you remove it.",
               lines: [
                 ...SCALE.map((option) => ({
                   term: STANDING_LABEL[option],
                   text: STANDING_MEANING[option],
                 })),
                 {
+                  term: "Remove",
+                  text: "Takes a block out of the document, or turns a proposed change down. Show removed brings both back where they stood, to restore or reopen.",
+                },
+                {
                   term: "Setting one",
-                  text: "Swipe a block left to discard it and right to fixate it, or press Alt+Shift+← and Alt+Shift+→ on the block you are reading. The bar's Standing control sets the block you have turned to or are editing, and that block also carries the three buttons on its top edge.",
+                  text: "Swipe a row right to keep it — a block is fixated, a proposed change accepted — and left to remove it; a fixated block swiped left is kept first. While reading, Delete removes the block you have turned to. The block you have turned to or are editing carries Remove and Fixate on its top edge.",
                 },
               ],
             },
@@ -3932,7 +4113,9 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
         name:
           standing.store.takeBack === null
             ? "Take back the last change of standing"
-            : `Take back: ${standing.store.takeBack.did}`,
+            : standing.store.takeBack.kind === "removal"
+              ? `Take back ${standing.store.takeBack.did}`
+              : `Take back: ${standing.store.takeBack.did}`,
         disabled: standing.store.takeBack === null,
         run$: standing.takeBack$,
       },
@@ -3969,6 +4152,38 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     bridge.bar.groups = groups;
   });
 
+  /** The last drop this view has seen, taken at mount, so a drop older than
+   * the view is never answered by it. CA_0072_002 */
+  const dropsSeen = useStore({ seq: bridge.drag.drop?.seq ?? 0 });
+
+  /**
+   * A block dropped onto a text block's middle (CA_0072_007): the shell opens
+   * the target's focused work, or finds the one it has, without leaving this
+   * document, and the block moves to its end — from this document or from
+   * the one it was dragged out of. The reader stays; the target wears its
+   * face at once. A refusal from either is said on the document.
+   */
+  const nest$ = $(async (payload: DragPayload, targetId: string) => {
+    if (documentId === null) return;
+    const blockId = payload.itemId;
+    if (blockId === targetId || blockId.includes(":")) return;
+    if (!(await save$())) return;
+    const child = await bridge.focusedChild$(documentId, targetId);
+    if ("refusal" in child) {
+      state.notice = child.refusal;
+      return;
+    }
+    const outcome = await sendCommand(child.itemId, {
+      command: "moveIn",
+      blockId,
+      fromDocumentId: payload.from ?? documentId,
+      placement: { at: "end" },
+    });
+    state.notice = outcome.outcome === "success" ? null : describeOutcome(outcome);
+    await readBack$(null);
+    state.faces = await bridge.faces$(documentId);
+  });
+
   // A visible task for the counts task's reason: a drop awaits its write.
   // DO_0001_002
   // eslint-disable-next-line qwik/no-use-visible-task
@@ -3976,12 +4191,25 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     track(() => bridge.drag.drop?.seq);
     const drop = bridge.drag.drop;
     if (drop == null) return;
-    if (drop.operation !== "move" || !drop.overId.startsWith("block:")) return;
+    // A drop is answered once, by the view it landed in. The shell keeps the
+    // last drop after its gesture, so a view mounted after it — a tab a held
+    // drag opened, a tab switched to later — would otherwise take it as its
+    // own on its first run. CA_0072_002
+    if (drop.seq <= dropsSeen.seq) return;
+    dropsSeen.seq = drop.seq;
+    if (drop.operation !== "move") return;
+    // Onto a block's middle: the block is taken into it, as its focused
+    // work. CA_0072_007
+    if (drop.overId.startsWith("nest:")) {
+      await nest$(drop.payload, drop.overId.slice("nest:".length));
+      return;
+    }
+    if (!drop.overId.startsWith("block:")) return;
     const target = drop.overId.slice("block:".length);
     const doc = state.document;
     if (doc === null || target === drop.payload.itemId || `retired:${target}` === drop.payload.itemId) return;
     // Directly before the row it was dropped on, whatever that row is — a
-    // proposed insert, a retired or a discarded block as well as a block of
+    // proposed insert, a removed row as well as a block of
     // the document — between the keys of the rows the reader saw. BO_0263_002
     const placement = dropPlacement(drawnRows(state, doc, branchOf(documentId, tab.id)), target);
     if (placement === null) return;
@@ -3999,6 +4227,13 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       if (item === undefined) return;
       await drawProposalAt$(itemId, localOrder(placement, placedOf(doc.blocks), item.blockId));
       await placeProposal$(itemId, placement);
+      return;
+    }
+    // A block of another document moves into this one, where it was
+    // dropped. CA_0072_008
+    const from = drop.payload.from;
+    if (from !== undefined && from !== documentId) {
+      await structural$({ command: "moveIn", blockId: drop.payload.itemId, fromDocumentId: from, placement }, null);
       return;
     }
     await dropOn$(drop.payload.itemId, placement);
@@ -4019,9 +4254,8 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     if (documentId !== null && state.document !== null) {
       const kept = storedShows(documentId);
       if (kept !== null) {
-        state.discardedOpen = kept.discarded;
         state.promptsOpen = kept.prompts;
-        if (kept.retired) await toggleRetired$(true);
+        if (kept.removed) await toggleRetired$(true);
         if (kept.proposals) await toggleProposals$(true);
       }
       shows.restored = true;
@@ -4058,38 +4292,8 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     // asked for with `keepalive` while the document is still here.
     const leaving = () => {
       void save$(true);
-      markRead(true);
     };
     frame.addEventListener("beforeunload", leaving);
-    // The reader's mark: written once the derived headings came into view,
-    // and again as the tab is left, at the data revision the document was
-    // read at; never on the document read. BO_0246_007
-    let marked = -1;
-    const markRead = (keepalive = false) => {
-      const at = state.document?.dataRevision;
-      if (documentId === null || at === undefined || at === marked) return;
-      marked = at;
-      void sendReadMark(documentId, at, keepalive);
-    };
-    let watching: IntersectionObserver | null = null;
-    const Observer = (frame as unknown as { IntersectionObserver?: typeof IntersectionObserver }).IntersectionObserver;
-    if (typeof Observer === "function" && surface !== null) {
-      watching = new Observer((entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) markRead();
-      }, { root: surface });
-      const headings = () => {
-        for (const heading of surface.querySelectorAll(".derived-heading")) watching?.observe(heading);
-      };
-      headings();
-      // Headings arrive with the document's reads; a repaint adds new ones.
-      const seen = new MutationObserver(headings);
-      seen.observe(surface, { childList: true, subtree: true });
-      cleanup(() => seen.disconnect());
-    }
-    cleanup(() => {
-      watching?.disconnect();
-      markRead(true);
-    });
     // The surface owns the mode, so the surface hears the key: one listener
     // decides, and no block arbitrates the same event for itself. It listens on
     // the document because the shortcut opens the mode from wherever the reader
@@ -4101,14 +4305,46 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       // first, and the ordering the shell's.
       if (view === null || view.closest("[inert]") !== null) return;
       // `Ctrl`/`Cmd`+`Enter` sends the block being edited, or the prompt
-      // pointed from, as a prompt. BO_0267_012
+      // pointed from, the way its *Keep as content* says. BO_0267_012
+      // DO_0025_001
       if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
         const prompt =
           editor.blockId ?? (marking.store.marking.mode === "command" ? marking.store.prompt : null);
         if (prompt === null) return;
         event.preventDefault();
-        void sendBlock$(prompt, true, []);
+        // The way *Keep as content* says. DO_0025_001
+        const keep = choiceIn(commandChoices.byBlock, state.runs, state.document, prompt, state.mode).keep;
+        void sendBlock$(prompt, !keep, []);
         return;
+      }
+      // Delete or Backspace while reading removes: every row a selection
+      // marks, else the row turned to — a fixated block at once, a proposal
+      // by rejecting it. A key pressed in an editor, a field or the title
+      // keeps its meaning there. BO_0315_011
+      if (
+        (event.key === "Delete" || event.key === "Backspace") &&
+        !event.ctrlKey && !event.metaKey && !event.altKey &&
+        marking.store.marking.mode === "reading" &&
+        editor.blockId === null &&
+        state.editingItemId === null &&
+        !typesHere(event.target)
+      ) {
+        if (marksSeveral(selectionMarks.rows)) {
+          event.preventDefault();
+          void retireMarked$();
+          return;
+        }
+        const open = state.focusedItemId !== null && (state.proposals?.groups ?? []).some((group) => group.items.some((item) => item.itemId === state.focusedItemId));
+        if (open && state.focusedItemId !== null) {
+          event.preventDefault();
+          void answerProposal$(state.focusedItemId, "rejected");
+          return;
+        }
+        if (state.focusedBlockId !== null && state.document?.blocks.some((block) => block.blockId === state.focusedBlockId) === true) {
+          event.preventDefault();
+          void removeBlock$(state.focusedBlockId);
+          return;
+        }
       }
       // Reading has more local surfaces that answer `Escape` first — an active
       // block leaves editing — and in command mode there is none, because no
@@ -4167,9 +4403,12 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     const away = (event: MouseEvent) => {
       if (view === null || view.closest("[inert]") !== null) return;
       // A press outside every row and its depth lets the focus go. CA_0046_001
-      if (state.focusedBlockId !== null || state.focusedItemId !== null) {
+      // Not the click a drag across rows ends in, which lands on their common
+      // ancestor: letting the focus go would draw the row the selection began
+      // in again and take its start away. DO_0023_002
+      if ((state.focusedBlockId !== null || state.focusedItemId !== null) && !marksSeveral(selectionMarks.rows)) {
         const target = event.target instanceof Element ? event.target : null;
-        if (target?.closest("[data-block-id], [data-discarded-id], [data-retired-id], [data-block-depth], [data-proposal-id], [data-view-bar]") == null) {
+        if (target?.closest("[data-block-id], [data-retired-id], [data-rejected-id], [data-proposal-id], [data-view-bar]") == null) {
           state.focusedBlockId = null;
           state.focusedItemId = null;
         }
@@ -4216,30 +4455,22 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     page.addEventListener("pointerdown", pressed);
     page.addEventListener("mousedown", keepFocus);
     page.addEventListener("click", away);
-    // The disposition swipe, on touch. It commits through the one write the
-    // bar and the chord use; on a proposal it accepts first. BO_0227_011
-    // BO_0272_008
-    const uninstallSwipe = installSwipe(page, (swiped, to) => {
+    // The swipe, on touch: left removes, right keeps. On a block it commits
+    // through the paths the bar's buttons take; on a proposal it answers it,
+    // and an accepted proposal takes no standing. BO_0227_011 BO_0315_010
+    const uninstallSwipe = installSwipe(page, (swiped, action) => {
       if (swiped.kind === "block") {
-        void standing.setStanding$(swiped.blockId, to);
+        if (action === "remove") void removeBlock$(swiped.blockId);
+        else void standing.setStanding$(swiped.blockId, action === "fixate" ? "fixate" : "keep");
         return;
       }
-      void swipeProposal$(swiped.itemId, to);
+      void answerProposal$(swiped.itemId, action === "remove" ? "rejected" : "accepted");
     });
-    // The pinch, on touch: inward on a row opens it as focused work, outward
-    // goes back one crumb. CA_0047_006
-    const uninstallPinch = installPinch(
-      page,
-      (_outcome, blockId) => {
-        // A pinch outward opens the block as its own work root, the gesture
-        // this adapter has always been installed for. CA_0065_011
-        void pressBlockControl$("focused-work", blockId);
-      },
-      () => {
-        const route = routeOf(tab);
-        if (route.length > 1) void back$(route.length - 2);
-      },
-    );
+    // The pinch, on touch: zooming in on a row deepens the block, zooming
+    // out gathers its neighbours into its focused work. BO_0322_010
+    const uninstallPinch = installPinch(page, (pinch, blockId) => {
+      void pinch$(pinch, blockId);
+    });
     cleanup(() => {
       uninstallSwipe();
       uninstallPinch();
@@ -4359,7 +4590,13 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     // One change at a time holds as the changes arrive, not only when a press
     // or a run's end sets it. CA_0061_009
     keepOneExpanded(state);
-    const chips = chipsOf(state);
+    // Each chip says the number its proposal is marked whole under, while a
+    // mark stands. BO_0321_008
+    const marks = track(() => marking.store.marking);
+    const chips = chipsOf(state).map((chip) => {
+      const number = chip.group === null ? null : proposalReferenceFor(marks, chip.group);
+      return number === null ? chip : { ...chip, reference: number };
+    });
     const said = JSON.stringify(chips);
     if (said === reportedChips.value) return;
     reportedChips.value = said;
@@ -4389,8 +4626,17 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     const seq = track(() => bridge.toggleRun.seq);
     if (seq === state.toggleRunSeen) return;
     state.toggleRunSeen = seq;
-    const { itemId, key, work } = bridge.toggleRun;
+    const { itemId, key, work, mark } = bridge.toggleRun;
     if (itemId !== documentId || key === null) return;
+    // While pointing, a chip's press marks its whole proposal, a run's or
+    // the reader's own session, instead of showing or hiding it. BO_0321_008
+    if (mark === true) {
+      const group = state.proposals?.groups.find((candidate) => candidate.groupId === key);
+      const session = state.sessions.some((candidate) => candidate.branch === key);
+      if (group === undefined && !session) return;
+      await marking.toggleProposal$(key, group === undefined ? undefined : proposerName(group.proposer));
+      return;
+    }
     // A session chip's pencil works in its session; its press shows or hides
     // it as a run chip's does, but the session the tab works in is the
     // document it reads. CA_0057_014
@@ -4460,6 +4706,17 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       return;
     }
     if (looked.target === null || element === undefined || state.document === null) return;
+    // A proposal marked whole: its change is shown first, as a successor's
+    // is, so there is a row to ring. BO_0321_010
+    if (looked.target.kind === "proposal" && !groupShown(looked.target.group, state)) {
+      const next = revealGroup(looked.target.group, state);
+      state.shownGroups = [...next.shownGroups];
+      state.hiddenGroups = [...next.hiddenGroups];
+      const target = looked.target;
+      const passageless = setTimeout(() => cleanup(showArea(element, target, null)), 0);
+      cleanup(() => clearTimeout(passageless));
+      return;
+    }
     const passage = revealedPassage(
       looked.target,
       marking.store.marking,
@@ -4543,10 +4800,6 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   // What the panel shows of the proposals, and which of them frame the block
   // they concern — a removal and a move, which are drawn with that block
   // rather than beside it. BO_0233_004
-  // A system run's derived candidates are read at no cost: shown whether or
-  // not the toggle is on, in the derived idiom. BO_0246_006
-  // A run's `phase` item is the transition card under the intent, never a
-  // proposal block among the rows. BO_0249_011
   /** What this view offers an extension drawing on its blocks: what the
    * editor knows and a decoration cannot read for itself. BO_0256_007 */
   const reveal$ = $(async (blockId: string) => {
@@ -4565,7 +4818,6 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     get focusedBlockId() { return state.focusedBlockId; },
     get focusedItemId() { return state.focusedItemId; },
     get loaded() { return state.loaded; },
-    get readMark() { return state.readMark; },
     get notice() { return state.notice; },
     set notice(value: string | null) { state.notice = value; },
     tab,
@@ -4592,22 +4844,14 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   };
   // Every run's stagings, for the notes their items carry while they go.
   const runEvents = state.runActivities.flatMap((run) => run.events);
-  const fixatedBlock = (blockId: string): boolean =>
-    doc?.blocks.some((block) => block.blockId === blockId && block.kind === "text" && block.standing === "fixate") ?? false;
-  /** A derived block whose revision a person made is theirs: a run's rewrite
-   * of it is drawn beside it as a challenge, never as a replacement. The fact
-   * is `calliopa-refine`'s; this reads it off the block. BO_0258_016 */
-  const governedBlock = (blockId: string): boolean =>
-    doc?.blocks.some(
-      (block) =>
-        block.blockId === blockId &&
-        block.kind === "text" &&
-        (block.derivedFrom ?? []).length > 0 &&
-        block.revisedBy !== undefined &&
-        !isAgentPrincipal(block.revisedBy),
-    ) ?? false;
   const framed = new Map<string, ProposedChange[]>();
   for (const item of shownProposals) {
+    // Each block a gather moves is framed by the gather, answered whole
+    // from any of them. BO_0322_013
+    if (item.kind === "gather") {
+      for (const blockId of item.gathered ?? []) framed.set(blockId, [...(framed.get(blockId) ?? []), item]);
+      continue;
+    }
     if (item.kind !== "remove" && item.kind !== "move") continue;
     if (!(doc?.blocks.some((block) => block.blockId === item.blockId) ?? false)) continue;
     framed.set(item.blockId, [...(framed.get(item.blockId) ?? []), item]);
@@ -4714,140 +4958,131 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
             </p>
           )}
           <div class="block-surface" data-block-surface>
-            {routeOf(tab).length > 1 && (
-              <nav class="document-route" data-document-route aria-label="Route">
-                <button
-                  type="button"
-                  class="document-route__back"
-                  data-route-back
-                  onClick$={() => back$(routeOf(tab).length - 2)}
-                >
-                  ← Back
-                </button>
-                {routeOf(tab).map((entry, index, route) => (
-                  <span key={`${index}:${entry.itemId}`} class="document-route__crumb">
-                    {index > 0 && <span aria-hidden="true"> › </span>}
-                    {index < route.length - 1 ? (
-                      <button type="button" data-route-crumb={entry.itemId} onClick$={() => back$(index)}>
-                        {entry.title}
-                      </button>
-                    ) : (
-                      <span data-route-current={entry.itemId}>{entry.title}</span>
-                    )}
-                  </span>
-                ))}
-              </nav>
-            )}
-            <span id="document-title-label" class="visually-hidden">
-              Document title
-            </span>
-            <h2 class="document-title">
-              {/* A document nobody has named holds no title text: the minted
-                  name is painted over the empty field as its placeholder, so
-                  naming it does not start with deleting a word the system
-                  wrote. The heading takes its accessible name from the same
-                  words, standing beside the empty field rather than in it, so
-                  an unnamed document is still a named heading. DO_0012_002 */}
-              {isUnnamed(doc.title) && <span class="visually-hidden">{unnamedTitle(doc)}</span>}
-              <span
-                class="document-title__text"
-                ref={titleField}
-                data-document-title
-                data-unnamed={isUnnamed(doc.title) ? "true" : "false"}
-                data-placeholder={unnamedTitle(doc)}
-                aria-placeholder={unnamedTitle(doc)}
-                role="textbox"
-                aria-labelledby="document-title-label"
-                contentEditable="true"
-                spellcheck={false}
-                onPaste$={(event: ClipboardEvent, element: HTMLElement) => {
-                  // A title is text. Letting the clipboard's markup land and
-                  // relying on `textContent` to flatten it later would show
-                  // formatting the document cannot keep, and a pasted newline
-                  // would split the heading into lines it has no way to store.
-                  event.preventDefault();
-                  const pasted =
-                    event.clipboardData?.getData("text/plain") ?? "";
-                  const flat = pasted.replace(/\s+/gu, " ").trim();
-                  if (flat === "") return;
-                  const selection = document.getSelection();
-                  const range =
-                    selection !== null && selection.rangeCount > 0
-                      ? selection.getRangeAt(0)
-                      : null;
-                  if (
-                    range === null ||
-                    !element.contains(range.startContainer)
-                  ) {
-                    element.textContent = `${element.textContent ?? ""}${flat}`;
-                    return;
-                  }
-                  range.deleteContents();
-                  const node = document.createTextNode(flat);
-                  range.insertNode(node);
-                  range.setStartAfter(node);
-                  range.collapse(true);
-                  selection?.removeAllRanges();
-                  selection?.addRange(range);
-                }}
-                onKeyDown$={(event, element) => {
-                  if (event.key === "Enter") {
+            {/* The one line that stays under the bar once the header has
+                scrolled away: the title and the role pills; a press is back
+                to the top. DO_0030_003 */}
+            <CompactHeader
+              header={documentHeader}
+              title={isUnnamed(doc.title) ? unnamedTitle(doc) : doc.title}
+              documentId={documentId ?? ""}
+              dataRevision={state.document?.dataRevision}
+            />
+            {/* The document's header: the route, the title, and the lines
+                the extensions draw under it — the roles, their values, a
+                keyword's mentions — one unit with one spacing, its left edge
+                on the blocks' text. DO_0030_002 */}
+            <header ref={documentHeader} class="document-header" data-document-header>
+              {routeOf(tab).length > 1 && (
+                <nav class="document-route" data-document-route aria-label="Route">
+                  <button
+                    type="button"
+                    class="document-route__back"
+                    data-route-back
+                    onClick$={() => back$(routeOf(tab).length - 2)}
+                  >
+                    ← Back
+                  </button>
+                  {routeOf(tab).map((entry, index, route) => (
+                    <span key={`${index}:${entry.itemId}`} class="document-route__crumb">
+                      {index > 0 && <span aria-hidden="true"> › </span>}
+                      {index < route.length - 1 ? (
+                        <button type="button" data-route-crumb={entry.itemId} onClick$={() => back$(index)}>
+                          {entry.title}
+                        </button>
+                      ) : (
+                        <span data-route-current={entry.itemId}>{entry.title}</span>
+                      )}
+                    </span>
+                  ))}
+                </nav>
+              )}
+              <span id="document-title-label" class="visually-hidden">
+                Document title
+              </span>
+              <h2 class="document-title">
+                {/* A document nobody has named holds no title text: the minted
+                    name is painted over the empty field as its placeholder, so
+                    naming it does not start with deleting a word the system
+                    wrote. The heading takes its accessible name from the same
+                    words, standing beside the empty field rather than in it, so
+                    an unnamed document is still a named heading. DO_0012_002 */}
+                {isUnnamed(doc.title) && <span class="visually-hidden">{unnamedTitle(doc)}</span>}
+                <span
+                  class="document-title__text"
+                  ref={titleField}
+                  data-document-title
+                  data-unnamed={isUnnamed(doc.title) ? "true" : "false"}
+                  data-placeholder={unnamedTitle(doc)}
+                  aria-placeholder={unnamedTitle(doc)}
+                  role="textbox"
+                  aria-labelledby="document-title-label"
+                  contentEditable="true"
+                  spellcheck={false}
+                  onPaste$={(event: ClipboardEvent, element: HTMLElement) => {
+                    // A title is text. Letting the clipboard's markup land and
+                    // relying on `textContent` to flatten it later would show
+                    // formatting the document cannot keep, and a pasted newline
+                    // would split the heading into lines it has no way to store.
                     event.preventDefault();
-                    element.blur();
-                  }
-                  if (event.key === "Escape") {
-                    element.textContent = shownTitle(state.document);
-                    element.blur();
-                  }
-                }}
-                onBlur$={async (_, element) => {
-                  // A rename that took is shown by the task that owns the
-                  // field. One that did not — blank, unchanged or refused —
-                  // puts back what the document is called, which is nothing
-                  // at all while it carries the minted name: clearing the
-                  // field and leaving ends under the placeholder rather than
-                  // with words to delete again. DO_0012_002
-                  const renamed = await rename$(element.textContent ?? "");
-                  if (!renamed) {
-                    element.textContent = shownTitle(state.document);
-                  }
-                }}
-              ></span>
-              {doc.proposed !== undefined && <StartedBy proposer={doc.proposed.proposer} />}
-            </h2>
-            {/* The manuscript's head as the document carries it: its authors
-                and their affiliations beneath the title, read-only, set from
-                the panel. BO_0293_016 */}
-            {doc.frontMatter?.authors !== undefined && (
-              <p class="document-authors" data-document-authors>
-                {doc.frontMatter.authors.map((author, at) => (
-                  <span key={at} class="document-authors__author">
-                    {author.name}
-                    {author.affiliations !== undefined && author.affiliations.length > 0 && (
-                      <sup>{author.affiliations.map((place) => place + 1).join(",")}</sup>
-                    )}
-                    {author.corresponding === true && <span aria-label="corresponding author">*</span>}
-                  </span>
-                ))}
-                {(doc.frontMatter.affiliations ?? []).length > 0 && (
-                  <span class="document-authors__affiliations" data-document-affiliations>
-                    {(doc.frontMatter.affiliations ?? []).map((affiliation, at) => (
-                      <span key={at}>
-                        <sup>{at + 1}</sup>
-                        {affiliation}
-                      </span>
-                    ))}
-                  </span>
-                )}
-              </p>
-            )}
-            {/* The manuscript's head, edited where it is drawn: chips for the
-                affiliations and the keywords, a row per author, the venue as
-                a word, each settled edit writing the whole front matter. The
-                inspector contributes no action (CA_0053), so the fields
-                stand above the first block, where the user's answer to
-                BO_0293_Q3 draws the head. BO_0293_016 BO_0293_025 */}
-            <FrontMatterHead editor={state} save$={saveFront$} />
+                    const pasted =
+                      event.clipboardData?.getData("text/plain") ?? "";
+                    const flat = pasted.replace(/\s+/gu, " ").trim();
+                    if (flat === "") return;
+                    const selection = document.getSelection();
+                    const range =
+                      selection !== null && selection.rangeCount > 0
+                        ? selection.getRangeAt(0)
+                        : null;
+                    if (
+                      range === null ||
+                      !element.contains(range.startContainer)
+                    ) {
+                      element.textContent = `${element.textContent ?? ""}${flat}`;
+                      return;
+                    }
+                    range.deleteContents();
+                    const node = document.createTextNode(flat);
+                    range.insertNode(node);
+                    range.setStartAfter(node);
+                    range.collapse(true);
+                    selection?.removeAllRanges();
+                    selection?.addRange(range);
+                  }}
+                  onKeyDown$={(event, element) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      element.blur();
+                    }
+                    if (event.key === "Escape") {
+                      element.textContent = shownTitle(state.document);
+                      element.blur();
+                    }
+                  }}
+                  onBlur$={async (_, element) => {
+                    // A rename that took is shown by the task that owns the
+                    // field. One that did not — blank, unchanged or refused —
+                    // puts back what the document is called, which is nothing
+                    // at all while it carries the minted name: clearing the
+                    // field and leaving ends under the placeholder rather than
+                    // with words to delete again. DO_0012_002
+                    const renamed = await rename$(element.textContent ?? "");
+                    if (!renamed) {
+                      element.textContent = shownTitle(state.document);
+                    }
+                  }}
+                ></span>
+                {doc.proposed !== undefined && <StartedBy proposer={doc.proposed.proposer} />}
+              </h2>
+              {/* The header's lines under the title: each extension's
+                  contribution a row of its own, in extension order, carrying
+                  nothing of a command's own. Their presses are their own.
+                  calliopa-bootstrap's BO_0309_031, DO_0030_001 */}
+              <div class="document-title-place" data-document-title-place stoppropagation:click>
+                <div class="document-title-place__chip">
+                  <DocumentDecorations at="title" form="full" documentId={documentId ?? ""} dataRevision={state.document?.dataRevision} />
+                </div>
+              </div>
+            </header>
             {/* The person's branch on this document: entering and leaving
                 it, accepting it by its standing, and what a rejected one
                 held. BO_0250_020 */}
@@ -4884,8 +5119,14 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                   type="button"
                   class="document-empty"
                   data-document-empty
+                  // A blank page is where a dragged block lands first, as the
+                  // area below the last block is on a page that has some.
+                  // Found in the CA_0072 walk.
+                  data-drop-target="block:end"
+                  data-accepts="move"
                   onClick$={() => startWriting$()}
                 >
+                  <DropMark id="end" drag={bridge.drag} />
                   <span class="document-empty__hint">Write something</span>
                 </button>
               ) : (
@@ -4960,11 +5201,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                           grip={{ ...edge(positionOf(entry) ?? `proposal:${entry.item.itemId}`), step$: stepRow$ }}
                           startDrag$={startProposalDrag$}
                           step$={stepProposal$}
-                          derived={entry.item.derived === true}
-                          fixated={fixatedBlock(entry.item.blockId)}
-                          governed={governedBlock(entry.item.blockId)}
-                          standing$={$((to: Standing) => swipeProposal$(entry.item.itemId, to))}
-                          use$={useDerived$}
+                          standing$={$((to: Standing) => standProposal$(entry.item.itemId, to))}
                         />
                       );
                       // A proposed insert is a place to drop a block: it has a
@@ -4972,25 +5209,24 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                       // block's place is that block's place. CA_0055_005
                       const position = positionOf(entry);
                       if (position !== null) return dropSlot(position, proposal);
-                      // A derived candidate opening a section no block opened
-                      // carries the heading. BO_0246_006
-                      if (entry.heading === undefined) return proposal;
-                      return (
-                        <>
-                          <h3 class="derived-heading" data-derived-section={entry.section}>
-                            {entry.heading}
-                          </h3>
-                          {proposal}
-                        </>
-                      );
+                      return proposal;
                     }
-                    // Revealed retired and discarded rows are places to drop
-                    // a block, where they sit. BO_0263_002
-                    if (entry.discarded) {
-                      return dropSlot(
-                        entry.block.blockId,
-                        <DiscardedRow block={entry.block} {...edge(entry.block.blockId)} startDrag$={startBlockDrag$} stepRow$={stepRow$} focus$={focus$} focused={entry.block.blockId === state.focusedBlockId} />,
-                        `discarded:${entry.block.blockId}:${entry.block.revisionId}`,
+                    // A revealed removed row is a place to drop a block,
+                    // where it sits. BO_0263_002
+                    if (entry.rejected !== undefined) {
+                      return (
+                        <RetiredRow
+                          key={`rejected:${entry.rejected.itemId}`}
+                          block={entry.block}
+                          rejected={entry.rejected.itemId}
+                          restore$={reopen$}
+                          first
+                          last
+                          startDrag$={startRowDrag$}
+                          stepRow$={stepRow$}
+                          focus$={$(() => focusItem$(entry.rejected?.itemId ?? ""))}
+                          focused={state.focusedItemId === entry.rejected.itemId}
+                        />
                       );
                     }
                     if (entry.retired) {
@@ -5045,6 +5281,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                         activate$={activate$}
                         deactivate$={deactivate$}
                         move$={move$}
+                        remove$={removeBlock$}
                         startBlockDrag$={startBlockDrag$}
                         editRuns$={editRuns$}
                         input$={input$}
@@ -5058,6 +5295,10 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
 
                         agentRead={agentReadOf(entry.block.blockId)}
                         send$={sendBlock$}
+                        commandChoice={choiceIn(commandChoices.byBlock, state.runs, state.document, entry.block.blockId, state.mode)}
+                        setKeep$={setKeep$}
+            pinch$={pinch$}
+                        switchCommandMode$={switchCommandMode$}
                         prompted={state.sources.includes(entry.block.blockId)}
                         promptsOpen={state.promptsOpen}
                         commandFiles={commandFiles.byBlock}
@@ -5086,7 +5327,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                           item={item}
                           numbersCode={doc.lineNumbers !== false}
                           proposer={groupOf(item.groupId)?.proposer ?? UNKNOWN_PROPOSER}
-                          words={itemWords(item, runEvents, groupOf(item.groupId)?.proposer)}
+                          words={item.kind === "gather" ? GATHERED_WORDS : itemWords(item, runEvents, groupOf(item.groupId)?.proposer)}
                           refinedBy={refinerOf(item, state.runActivities)}
                           withdrawal={withdrawerOf(item, state.runActivities)}
                           withdrawing={withdrawnCountOf(item.itemId, state.proposals)}
@@ -5102,11 +5343,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                           edit$={$((editing: boolean) => editItem$(item.itemId, editing))}
                           startDrag$={startProposalDrag$}
                           step$={stepProposal$}
-                          derived={item.derived === true}
-                          fixated={fixatedBlock(item.blockId)}
-                          governed={governedBlock(item.blockId)}
-                          standing$={$((to: Standing) => swipeProposal$(item.itemId, to))}
-                          use$={useDerived$}
+                          standing$={$((to: Standing) => standProposal$(item.itemId, to))}
                           framed={entry.block}
                         >
                           {inner}
@@ -5114,16 +5351,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                       ),
                       row,
                     );
-                    // A derived section opens with its heading. CA_0046_005
-                    if (entry.heading === undefined) return framedRow;
-                    return (
-                      <>
-                        <h3 class="derived-heading" data-derived-section={entry.section}>
-                          {entry.heading}
-                        </h3>
-                        {framedRow}
-                      </>
-                    );
+                    return framedRow;
                   })}
                   <DropMark id="end" drag={bridge.drag} />
                   {/* The area below the last block carries both gestures. It is
@@ -5179,6 +5407,16 @@ const DropMark = component$<{ id: string; drag: ViewDragState }>(
     />
   ),
 );
+
+/**
+ * The whole row lit while a dropped block would be taken into it as focused
+ * work (CA_0072_007): a component of its own, as the drop mark is, so the
+ * pointer crossing rows redraws the mark and never the row whose words the
+ * caret may sit in.
+ */
+const NestMark = component$<{ id: string; drag: ViewDragState }>(({ id, drag }) => (
+  <span class="nest-mark" data-nest-mark={id} data-drop-active={drag.overId === `nest:${id}` ? "true" : "false"} aria-hidden="true" />
+));
 
 /** The agent reading a block: its face and the mark's words, until the mark
  * goes. BO_0265_013 */
@@ -5264,6 +5502,9 @@ const BlockRow = component$<{
   >;
   deactivate$: QRL<() => void>;
   move$: QRL<(blockId: string, by: -1 | 1) => void>;
+  /** Removes the block: it is retired, and the take-back can restore it
+   * where it was drawn. BO_0315_011 */
+  remove$: QRL<(blockId: string) => void>;
   /** One arrow press on the idle grip. BO_0263_013 */
   stepRow$: QRL<(position: string, direction: -1 | 1) => void>;
   startBlockDrag$: QRL<
@@ -5282,7 +5523,13 @@ const BlockRow = component$<{
   /** The agent reading this block, while its mark stands. BO_0265_013 */
   agentRead?: AgentRead | null;
   /** Sends the block as a command. BO_0267_012 */
-  send$: QRL<(blockId: string, asPrompt: boolean, attachments: readonly AttachmentDescriptor[]) => Promise<SentCommand>>;
+  send$: QRL<(blockId: string, asPrompt: boolean, attachments: readonly AttachmentDescriptor[]) => Promise<SentCommand & { readonly note?: string }>>;
+  /** The block's command choices: *Keep as content* and the mode. DO_0025 */
+  commandChoice: CommandChoice;
+  setKeep$: QRL<(blockId: string, keep: boolean) => void>;
+  /** The pinch without a gesture, for the command line. BO_0322_012 */
+  pinch$: QRL<(pinch: "in" | "out", blockId: string) => Promise<SentCommand>>;
+  switchCommandMode$: QRL<(blockId: string, axis: "field" | "work") => void>;
   /** Whether a run the person may see was sent from this block, which *Show
    * prompts* marks on a block kept as content. BO_0267_015 */
   prompted: boolean;
@@ -5340,6 +5587,7 @@ const BlockRow = component$<{
     activate$,
     deactivate$,
     move$,
+    remove$,
     stepRow$,
     startBlockDrag$,
     editRuns$,
@@ -5353,6 +5601,10 @@ const BlockRow = component$<{
     toggleMark$,
     agentRead,
     send$,
+    commandChoice,
+    setKeep$,
+    pinch$,
+    switchCommandMode$,
     prompted,
     promptsOpen,
     commandFiles,
@@ -5443,6 +5695,10 @@ const BlockRow = component$<{
         data-pointing-from={pointingFrom ? "true" : undefined}
         data-prompted={promptsOpen && prompted && standing !== "prompt" ? "true" : undefined}
         data-drop-target={`block:${block.blockId}`}
+        // Over its middle half a text row takes the dropped block into it,
+        // as its focused work; its edges still place before and after it.
+        // CA_0072_007
+        data-drop-middle={isText(block) ? `nest:${block.blockId}` : undefined}
         data-accepts="move"
         {...markable}
         {...reachable}
@@ -5533,6 +5789,7 @@ const BlockRow = component$<{
         }}
       >
         <DropMark id={block.blockId} drag={drag} />
+        {isText(block) && <NestMark id={block.blockId} drag={drag} />}
         {agentRead != null && <AgentReadMark key={agentRead.until} blockId={block.blockId} read={agentRead} />}
 
         {/* The number, in the gutter the grips use and out of the row's flow,
@@ -5556,33 +5813,45 @@ const BlockRow = component$<{
           revisionId={block.revisionId}
           active={active}
         />
-        {/* The standing toolbar stands on the bar's subject while reading: the
-         * block being edited when there is one, else the row turned to. It is
-         * drawn rather than hidden, so a button that should not be there takes
-         * no focus and needs no rule to say so, and command mode draws none at
-         * all. DO_0014_001 DO_0014_002 */}
-        {mode === "reading" && isText(block) && (active || focused) && (
-          <div class="block-toolbars">
-            <StandingToolbar block={block} />
-            {/* What the frame offers on a block, drawn where this view puts
-                it and filled by the shell. CA_0065_009 */}
-            <BlockControls itemId={documentId} blockId={block.blockId} press$={pressControl$} />
-          </div>
-        )}
-        {mode === "reading" && block.kind === "image" && (active || focused) && (
-          <div class="block-toolbars"><BlockControls itemId={documentId} blockId={block.blockId} press$={pressControl$} /></div>
+        {/* The block bar stands on the bar's subject while reading: the block
+         * being edited when there is one, else the row turned to. It is drawn
+         * rather than hidden, so a button that should not be there takes no
+         * focus and needs no rule to say so, and command mode draws none at
+         * all. What the frame offers on a block is drawn in it and filled by
+         * the shell. DO_0014_001 DO_0014_002 CA_0065_009 BO_0315_013 */}
+        {mode === "reading" && (active || focused) && (
+          <BlockBar
+            measured
+            {...(isText(block) || block.kind === "image"
+              ? {
+                  controlsFor: {
+                    documentId,
+                    blockId: block.blockId,
+                    hasFocusedWork: face !== null,
+                    press$: pressControl$,
+                  },
+                }
+              : {})}
+            label={`block ${position}`}
+            id={block.blockId}
+            arrows={active ? "block" : "row"}
+            first={first}
+            last={last}
+            step$={active ? move$ : stepRow$}
+            standing={isText(block) ? standing : null}
+            fixate$={setStanding$}
+            remove$={remove$}
+          />
         )}
         <PassageNumbers block={block} />
 
-        {/* Every row's grip while reading: drawn on hover on a desktop and on
-         * the focused row on a phone, moving without editing. BO_0263_013 */}
+        {/* Every row's handle while reading: drawn on hover on a desktop and on
+         * the focused row on a phone, dragging without editing. Its arrows are
+         * the block bar's. BO_0263_013 BO_0315_014 */}
         {!active && mode === "reading" && (
           <RowGrip
             label={`block ${position}`}
-            first={first}
-            last={last}
             drag$={$((event: PointerEvent) => startBlockDrag$(block.blockId, preview, event))}
-            step$={$((direction: -1 | 1) => stepRow$(block.blockId, direction))}
           />
         )}
 
@@ -5853,20 +6122,6 @@ const BlockRow = component$<{
           />
         )}
 
-        {/* What lies beneath a block is whatever an extension has to say
-            about it: the editor renders the place and knows nothing of what
-            fills it, so a tree with no decorating extension shows a block
-            with no depth. BO_0256_007 */}
-        {focused && !active && mode === "reading" && (
-          <BlockDecorations
-            at="depth"
-            documentId={documentId}
-            blockId={block.blockId}
-            revisionId={block.revisionId}
-            active={active}
-          />
-        )}
-
         {isText(block) && active && (
           <ActiveBlockText
             tag={Tag}
@@ -5895,33 +6150,6 @@ const BlockRow = component$<{
           />
         )}
 
-        {active && (
-          <div
-            class="block-grip block-grip--end"
-            role="group"
-            aria-label={`Reorder block ${position}`}
-          >
-            <button
-              type="button"
-              aria-label={`Move block ${position} up`}
-              data-block-up
-              disabled={first}
-              onClick$={() => move$(block.blockId, -1)}
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              aria-label={`Move block ${position} down`}
-              data-block-down
-              disabled={last}
-              onClick$={() => move$(block.blockId, 1)}
-            >
-              ↓
-            </button>
-          </div>
-        )}
-
         <BlockFailure blockId={block.blockId} editor={editor} />
         {/* The command control: on the block being edited, and on the prompt
             pointed from. BO_0267_012 */}
@@ -5932,6 +6160,10 @@ const BlockRow = component$<{
             editor={editor}
             pointing={pointingFrom}
             send$={send$}
+            choice={commandChoice}
+            setKeep$={setKeep$}
+            pinch$={pinch$}
+            switchMode$={switchCommandMode$}
             editRuns$={editRuns$}
             resume$={$(() => activate$(block.blockId, "end"))}
             files={filesOf(commandFiles, block.blockId)}
@@ -6291,7 +6523,11 @@ const ActiveBlockText = component$<{
  */
 const RetiredRow = component$<{
   block: BlockView;
-  restore$: QRL<(blockId: string) => void>;
+  /** The rejected proposal this row draws, when it is one: *Restore* reopens
+   * it, and it neither moves nor marks. BO_0315_015 */
+  rejected?: string;
+  /** Restores the block, or reopens the rejected proposal, by what it names. */
+  restore$: QRL<(id: string) => void>;
   first: boolean;
   last: boolean;
   startDrag$: QRL<(itemId: string, preview: string, event: PointerEvent) => void>;
@@ -6301,7 +6537,7 @@ const RetiredRow = component$<{
   focus$: QRL<(blockId: string) => void>;
   /** Whether this is the row the reader has turned to. DO_0016_005 */
   focused: boolean;
-}>(({ block, restore$, first, last, startDrag$, stepRow$, focus$, focused }) => {
+}>(({ block, rejected, restore$, first, last, startDrag$, stepRow$, focus$, focused }) => {
   const { store, toggleReference$ } = useContext(MarkingContext);
   const name = isText(block)
     ? runsText(block.runs) || "empty block"
@@ -6310,30 +6546,43 @@ const RetiredRow = component$<{
   // the block as retired, with the revision the reader sees. BO_0263_005
   const marked: MarkedTarget = { target: "retired", revisionId: block.revisionId, words: openingWords(name) };
   const commanding = store.marking.mode === "command";
+  const proposal = rejected !== undefined;
   const numbers = rowNumbers(store.marking, block.blockId, marked);
   return (
     <div
       class="retired-row"
-      data-retired-id={block.blockId}
+      data-retired-id={proposal ? undefined : block.blockId}
+      data-rejected-id={rejected}
       data-focused={focused ? "true" : undefined}
       role="group"
-      aria-label={`Retired: ${name}`}
-      {...rowMarkAttributes(block.blockId, marked)}
+      aria-label={proposal ? `Removed proposal: ${name}` : `Removed: ${name}`}
+      {...(proposal ? {} : rowMarkAttributes(block.blockId, marked))}
       data-reference={commanding && numbers.reference !== null ? numbers.reference : undefined}
     >
-      <RowMarks blockId={block.blockId} marked={marked} />
+      {!proposal && <RowMarks blockId={block.blockId} marked={marked} />}
       {/* Moved without being restored. BO_0263_012 */}
-      {!commanding && (
+      {!commanding && !proposal && (
         <RowGrip
           inline
-          label="retired block"
-          first={first}
-          last={last}
+          label="removed block"
           drag$={$((event: PointerEvent) => startDrag$(`retired:${block.blockId}`, name, event))}
-          step$={$((direction: -1 | 1) => stepRow$(block.blockId, direction))}
         />
       )}
-      <CardLabel mark="retired" />
+      {/* Turned to while reading, it carries the block bar with its arrows and
+          *Restore*. BO_0315_014 */}
+      {!commanding && focused && (
+        <BlockBar
+          label="removed block"
+          id={rejected ?? block.blockId}
+          arrows="row"
+          first={first}
+          last={last}
+          {...(proposal ? {} : { step$: stepRow$ })}
+          standing={null}
+          restore$={restore$}
+        />
+      )}
+      <CardLabel mark="removed" />
       <div
         class="retired-row__text"
         data-mark-text
@@ -6343,32 +6592,25 @@ const RetiredRow = component$<{
         onFocusIn$={() => {
           if (store.marking.mode === "reading") void focus$(block.blockId);
         }}
-        {...(commanding
+        {...(commanding && !proposal
           ? {
               role: "button",
               "aria-pressed": numbers.reference !== null,
-              "aria-label": rowMarkingName(`retired block: “${openingWords(name)}”`, numbers.reference, numbers.passages),
+              "aria-label": rowMarkingName(`removed block: “${openingWords(name)}”`, numbers.reference, numbers.passages),
             }
           : {})}
         onClick$={(_: MouseEvent, element: HTMLElement) => {
-          if (store.marking.mode !== "command" || !clickMarks(element)) return;
+          if (proposal || store.marking.mode !== "command" || !clickMarks(element)) return;
           void toggleReference$(block.blockId, marked);
         }}
         onKeyDown$={(event: KeyboardEvent) => {
-          if (store.marking.mode !== "command" || (event.key !== "Enter" && event.key !== " ")) return;
+          if (proposal || store.marking.mode !== "command" || (event.key !== "Enter" && event.key !== " ")) return;
           event.preventDefault();
           void toggleReference$(block.blockId, marked);
         }}
       >
         {name}
       </div>
-      <button
-        type="button"
-        data-retired-restore={block.blockId}
-        onClick$={() => restore$(block.blockId)}
-      >
-        Restore
-      </button>
     </div>
   );
 });

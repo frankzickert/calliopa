@@ -23,11 +23,11 @@ import {
   renameDocument,
   restoreBlock,
   retireBlock,
+  retireBlocks,
   reviseTextBlock,
   setBlockDisposition,
   setCitationStyle,
   setFigure,
-  setFrontMatter,
   splitTextBlock,
 } from "~/extensions/documents/server/documents";
 import type { BlockView } from "~/extensions/documents/server/assemble";
@@ -206,7 +206,7 @@ describe.skipIf(!configured)("documents over CCGW", () => {
 
     // A stale base is a conflict that writes nothing.
     await settle();
-    const stale = await setBlockDisposition({ documentId: standingId, blockId: headId, baseRevisionId: before?.revisionId ?? "", standing: "discarded" });
+    const stale = await setBlockDisposition({ documentId: standingId, blockId: headId, baseRevisionId: before?.revisionId ?? "", standing: "keep" });
     expect(stale.outcome).toBe("conflict");
 
     // Typing writes runs and role by property, so the standing stands.
@@ -494,6 +494,47 @@ describe.skipIf(!configured)("documents over CCGW", () => {
     expect(more.changeCount).toBe(changes.changeCount + 1);
   });
 
+  it("Given several marked blocks, Then one retirement retires them all at the revisions read, and a base the reader did not see refuses it whole (DO_0023_004)", async () => {
+    const first = ok<{ blockId: string; revisionId: string }>(
+      await insertBlock({ documentId, block: { kind: "text", runs: [{ text: "marked one" }] }, placement: { at: "end" } }),
+    );
+    const second = ok<{ blockId: string; revisionId: string }>(
+      await insertBlock({ documentId, block: { kind: "divider" }, placement: { at: "end" } }),
+    );
+    const before = ok<readonly { blockId: string }[]>(await readRetiredBlocks(documentId)).length;
+
+    const stale = await retireBlocks({
+      documentId,
+      blocks: [
+        { blockId: first.blockId, baseRevisionId: first.revisionId },
+        { blockId: second.blockId, baseRevisionId: "rev:not-seen" },
+      ],
+    });
+    expect(stale.outcome).toBe("conflict");
+    let document = ok<{ blocks: readonly { blockId: string }[] }>(await readDocument(documentId));
+    expect(document.blocks.map((block) => block.blockId)).toEqual(expect.arrayContaining([first.blockId, second.blockId]));
+
+    ok(await retireBlocks({
+      documentId,
+      blocks: [
+        { blockId: first.blockId, baseRevisionId: first.revisionId },
+        { blockId: second.blockId, baseRevisionId: second.revisionId },
+      ],
+    }));
+    document = ok(await readDocument(documentId));
+    expect(document.blocks.map((block) => block.blockId)).not.toContain(first.blockId);
+    expect(document.blocks.map((block) => block.blockId)).not.toContain(second.blockId);
+    const retired = ok<readonly { blockId: string }[]>(await readRetiredBlocks(documentId));
+    expect(retired.length).toBe(before + 2);
+    expect(retired.map((block) => block.blockId)).toEqual(expect.arrayContaining([first.blockId, second.blockId]));
+
+    await settle();
+    ok(await restoreBlock({ documentId, blockId: first.blockId, placement: { at: "end" } }));
+    document = ok(await readDocument(documentId));
+    expect(document.blocks.map((block) => block.blockId)).toContain(first.blockId);
+    expect(document.blocks.map((block) => block.blockId)).not.toContain(second.blockId);
+  });
+
   it("Given a split whose tail the caller names, Then the tail takes that identity and its revision is answered; a name already taken is refused and writes nothing; an unnamed split is unchanged", async () => {
     // Its own document, so the splits it makes move nothing the others read.
     // CA_0045_004
@@ -595,6 +636,39 @@ describe.skipIf(!configured)("documents over CCGW", () => {
     expect(document.blocks.find((block) => block.blockId === firstBlockId)?.runs).not.toEqual([{ text: "Proposed opening" }]);
     const after = ok<{ groups: readonly { groupId: string }[] }>(await readDocumentProposals(documentId));
     expect(after.groups.some((candidate) => candidate.groupId === staged.groupId)).toBe(false);
+  });
+
+  it("Given a retired selection holding two proposals of one group and one of another, Then the three declines go out together and all land", async () => {
+    // What retiring a marked selection does since DO_0024_001: every marked
+    // proposal is declined at once, not one after another. DO_0024_004
+    await settle();
+    const first = ok<{ groupId: string; items: readonly { itemId: string }[] }>(
+      await proposeDocumentChanges({
+        documentId,
+        items: [
+          { kind: "insert", block: { kind: "text", runs: [{ text: "Marked one" }] }, placement: { at: "end" } },
+          { kind: "insert", block: { kind: "text", runs: [{ text: "Marked two" }] }, placement: { at: "end" } },
+        ],
+      }),
+    );
+    await settle();
+    const second = ok<{ groupId: string; items: readonly { itemId: string }[] }>(
+      await proposeDocumentChanges({
+        documentId,
+        items: [{ kind: "insert", block: { kind: "text", runs: [{ text: "Marked three" }] }, placement: { at: "end" } }],
+      }),
+    );
+    const items = [...first.items, ...second.items].map((item) => item.itemId);
+    expect(items).toHaveLength(3);
+
+    const answers = await Promise.all(items.map((itemId) => answerDocumentProposal({ documentId, itemId, answer: "rejected" })));
+    for (const answered of answers) ok(answered);
+
+    const after = ok<{ groups: readonly { groupId: string }[] }>(await readDocumentProposals(documentId));
+    expect(after.groups.some((group) => group.groupId === first.groupId || group.groupId === second.groupId)).toBe(false);
+    const words = ok<{ blocks: readonly { runs?: readonly { text: string }[] }[] }>(await readDocument(documentId)).blocks
+      .map((block) => (block.runs ?? []).map((run) => run.text).join(""));
+    expect(words.filter((text) => text.startsWith("Marked "))).toEqual([]);
   });
 
   it("Given an agent's proposal, Then its proposer is the agent its run names, and a reader placing it keeps its text and proposer", async () => {
@@ -928,48 +1002,15 @@ describe.skipIf(!configured)("documents over CCGW", () => {
     expect(ok<Read>(await readDocument(documentId)).citationStyle).toBeUndefined();
   });
 
-  it("Given a manuscript's head, Then the front matter is set whole on the document's base, read back, and the abstract is a block of its role", async () => {
-    const created = ok<{ documentId: string; revisionId: string }>(await createDocument({ title: "A Manuscript" }));
+  it("Given an abstract, Then it is a block of its role, written and read as one", async () => {
+    const created = ok<{ documentId: string }>(await createDocument({ title: "A Manuscript" }));
     const documentId = created.documentId;
-    type Read = { revisionId: string; frontMatter?: Record<string, unknown>; blocks: readonly { blockId: string; role?: string }[] };
-    let document = ok<Read>(await readDocument(documentId));
-    expect(document.frontMatter).toBeUndefined();
-
-    await settle();
-    const set = ok<{ revisionId: string }>(
-      await setFrontMatter({
-        documentId,
-        baseRevisionId: document.revisionId,
-        frontMatter: {
-          authors: [{ name: "Ada Lovelace", affiliations: [0], corresponding: true }, { name: "Charles Babbage", affiliations: [0, 1] }],
-          affiliations: ["Analytical Engines Ltd", "Difference Works"],
-          keywords: ["provenance", "typesetting"],
-          venue: "ieee",
-        },
-      }),
-    );
-    document = ok<Read>(await readDocument(documentId));
-    expect(document.frontMatter).toEqual({
-      authors: [{ name: "Ada Lovelace", affiliations: [0], corresponding: true }, { name: "Charles Babbage", affiliations: [0, 1] }],
-      affiliations: ["Analytical Engines Ltd", "Difference Works"],
-      keywords: ["provenance", "typesetting"],
-      venue: "ieee",
-    });
-
-    // A stale base is refused; setting it whole again clears what is left out.
-    await settle();
-    // The document's first revision is stale now that the front matter moved it.
-    expect((await setFrontMatter({ documentId, baseRevisionId: created.revisionId, frontMatter: {} })).outcome).toBe("conflict");
-    ok(await setFrontMatter({ documentId, baseRevisionId: set.revisionId, frontMatter: { keywords: ["provenance"] } }));
-    document = ok<Read>(await readDocument(documentId));
-    expect(document.frontMatter).toEqual({ keywords: ["provenance"] });
-
-    // The abstract is a text block of its own role, written and read as one.
+    type Read = { blocks: readonly { blockId: string; role?: string }[] };
     await settle();
     const abstract = ok<{ blockId: string }>(
       await insertBlock({ documentId, block: { kind: "text", role: "abstract", runs: [{ text: "We show that a record can emit a paper." }] }, placement: { at: "start" } }),
     );
-    document = ok<Read>(await readDocument(documentId));
+    const document = ok<Read>(await readDocument(documentId));
     expect(document.blocks.find((block) => block.blockId === abstract.blockId)?.role).toBe("abstract");
   });
 

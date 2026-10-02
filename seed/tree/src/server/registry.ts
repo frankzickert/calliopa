@@ -5,18 +5,14 @@ import type {
   FocusedWorkContribution,
   LibraryGlyph,
   LibraryItem,
-  PartyDescriptor,
-  SendOutcome,
-  SendQuote,
-  SendRequest,
-  SenderDescriptor,
 } from "~/contract";
 import { HOST_KINDS } from "~/lib/tabs";
-import { matchRoute, mergeRoster, qualify, type RegisteredParty, type RegisteredSection } from "~/registry";
+import { matchRoute, qualify, type RegisteredParty, type RegisteredSection } from "~/registry";
 import { REGISTRY } from "~/registry.gen";
 import { SERVER_REGISTRY } from "~/registry.server.gen";
 import { api } from "./api";
 import { KERNEL_CALLBACK_HEADER, kernelCallbackRefusal } from "./kernel-callback";
+import { port } from "./port";
 
 /**
  * The server's reading of the two generated registries: the library readers
@@ -133,7 +129,7 @@ export async function dispatch(event: RequestEvent, extension: string, path: str
     return;
   }
   if (matched.route.kernelCallback === true) {
-    const refusal = kernelCallbackRefusal(event.request.headers.get(KERNEL_CALLBACK_HEADER), process.env["CALLIOPA_KERNEL_CALLBACK_SECRET"]);
+    const refusal = kernelCallbackRefusal(event.request.headers.get(KERNEL_CALLBACK_HEADER), port.env("CALLIOPA_KERNEL_CALLBACK_SECRET"));
     if (refusal !== null) {
       event.json(403, { error: refusal });
       return;
@@ -143,82 +139,20 @@ export async function dispatch(event: RequestEvent, extension: string, path: str
 }
 
 /**
- * Every party: the descriptors the build contributes, then each runtime
- * roster's answer in extension order, merged by `mergeRoster`'s rule. A roster
- * that throws contributes nothing for that read, the way a section reader
- * that throws renders its section empty. CA_0049_001
+ * Every party: the descriptors the build contributes. No extension answers a
+ * roster at runtime since `publishing`, the only one, was removed
+ * (`calliopa-bootstrap`'s `BO_0312_061`); the call stays async so a reader
+ * of the parties does not change with where they come from.
  */
-/**
- * The senders contributed beside the agents (`BO_0273_035`), in extension
- * order. Ids are namespaced by their extension; one outside its namespace is
- * dropped rather than shadowing an agent, and a roster that throws contributes
- * none — the menu is one region of a shell that still works without it.
- */
-export async function senders(): Promise<readonly SenderDescriptor[]> {
-  const merged: SenderDescriptor[] = [];
-  for (const { extension, roster } of SERVER_REGISTRY.senders) {
-    let answered: readonly SenderDescriptor[];
-    try {
-      answered = await roster();
-    } catch {
-      continue;
-    }
-    for (const sender of answered) {
-      if (!sender.id.startsWith(`${extension}:`)) continue;
-      if (merged.some((held) => held.id === sender.id)) continue;
-      merged.push(sender);
-    }
-  }
-  return merged;
-}
-
-/** The extension a sender belongs to, or null for an id nothing offers. */
-export function senderExtension(id: string): string | null {
-  const found = SERVER_REGISTRY.senders.find((one) => id.startsWith(`${one.extension}:`));
-  return found?.extension ?? null;
-}
-
-/** Hands a command to the sender it names. Refused for an id nothing offers. */
-export async function sendToSender(request: SendRequest): Promise<SendOutcome> {
-  const found = SERVER_REGISTRY.senders.find((one) => request.sender.startsWith(`${one.extension}:`));
-  if (found === undefined) return { ok: false, error: `Nothing offers ${request.sender}.` };
-  return found.send(request);
-}
-
-/**
- * What a command to this sender would cost. Free, and never part of a press:
- * an extension that offers no quote, or whose quote throws, answers nothing
- * and the shell shows nothing rather than a guess. BO_0279_009
- */
-export async function quoteSender(request: SendRequest): Promise<SendQuote> {
-  const found = SERVER_REGISTRY.senders.find((one) => request.sender.startsWith(`${one.extension}:`));
-  if (found?.quote === undefined) return { ok: false };
-  try {
-    return await found.quote(request);
-  } catch {
-    return { ok: false };
-  }
-}
-
 export async function parties(): Promise<readonly RegisteredParty[]> {
-  let merged: readonly RegisteredParty[] = SERVER_REGISTRY.parties;
-  for (const { extension, roster } of SERVER_REGISTRY.rosters) {
-    let answered: readonly PartyDescriptor[];
-    try {
-      answered = await roster();
-    } catch {
-      continue;
-    }
-    merged = mergeRoster(merged, extension, answered);
-  }
-  return merged;
+  return SERVER_REGISTRY.parties;
 }
 
 export async function partyOf(id: string): Promise<RegisteredParty | undefined> {
   return (await parties()).find((party) => party.id === id);
 }
 
-/** Whether a party is a channel — somewhere the author's work goes — which publishing consults. BO_0202_008 */
+/** Whether a party is a channel — somewhere the author's work goes — BO_0202_008 */
 export async function isChannelParty(id: string): Promise<boolean> {
   return (await partyOf(id))?.kind === "channel";
 }

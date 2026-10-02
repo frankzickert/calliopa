@@ -15,9 +15,9 @@ import { HOST_CHIPS, RunChipsHost } from "./testing/run-chips-host";
  * BO_0265_008 CA_0055_001 CA_0055_002 CA_0055_004 The reader's own
  * proposal sessions stand among them, answered at once. CA_0057_004
  */
-const mount = async (chips: readonly RunChip[] = HOST_CHIPS) => {
+const mount = async (chips: readonly RunChip[] = HOST_CHIPS, pointing = false) => {
   const dom = await createDOM();
-  await dom.render(jsx(RunChipsHost, { chips }));
+  await dom.render(jsx(RunChipsHost, { chips, pointing }));
   const root = dom.screen as unknown as HTMLElement;
   // This DOM answers `undefined`, not `null`, when nothing matches.
   const find = (selector: string) => (root.querySelector(selector) as HTMLElement | null) ?? null;
@@ -230,5 +230,37 @@ describe("the run chips under the view bar", () => {
     expect(chipsFor({ "doc-1": HOST_CHIPS }, { kind: "documents:document", itemId: "doc-1" } as never)).toHaveLength(2);
     expect(chipsFor({ "doc-1": HOST_CHIPS }, { kind: "documents:document", itemId: "doc-2" } as never)).toHaveLength(0);
     expect(chipsFor({ "doc-1": HOST_CHIPS }, { kind: "settings:settings", itemId: "instance" } as never)).toHaveLength(0);
+  });
+});
+
+describe("a chip marks its whole proposal while pointing (BO_0321_011)", () => {
+  const session: RunChip = { key: "node:mine", group: "node:mine", face: { kind: "icon", icon: "user" }, tone: "person", name: "you", text: "Proposal · yours", count: 1, ended: true, shown: true, session: true, working: true };
+  const running: RunChip = { key: "node:live", group: "node:live", face: { kind: "icon", icon: "robot" }, tone: "codex", name: "Codex", text: "Rewriting", ended: false, shown: true };
+
+  it("Given a pointing, When a chip is pressed, Then it asks the view to mark its proposal, and without one it shows or hides as before", async () => {
+    const pointed = await mount(HOST_CHIPS, true);
+    await pointed.userEvent('[data-run-chip-toggle="node:run-old"]', "click");
+    expect(pointed.read("[data-toggle-run]")).toEqual({ itemId: "doc-1", key: "node:run-old", seq: 1, work: false, mark: true });
+    const reading = await mount();
+    await reading.userEvent('[data-run-chip-toggle="node:run-old"]', "click");
+    expect(reading.read("[data-toggle-run]")).toEqual({ itemId: "doc-1", key: "node:run-old", seq: 1, work: false });
+  });
+
+  it("Given a chip marked under a number, Then it reads as pressed, its name says the reference, and it draws the number", async () => {
+    const { find } = await mount([{ ...(HOST_CHIPS[1] as RunChip), shown: false, reference: 3 }], true);
+    const toggle = find('[data-run-chip-toggle="node:run-old"]');
+    expect(toggle?.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle?.getAttribute("aria-label")).toBe("Unmark an agent's proposal, reference 3");
+    expect(find("[data-run-chip-reference]")?.textContent).toBe("#3");
+  });
+
+  it("Given a running run's chip and the session worked in, Then both can be marked while pointing", async () => {
+    const { find, read, userEvent } = await mount([running, session], true);
+    expect(find('[data-run-chip-toggle="node:live"]')?.getAttribute("aria-label")).toBe("Mark Codex's proposal");
+    expect(find('[data-run-chip-toggle="node:mine"]')?.getAttribute("aria-label")).toBe("Mark your proposal");
+    await userEvent('[data-run-chip-toggle="node:mine"]', "click");
+    expect(read("[data-toggle-run]")).toMatchObject({ key: "node:mine", mark: true });
+    await userEvent('[data-run-chip-toggle="node:live"]', "click");
+    expect(read("[data-toggle-run]")).toMatchObject({ key: "node:live", mark: true, seq: 2 });
   });
 });

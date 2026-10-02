@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { agentStatus, chooseAgent, chosenAgent, loginState, requestLogin, selectableRuntimes } from "./adapters";
+import { agentStatus, chooseAgent, chosenAgent, loginState, requestLogin, requestLogout, selectableRuntimes } from "./adapters";
 
 /**
  * What the command area may offer.
@@ -214,5 +214,42 @@ describe("the sign-in a request started", () => {
     expect(await loginState(id)).toEqual(started);
     // Two requests never share an id.
     expect(await requestLogin("claude-code")).not.toBe(id);
+  });
+});
+
+/**
+ * A sign-out is asked for the way a sign-in is: a request the broker reads,
+ * carrying an id its states are stamped with, and an action that makes it a
+ * sign-out. BO_0316_006
+ */
+describe("the sign-out a request started", () => {
+  const previous = process.env["CALLIOPA_AGENT_CONFIG_DIR"];
+
+  afterEach(() => {
+    if (previous === undefined) delete process.env["CALLIOPA_AGENT_CONFIG_DIR"];
+    else process.env["CALLIOPA_AGENT_CONFIG_DIR"] = previous;
+  });
+
+  it("Given Sign out confirmed, Then the broker is asked to sign the runtime out under a new id, and only that sign-out is answered", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "agent-config-"));
+    await mkdir(join(dir, "login"), { recursive: true });
+    const signedIn = { runtime: "codex", id: "earlier", status: "succeeded", awaiting: null, output: "" };
+    await writeFile(join(dir, "login", "state.json"), JSON.stringify(signedIn));
+    process.env["CALLIOPA_AGENT_CONFIG_DIR"] = dir;
+
+    const id = await requestLogout("codex");
+
+    expect(JSON.parse(await readFile(join(dir, "login", "request.json"), "utf8"))).toEqual({
+      runtime: "codex",
+      action: "logout",
+      id,
+    });
+    // The sign-in that left its state is not the sign-out's answer.
+    expect(await loginState(id)).toBeNull();
+
+    const signedOut = { runtime: "codex", id, action: "logout", status: "succeeded", awaiting: null, output: "" };
+    await writeFile(join(dir, "login", "state.json"), JSON.stringify(signedOut));
+    expect(await loginState(id)).toEqual(signedOut);
+    expect(await requestLogout("codex")).not.toBe(id);
   });
 });

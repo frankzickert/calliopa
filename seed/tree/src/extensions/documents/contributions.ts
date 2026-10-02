@@ -7,7 +7,7 @@ import { UNNAMED_DOCUMENT } from "./lib/naming";
  * What `documents` contributes to the frame: the Documents section and the
  * `document` kind with the block editor presenting it. What a block *means* is
  * drawn into the editor's places by whichever extension has something to say
- * about it, and is `calliopa-refine`'s since `BO_0256`. The block document
+ * about it. The block document
  * model left `ui.shell` under `BO_0255`, so the shell keeps the frame and
  * extension administration and declares no dependency on this — a tree
  * without `documents` builds and serves, with no Documents section and a

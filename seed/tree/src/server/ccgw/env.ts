@@ -8,13 +8,18 @@
  * a default.
  */
 
+import { port } from "../port";
+
 export interface GraphEnv {
   readonly ccgwUrl: string;
   readonly kernelUrl: string;
 }
 
 export function readGraphEnv(
-  source: Record<string, string | undefined> = process.env,
+  source: Record<string, string | undefined> = {
+    CALLIOPA_CCGW_URL: port.env("CALLIOPA_CCGW_URL"),
+    CALLIOPA_KERNEL_URL: port.env("CALLIOPA_KERNEL_URL"),
+  },
 ): GraphEnv {
   const ccgwUrl = (source["CALLIOPA_CCGW_URL"] ?? "").trim();
   const kernelUrl = (source["CALLIOPA_KERNEL_URL"] ?? "").trim();

@@ -14,7 +14,6 @@ import {
   handleProposalsRead,
   handleRetiredRead,
   unknownDocument,
-  handleReadMark,
   handleWorkingMode,
   handleBranchRead,
   handlePolicyRead,
@@ -28,6 +27,8 @@ import { glyphsFor } from "~/server/registry";
 import { documentFocusedWork } from "./server/focus";
 import { proposedDocuments } from "./server/proposed";
 import { isRecordId } from "~/server/uuid";
+import { HttpError } from "~/server/http-error";
+import { MIGRATIONS } from "./server/migrations";
 
 /**
  * The server half of `documents`: the reader behind its library section and
@@ -54,6 +55,22 @@ const document =
   };
 
 const routes: readonly ApiRoute[] = [
+  {
+    // An executable migration the kernel runs once per instance when it serves
+    // a pin (`calliopa-bootstrap`'s `BO_0312_003`): answered only with the
+    // callback secret, as every kernelCallback route is, with the statement
+    // the kernel writes as truth. BO_0315_008
+    method: "POST",
+    path: "kernel/migrations/[migration]",
+    kernelCallback: true,
+    handle: async (event, params) => {
+      const migration = MIGRATIONS[params["migration"] ?? ""];
+      if (migration === undefined) throw new HttpError(404, `documents runs no migration ${params["migration"] ?? ""}`);
+      const answer = await migration();
+      if (answer.outcome !== "success") throw new HttpError(502, `the migration could not read the graph: ${"detail" in answer ? String(answer.detail) : answer.outcome}`);
+      event.json(200, answer.result);
+    },
+  },
   { method: "GET", path: "patterns", handle: async (event) => { const answer = await handleAdmonitionPatternsRead(); event.json(answer.status, answer.body); } },
   { method: "POST", path: "patterns", handle: async (event) => { const answer = await handleAdmonitionPatternWrite(event.request); event.json(answer.status === 200 ? 201 : answer.status, answer.body); } },
   { method: "PUT", path: "patterns/[id]", handle: async (event, params) => { const answer = await handleAdmonitionPatternWrite(event.request, params["id"] ?? ""); event.json(answer.status, answer.body); } },
@@ -86,23 +103,15 @@ const routes: readonly ApiRoute[] = [
   {
     method: "GET",
     path: "d/[id]/proposals",
-    handle: document(handleProposalsRead),
+    // `?rejected=1` adds the rejected proposals *Show removed* draws.
+    // BO_0315_015
+    handle: (event, params) =>
+      document((id) => handleProposalsRead(id, new URL(event.request.url).searchParams.get("rejected") === "1"))(event, params),
   },
   {
     method: "GET",
     path: "d/[id]/retired",
     handle: document(handleRetiredRead),
-  },
-  {
-    /** The signed-in person's read mark on the document. BO_0246_009 */
-    method: "GET",
-    path: "d/[id]/read",
-    handle: (event, params) => document((id) => handleReadMark(event.request, id))(event, params),
-  },
-  {
-    method: "PUT",
-    path: "d/[id]/read",
-    handle: (event, params) => document((id) => handleReadMark(event.request, id))(event, params),
   },
   {
     /** The signed-in person's working mode on the document. BO_0306_011 */
@@ -155,8 +164,6 @@ export const contributions = declare({
     // A document as the library lists it is its identity and its title; the
     // listing carries nothing else, so opening the drawer never reads block
     // content the section does not render.
-    // A document under pressure or needing review carries the glyph that
-    // says so, derived from its judgements at listing time. BO_0248_012
     documents: async (): Promise<readonly LibraryItem[]> => {
       const outcome = await listDocuments();
       if (outcome.outcome !== "success") return [];

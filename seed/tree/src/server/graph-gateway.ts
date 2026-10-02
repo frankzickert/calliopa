@@ -10,6 +10,8 @@
  * read reports the gateway unreachable and the surfaces say so. BO_0201_004
  */
 
+import { port } from "./port";
+
 export type GatewayReply<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly detail: string };
@@ -50,7 +52,7 @@ export interface GraphResult {
 export const READER_PRINCIPAL = "ui.shell";
 
 export function gatewayUrl(): string | null {
-  const url = process.env.CALLIOPA_CCGW_URL?.trim() ?? "";
+  const url = port.env("CALLIOPA_CCGW_URL")?.trim() ?? "";
   return url === "" ? null : url.replace(/\/+$/u, "");
 }
 
@@ -63,8 +65,7 @@ async function ask(
   init: RequestInit,
   timeoutMs: number,
 ): Promise<GatewayReply<string>> {
-  const base = gatewayUrl();
-  if (base === null) {
+  if (gatewayUrl() === null) {
     return {
       ok: false,
       detail:
@@ -72,7 +73,7 @@ async function ask(
     };
   }
   try {
-    const response = await fetch(`${base}${path}`, {
+    const response = await port.gateway(path, {
       ...init,
       headers: {
         "Content-Type": "application/json",

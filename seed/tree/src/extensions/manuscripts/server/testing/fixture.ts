@@ -1,6 +1,8 @@
 import type { BlockView, DocumentView } from "~/extensions/documents/server/assemble";
 import type { WorkRecord } from "~/extensions/bibliography/lib/work";
 
+import { frontOf } from "../../lib/front";
+
 /**
  * One document holding every kind of block (`BO_0293_019`), shared by the
  * projection's test and its run against the real typesetting service.
@@ -40,7 +42,7 @@ export const blocks: BlockView[] = [
     ],
   },
   { ...common("claim", "c2"), kind: "text", role: "paragraph", standing: "keep", runs: [{ text: "A paragraph another sentence refers to." }] },
-  { ...common("gone", "c5"), kind: "text", role: "paragraph", standing: "discarded", runs: [{ text: "Discarded words." }] },
+  { ...common("gone", "c5"), kind: "text", role: "paragraph", standing: "prompt", runs: [{ text: "Prompted words." }] },
   { ...common("eq", "d0"), kind: "equation", standing: "keep", tex: "e^{i\\pi} + 1 = 0", numbered: true, number: 1 },
   { ...common("eq2", "d5"), kind: "equation", standing: "keep", tex: "x = 1" },
   { ...common("img", "e0"), kind: "image", objectId: "obj-img", mediaType: "image/png", caption: "The apparatus", numbered: true, number: 1 },
@@ -74,13 +76,14 @@ export const document: DocumentView = {
   tableNumbers: { tab: 1 },
   referenceLabels: { h: "Introduction", claim: "Remark 1", img: "Figure 1", tab: "Table 1", eq: "(1)" },
   remarkNumbers: { claim: 1 },
-  frontMatter: {
-    authors: [{ name: "Ada Lovelace", affiliations: [0], email: "ada@example.org", corresponding: true }, { name: "Charles Babbage", affiliations: [0, 1] }],
-    affiliations: ["Analytical Engines Ltd", "Difference Works"],
-    keywords: ["provenance", "typesetting"],
-    venue: "ieee",
-  },
 };
+
+/** The front matter as *Paper* holds it (`calliopa-bootstrap`'s `BO_0312_Q3`). */
+export const front = frontOf({
+  authors: "Ada Lovelace* <ada@example.org>\nCharles Babbage",
+  affiliations: "Analytical Engines Ltd\nDifference Works",
+  keywords: "provenance, typesetting",
+});
 
 export const works = new Map<string, WorkRecord>([
   ["w1", { title: "On records", kind: "article-journal", author: [{ family: "Smith", given: "Anna" }], issued: { "date-parts": [[2020]] } } as WorkRecord],

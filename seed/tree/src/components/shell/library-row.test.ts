@@ -139,3 +139,16 @@ describe("Mark document while a pointing stands (BO_0304_014)", () => {
     expect(find("[data-mark-document]")).toBeNull();
   });
 });
+
+describe("a library row held with a dragged block (CA_0072_004)", () => {
+  it("names the document it opens, and carries the hold mark only while held", async () => {
+    const dom = await createDOM();
+    await dom.render(jsx(LibraryRowHost, { items, held: "doc-started" }));
+    const root = dom.screen as unknown as HTMLElement;
+    await dom.userEvent("[data-load]", "click");
+    const row = (id: string) => root.querySelector(`.library-entry[data-item-id="${id}"]`) as HTMLElement | null;
+    expect(row("doc-plain")?.getAttribute("data-spring")).toBe("library:doc-plain");
+    expect(row("doc-started")?.getAttribute("data-spring-hold")).toBe("true");
+    expect(row("doc-plain")?.hasAttribute("data-spring-hold")).toBe(false);
+  });
+});

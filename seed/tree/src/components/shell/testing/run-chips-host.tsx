@@ -17,7 +17,7 @@ export const HOST_CHIPS: readonly RunChip[] = [
  * `toggleRun`, and the height the line published on the region. Test support,
  * imported by `run-chips.test.ts` and nothing that ships. CA_0055_004
  */
-export const RunChipsHost = component$<{ chips: readonly RunChip[] }>(({ chips }) => {
+export const RunChipsHost = component$<{ chips: readonly RunChip[]; pointing?: boolean }>(({ chips, pointing = false }) => {
   const answerAll = useStore<ViewAnswerAll>({ itemId: null, group: null, answer: null, seq: 0 });
   const toggleRun = useStore<ViewToggleRun>({ itemId: null, key: null, seq: 0 });
   // The chips the line draws are the host's own, so a test can change what
@@ -32,7 +32,7 @@ export const RunChipsHost = component$<{ chips: readonly RunChip[] }>(({ chips }
       <section class="workspace" data-host-region>
         <div class="view-bar" data-host-bar />
         {reported.chips.length > 0 && (
-          <RunChips itemId="doc-1" chips={reported.chips} answerAll={answerAll} toggleRun={toggleRun} />
+          <RunChips itemId="doc-1" chips={reported.chips} answerAll={answerAll} toggleRun={toggleRun} pointing={pointing} />
         )}
       </section>
       {chips.map((chip) => (
@@ -43,7 +43,7 @@ export const RunChipsHost = component$<{ chips: readonly RunChip[] }>(({ chips }
       <output data-answer-all>
         {JSON.stringify({ itemId: answerAll.itemId, group: answerAll.group, answer: answerAll.answer, seq: answerAll.seq })}
       </output>
-      <output data-toggle-run>{JSON.stringify({ itemId: toggleRun.itemId, key: toggleRun.key, seq: toggleRun.seq, ...(toggleRun.work === undefined ? {} : { work: toggleRun.work }) })}</output>
+      <output data-toggle-run>{JSON.stringify({ itemId: toggleRun.itemId, key: toggleRun.key, seq: toggleRun.seq, ...(toggleRun.work === undefined ? {} : { work: toggleRun.work }), ...(toggleRun.mark === true ? { mark: true } : {}) })}</output>
     </div>
   );
 });

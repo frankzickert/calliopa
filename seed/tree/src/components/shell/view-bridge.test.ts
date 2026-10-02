@@ -6,7 +6,7 @@ import {
   type ViewActivity,
   type ViewAnswerAll,
   type ViewToggleRun, ViewBridgeContext, type ViewBridge, type ViewBar,
-  type ViewFocus, type ViewAgents, type ViewComposeBlock, type ViewInspector, type ViewProposed, type ViewReveal, type ViewPointing, type ViewAcross } from "./view-bridge";
+  type ViewFocus, type ViewAgents, type ViewComposeBlock, type ViewInspector, type ViewProposed, type ViewReveal, type ViewPointing, type ViewAcross, type ViewCommandOptions } from "./view-bridge";
 
 /**
  * A contributed view reads the workspace it is mounted in off the bridge:
@@ -51,18 +51,20 @@ const Host = component$<{ workspaceId: string }>(({ workspaceId }) => {
     agentsChanged$: noop,
     composeCommand$: noop,
     composeBlock: useStore<ViewComposeBlock>({ itemId: null, text: "", seq: 0 }),
-    agents: useStore<ViewAgents>({ runtimes: [], agent: null, options: {}, cost: "", speed: "fast", sending: false }),
+    agents: useStore<ViewAgents>({ runtimes: [], agent: null, speed: "fast", sending: false }),
     chooseAgent$: noop,
-    chooseOption$: noop,
-    quoteSend$: $(async () => undefined),
+    commandOptions: useStore<ViewCommandOptions>({ byCommand: {} }),
+    setCommandOption$: noop,
     chooseSpeed$: noop,
     refreshAgents$: $(async () => null),
     sendCommand$: $(async () => ({ ok: false as const, error: "not in this test" })),
+    sendPinch$: $(async () => ({ ok: false as const, error: "not in this test" })),
     sendGesture$: $(async () => ({ ok: false as const, error: "not in this test" })),
-    retarget$: noop,
+    openAlongRoute$: noop,
     blockControls$: $(async () => []),
     pressBlockControl$: $(async () => null),
     faces$: $(async () => ({})),
+    focusedChild$: $(async () => ({ refusal: "no focused work here" })),
   };
   useContextProvider(ViewBridgeContext, bridge);
   return jsx(Reader, {});

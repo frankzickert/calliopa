@@ -19,6 +19,10 @@ export interface DragPayload {
   readonly source: DragSource;
   readonly operations: readonly DragOperation[];
   readonly preview: string | null;
+  /** The target the item was dragged out of — a block's document — so a view
+   * receiving the drop can tell another document's block from its own.
+   * CA_0072_002 */
+  readonly from?: string | undefined;
 }
 
 export interface DropTarget {
@@ -56,6 +60,82 @@ export function resolveDrop(payload: DragPayload, target: DropTarget): DragOpera
   const iconTarget = target.id.startsWith(PANEL_ICON_TARGET);
   if (iconTarget !== (payload.kind === PANEL_ICON_KIND)) return null;
   return resolveOperation(payload, target);
+}
+
+/**
+ * A held drag opens the place it is held over (CA_0072_001): a tab, a tab
+ * edge, a library icon or a library entry marks itself `data-spring`, and a
+ * dragged item held there for `SPRING_HOLD_MS` opens it once, the drag going
+ * on in what it opened. Only what is dragged out of a view's content springs:
+ * a tab dragged over a tab still only reorders, and a library icon only moves.
+ */
+export const SPRING_HOLD_MS = 600;
+
+export const springs = (payload: DragPayload | null): boolean => payload?.source === "workspace";
+
+/** A hold under way: the place and when the pointer arrived there. `since` is
+ * `null` once the hold has opened its place, so it opens once per arrival. */
+export interface SpringHold {
+  readonly id: string;
+  readonly since: number | null;
+}
+
+/** The hold after the pointer is over `id` (or over no place) at `now`: the
+ * same hold while it stays, a fresh one where it arrives, none once it left. */
+export function holdOver(hold: SpringHold | null, id: string | null, now: number): SpringHold | null {
+  if (id === null) return null;
+  if (hold !== null && hold.id === id) return hold;
+  return { id, since: now };
+}
+
+/** What a held place opens, read from its `data-spring` id: a tab by its id,
+ * a tab edge's step, the phone's library sheet, a library icon's content, or
+ * a library entry's document. `null` for an id nothing opens. CA_0072_003
+ * CA_0072_004 */
+export type SpringAction =
+  | { readonly open: "tab"; readonly tabId: string }
+  | { readonly open: "step"; readonly step: -1 | 1 }
+  | { readonly open: "sheet" }
+  | { readonly open: "icon"; readonly icon: string }
+  | { readonly open: "entry"; readonly itemId: string };
+
+export function springAction(id: string): SpringAction | null {
+  if (id === "tab-edge:before") return { open: "step", step: -1 };
+  if (id === "tab-edge:after") return { open: "step", step: 1 };
+  if (id === "library-handle") return { open: "sheet" };
+  const [prefix, rest] = [id.slice(0, id.indexOf(":") + 1), id.slice(id.indexOf(":") + 1)];
+  if (rest === "") return null;
+  if (prefix === "tab:") return { open: "tab", tabId: rest };
+  if (prefix === "library-icon:") return { open: "icon", icon: rest };
+  if (prefix === "library:") return { open: "entry", itemId: rest };
+  return null;
+}
+
+/** An edge steps again after another hold; every other place opens once. */
+export const springRepeats = (id: string): boolean => springAction(id)?.open === "step";
+
+/** The hold mark on a place — `data-spring-hold` — present while a hold on
+ * it runs and gone once it opened. */
+export const holdMark = (hold: SpringHold | null, id: string): "true" | undefined =>
+  hold !== null && hold.id === id && hold.since !== null ? "true" : undefined;
+
+/** Whether a hold has lasted long enough at `now` to open its place. */
+export const springDue = (hold: SpringHold | null, now: number): boolean =>
+  hold !== null && hold.since !== null && now - hold.since >= SPRING_HOLD_MS;
+
+/**
+ * A target may name a second target for its middle (`data-drop-middle`): over
+ * the middle half of its height the drop means that one, over its upper and
+ * lower quarters the target itself. A block row uses it to take a block into
+ * it — nesting — between the edges that place before and after it. The
+ * quarters stay a finger's height on a phone's enlarged targets. CA_0072_007
+ */
+export const DROP_MIDDLE_FROM = 0.25;
+
+export function inMiddle(y: number, top: number, height: number): boolean {
+  if (height <= 0) return false;
+  const at = (y - top) / height;
+  return at >= DROP_MIDDLE_FROM && at <= 1 - DROP_MIDDLE_FROM;
 }
 
 export const LONG_PRESS_MS = 400;

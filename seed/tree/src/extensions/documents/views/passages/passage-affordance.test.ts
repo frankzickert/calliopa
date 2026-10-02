@@ -54,7 +54,7 @@ const harness = (input: {
   blockText: string;
   end: number;
   pressed: Pressed;
-  /** Words selected in a proposal, a retired or a discarded row. BO_0263_005 */
+  /** Words selected in a proposal or a removed row. BO_0263_005 */
   row?: { readonly marked: Marked; readonly text: string };
 }) =>
   component$(() => {
@@ -85,6 +85,7 @@ const harness = (input: {
       removeReference$: $((number: number) => {
         input.pressed.removed.push(number);
       }),
+      toggleProposal$: noop,
       recover$: noop,
     };
     useContextProvider(MarkingContext, controls);

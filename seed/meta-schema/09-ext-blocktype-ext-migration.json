@@ -9,14 +9,16 @@
     "id": "ext.migration",
     "name": "ext.migration",
     "properties": {
+      "after": "the ids of the migrations this one runs after",
       "id": "member Block id, conventionally \u003cextId\u003e.\u003cshort-name\u003e",
       "migrates": "the type names whose breaking definition changes this Block covers",
-      "rationale": "why the breaking definition change is safe or worth its cost"
+      "rationale": "why the breaking definition change is safe or worth its cost",
+      "route": "the kernelCallback route, relative to the extension's own, that answers the statement transforming existing content; absent for a migration that is rationale alone"
     },
     "requiredProperties": [
       "id"
     ],
-    "semantics": "The migration Block a breaking type-definition change must travel with: a reviewed manual artifact whose authority is the ordinary human review of its proposal group. The operations that transform existing content are staged as ordinary operations in the same group; nothing executes the Block. Validation refuses a breaking ext.blocktype or ext.relationtype change whose group carries no ext.migration covering the type. Never materializes to the working tree. BO_0109_007",
+    "semantics": "The migration Block a breaking type-definition change must travel with. Without a route it is the rationale beside the change, whose content operations are staged in the same group. With a route, a kernelCallback route of its extension, it is executable: the kernel runs it once per instance when it serves a pin, after the migrations of the extensions its extension depends on and those it names in after, and writes the statement the route answers as truth. Validation refuses a breaking ext.blocktype or ext.relationtype change whose group carries no ext.migration covering the type. Never materializes to the working tree. BO_0109_007 BO_0312_001",
     "status": "established"
   }
 }

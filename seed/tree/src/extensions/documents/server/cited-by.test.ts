@@ -35,14 +35,12 @@ const graph: ReadResult = {
     node("doc-c", { _type: "document", id: "doc-c", title: "Uncited" }),
     text("t1", "b", [{ text: "Ice sheets thin " }, { text: "", cite: { work: "wrk-1", locator: "p. 4" } }, { text: "." }]),
     text("t2", "a", [{ text: "First, " }, { text: "", cite: { work: "wrk-1" } }, { text: " and " }, { text: "", cite: { work: "wrk-2" } }]),
-    text("t3", "a", [{ text: "Set aside " }, { text: "", cite: { work: "wrk-1" } }], "discarded"),
     text("t4", "a", [{ text: "Only the other work " }, { text: "", cite: { work: "wrk-2" } }]),
     text("t5", "a", [{ text: "Taken out " }, { text: "", cite: { work: "wrk-1" } }]),
   ],
   relations: [
     contains("doc-b", "t1"),
     contains("doc-b", "t2"),
-    contains("doc-a", "t3"),
     contains("doc-a", "t4"),
     contains("doc-c", "t5", "retired"),
   ],
@@ -63,7 +61,7 @@ describe("the documents citing a work (BO_0291_023)", () => {
     ]);
   });
 
-  it("leaves out a discarded block and one no longer contained, and orders documents by title", () => {
+  it("leaves out a block no longer contained, and orders documents by title", () => {
     expect(citingDocumentsIn(graph, "wrk-2").map((document) => document.title)).toEqual(["Antarctica", "Greenland"]);
     expect(citingDocumentsIn(graph, "wrk-3")).toEqual([]);
   });

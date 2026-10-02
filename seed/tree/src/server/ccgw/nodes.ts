@@ -7,8 +7,8 @@ import type { ReadNode } from "./client";
  * beside `asRecord`, which says whether stored JSON is a record at all.
  *
  * They live here rather than in the document model because they are not the
- * document model: `publishing` and `calliopa-video` read nodes of their own
- * kinds with them, and an extension should not have to depend on `documents`
+ * document model: other extensions read nodes of their own kinds with them,
+ * and an extension should not have to depend on `documents`
  * to read a node. BO_0255_007
  */
 

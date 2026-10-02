@@ -85,7 +85,7 @@ export interface ReferenceBytes {
 }
 
 /** Reads the picture's bytes for the generator, or null when they will not come. */
-async function startFrame(
+export async function startFrame(
   picture: { readonly objectId: string; readonly mediaType: string },
 ): Promise<ReferenceBytes | null> {
   try {

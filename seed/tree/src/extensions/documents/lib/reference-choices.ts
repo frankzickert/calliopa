@@ -31,7 +31,7 @@ const glimpseOf = (words: string): string => {
   return trimmed.length > GLIMPSE ? `${trimmed.slice(0, GLIMPSE)}…` : trimmed;
 };
 
-const inReadingOrder = (block: BlockView): boolean => !("standing" in block) || (block.standing !== "discarded" && block.standing !== "prompt");
+const inReadingOrder = (block: BlockView): boolean => !("standing" in block) || block.standing !== "prompt";
 
 /** The blocks a sentence in `editing` may refer to. */
 export function referenceChoices(document: Pick<DocumentView, "blocks" | "referenceLabels" | "equationNumbers">, editing: string | null): ReferenceChoice[] {

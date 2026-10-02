@@ -7,7 +7,8 @@ agent nobody can configure from the product is an agent nobody configures.
 
 The settings surface and this broker talk through files on the shared volume:
 
-  login/request.json  {"runtime": "codex" | "claude-code", "id"?}   written by the app
+  login/request.json  {"runtime": "codex" | "claude-code", "id"?, "action"?}
+                      written by the app; `action: "logout"` signs out
   login/state.json    {runtime, id?, status, url?, userCode?, awaiting?, output}
   login/code          the paste-back code for Claude's flow, written by the app
   adapters.json       what each runtime is: installed, version, authenticated
@@ -68,12 +69,20 @@ def clean_terminal(text):
     return ANSI_PATTERN.sub("", text)
 
 
+# A flow's reader thread and the broker's own loop both publish the state.
+# They share one temporary path, so two writes at once would move it out from
+# under each other, and the loser's replace raised and took the broker down in
+# the middle of a flow. BO_0316_003
+WRITE_LOCK = threading.Lock()
+
+
 def write_json(path, value):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
-    with open(tmp, "w") as handle:
-        json.dump(value, handle)
-    os.replace(tmp, path)
+    with WRITE_LOCK:
+        with open(tmp, "w") as handle:
+            json.dump(value, handle)
+        os.replace(tmp, path)
 
 
 def write_state(state):
@@ -414,6 +423,77 @@ def run_login(runtime, request_id=None):
     write_state(state)
 
 
+def logout_commands(runtime):
+    """The runtime's own sign-out, one command per copy of its credential.
+
+    Codex's pair lives in the CLI's home and, adopted, in Hermes's own store;
+    both go, or the gateway would go on reasoning on the copy left behind.
+    Claude's lives in the CLI's store or in claude.env, which the broker wrote
+    itself and removes itself. BO_0316_001
+    """
+    if runtime == "codex":
+        return [["codex", "logout"], ["hermes", "auth", "logout", "openai-codex"]]
+    if runtime == "claude-code":
+        return [["claude", "auth", "logout"]]
+    return None
+
+
+def run_logout(runtime, request_id=None):
+    """Signs a runtime out, and says so only once the runtime agrees.
+
+    The state carries the request's id and `action: "logout"`, as a sign-in's
+    carries its id, so the surface follows its own request (BO_0261_001). The
+    commands' exit codes are not the verdict: signing out of a runtime that
+    was not signed in exits non-zero and leaves exactly what was asked for.
+    The probe is. Nothing is revoked with the provider. BO_0316_001
+    """
+    stamp = {"runtime": runtime, "action": "logout"}
+    if request_id is not None:
+        stamp["id"] = request_id
+    commands = logout_commands(runtime)
+    if commands is None:
+        write_state(
+            {
+                **stamp,
+                "status": "failed",
+                "output": f"There is no {runtime!r} runtime to sign out of.",
+            }
+        )
+        return
+    write_state({**stamp, "status": "running", "awaiting": "cli", "output": ""})
+    said = []
+    for command in commands:
+        code, output = run(command, timeout=60)
+        if code != 0 and output:
+            said.append(output)
+    if runtime == "claude-code":
+        try:
+            os.remove(os.path.join(CONFIG_DIR, "claude.env"))
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            said.append(str(error))
+    adapters = probe_adapters()
+    signed_out = not adapters.get(runtime, {}).get("authenticated", False)
+    if signed_out and runtime == "codex":
+        # The gateway holds what Codex signed in with until it restarts, and
+        # the entrypoint restarts it when runtime.env moves. The keys stay as
+        # they are: resolve_runtime stamps the fallback and its reason on the
+        # restart this causes. BO_0225_001
+        write_runtime_env({})
+    output = "" if signed_out else "\n".join(
+        said + [f"{runtime} still reports itself signed in."]
+    )
+    write_state(
+        {
+            **stamp,
+            "status": "succeeded" if signed_out else "failed",
+            "awaiting": None,
+            "output": output[-4000:],
+        }
+    )
+
+
 def selected_runtime():
     """The runtime currently selected, as runtime.env holds it."""
     try:
@@ -445,9 +525,9 @@ def select_runtime(runtime):
 
     A Claude sign-in selects nothing: Claude Code runs as itself behind the
     Claude runner, never through the gateway, and the composer names it per
-    command. The token it wrote to claude.env still moves that file's mtime,
-    so the gateway restarts with the credential in its environment regardless.
-    BO_0228_003
+    command. The runner reads claude.env at each run's start, and the gateway
+    neither sources nor watches it, so a Claude sign-in restarts nothing.
+    BO_0228_003 BO_0316_002
     """
     if runtime == "claude-code":
         return
@@ -511,7 +591,10 @@ def main():
             except FileNotFoundError:
                 pass
             request_id = request.get("id")
-            run_login(
+            # A request without an action is a sign-in, as every request was
+            # before BO_0316.
+            flow = run_logout if request.get("action") == "logout" else run_login
+            flow(
                 str(request.get("runtime", "")),
                 str(request_id) if request_id is not None else None,
             )

@@ -16,7 +16,7 @@
 - Which agent performs a command is the reader's choice, in a dropdown at the start of a block's command control (`AgentMenu`, `BO_0228`, reached through `bridge.agents`, `BO_0267_008`): Codex, Claude Code and Hermes, each shown by its character's face — Codey, Clauderic, and for now the Fairytales barista robot — never a vendor's logo. Closed, it shows the chosen agent's face and a caret and is named *Agent: «name»*; open, it lists the three with their faces and names, Hermes's with its model. A native `select` cannot show a face, so it is the select-only combobox pattern: the arrows, `Home`, `End` and a letter move, `Enter` chooses, `Escape`, `Tab`, a press outside or the button again close with the choice unchanged. An agent that cannot run is listed dimmed with its reason as text under its name, `aria-disabled` rather than removed, and choosing it changes nothing. The choice is remembered for the instance (`PUT /api/agent/choice`, `agent-choice.json`), so every device opens on the same agent; when the remembered agent cannot run, it opens on the one the gateway is running and the notice beside the control says so, and a command always names its agent. The faces' crops are recorded beside `AGENT_FACES` in `src/lib/agent-menu.ts`, and every decision the dropdown makes is a function there (`openingAgent`, `menuKey`, `pick`).
 - `sendCommand$` on the view bridge sends a block's command (`BO_0267_008`, `CA_0058_002`): it copies the marks the view last reported for the document (`setPointing$`) at the press, refuses a stale passage and a `#n` no mark stands under, and posts `blockCommand` — `artifact`, `delivery: "propose"`, `references` and `source` (the block and the revision sent) — with the chosen agent, the tab's branch and the block's attachments, and no goal, since the kernel reads the words from the revision. It goes through `startRun$`, which follows the started run. The route reads the target back through `readCommandTarget`, which knows that one shape and refuses every other by name — a body naming no document, one with no source, a reference list that is not one, a source missing its block or revision, `delivery: "answer"`, and the `delivery: "start"` the kernel still takes — and refuses a goal beside it, since the words are the block's; the kernel's intake refuses an incoherent one too, and its `400` reaches the reader as a refusal rather than as the agent failing (`BO_0226_004`, `BO_0267_009`). A process opened for a block's command is named by the first line of the words the kernel read (`firstLine`, `conductor.ts`).
 - When a run the reader started ends — completed, failed or cancelled, since a run that failed may already have staged — the shell tells the view showing its document once, through `proposed` on the view bridge, and the block editor reads its proposals again and opens them if any stand unanswered, so the reader sees the proposed change where it would land without reopening the tab (`BO_0226_007`).
-- What a block's command carries is shown as chips on its command control's line (`ReferenceChips`, `CA_0039_003`, moved there by `BO_0267_012`): one per reference in mark order — `#1`, `#3`, `#5` — then one per fixated block, carrying a pin glyph and no number, since a fixated block is a standing and not a reference. A chip shows its number and says its words in its accessible name — *Reference 3: “…”*, *Fixated: “…”* (`chipName`, `fixatedChipName` in `src/lib/command-target.ts`; the contract's `Pointing.fixated` and `FixatedBlock` follow the state's name, `BO_0272_015`); a stale passage's chip carries the warning icon and border and *stale* in its name. The chips are the view's report itself, the entries `sendCommand$` builds the body from, so what they show and what is sent cannot differ; a fixated block is shown and never sent, since the kernel reads what is fixated from the graph at the run's start. They wrap onto a second line, and the row is absent when nothing is marked or fixated. A chip carries no × and no +: a reference is taken back where it was marked, in the document, which is still the list of what was marked; the chips are the command. Pressing one — click, tap, `Enter` or `Space` — asks the document's view to show its area through `reveal` on the view bridge ([Workspace View Types](./view-types.md)). This supersedes `BO_0226`'s *never an enumeration*, by the user's decision of 2026-09-10, as the disclosure it replaced did (`BO_0227_015`).
+- What a block's command carries is shown as chips on its command control's line (`ReferenceChips`, `CA_0039_003`, moved there by `BO_0267_012`): one per reference in mark order — `#1`, `#3`, `#5` — and none for a fixated block, which stands behind every run since the kernel reads what is fixated from the graph at the run's start (`DO_0025_008`). A chip shows its number and says its words in its accessible name — *Reference 3: “…”* (`chipName` in `src/lib/command-target.ts`); a stale passage's chip carries the warning icon and border and *stale* in its name. The chips are the view's report itself, the entries `sendCommand$` builds the body from, so what they show and what is sent cannot differ. They wrap onto a second line, and the row is absent when nothing is marked. A chip carries no × and no +: a reference is taken back where it was marked, in the document, which is still the list of what was marked; the chips are the command. Pressing one — click, tap, `Enter` or `Space` — asks the document's view to show its area through `reveal` on the view bridge ([Workspace View Types](./view-types.md)). This supersedes `BO_0226`'s *never an enumeration*, by the user's decision of 2026-09-10, as the disclosure it replaced did (`BO_0227_015`).
 - Typing `#` in the block being edited offers its prompt's references by number, narrowing as digits follow, as buttons in a list that opens above the command control; choosing one writes `#<number>` where the caret stood, through the editor's own edit (`BO_0267_013`). A number typed creates nothing (`pendingReference`, `referenceMatches` in `src/lib/command-typeahead.ts`). A block with nothing marked offers the document's blocks instead (`BO_0300`), and a prompt offers those after its marks, marking the one chosen (`BO_0304_016`); a mark into another document shows that document's title in the list (`BO_0304`).
 - A command carrying a stale passage is refused at *Send*, naming it beside the control, as every refusal is shown beside the control that was pressed (`CA_0022_018`): its number may already be in the words, and sending it would name a reference with nothing behind it. So is a command whose words name `#n` that no mark stands under — a mark taken back after its number was written — naming the number and asking for it to be marked again or taken out of the words (`danglingNumbers`, `src/lib/command-typeahead.ts`, checked by `sendCommand$`).
 - A run's normalized events stand in its detail in the right panel, read through the registry's own polling rather than a second transport ([Processes](./processes.md), `CA_0058_006`). Cancel is offered only while the run's process is still queued or running, so the control is never there for a run that has already ended (`CA_0022_018`).
@@ -30,7 +30,7 @@
 ## Command File Attachments
 
 - Under `BO_0229`, promoted to draft by the user on 2026-09-10, transferred into this repository's docs the same day and re-transferred here on 2026-09-16 after the split of `ui.shell` into the frame, `documents` and `calliopa-refine` (`BO_0253`): the command bar attaches files to a command, and the run reads them. The kernel's half — the image, the upload and extraction route, the intake and the record, `read_attachment` and the facts measured at the transfer — is `calliopa-bootstrap`'s `docs/system/ui-kernel.md`, *Command File Attachments* (`BO_0229_001`–`BO_0229_006`). The process detail is [Processes](./processes.md) (`BO_0229_011`). Decided 2026-09-10: any file, up to 10 MB per file and 10 per command; contents for text, PDF, images and Office documents; kept with the run, in Garage; access follows the run, which is instance-wide today, with per-person scoping left to `BO_0232`; no process results.
-- Attachments are the frame's: they belong to a command and its run, not to a document, so `ui.shell` declares the `attachment` type and nothing of this change is `documents`' or `calliopa-refine`'s. A command aimed at nothing may carry files, and the frame stays total without either extension.
+- Attachments are the frame's: they belong to a command and its run, not to a document, so `ui.shell` declares the `attachment` type and nothing of this change is `documents`'. A command aimed at nothing may carry files, and the frame stays total without either extension.
 * What a command carries is shown on its control's line, and each attachment can be taken off: a file the reader cannot see there never reaches a run.
 * A file refused — over the bound, past the tenth, or failed to upload — is refused in words beside the paperclip, never dropped silently.
 - The `attachment` type (`BO_0229_007`) is `ui.shell`'s `ext.blocktype` member, staged with the change through `kernel commit --members`: required `id`, `filename`, `mediaType`, `size` (bytes), `file` (a blob reference) and `textStatus` (`text`, `extracted`, `empty`, `image`, `none`), optional `text` (the extracted text's blob reference). A blob reference is top-level, where CCGW's validation looks for one, so writing the node references its bytes and Garage keeps them past the staging TTL. Nothing contains an attachment and it contains nothing. The kernel's fixture `internal/kernel/serve/testdata/ui-shell-vocabulary.json` holds the same member.
@@ -59,8 +59,8 @@
 
 ## References To What Was Marked
 
-- Under `calliopa-bootstrap`'s `BO_0263` (2026-09-18), a reference can point at a proposed change, a retired block or a discarded block, and it keeps what was marked even when its target changes since ([Command Mode](../../../src/extensions/documents/docs/system/documents/command-mode.md#marking-every-drawn-row), `documents`).
-- The chips and the body (`BO_0263_007`): `SentReference` in `src/lib/command-target.ts` carries what was marked — `target` (`proposal` or `retired`), `group`, `item` and `revisionId` — beside the kind, the number, the block and a passage's quote, and `PointedReference` shows `what` it is, the `proposer`, `since` and `rowless`. `sent` keeps what was marked and drops what is only shown; `readCommandTarget` reads the new fields back and refuses by name a target the shell never sends, a proposal naming no group or item, a proposal or retired block naming no revision, and a field naming nothing. A chip says what its reference is in a word beside its number — *proposed*, *retired*, *discarded* — and in its name with what has happened since (*Reference 1: proposed by Claude Code, “A new line.”, since rejected*; `chipName`). A rowless chip reveals nothing and carries a × (*Take back reference n*, `takeBackName`) that asks the view, over the reveal channel, to take the reference back (`RevealTarget` `{kind: "takeBack", number}`, `ReferenceChips`). Such a reference is never a reason to refuse *Run*; a stale passage still is. Verified 2026-09-18 on the tree: `src/lib/command-target.test.ts` (*a reference to what was marked*) and `src/components/shell/reference-chips.test.ts` (*the chips of what was marked*: each chip's word and name, the × only on the rowless one and taking it back over the reveal channel while the chip itself reveals nothing, and the body carrying what was marked and nothing only shown).
+- Under `calliopa-bootstrap`'s `BO_0263` (2026-09-18), a reference can point at a proposed change or a retired block, and it keeps what was marked even when its target changes since ([Command Mode](../../../src/extensions/documents/docs/system/documents/command-mode.md#marking-every-drawn-row), `documents`).
+- The chips and the body (`BO_0263_007`): `SentReference` in `src/lib/command-target.ts` carries what was marked — `target` (`proposal` or `retired`), `group`, `item` and `revisionId` — beside the kind, the number, the block and a passage's quote, and `PointedReference` shows `what` it is, the `proposer`, `since` and `rowless`. `sent` keeps what was marked and drops what is only shown; `readCommandTarget` reads the new fields back and refuses by name a target the shell never sends, a proposal naming no group or item, a proposal or retired block naming no revision, and a field naming nothing. A chip says what its reference is in a word beside its number — *proposed*, *retired* (`BO_0315_009`) — and in its name with what has happened since (*Reference 1: proposed by Claude Code, “A new line.”, since rejected*; `chipName`). A rowless chip reveals nothing and carries a × (*Take back reference n*, `takeBackName`) that asks the view, over the reveal channel, to take the reference back (`RevealTarget` `{kind: "takeBack", number}`, `ReferenceChips`). Such a reference is never a reason to refuse *Run*; a stale passage still is. Verified 2026-09-18 on the tree: `src/lib/command-target.test.ts` (*a reference to what was marked*) and `src/components/shell/reference-chips.test.ts` (*the chips of what was marked*: each chip's word and name, the × only on the rowless one and taking it back over the reveal channel while the chip itself reveals nothing, and the body carrying what was marked and nothing only shown).
 
 ## Blocks As Commands
 
@@ -89,8 +89,7 @@
 - Under `calliopa-bootstrap`'s `BO_0273`, the agent list opens where there is room for it and
   scrolls inside that room (`BO_0273_036`). It opened upward always, which was right in the
   composer at the foot of the page and wrong on a block: a chip near the top of a document pushed
-  the list off the screen, and the senders beside the agents made the list long enough for that to
-  happen on most blocks.
+  the list off the screen on most blocks.
 * A menu that cannot be seen does not exist. The list opens on whichever side of its button has
   more room, is never taller than that room, and scrolls rather than growing past it. User
   decision, 2026-09-22.
@@ -108,15 +107,14 @@
   one near the top, never more room than the side has, the floor for a chip with almost none, and
   the flip to the right edge. The side rule was shown to bite by fixing it to *above*.
 
-## A Sender's Answer Tells The Document
+## An Answer Without A Run Tells The Document
 
-- A sender answers a process and no run, and `startRun$` follows nothing for it (`BO_0273_039`):
-  the process is on the Execution list like any other, and its end reaches the document from the
-  poll ([Processes](./processes.md), `CA_0063_002`).
-- Its start is this route's (`CA_0063_003`): when the answer carries a process and no run,
-  `startRun$` raises `proposed` for the artifact, so the pending block the sender staged before
-  spending (`media`, `BO_0273_017b`) shows at once in its chip while the picture is made, rather
-  than standing unseen in the document's group until the reader reopened the tab.
+- An answer that carries a process and no run is followed by nothing (`BO_0273_039`): the process
+  is on the Execution list like any other, and its end reaches the document from the poll
+  ([Processes](./processes.md), `CA_0063_002`). Its start raises `proposed` for the artifact
+  (`CA_0063_003`), so a pending block staged before the process shows at once. No extension answers
+  one since the senders went (`calliopa-bootstrap`'s `BO_0312_040`); the handling is the frame's,
+  for any process a command starts.
 
 ## References Across Documents
 
@@ -136,9 +134,11 @@ and the choice are `documents`' [Block Editor](../../../src/extensions/documents
 [UI Kernel](../../../../../docs/system/ui-kernel.md), *Working Modes*.
 
 * The console's composer does not name the mode. User decision, 2026-09-29 (`BO_0306_Q5`).
-- The shell forwards the mode (`BO_0306_017`). The view bridge's `setMode$` keeps the mode each
-  document's view says is in force in the aim (`CommandAim.mode`, keyed by document as the branch
-  is), and `sendCommand$` and `sendGesture$` put it on the run's body; the run route reads it
+- The shell forwards the mode (`BO_0306_017`, `DO_0025_008`). A command carries its own
+  (`ViewCommand.mode`), which `sendCommand$` puts on the run's body. The view bridge's `setMode$`
+  keeps the document's last sent mode, as its view says it, in the aim (`CommandAim.mode`, keyed
+  by document as the branch is), which `sendCommand$` sends for a command that carries none and
+  `sendGesture$` for a gesture; the run route reads it
   (`readMode` in `src/lib/command-target.ts`, two words or none, the kernel judging the poles) and
   hands it through `conductRun` to `startBridgeRun`, which sends it beside `intention`. The chip
   reads the mode and the drift from the run's `agent.run` node, so `BridgeRun` reads neither.
@@ -146,3 +146,31 @@ and the choice are `documents`' [Block Editor](../../../src/extensions/documents
   `book-open-text` and `pencil-simple-line` from `@phosphor-icons/core@2.1.1`. Verified in
   `src/server/agent/bridge.test.ts` (the mode sent, and none when none is given) and
   `src/lib/command-target.test.ts` (`readMode`).
+
+## The Send And The Mode On The Command Line
+
+Under `documents`' `DO_0025`, set to draft by the user on 2026-09-30 and transferred the same day:
+a block's command line no longer shows its fixated blocks, and it carries the working mode of the
+command it sends. The rules are `documents`' [Command Mode](../../../src/extensions/documents/docs/system/documents/command-mode.md),
+*The Send And The Mode On The Command Line*.
+
+- The fixated chip and its contract retired (`DO_0025_008`): `ReferenceChips` draws no chip for a
+  fixated block, and `Pointing` is `{references}` alone — `Pointing.fixated`, `FixatedBlock` and
+  `fixatedChipName` are gone from `src/lib/command-target.ts`. `ViewCommand` carries the command's
+  own `mode`, which `sendCommand$` sends in place of the aim's; the aim's mode (`setMode$`) stays for
+  the console's composer and gestures. `executionRun` (`src/lib/execution.ts`) carries a run's
+  `mode` from the kernel's record when it has both poles, so a view reads the mode a block was last
+  sent with; the section's readers ignore it. Verified in `reference-chips.test.ts` (no fixated
+  chip), `command-target.test.ts` and `execution.test.ts` (the mode read back, and none when none
+  was sent); the kernel side of the mode on the body is `bridge.test.ts`' as before.
+
+## References To A Whole Proposal
+
+- Under `calliopa-bootstrap`'s `BO_0321`, set to draft by the user on 2026-09-30 and transferred here the same day, a command may carry a whole proposal as one reference ([Command Mode](../../../src/extensions/documents/docs/system/documents/command-mode.md#a-whole-proposal-marked), `documents`).
+- The body and the chip (`BO_0321_012`, landed 2026-10-01, `src/lib/command-target.ts`, `reference-chips.tsx`). `SentReference` has the kind `proposal`, a proposal marked whole, carrying `group` and `items` (`ProposalItem`: `item`, `blockId`, `revisionId` — the block too, since an item's id does not always name it) and no block; `sent` keeps only those. `readCommandTarget` reads it back trimmed (`readWholeProposal`) and refuses by name one naming no group, a block, a single item or a revision, or an item missing its item, block or revision; it may carry no item yet. `PointedReference` carries `count` and `staging`; the chip draws `proposalWords` — *#3 Claude Code’s proposal · 4, still being staged* — named the same (`chipName`), with its × while rowless, and its press asks for `{kind: "proposal", group}` (`revealTarget`). `SentMark` (`src/lib/execution.ts`) keeps the items a run was sent. `command-target.test.ts` and `reference-chips.test.ts` prove it read back, refused, sent, drawn and revealed; the refusal, the reveal and the chip's words were each shown to bite.
+
+## A Pinch Is A Command
+
+Under `calliopa-bootstrap`'s `BO_0322`, set to draft by the user on 2026-10-01 and transferred here the same day: a pinch on a block, or its control on the command line, sends a command with no words that names the pinch. The rules are `documents`' [Block Editor](../../../src/extensions/documents/docs/system/documents/block-editor.md#a-pinch-deepens-or-gathers); the kernel's intake is `calliopa-bootstrap`'s `ui-kernel.md`, *A Pinch Deepens Or Gathers* (`BO_0322_001`).
+
+- A pinch is sent (`BO_0322_016`, landed 2026-10-01). The view bridge carries `sendPinch$(ViewPinch)` — the target, the block, `in` or `out`, and the mode the view gives it — and the shell sends `{pinch, artifact, block, mode}` with the chosen agent and speed and the tab's branch, following the run as a command's. The runs route takes a third shape beside a command and a gesture (`readRunShape`): a pinch, with no goal and no intention, whose target is the document and its block as the one reference (`readPinchTarget`); `conductRun` and `startBridgeRun` pass `pinch` to the kernel, and the process is named *Deepen* or *Gather* (`pinchName`). `src/lib/command-target.test.ts` proves the shape and the target with their refusals; the shell's verb is recorded by `documents`' render harness.

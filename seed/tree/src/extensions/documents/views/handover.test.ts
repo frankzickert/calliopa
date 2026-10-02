@@ -497,6 +497,12 @@ describe("a touch on another block's words while one is being edited", () => {
     const down = page.createEvent("Event");
     down.initEvent("mousedown", true, true);
     target.dispatchEvent(down);
+    // And the finger lifts, as every press ends: a press under way holds
+    // back the focus a row is given until it does (DO_0023_001).
+    const up = page.createEvent("Event");
+    up.initEvent("pointerup", true, true);
+    Object.defineProperty(up, "pointerType", { value: pointerType });
+    target.dispatchEvent(up);
     return down.defaultPrevented;
   };
 

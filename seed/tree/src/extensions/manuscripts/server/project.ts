@@ -2,10 +2,13 @@ import { showsLineNumbers, type BlockView, type CodeBlockView, type DocumentView
 import type { WorkRecord } from "~/extensions/bibliography/lib/work";
 import type { Run } from "~/lib/runs";
 
+import { NO_FRONT, type Front } from "../lib/front";
+
 /**
  * The projection (`BO_0293_019`): a document's accepted reading order at a
  * revision, turned into what the typesetting service takes — a Pandoc JSON
- * document AST whose metadata carries the front matter, the cited works as
+ * document AST whose metadata carries the front matter read from the role the
+ * run names (`calliopa-bootstrap`'s `BO_0312_020`), the cited works as
  * CSL-JSON, and the figures to send — with nothing typed a second time, so a
  * manuscript can never say what the record does not.
  *
@@ -273,12 +276,18 @@ export interface GlossaryEntry {
   readonly definition: readonly Run[] | null;
 }
 
-export function project(document: DocumentView, works: ReadonlyMap<string, WorkRecord>, revision: number, glossary: readonly GlossaryEntry[] = []): Projection {
+export function project(
+  document: DocumentView,
+  works: ReadonlyMap<string, WorkRecord>,
+  revision: number,
+  glossary: readonly GlossaryEntry[] = [],
+  front: Front = NO_FRONT,
+): Projection {
   const blocks: Block[] = [];
   const abstract: Block[] = [];
   const supplementary: Block[] = [];
   const files: FigureFile[] = [];
-  const reading = document.blocks.filter((block) => !("standing" in block) || (block.standing !== "discarded" && block.standing !== "prompt"));
+  const reading = document.blocks.filter((block) => !("standing" in block) || block.standing !== "prompt");
   // The paragraphs a sentence refers to, set apart as remarks so a reference
   // has a number to point at (`BO_0300_012`, user decision 2026-09-25):
   // the read's own answer when it gave one, else derived here the same way.
@@ -449,25 +458,21 @@ export function project(document: DocumentView, works: ReadonlyMap<string, WorkR
   }
 
   const head: Meta = { title: meta(document.title) };
-  const front = document.frontMatter;
-  if (front?.authors !== undefined) {
+  if (front.authors.length > 0) {
     head["author"] = {
       t: "MetaList",
-      c: front.authors.map((author) => {
-        const places = (author.affiliations ?? []).map((at) => front.affiliations?.[at]).filter((place): place is string => place !== undefined);
-        return {
-          t: "MetaMap",
-          c: {
-            name: meta(author.corresponding === true ? `${author.name}*` : author.name),
-            ...(places.length > 0 ? { affiliation: meta(places.join("; ")) } : {}),
-            ...(author.email !== undefined ? { email: meta(author.email) } : {}),
-          },
-        };
-      }),
+      c: front.authors.map((author) => ({
+        t: "MetaMap",
+        c: {
+          name: meta(author.name),
+          ...(author.affiliation !== undefined ? { affiliation: meta(author.affiliation) } : {}),
+          ...(author.email !== undefined ? { email: meta(author.email) } : {}),
+        },
+      })),
     };
   }
   if (abstract.length > 0) head["abstract"] = { t: "MetaBlocks", c: abstract };
-  if (front?.keywords !== undefined) head["keywords"] = { t: "MetaList", c: front.keywords.map(meta) };
+  if (front.keywords.length > 0) head["keywords"] = { t: "MetaList", c: front.keywords.map(meta) };
   if (supplementary.length > 0) head["supplementary"] = { t: "MetaBlocks", c: supplementary };
 
   const references = context.cited.map((workId) => cslOf(workId, works.get(workId) as WorkRecord));

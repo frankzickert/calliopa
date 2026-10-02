@@ -2,10 +2,9 @@ import { serverContributions as declare, type ApiRoute } from "~/contract";
 import { HttpError } from "~/server/http-error";
 
 import { remakeGeneration } from "./server/make";
-import { mediaSenders, quoteToModel, sendToModel } from "./server/senders";
 import { sourceOf } from "./server/source";
 import { captureAxes, offeredRoster, readOffered, writeOffered } from "./server/offered";
-import { TOOLS, ToolRefusal, type ToolCall } from "./server/tools";
+import { TOOLS, ToolRefusal, answerTool, type ToolCall } from "./server/tools";
 import { proposeGeneration } from "./server/propose";
 import {
   SERVICES,
@@ -210,8 +209,8 @@ const routes: readonly ApiRoute[] = [
 /**
  * What the kernel calls: the tools a run reaches. Answered only with the
  * secret the kernel generated at its start, which the proxy strips from every
- * browser request — so this is the one door a run has, and nothing that spends
- * is behind it. BO_0273_018
+ * browser request. A tool marked `spends: true` is admitted by the kernel's
+ * Send gate before this callback is reached (`BO_0312_004`). BO_0273_018
  */
 const kernelRoutes: readonly ApiRoute[] = [
   {
@@ -225,9 +224,10 @@ const kernelRoutes: readonly ApiRoute[] = [
       const asked: ToolCall = {
         input: (typeof body["input"] === "object" && body["input"] !== null ? body["input"] : {}) as Record<string, unknown>,
         run: (body["run"] ?? { id: "", group: "", pin: 0 }) as ToolCall["run"],
+        settings: body["settings"],
       };
       try {
-        event.json(200, await tool(asked));
+        event.json(200, await answerTool(params["tool"] as keyof typeof TOOLS, asked));
       } catch (error) {
         if (error instanceof ToolRefusal) throw new HttpError(422, error.message);
         throw error;
@@ -238,12 +238,6 @@ const kernelRoutes: readonly ApiRoute[] = [
 
 export const contributions = declare({
   routes: [...routes, ...kernelRoutes],
-  // The models, beside the agents. BO_0273_035
-  senders: mediaSenders,
-  send: sendToModel,
-  // Free: the adapters' own dry run, asked as the reader turns a control
-  // rather than as part of a press. BO_0279_013
-  quote: quoteToModel,
   // No parties. A `credential: "status"` party is an *agent runtime* to the
   // settings extension: `withStatus` looks it up in what the agent reported
   // (`adapters.json`, which the hermes broker writes for codex and claude-code

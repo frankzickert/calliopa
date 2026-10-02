@@ -1,11 +1,9 @@
-import { randomUUID } from "node:crypto";
-
 import {
   MAX_ATTACHMENT_BYTES,
   type AttachmentDescriptor,
 } from "~/lib/command-target";
-import { graphEnv } from "../ccgw/env";
 import { query, write } from "../ccgw/client";
+import { port } from "../port";
 import { forwardedHeaders } from "../request-context";
 import { isRecordId } from "../uuid";
 import { readBridgeRun } from "./bridge";
@@ -39,7 +37,7 @@ export async function uploadAttachment(
   }
   let response: Response;
   try {
-    response = await fetch(`${graphEnv().kernelUrl}/__kernel/attachments`, {
+    response = await port.kernel("/__kernel/attachments", {
       method: "POST",
       headers: {
         ...forwardedHeaders(),
@@ -82,7 +80,7 @@ export type Written =
 export async function writeAttachments(descriptors: readonly AttachmentDescriptor[]): Promise<Written> {
   const ids: string[] = [];
   for (const descriptor of descriptors) {
-    const id = randomUUID();
+    const id = port.uuid();
     const file = {
       _kind: "blob",
       hash: descriptor.hash,
@@ -159,7 +157,7 @@ export async function readAttachment(id: string): Promise<StoredAttachment | nul
 
 /** The file's bytes from CCGW's blob door, streamed as they arrive. */
 export async function fetchAttachmentFile(hash: string): Promise<Response> {
-  return fetch(`${graphEnv().ccgwUrl}/v1/blobs/${hash}`);
+  return port.gateway(`/v1/blobs/${hash}`);
 }
 
 /**

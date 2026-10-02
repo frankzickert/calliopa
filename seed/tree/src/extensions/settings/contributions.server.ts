@@ -1,6 +1,7 @@
 import { serverContributions as declare, type ApiRoute } from "~/contract";
-import { loginState, requestLogin, sendLoginCode } from "~/server/agent/adapters";
-import { configureHermesModel } from "~/server/agent/bridge";
+import { signOutBlocker } from "~/lib/connections";
+import { loginState, requestLogin, requestLogout, sendLoginCode } from "~/server/agent/adapters";
+import { activeRuns, configureHermesModel } from "~/server/agent/bridge";
 import { HttpError } from "~/server/http-error";
 import { kernelAccounts } from "~/server/kernel/accounts";
 import { kernelUpdate } from "~/server/kernel/update";
@@ -201,6 +202,29 @@ const routes: readonly ApiRoute[] = [
         return;
       }
       const id = await requestLogin(runtime);
+      event.json(202, { runtime, id });
+    },
+  },
+  {
+    // Asks the agent to sign a runtime out. It is refused, in words, while a
+    // run the sign-out would stop is in flight, whoever's run it is: a
+    // sign-out never interrupts a run. The state is read like a sign-in's,
+    // from `agent/login?id=`. BO_0316_006
+    method: "POST",
+    path: "agent/logout",
+    handle: async (event) => {
+      const body = (await event.request.json()) as { runtime?: unknown };
+      const runtime = body.runtime;
+      if (runtime !== "codex" && runtime !== "claude-code") {
+        event.json(400, { error: `There is no ${String(runtime)} runtime.` });
+        return;
+      }
+      const blocked = signOutBlocker(runtime, await activeRuns());
+      if (blocked !== null) {
+        event.json(409, { error: blocked });
+        return;
+      }
+      const id = await requestLogout(runtime);
       event.json(202, { runtime, id });
     },
   },

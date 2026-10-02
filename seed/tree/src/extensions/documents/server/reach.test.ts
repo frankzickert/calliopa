@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { reachesDocument } from "./reach";
+import { gatherOf, reachesDocument } from "./reach";
 
 const set = (overrides: Partial<Parameters<typeof reachesDocument>[0]> = {}) => ({
   touchedNodes: [],
@@ -35,5 +35,29 @@ describe("reachesDocument", () => {
         reach,
       ),
     ).toBe(false);
+  });
+});
+
+// A gather (BO_0322_013): the group closes blocks' containment in the
+// document and places the same blocks under another node, its focused work.
+describe("gatherOf", () => {
+  const established = new Map([["node:b", {}], ["node:c", {}], ["node:d", {}]]);
+  const contains = (id: string, fromNodeId: string, toId: string) => ({ id, type: "CONTAINS", fromNodeId, toKind: "node", toId });
+
+  it("reads the moved blocks and the focused work they move into", () => {
+    const gathered = gatherOf(
+      {
+        closedRelations: [contains("rel:cb", "node:doc", "node:b"), contains("rel:cd", "node:doc", "node:d")],
+        stagedRelations: [contains("rel:mb", "node:child", "node:b"), contains("rel:md", "node:child", "node:d"), contains("rel:mo", "node:child", "node:orig")],
+      },
+      "node:doc",
+      established,
+    );
+    expect(gathered === null ? null : { moved: [...gathered.moved].sort(), child: gathered.child }).toEqual({ moved: ["node:b", "node:d"], child: "node:child" });
+  });
+
+  it("is nothing for a removal, which closes a containment and places the block nowhere, or a group that moves nothing", () => {
+    expect(gatherOf({ closedRelations: [contains("rel:cb", "node:doc", "node:b")], stagedRelations: [{ ...contains("rel:r", "node:doc", "node:b"), type: "retired" }] }, "node:doc", established)).toBeNull();
+    expect(gatherOf({ stagedRelations: [contains("rel:n", "node:doc", "node:new")] }, "node:doc", established)).toBeNull();
   });
 });

@@ -24,7 +24,6 @@ const report: Pointing = {
       stale: true,
     },
   ],
-  fixated: [{ blockId: "c", words: "Tone: dry." }],
 };
 
 const mount = async (shown: Pointing = report) => {
@@ -43,21 +42,22 @@ const mount = async (shown: Pointing = report) => {
 };
 
 describe("the chips along the field", () => {
-  it("Given nothing marked or fixated, Then there is no chip row", async () => {
+  it("Given nothing marked, Then there is no chip row", async () => {
     const { find } = await mount();
     expect(find("[data-chips]")).toBeNull();
   });
 
-  it("Given marks and a fixated block, Then the chips come in mark order with the fixated one after them, each named by its words", async () => {
+  it("Given marks, Then the chips come in mark order, each named by its words, and no chip stands for a fixated block", async () => {
     const { root, userEvent } = await mount();
     await userEvent("[data-report]", "click");
     const chips = Array.from(root.querySelectorAll("[data-chips] button"));
     expect(chips.map((chip) => chip.getAttribute("aria-label"))).toEqual([
       "Reference 1: “Opening.”",
       "Reference 2, stale: “before the lights”",
-      "Fixated: “Tone: dry.”",
     ]);
-    expect(chips.map((chip) => chip.textContent?.trim())).toEqual(["#1", "#2", ""]);
+    expect(chips.map((chip) => chip.textContent?.trim())).toEqual(["#1", "#2"]);
+    // The command line shows no pin for a fixated block. DO_0025_008
+    expect(root.querySelector("[data-chip-fixated]") ?? null).toBeNull();
   });
 
   it("Given a stale passage, Then its chip says so beyond colour", async () => {
@@ -79,11 +79,6 @@ describe("the chips along the field", () => {
     });
     await userEvent('[data-chip="2"]', "click");
     expect(revealed().seq).toBe(2);
-    await userEvent('[data-chip-fixated="c"]', "click");
-    expect(revealed()).toEqual({
-      target: { kind: "block", blockId: "c" },
-      seq: 3,
-    });
   });
 });
 
@@ -99,7 +94,6 @@ describe("the chips of what was marked", () => {
       { kind: "block", number: 1, blockId: "n", words: "A new line.", stale: false, target: "proposal", group: "node:g", item: "node:g|insert|node:n", revisionId: "rev-n", what: "proposal", proposer: "Claude Code", since: "rejected", rowless: true },
       { kind: "block", number: 2, blockId: "r", words: "Gone.", stale: false, target: "retired", revisionId: "rev-r", what: "retired" },
     ],
-    fixated: [],
   };
 
   it("Given a rejected proposal and a retired block, Then each chip says what it is, and only the rowless one has a ×", async () => {
@@ -133,8 +127,7 @@ describe("chips for references across documents (BO_0304_013)", () => {
         { kind: "block", number: 2, blockId: "x", words: "Elsewhere.", stale: false, document: "doc-2", documentTitle: "Second" },
         { kind: "document", number: 3, document: "doc-3", words: "Third", stale: false, documentTitle: "Third" },
       ],
-      fixated: [],
-    });
+      });
     await userEvent("[data-report]", "click");
     expect(find('[data-chip="1"] [data-chip-document]')).toBeNull();
     expect(find('[data-chip="2"] [data-chip-document="doc-2"]')?.textContent).toBe("Second");
@@ -147,5 +140,28 @@ describe("chips for references across documents (BO_0304_013)", () => {
     await userEvent('[data-chip="3"]', "click");
     expect(revealed().target).toEqual({ kind: "document", document: "doc-3", documentTitle: "Third" });
     expect(root.querySelectorAll("[data-chip]").length).toBe(3);
+  });
+});
+
+describe("a proposal marked whole, as a chip (BO_0321_012)", () => {
+  const whole: Pointing = {
+    references: [
+      { kind: "proposal", number: 3, group: "chg-1", items: [], count: 4, proposer: "Codex", staging: true, words: "Codex’s proposal · 4, still being staged", stale: false },
+    ],
+  };
+
+  it("Given a proposal marked whole, Then its chip says whose and how much, and its press reveals the group", async () => {
+    const { find, userEvent, revealed } = await mount(whole);
+    await userEvent("[data-report]", "click");
+    expect(find('[data-chip-proposal="chg-1"]')?.textContent).toBe("Codex’s proposal · 4, still being staged");
+    expect(find('[data-chip="3"]')?.getAttribute("aria-label")).toBe("Reference 3: Codex’s proposal · 4, still being staged");
+    await userEvent('[data-chip="3"]', "click");
+    expect(revealed().target).toEqual({ kind: "proposal", group: "chg-1" });
+  });
+
+  it("Given its items all answered, Then it is rowless and taken back from its ×", async () => {
+    const { find, userEvent } = await mount({ references: [{ ...(whole.references[0] as Pointing["references"][number]), rowless: true, since: "answered" }] });
+    await userEvent("[data-report]", "click");
+    expect(find('[data-chip-take-back="3"]')).not.toBeNull();
   });
 });

@@ -23,7 +23,9 @@ import shutil
 import subprocess
 import sys
 import threading
+import urllib.error
 import urllib.parse
+import urllib.request
 import uuid
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -67,6 +69,7 @@ class Adapter:
 
 
 ADAPTERS: tuple[Adapter, ...] = (
+    Adapter("codex", "image", "codex-image", "codex_image.py"),
     Adapter("higgsfield", "image", "higgsfield-image", "higgsfield_image.py"),
     # The Higgsfield job type is a parameter by the adapter's own design, so its video set is open.
     Adapter("higgsfield", "video", "higgsfield-seedance", "seedance.py", open_set=True),
@@ -476,6 +479,16 @@ def choose_workspace(service: str, workspace: str, *,
 def credential_of(service: str, *, runner: Callable[..., Any] | None = None) -> tuple[bool, str | None]:
     """A free probe: the adapters' own no-cost calls, never a generation."""
     call = runner or subprocess.run
+    if service == "codex":
+        base = os.environ.get("CALLIOPA_CODEX_IMAGE_URL", "http://hermes:8644/v1/image").rsplit("/", 1)[0]
+        try:
+            bearer = Path(BEARER_FILE).read_text().strip()
+            request = urllib.request.Request(base + "/status", headers={"Authorization": f"Bearer {bearer}"})
+            with urllib.request.urlopen(request, timeout=10) as response:
+                state = json.loads(response.read())
+            return bool(state.get("signedIn")), None if state.get("signedIn") else "sign in to Codex in Settings"
+        except (OSError, ValueError, urllib.error.URLError):
+            return False, "the Codex image runner is not answering"
     if service == "openart":
         binary = os.environ.get("OPENART_BIN", "openart")
         argv = [binary, "account"]

@@ -19,7 +19,7 @@ export interface SelectedWords {
   readonly bottom: number;
   readonly left: number;
   /** What the row is, when it is not a block of the document — a proposal,
-   * a retired or a discarded block — and the words it shows, which the
+   * a retired block — and the words it shows, which the
    * passage is anchored in. BO_0263_005 */
   readonly marked?: Marked;
   readonly text?: string;
@@ -37,7 +37,7 @@ export function selectedWords(page: Document): SelectedWords | null {
     null;
   const range = selection.getRangeAt(0);
   if (row === null) {
-    // A proposal, a retired or a discarded row: its words are its own.
+    // A proposal or a retired row: its words are its own.
     const marked = from?.closest<HTMLElement>("[data-mark-row]") ?? null;
     const words = marked?.querySelector<HTMLElement>("[data-mark-text]") ?? null;
     const markedBlock = marked?.dataset.markRow;

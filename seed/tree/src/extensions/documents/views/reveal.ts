@@ -69,10 +69,15 @@ export function showArea(
   // Taking a reference back shows nothing. BO_0263_007 A document marked
   // whole is brought forward by the shell, not shown in a view. BO_0304_009
   if (target.kind === "takeBack" || target.kind === "document") return () => undefined;
-  // A block's row, or the proposal, retired or discarded row a reference
-  // stands on. BO_0263_007
+  // A block's row, or the proposal or retired row a reference
+  // stands on. BO_0263_007 A proposal marked whole rings its first shown
+  // item. BO_0321_010
   const row =
-    Array.from(root.querySelectorAll<HTMLElement>("[data-block-id]")).find(
+    target.kind === "proposal"
+      ? (Array.from(root.querySelectorAll<HTMLElement>("[data-proposal-id]")).find((candidate) =>
+          (candidate.getAttribute("data-proposal-id") ?? "").startsWith(`${target.group}|`),
+        ) ?? null)
+      : Array.from(root.querySelectorAll<HTMLElement>("[data-block-id]")).find(
       (candidate) => candidate.getAttribute("data-block-id") === target.blockId,
     ) ??
     Array.from(root.querySelectorAll<HTMLElement>("[data-mark-row]")).find(

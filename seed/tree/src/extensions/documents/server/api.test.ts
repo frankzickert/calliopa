@@ -23,7 +23,7 @@ describe("a setDisposition command", () => {
   };
 
   it("Given a standing on the scale, Then it is read as that standing, keep included", () => {
-    for (const standing of ["fixate", "keep", "discarded"]) {
+    for (const standing of ["fixate", "keep"]) {
       expect(parseDocumentCommand({ ...base, standing })).toEqual({
         command: {
           command: "setDisposition",
@@ -37,7 +37,7 @@ describe("a setDisposition command", () => {
 
   it("Given no standing, Then it is refused rather than read as clearing one", () => {
     expect(parseDocumentCommand(base)).toEqual({
-      failure: "A standing is one of discarded, keep, fixate, prompt.",
+      failure: "A standing is one of keep, fixate, prompt.",
     });
   });
 

@@ -2,8 +2,7 @@ import type { Run } from "~/lib/runs";
 
 /**
  * What a relation is, as this extension declares it in the graph
- * (`BO_0288_015`). A relation anchors a block, not a claim: any block says
- * something, and a claim only ever existed where refinement had been
+ * (`BO_0288_015`). A relation anchors a block: any block says something
  * (`BO_0288`, user decision 2026-09-23).
  */
 export const RELATION_TYPE = "relation";

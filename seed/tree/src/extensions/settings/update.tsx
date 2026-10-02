@@ -5,7 +5,7 @@ import { ViewBridgeContext } from "~/components/shell/view-bridge";
 import { candidates, fetchReleases, parseReleases, type Candidate, type Release } from "~/lib/releases";
 import type { UpdateProposal, UpdateView } from "~/server/kernel/update";
 import { updateCommands } from "./update-commands";
-import { supersedes, unserved, updateRunning, type Phase } from "./update-view";
+import { migrationNotice, supersedes, unserved, updateRunning, type Phase } from "./update-view";
 
 /**
  * The Update tab: the installed release, the releases above it worth
@@ -400,6 +400,12 @@ export const UpdateTabView = component$<ViewProps>(() => {
           </ul>
         )}
       </section>
+
+      {migrationNotice(info) !== null && (
+        <p class="settings-section__lead" role="alert" data-update-migration>
+          {migrationNotice(info)}
+        </p>
+      )}
 
       {(state.phase === "accepted" || (unserved(info) && !running)) && (
         <section class="settings-section" aria-labelledby="update-promote" data-update-promote>

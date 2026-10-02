@@ -16,15 +16,15 @@ const record: WorkRecord = {
   fetched: { by: "zotero-translation-server", at: "2026-09-23T10:00:00Z", from: "10.1038/nature12373" },
 };
 
-describe("the work form", () => {
+describe("the add-source form", () => {
   it("fills from a record and reads back to the same record, keeping what it does not edit", () => {
     const form = formOf(record);
     expect(form.authors).toBe("Kucsko, G.\nMaurer, P. C.\nThe Consortium");
-    expect(form.year).toBe("2013");
+    expect(form.year).toBe("2013-08");
     expect(form.tags).toBe("thermometry, cells");
     const back = recordOf(form, record);
     expect(readWorkRecord(back)).toEqual({
-      record: { ...record, issued: { "date-parts": [[2013]] } },
+      record,
     });
   });
 

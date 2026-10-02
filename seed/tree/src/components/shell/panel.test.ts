@@ -309,3 +309,16 @@ describe("a panel's inner border", () => {
     expect(wide.stored.get("calliopa.panelWidth.left"), "storage keeps what was stored").toBe("5000");
   });
 });
+
+describe("a library icon held with a dragged block (CA_0072_004)", () => {
+  it("Given a block held over an icon, Then that icon carries the hold mark, And the inspector's icon offers no hold", async () => {
+    const view = await mount({ left: { shown: true, icon: "documents" } });
+    const icon = (id: string) => view.one(`.panel-icons[data-side="left"] [data-panel-icon="${id}"]`);
+    expect(icon("publishing")?.getAttribute("data-spring")).toBe("library-icon:publishing");
+    expect(icon("publishing")?.hasAttribute("data-spring-hold")).toBe(false);
+    await view.press("[data-hold]");
+    expect(icon("publishing")?.getAttribute("data-spring-hold")).toBe("true");
+    expect(icon("documents")?.hasAttribute("data-spring-hold")).toBe(false);
+    expect(view.one('.panel-icons[data-side="right"] .panel-icon')?.hasAttribute("data-spring")).toBe(false);
+  });
+});

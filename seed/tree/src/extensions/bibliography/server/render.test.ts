@@ -45,6 +45,40 @@ describe("render", () => {
   });
 });
 
+/** Sources beyond papers in each style (BO_0313): a style that cites an
+ * unpublished interview in the text alone leaves it out of the list, and every
+ * other entry keeps its own source. */
+describe("sources beyond papers", () => {
+  const works = [
+    { workId: "p", record: { title: "How the river moved", kind: "webpage" as const, URL: "https://example.org/r", author: [{ literal: "River Trust" }] } },
+    { workId: "i", record: { title: "Interview with the ferryman", kind: "interview" as const, author: [{ family: "Okafor", given: "Chi" }], issued: { "date-parts": [[2025, 6]] } } },
+    { workId: "d", record: { title: "Gauge readings", kind: "dataset" as const, DOI: "10.9999/x", publisher: "Hydrology Office" } },
+  ];
+  const cited = [{ work: "p" }, { work: "i", locator: "12:30" }, { work: "d" }];
+
+  it("lists all three in IEEE, each beside its number", () => {
+    const ieee = render("ieee", works, cited);
+    expect(ieee.entries.map((entry) => [entry.workId, entry.label])).toEqual([
+      ["p", "[1]"],
+      ["i", "[2]"],
+      ["d", "[3]"],
+    ]);
+    expect(entryText(ieee.entries[0]!.entry)).toContain("https://example.org/r");
+  });
+
+  it("cites the interview in the text alone in APA and Chicago, and pairs every listed entry with its own source", () => {
+    for (const style of ["apa", "chicago-author-date"] as const) {
+      const rendered = render(style, works, cited);
+      expect(rendered.labels[citationKey({ work: "i", locator: "12:30" })]).toContain("Okafor");
+      expect(rendered.entries.map((entry) => entry.workId).sort()).toEqual(["d", "p"]);
+      const page = rendered.entries.find((entry) => entry.workId === "p")!;
+      expect(entryText(page.entry)).toContain("River Trust");
+      const dataset = rendered.entries.find((entry) => entry.workId === "d")!;
+      expect(entryText(dataset.entry)).toContain("Gauge");
+    }
+  });
+});
+
 describe("locators and markup", () => {
   it("reads a locator as a person writes it", () => {
     expect(locatorOf("p. 54")).toEqual({ label: "page", locator: "54" });

@@ -4,23 +4,30 @@ import type { BlockView } from "~/extensions/documents/server/assemble";
 import type { WorkRecord } from "~/extensions/bibliography/lib/work";
 
 import { cslOf, htmlTable, latexText, project } from "./project";
-import { common, document, works } from "./testing/fixture";
+import { common, document, front, works } from "./testing/fixture";
 
 /**
  * The projection (`BO_0293_019`) on one document holding every kind of block:
  * each rule a case, the left-out blocks named.
  */
-const projected = project(document, works, 2186);
+const projected = project(document, works, 2186, [], front);
 const raw = JSON.stringify(projected.ast);
 
 describe("the head", () => {
-  it("carries the title, the authors with their affiliations and the corresponding mark, the keywords and the abstract", () => {
+  it("carries the title, the authors from the paper role with their affiliations, addresses and the corresponding mark, the keywords and the abstract", () => {
     const head = projected.ast.meta as Record<string, { c: unknown }>;
     expect(JSON.stringify(head["title"])).toContain("Manuscript");
     expect(JSON.stringify(head["author"])).toContain('"Lovelace*"');
     expect(JSON.stringify(head["author"])).toContain("Difference");
+    expect(JSON.stringify(head["author"])).toContain("ada@example.org");
     expect(JSON.stringify(head["keywords"])).toContain("typesetting");
     expect(JSON.stringify(head["abstract"])).toContain("record");
+  });
+
+  it("carries no author and no keywords when no paper role is named", () => {
+    const head = project(document, works, 2186).ast.meta as Record<string, unknown>;
+    expect(head["author"]).toBeUndefined();
+    expect(head["keywords"]).toBeUndefined();
   });
 
   it("takes the abstract to the head wherever it stands, and out of the body", () => {
@@ -110,7 +117,7 @@ describe("the body", () => {
     expect(supplementary(project(off, works, 2186))).toContain(JSON.stringify({ t: "CodeBlock", c: [["", ["python"], []], "plot(x)"] }));
   });
 
-  it("leaves out what a manuscript cannot carry and says each by name, and a discarded block says nothing", () => {
+  it("leaves out what a manuscript cannot carry and says each by name, and a prompt says nothing", () => {
     expect(projected.omitted).toEqual([
       "A reference to a block outside the reading order (gone).",
       "An output that showed no picture and no table: text output and tracebacks are not manuscript material.",
@@ -118,7 +125,7 @@ describe("the body", () => {
       "A divider.",
       "Code cell 2, which produced no figure and no table.",
     ]);
-    expect(raw).not.toContain("Discarded");
+    expect(raw).not.toContain("Prompted");
   });
 });
 

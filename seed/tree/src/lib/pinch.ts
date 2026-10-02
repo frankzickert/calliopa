@@ -1,10 +1,10 @@
 /**
- * The pinch, pure (`CA_0047_006`): two fingers moving apart — the zoom-in
- * gesture — open the block under them as focused work, two fingers moving
- * closer go back one crumb. User decision, 2026-09-14, after the walk on a
- * phone: going into a block is zooming in. The adapter (`block-pinch.ts`)
- * reads the touches and calls these; nothing here touches the DOM, so what
- * a release means is settled without a browser.
+ * The pinch, pure (`CA_0047_006`): two fingers moving apart zoom in, two
+ * fingers moving closer zoom out. What a zoom asks for is the view's to say
+ * (`documents`: zooming in on a block deepens it, zooming out gathers its
+ * neighbours, `BO_0322`); the pinch opens and leaves no focused work. The
+ * adapter reads the touches and calls these; nothing here touches the DOM,
+ * so what a release means is settled without a browser. BO_0322_017
  */
 
 export interface Point {
@@ -20,14 +20,14 @@ export const spread = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.y 
  * two fingers. */
 export const PINCH_THRESHOLD = 0.25;
 
-export type PinchOutcome = "open" | "back" | null;
+export type PinchOutcome = "in" | "out" | null;
 
 /** What a release means, from the spread at the start and at the end. */
 export function pinchOutcome(startSpread: number, endSpread: number): PinchOutcome {
   if (!(startSpread > 0) || !(endSpread >= 0)) return null;
   const change = (endSpread - startSpread) / startSpread;
-  if (change >= PINCH_THRESHOLD) return "open";
-  if (change <= -PINCH_THRESHOLD) return "back";
+  if (change >= PINCH_THRESHOLD) return "in";
+  if (change <= -PINCH_THRESHOLD) return "out";
   return null;
 }
 

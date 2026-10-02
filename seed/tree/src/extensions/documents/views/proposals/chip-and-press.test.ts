@@ -8,8 +8,8 @@ import { documentsApi, mountEditor, type SentCommand } from "../testing/editor-h
 /**
  * A proposal's chip and the press on a desktop and a phone, pressed in Qwik's
  * render harness (DO_0004_006): the face, the words and the answers in one
- * chip; a proposal's text taking the caret at once on a pointer that hovers
- * and after a first tap elsewhere; one click editing an ordinary block on a
+ * chip; a proposal's text out of the way of a drag on a pointer that hovers
+ * and taking the caret after a first tap elsewhere; one click editing an ordinary block on a
  * desktop, two on a phone; hovering revealing a row's depth; and an accepted
  * rewrite landing where the reader moved it. What the chip looks like —
  * hidden at rest, 24px controls, the spacing — is CSS, measured in Chromium.
@@ -100,12 +100,16 @@ describe("the proposal chip and the press", () => {
     await view.settle();
   });
 
-  it("Given a pointer that hovers, Then a proposal's text takes the caret at once", async () => {
+  // A proposal's text takes the caret on the first click rather than while
+  // the pointer rests on it, so a drag starting in it can run on into the
+  // blocks around (DO_0023_001): `marked-rows.test.ts` presses the click.
+  it("Given a pointer that hovers, Then a proposal's text takes no typing at rest but stays in reach of the keyboard", async () => {
     pointer(true);
     const view = await mount();
     const text = view.proposal()?.querySelector("[data-proposal-text]");
-    await view.settle(() => text?.getAttribute("contenteditable") === "true");
-    expect(text?.getAttribute("contenteditable")).toBe("true");
+    await view.settle();
+    expect(text?.getAttribute("contenteditable")).toBe("false");
+    expect(text?.getAttribute("tabindex")).toBe("0");
     await view.settle();
   });
 
@@ -170,19 +174,19 @@ describe("the proposal chip and the press", () => {
     pointer(true);
     const view = await mount();
     const retire = () =>
-      view.root.querySelector('[data-bar-action="block-retire"]')?.getAttribute("aria-label") ?? null;
+      view.root.querySelector('[data-bar-action="block-add-paragraph"]')?.getAttribute("aria-label") ?? null;
     await view.userEvent(`[data-proposal-id="${rewrite}"]`, "pointerenter", { pointerType: "mouse" });
     // A proposal is a row like any other under the pointer: after the same
     // rest the bar's block groups act on it. DO_0006_008
     await new Promise((resolve) => setTimeout(resolve, 600));
     await view.settle();
-    expect(retire()).toBe("Retire the proposed block");
+    expect(retire()).toBe("Insert paragraph after the proposed block");
     // It is drawn as the row the bar acts on, and keeps its chip when the
     // pointer leaves, since the focus holds. DO_0006_010
     expect(view.proposal()?.getAttribute("data-focused")).toBe("true");
     await view.userEvent(`[data-proposal-id="${rewrite}"]`, "pointerleave", { pointerType: "mouse" });
     await view.settle();
-    expect(retire()).toBe("Retire the proposed block");
+    expect(retire()).toBe("Insert paragraph after the proposed block");
     expect(view.proposal()?.getAttribute("data-focused")).toBe("true");
     await view.settle();
   });
@@ -211,14 +215,14 @@ describe("the proposal chip and the press", () => {
     pointer(true);
     const view = await mount();
     await view.userEvent(`[data-proposal-text="${rewrite}"]`, "focus");
-    await view.waitFor(() => view.root.querySelector('[data-bar-action="block-retire"]')?.getAttribute("aria-label") === "Retire the proposed block");
+    await view.waitFor(() => view.root.querySelector('[data-bar-action="block-add-paragraph"]')?.getAttribute("aria-label") === "Insert paragraph after the proposed block");
     // The rest on another row passes; the bar keeps naming the proposal, and
     // the other row takes no ring. DO_0006_008
     await view.userEvent('[data-block-id="blk-c"]', "pointerenter", { pointerType: "mouse" });
     await new Promise((resolve) => setTimeout(resolve, 300));
     await view.settle();
-    expect(view.root.querySelector('[data-bar-action="block-retire"]')?.getAttribute("aria-label")).toBe(
-      "Retire the proposed block",
+    expect(view.root.querySelector('[data-bar-action="block-add-paragraph"]')?.getAttribute("aria-label")).toBe(
+      "Insert paragraph after the proposed block",
     );
     expect(view.root.querySelector('[data-block-id="blk-c"]')?.getAttribute("data-focused")).toBeNull();
     await view.settle();
@@ -233,6 +237,9 @@ describe("the proposal chip and the press", () => {
   it("Given a rewrite stepped down by its arrow, When it is accepted before the step is staged, Then it is drawn where it went and its place is staged before the answer", async () => {
     const view = await mount();
     expect(view.rows()).toEqual(["blk-a", rewrite, "blk-c"]);
+    // The arrows are the bar's, on the row turned to. BO_0315_014
+    await view.userEvent(`[data-proposal-id="${rewrite}"]`, "focusin");
+    await view.settle(() => view.root.querySelector(`[data-proposal-id="${rewrite}"] [data-row-down]`) != null);
     await view.userEvent(`[data-proposal-id="${rewrite}"] [data-row-down]`, "click");
     await view.settle(() => view.rows().indexOf(rewrite) === 2);
     expect(view.rows()).toEqual(["blk-a", "blk-c", rewrite]);

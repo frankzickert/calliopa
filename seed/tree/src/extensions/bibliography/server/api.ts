@@ -1,13 +1,14 @@
 import { refusal, respond, type OutcomeResponse } from "~/server/outcome";
 import { withBranch } from "~/server/ccgw/branch-scope";
 
-import { addWork, retireWork, reviseWork } from "./works";
+import { addWork, fillWork } from "./works";
 
 /**
- * This extension's command route (`BO_0291_016`), its own rather than
- * `documents`' single switch, as `relations`' is: the extension owns the
- * `work` vocabulary, so it owns the writes of it, and the branch scope is the
- * shared helper either way.
+ * This extension's command route (`BO_0291_016`, `BO_0313_020`), its own
+ * rather than `documents`' single switch, as `relations`' is: adding a source
+ * document and filling one from a fetched record are this extension's; its
+ * fields are edited in the inspector and it is deleted as a document. The
+ * branch scope is the shared helper either way.
  */
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -25,8 +26,7 @@ async function decode(request: Request): Promise<unknown> {
 
 export type WorkCommand =
   | { readonly command: "addWork"; readonly record: unknown }
-  | { readonly command: "reviseWork"; readonly workId: string; readonly baseRevisionId: string; readonly record: unknown }
-  | { readonly command: "retireWork"; readonly workId: string; readonly baseRevisionId: string };
+  | { readonly command: "fillWork"; readonly workId: string; readonly baseRevisionId: string; readonly record: unknown };
 
 export function parseWorkCommand(body: unknown): { command: WorkCommand } | { failure: string } {
   const value = record(body);
@@ -36,13 +36,12 @@ export function parseWorkCommand(body: unknown): { command: WorkCommand } | { fa
     if (record(value["record"]) === null) return { failure: "an addWork command carries a record" };
     return { command: { command: "addWork", record: value["record"] } };
   }
-  if (command === "reviseWork" || command === "retireWork") {
+  if (command === "fillWork") {
     const workId = text(value["workId"]);
     const baseRevisionId = text(value["baseRevisionId"]);
-    if (workId === null) return { failure: `a ${command} command names the workId` };
-    if (baseRevisionId === null) return { failure: `a ${command} command names the baseRevisionId it read` };
-    if (command === "retireWork") return { command: { command, workId, baseRevisionId } };
-    if (record(value["record"]) === null) return { failure: "a reviseWork command carries a record" };
+    if (workId === null) return { failure: "a fillWork command names the workId" };
+    if (baseRevisionId === null) return { failure: "a fillWork command names the baseRevisionId it read" };
+    if (record(value["record"]) === null) return { failure: "a fillWork command carries a record" };
     return { command: { command, workId, baseRevisionId, record: value["record"] } };
   }
   return { failure: `${String(value["command"])} is not a command of this extension` };
@@ -62,10 +61,8 @@ export async function handleWorkCommand(request: Request): Promise<OutcomeRespon
       switch (command.command) {
         case "addWork":
           return addWork({ record: command.record });
-        case "reviseWork":
-          return reviseWork({ workId: command.workId, baseRevisionId: command.baseRevisionId, record: command.record });
-        case "retireWork":
-          return retireWork({ workId: command.workId, baseRevisionId: command.baseRevisionId });
+        case "fillWork":
+          return fillWork({ workId: command.workId, baseRevisionId: command.baseRevisionId, record: command.record });
       }
     }),
   );

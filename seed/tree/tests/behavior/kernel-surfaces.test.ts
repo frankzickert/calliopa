@@ -110,8 +110,8 @@ describe.skipIf(!configured)("workspaces and processes in the kernel's state rec
     await expect(acknowledgeProcess(second.id)).rejects.toMatchObject({ status: 409 });
 
     // A process an extension produces, affecting an item of its own kind, lists, moves and is acknowledged like a run's. CA_0050_002
-    const published = await createProcess(workspace.id, { title: "Publish E1 to Calliopa.com", step: "declaring 3 objects", itemId: "e1", itemKind: "publishing:deliverable" });
-    expect(published).toMatchObject({ itemId: "e1", itemKind: "publishing:deliverable", state: "queued" });
+    const published = await createProcess(workspace.id, { title: "Typeset Ice loss", step: "declaring 3 objects", itemId: "e1", itemKind: "documents:document" });
+    expect(published).toMatchObject({ itemId: "e1", itemKind: "documents:document", state: "queued" });
     expect((await listProcesses(workspace.id)).map((process) => process.id)).toEqual([first.id, second.id, published.id]);
     expect((await transitionProcess(published.id, { state: "running", step: "uploading 2 of 3" })).step).toBe("uploading 2 of 3");
     const landed = await transitionProcess(published.id, { state: "failed", error: "Writing /episodes/e1: 400 validation (title)" });

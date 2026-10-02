@@ -2,7 +2,6 @@ import type { RequestHandler } from "@builder.io/qwik-city";
 import { api } from "~/server/api";
 import { agentStatus, chosenAgent, selectableRuntimes } from "~/server/agent/adapters";
 import { claudeRunnerHealth, rememberedSpeed } from "~/server/agent/bridge";
-import { senders } from "~/server/registry";
 
 /**
  * What the command area offers, and which agent it opens on. `chosen` is the
@@ -13,18 +12,17 @@ import { senders } from "~/server/registry";
  */
 export const onGet: RequestHandler = (event) =>
   api(event, async () => {
-    const [runtimes, stamped, chosen, speed, offered] = await Promise.all([
+    const [runtimes, stamped, chosen, speed] = await Promise.all([
       claudeRunnerHealth().then(selectableRuntimes),
       agentStatus(),
       chosenAgent(),
       rememberedSpeed(),
-      senders(),
     ]);
     event.json(200, {
-      // The agents, then what the extensions offer beside them: a sender is
-      // chosen and sent to the way an agent is, and the press on *Send* is the
-      // whole gesture. BO_0273_035
-      runtimes: [...runtimes, ...offered],
+      // The agents. A model is no longer offered beside them: a picture is
+      // made by the agent's tool under a profile (`calliopa-bootstrap`'s
+      // BO_0312).
+      runtimes,
       chosen,
       active: stamped?.runtime ?? null,
       selected: stamped?.selected ?? null,

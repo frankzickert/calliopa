@@ -28,13 +28,11 @@ const DERIVED_WORDS: Readonly<Record<string, string>> = {
   insert: "Proposes a new block",
   remove: "Proposes removal",
   move: "Proposes a move",
-  kind: "Proposes a kind",
-  claim: "Proposes a claim",
   relate: "Possible relation",
   reason: "Proposes a reason",
   state: "Proposes a state",
-  derive: "Says what it rests on",
-  phase: "Proposes a phase",
+  /** BO_0322_013 */
+  gather: "Proposes a summary",
 };
 
 /** The line's words: the agent's own note when it gave one, the derived
@@ -43,6 +41,14 @@ export function markWords(action: string, note?: string): string {
   if (note !== undefined && note.trim() !== "") return note.trim();
   return DERIVED_WORDS[action] ?? "Proposes a change";
 }
+
+/** A gather's words (`BO_0322`): the summary it proposes, and how many
+ * blocks it moves into which focused work. BO_0322_013 */
+export const gatherWords = (count: number, creates: boolean): string =>
+  `Proposes a summary, gathering ${count === 1 ? "1 block" : `${count} blocks`} into ${creates ? "new" : "its"} focused work`;
+
+/** The words on a row a gather moves. BO_0322_013 */
+export const GATHERED_WORDS = "Gathered into the summary's focused work";
 
 /** The members an item's decision covers, as its identity carries them. */
 const membersOf = (itemId: string): readonly string[] => itemId.split("|").slice(2);
@@ -56,7 +62,10 @@ export function itemWords(item: ProposedChange, events: readonly DocumentActivit
   const live = [...events]
     .reverse()
     .find((event) => event.action !== "read" && event.member !== undefined && members.has(event.member));
-  const words = markWords(item.kind, live?.note ?? item.note);
+  const words =
+    item.kind === "gather" && (live?.note ?? item.note ?? "").trim() === ""
+      ? gatherWords(item.gathered?.length ?? 0, item.createsChild === true)
+      : markWords(item.kind, live?.note ?? item.note);
   // A withdrawn item's words are the withdrawer's: whose proposal it is,
   // why it should go, or what supersedes it; a removal or a move withdrawn
   // means the block stays as it stands. A refined and withdrawn item reads
@@ -154,6 +163,7 @@ const PLURALS: Readonly<Record<string, readonly [string, string]>> = {
   insert: ["insert", "inserts"],
   remove: ["removal", "removals"],
   move: ["move", "moves"],
+  gather: ["gather", "gathers"],
 };
 
 /** What an ended run left to answer, counted by kind: *3 rewrites, 1 insert*. */

@@ -1,7 +1,7 @@
-import { component$, Slot, type JSXOutput } from "@builder.io/qwik";
+import { component$, Slot, type JSXOutput, type QRL } from "@builder.io/qwik";
 
 import { REGISTRY } from "~/registry.gen";
-import type { BlockPlace, Decorations, DocumentPlace } from "~/contract";
+import type { BlockPlace, Decorations, DocumentPlace, DocumentPlaceForm } from "~/contract";
 
 /**
  * The decorations contributed for this extension's blocks (`BO_0256_007`).
@@ -15,13 +15,22 @@ export const KIND = "documents:document";
 
 const sets = () => REGISTRY.decorations[KIND] ?? [];
 
+/** Whether any decorating extension contributes this block place, so a view
+ * drawing a frame around a place — the chip under the command chip — draws
+ * none when nothing would stand in it. RO_0002_002 */
+export const placeContributed = (at: BlockPlace): boolean =>
+  sets().some(({ decorations }) => decorations.places[at] !== undefined);
+
 export const BlockDecorations = component$<{
   at: BlockPlace;
   documentId: string;
   blockId: string;
   revisionId: string;
   active: boolean;
-}>(({ at, documentId, blockId, revisionId, active }) => (
+  /** The `command` place's: sets an option on the command it is drawn in.
+   * The command control hands it over; no other place has one. BO_0311_030 */
+  setOption$?: QRL<(name: string, value: string | null) => void>;
+}>(({ at, documentId, blockId, revisionId, active, setOption$ }) => (
   <>
     {sets().map(({ extension, decorations }) => {
       const Drawn = decorations.places[at];
@@ -32,6 +41,7 @@ export const BlockDecorations = component$<{
           blockId={blockId}
           revisionId={revisionId}
           active={active}
+          {...(setOption$ === undefined ? {} : { setOption$ })}
         />
       );
     })}
@@ -71,12 +81,21 @@ export const DocumentDecorations = component$<{
   at: DocumentPlace;
   documentId: string;
   dataRevision?: number | undefined;
-}>(({ at, documentId, dataRevision }) => (
+  form?: DocumentPlaceForm;
+}>(({ at, documentId, dataRevision, form }) => (
   <>
     {sets().map(({ extension, decorations }) => {
       const Drawn = decorations.documentPlaces?.[at];
-      return Drawn === undefined ? null : (
-        <Drawn key={`${extension}:${at}`} documentId={documentId} dataRevision={dataRevision} />
+      if (Drawn === undefined) return null;
+      const drawn = <Drawn key={`${extension}:${at}`} documentId={documentId} dataRevision={dataRevision} form={form} />;
+      // The header's lines (DO_0030_001): each extension's contribution is a
+      // row of its own, so one extension's lines never run into another's.
+      return at === "title" && form !== "compact" ? (
+        <div key={`${extension}:${at}`} class="document-title-place__row" data-title-place-row={extension}>
+          {drawn}
+        </div>
+      ) : (
+        drawn
       );
     })}
   </>

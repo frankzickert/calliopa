@@ -4,12 +4,12 @@
 
 * A connection is a record for one external party.
 * Connection states are `unconfigured`, `configured`, `verified`, and `failing`.
-* A connection's secret lives in the kernel's secret store, encrypted at rest under the kernel's own key (`ui-kernel.md`, `BO_0207_003`). No shell code ever holds a plaintext secret and no API response contains one.
+* On an instance, a connection's secret lives in the kernel's secret store, encrypted at rest under the kernel's own key (`ui-kernel.md`, `BO_0207_003`). No shell code ever holds a plaintext secret and no API response contains one.
 * An API-key connection takes a key that is write-only in the interface. After saving, the row shows that a key is set and its last characters, and never the key.
 * A connection can be cleared, which removes the stored secret and returns the state to `unconfigured`.
 
 - The set of connections is application source, not user data. There is no affordance for adding, renaming, or removing a connection, and a party arrives by the change that needs it.
-- `bunny` is the next party and arrives with `CA_0033_010` in [Publishing](../../../calliopa-video/docs/system/publishing/homepage-destination.md). It presents an API key, so it is the `apiKey` kind this store already holds and needs no new one. A platform whose credential is an OAuth token with a refresh lifecycle is not that shape, and the kind it needs is decided by the first adapter that has one.
+- A platform whose credential is an OAuth token with a refresh lifecycle is not the `apiKey` shape, and the kind it needs is decided by the first adapter that has one.
 - Saving the `honcho` key takes effect the next time `pnpm run dev` runs: the application deliberately holds no control over the Docker daemon, so it cannot start the memory service the key turns on. [Application Foundation](../../../../../docs/system/foundation/development-environment.md) carries that profile.
 - `honcho` is the one connection this document builds. Its secret is the OpenAI key the agent's memory in [Calliopa Agent](../../../../../docs/system/agent/memory.md) needs, and it is the only secret Calliopa is built to hold at rest.
 - The row is seeded `unconfigured` by the migration that creates the table, so the settings surface reads rows rather than inventing them and an empty instance already shows the connection it does not have a key for.
@@ -31,12 +31,18 @@
 - The API-level coverage proves that no response shape carries the secret or the ciphertext under any state, that a request with no key in it and an unknown party are refused, that a connection with no key is refused rather than tested, and that a key the service will not accept lands as `failing` with what came back and without the key in it. That last one makes the real request; a gate without egress reports the transport's refusal, which is the same proof that a refusal is not swallowed (`CA_0021_004`).
 
 
+## On A Device
+
+* On a device, the settings extension's connections are where the person enters the keys the apps use: Anthropic, OpenAI and OpenRouter for agent runs, a search vendor, the media vendors that offer a key-based API, and an embedding key. User decisions, 2026-09-30 and 2026-10-01 (`BO_0319`).
+- [ ] BO_0319_047 The device's parties: the settings extension contributes `anthropic`, `openai`, `openrouter`, `search` and `embeddings` as API-key parties with their probes (the cheapest authenticated call each), saved through the port into the keystore (`BO_0319_045`); the media parties come from `media` where its vendor offers a key. On an instance these parties are not shown, so nothing changes there. Verified by each key saved, proven against the real API, cleared, and never present in a response.
+- [ ] BO_0319_048 The app lock: a setting, off by default, that asks for the device's biometrics or passcode when the app opens or returns from the background, through the host's lock plugin. Shown on a device only.
+
 ## Out Of Scope
 
 - The agent layer. No Hermes, no Honcho service, no compose service, no Postgres image change, no tool surface, and no delegation; they are [Calliopa Agent](../../../../../docs/system/agent/calliopa-agent.md).
 - Subscription sign-ins. The Claude and Codex credentials never enter this store: the design that works keeps their credential homes on the agent's own data volume and drives the logins from inside the agent container, so a token round-tripped through Postgres would have to be adopted back anyway. Their status rows and the thing that reports them belong to [Calliopa Agent](./agent-sign-in.md).
 - Users, roles, and authorization. Connections are instance-wide and the settings surface is unprotected, like the rest of the shell.
 - A general settings area, sections beyond `Connections` and `Channels`, and further header controls.
-- Adapters, mappings, transports, and anything that publishes. A channel holds a credential and grants no authority to use it; [Publishing](../../../calliopa-video/docs/system/publishing/publishing.md) owns what leaves Calliopa.
+- Adapters, mappings, transports, and anything that publishes. A channel holds a credential and grants no authority to use it; the extension that publishes owns what leaves Calliopa.
 - Every channel other than `homepage`. Each arrives with its own change, and the OAuth credential kind arrives with the first platform that needs one — together with the problem that a platform's redirect cannot reach an instance on a Tailscale address.
 - Re-encrypting stored secrets under a new key.

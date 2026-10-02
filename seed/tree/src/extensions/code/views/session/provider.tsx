@@ -17,7 +17,7 @@ import { SessionContext, type SessionState } from "./context";
  * The group is this extension's own, after the view's groups, and the write
  * to the decoration bar keeps every other extension's group: the bar is one
  * store per shell, so a provider that assigned the whole array would take
- * refinement's *Establish…* away.
+ * another extension's group away.
  */
 export const SessionProvider = component$<DocumentDecorationProps>(({ documentId }) => {
   const bridge = useContext(ViewBridgeContext);

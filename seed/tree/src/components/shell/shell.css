@@ -1276,6 +1276,46 @@
   outline: 2px solid var(--accent);
 }
 
+/* While a drag runs, the pointer is the drag's everywhere it goes: the hand
+   that holds it, never the text cursor a block's words or an editor would
+   show beneath it, and a drag crossing words selects none of them. Found in
+   the CA_0072 walk. */
+.shell[data-dragging],
+.shell[data-dragging] * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+/* A place a dragged block is held over fills from its leading edge while the
+   hold runs, so the reader sees it coming before it opens. The fill's length
+   is the hold's, SPRING_HOLD_MS in src/lib/drag.ts. CA_0072_001 */
+.shell[data-dragging] [data-spring][data-spring-hold] {
+  outline: 2px solid var(--accent);
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 22%, transparent),
+    color-mix(in srgb, var(--accent) 22%, transparent)
+  );
+  background-repeat: no-repeat;
+  animation: spring-hold 600ms linear both;
+}
+
+@keyframes spring-hold {
+  from {
+    background-size: 0% 100%;
+  }
+  to {
+    background-size: 100% 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell[data-dragging] [data-spring][data-spring-hold] {
+    animation: none;
+    background-size: 100% 100%;
+  }
+}
+
 .shell[data-left="small"] {
   --left-column: var(--panel-icons);
 }
@@ -2919,6 +2959,20 @@
  * two answers as signs alone. The words and the labels are hidden here rather
  * than left out of the chip, so only the eye loses them — every name the chip
  * carries is the one it carries drawn in full. CA_0061_001 */
+/* The number the chip's proposal is marked whole under, while a pointing
+ * stands, in the reference badge's idiom: the accent as its border, the
+ * raised panel as its ground. BO_0321_011 */
+.run-chip__reference {
+  flex: none;
+  padding: 0 0.25rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.3rem;
+  background: var(--panel-raised);
+  color: var(--text);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .run-chip__count {
   display: none;
   min-width: 1ch;

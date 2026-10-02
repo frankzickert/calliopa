@@ -29,6 +29,22 @@ const Second = component$<BlockDecorationProps>(() =>
   jsx("button", { type: "button", "data-fixture-second": "", children: "Second" }),
 );
 
+/** A control saying something about its command: it sets an option, then a
+ * second press clears another it set. BO_0311_030 */
+const Opinion = component$<BlockDecorationProps>(({ setOption$ }) =>
+  jsx("span", {
+    children: [
+      jsx("button", { type: "button", "data-fixture-option": "", onClick$: async () => {
+        await setOption$?.("profile", "prof-9");
+        await setOption$?.("tone", "dry");
+      }, children: "Choose" }),
+      jsx("button", { type: "button", "data-fixture-clear": "", onClick$: async () => {
+        await setOption$?.("tone", null);
+      }, children: "Clear" }),
+    ],
+  }),
+);
+
 const places: { value: Record<string, unknown> } = { value: {} };
 const sets: { value: readonly unknown[] } = { value: [] };
 
@@ -105,11 +121,78 @@ describe("a contributed control in the command chip", () => {
     expect(html.indexOf("data-fixture-second")).toBeGreaterThan(html.indexOf("data-fixture-command"));
   });
 
+  it("hands the command place setOption, and Send carries what was set and nothing cleared", async () => {
+    const view = await mountWith([{ extension: "profiles", places: { command: Opinion } }]);
+    await view.userEvent("[data-fixture-option]", "click");
+    await view.userEvent("[data-fixture-clear]", "click");
+    await view.userEvent('[data-block-command="blk-a"] [data-block-send]', "click");
+    await view.settle(() => (view.record.commands?.length ?? 0) === 1);
+    expect(view.record.commands?.[0]?.options).toEqual({ profile: "prof-9" });
+  });
+
+  it("sends no options for a command nothing set one on", async () => {
+    const view = await mountWith([{ extension: "media", places: { command: Offered } }]);
+    await view.userEvent('[data-block-command="blk-a"] [data-block-send]', "click");
+    await view.settle(() => (view.record.commands?.length ?? 0) === 1);
+    expect(view.record.commands?.[0]?.options).toBeUndefined();
+  });
+
   it("draws nothing when no extension offers one", async () => {
     const view = await mountWith([{ extension: "media", places: { below: Offered } }]);
     const line = view.root.querySelector("[data-block-command-controls]") as HTMLElement;
     expect(line.innerHTML).not.toContain("data-fixture-command");
     // And the chip is otherwise itself.
     expect(line.innerHTML).toContain("data-block-send");
+  });
+});
+
+/** A control contributed under the command chip: the block's roles are the
+ * first (RO_0002_002). */
+const Under = component$<BlockDecorationProps>(({ blockId, active }) =>
+  jsx("button", {
+    type: "button",
+    "data-fixture-under": blockId,
+    "data-fixture-active": String(active),
+    children: "Roles",
+  }),
+);
+
+describe("a chip under the command chip", () => {
+  it("draws the underCommand place in a chip of its own after the line, in the line's row, not in it", async () => {
+    const view = await mountWith([{ extension: "roles", places: { underCommand: Under } }]);
+    const command = view.root.querySelector('[data-block-command="blk-a"]') as HTMLElement;
+    const line = command.querySelector("[data-block-command-controls]") as HTMLElement;
+    const under = command.querySelector("[data-block-command-under]") as HTMLElement | null;
+    expect(under ?? null).not.toBeNull();
+    expect(line.innerHTML).not.toContain("data-fixture-under");
+    const drawn = under?.querySelector("[data-fixture-under]") as HTMLElement | null;
+    expect(drawn?.getAttribute("data-fixture-under")).toBe("blk-a");
+    expect(drawn?.getAttribute("data-fixture-active")).toBe("true");
+    // After the line, in one row with it: the layout puts it at the row's
+    // right while there is room and wraps it below when there is not.
+    expect(command.innerHTML.indexOf("data-block-command-under")).toBeGreaterThan(command.innerHTML.indexOf("data-block-send"));
+    const row = command.querySelector("[data-block-command-row]") as HTMLElement;
+    expect(row.querySelector("[data-block-command-controls]") ?? null).not.toBeNull();
+    expect(row.querySelector("[data-block-command-under]") ?? null).not.toBeNull();
+  });
+
+  it("stands beside a command place without taking its place in the line", async () => {
+    const view = await mountWith([{ extension: "roles", places: { command: Offered, underCommand: Under } }]);
+    const line = view.root.querySelector("[data-block-command-controls]") as HTMLElement;
+    expect(line.innerHTML).toContain("data-fixture-command");
+    expect(line.innerHTML).not.toContain("data-fixture-under");
+    expect(view.root.querySelector("[data-block-command-under] [data-fixture-under]") ?? null).not.toBeNull();
+  });
+
+  it("stays with the prompt pointed from", async () => {
+    const view = await mountWith([{ extension: "roles", places: { underCommand: Under } }]);
+    await view.userEvent('[data-block-command="blk-a"] [data-block-point]', "click");
+    expect(view.root.querySelector('[data-block-command="blk-a"] [data-block-command-under] [data-fixture-under="blk-a"]') ?? null).not.toBeNull();
+  });
+
+  it("draws no chip when no extension contributes the place", async () => {
+    const view = await mountWith([{ extension: "media", places: { command: Offered } }]);
+    expect(view.root.querySelector("[data-block-command-under]") ?? null).toBeNull();
+    expect(view.root.querySelector("[data-block-command-controls] [data-block-send]") ?? null).not.toBeNull();
   });
 });

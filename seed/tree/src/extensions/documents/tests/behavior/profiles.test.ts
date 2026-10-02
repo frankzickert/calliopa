@@ -1,22 +1,25 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { write } from "~/server/ccgw/client";
 import { readGraphEnv } from "~/server/ccgw/env";
+import { nodeRef } from "~/server/ccgw/nodes";
 import { PROFILE_RECORD } from "~/extensions/documents/lib/profile";
 import {
+  clearProfileSlotsStatement,
   createDocument,
   deleteDocument,
   listDocuments,
   listProfiles,
+  profileSummary,
   readDocument,
-  readProfileSelection,
-  setProfile,
 } from "~/extensions/documents/server/documents";
 
 /**
  * Profiles over the one graph (`BO_0298_017`, the server side): a profile
  * created with its record, listed among the profiles and left out of the
- * documents; a selection set and cleared as truth, read back; and the
- * refusals — a document that is no profile, a document that is not there.
+ * documents; a document told apart as a profile or not; and the `profile`
+ * slot a document kept before the chip chose per command, cleared by one
+ * script and found nowhere after (`calliopa-bootstrap`'s `BO_0311_020`).
  * Runs under the kernel harness like `documents.test.ts`.
  */
 
@@ -65,27 +68,22 @@ describe.skipIf(!configured)("profiles over CCGW", () => {
     expect(documents.some((entry) => entry.documentId === documentId)).toBe(true);
   });
 
-  it("Given a selection set, Then it reads back as truth, and cleared it reads as none", async () => {
-    expect(ok<{ profile: unknown; gone: unknown }>(await readProfileSelection(documentId))).toEqual({ profile: null, gone: null });
-    const set = ok<{ profile: { id: string; title: string } | null }>(await setProfile({ documentId, profile: profileId }));
-    expect(set.profile).toEqual({ id: profileId, title: "Blog post" });
-    expect(ok<{ profile: { id: string } | null }>(await readProfileSelection(documentId)).profile?.id).toBe(profileId);
-    // The selection is the document's, not a candidate of anyone's.
-    const document = ok<{ revisionId: string }>(await readDocument(documentId));
-    expect(document.revisionId.startsWith("rev:")).toBe(true);
-    await settle();
-    expect(ok<{ profile: unknown }>(await setProfile({ documentId, profile: null })).profile).toBeNull();
-    expect(ok<{ profile: unknown; gone: unknown }>(await readProfileSelection(documentId))).toEqual({ profile: null, gone: null });
+  it("Given a profile and a document, Then each is told apart as a profile or not", async () => {
+    expect(ok<unknown>(await profileSummary(profileId))).toEqual({ id: profileId, title: "Blog post" });
+    expect(ok<unknown>(await profileSummary(documentId))).toBeNull();
+    expect(ok<unknown>(await profileSummary("00000000-0000-4000-8000-000000000000"))).toBeNull();
   });
 
-  it("Given a document that is no profile, or none at all, Then the selection is refused in words", async () => {
+  it("Given a document still carrying a profile slot, Then one script clears it and none is left", async () => {
     await settle();
-    const notOne = await setProfile({ documentId, profile: documentId });
-    expect(notOne.outcome).toBe("validationFailure");
-    expect(JSON.stringify(notOne)).toContain("is not a profile");
-    const missing = await setProfile({ documentId, profile: "00000000-0000-4000-8000-000000000000" });
-    expect(missing.outcome).toBe("validationFailure");
-    const nowhere = await setProfile({ documentId: "00000000-0000-4000-8000-000000000000", profile: null });
-    expect(nowhere.outcome).toBe("noResult");
+    expect((await write("SET d.profile = $p", { dNodeId: nodeRef(documentId), p: profileId }, "a slot kept from before BO_0311")).outcome).toBe("success");
+    const statement = ok<{ statement: string; parameters: Record<string, unknown> }>(await clearProfileSlotsStatement());
+    const alias = Object.entries(statement.parameters).find(([, value]) => value === nodeRef(documentId))?.[0];
+    expect(alias).toBeDefined();
+    expect(statement.statement).toContain(`${String(alias).replace(/NodeId$/u, "")}.profile = null`);
+    await settle();
+    expect((await write(statement.statement, statement.parameters, "clear the profile slots")).outcome).toBe("success");
+    const after = ok<{ parameters: Record<string, unknown> }>(await clearProfileSlotsStatement());
+    expect(Object.values(after.parameters)).not.toContain(nodeRef(documentId));
   });
 });

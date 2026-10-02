@@ -1,9 +1,9 @@
 import type { RequestHandler } from "@builder.io/qwik-city";
 import { api } from "~/server/api";
-import { readAttachments, readCommandTarget, readGestureTarget, readMode, readRunShape } from "~/lib/command-target";
+import { readAttachments, readCommandTarget, readGestureTarget, readMode, readPinchTarget, readRunShape } from "~/lib/command-target";
 import { writeAttachments } from "~/server/agent/attachments";
 import { conductRun, followRun } from "~/server/agent/conductor";
-import { senderExtension, sendToSender } from "~/server/registry";
+import { isRecordId } from "~/server/uuid";
 
 /**
  * Starts an agent run for a goal through the kernel's agent bridge.
@@ -41,6 +41,9 @@ export const onPost: RequestHandler = (event) =>
       source?: unknown;
       intention?: unknown;
       mode?: unknown;
+      commandOptions?: unknown;
+      pinch?: unknown;
+      block?: unknown;
     };
     const goal = typeof body.goal === "string" ? body.goal.trim() : "";
     // The shape decides which target is read: a gesture names the document it
@@ -53,7 +56,9 @@ export const onPost: RequestHandler = (event) =>
       event.json(400, { error: shape.error });
       return;
     }
-    const target = shape.gesture ? readGestureTarget(body) : readCommandTarget(body);
+    // A pinch names the document and its one block, and nothing it was
+    // written in. BO_0322_016
+    const target = shape.gesture ? readGestureTarget(body) : shape.pinch !== undefined ? readPinchTarget(body) : readCommandTarget(body);
     if (!target.ok) {
       event.json(400, { error: target.error });
       return;
@@ -70,41 +75,16 @@ export const onPost: RequestHandler = (event) =>
       return;
     }
 
-    // A command sent to a contributed sender is not a run: the extension that
-    // offered it does the work and answers a process to watch, as a run
-    // answers one. The press on *Send* is the whole gesture either way.
-    // BO_0273_035
-    const chosen = typeof body.agent === "string" ? body.agent : "";
-    const given = body.options;
-    const options =
-      given !== null && typeof given === "object" && !Array.isArray(given)
-        ? Object.fromEntries(
-            Object.entries(given as Record<string, unknown>)
-              .filter((entry): entry is [string, string] => typeof entry[1] === "string"),
-          )
-        : null;
-    if (chosen !== "" && senderExtension(chosen) !== null) {
-      const sent = await sendToSender({
-        workspaceId: event.params.id ?? "",
-        sender: chosen,
-        documentId: target.target.artifact,
-        // A command is always written in a block, and a sender makes what it
-        // makes from that block's words.
-        blockId: target.target.source?.block ?? "",
-        // What the reader chose on the sender's axes, kept as strings: the
-        // sender decides what an axis means and refuses what it does not
-        // offer. BO_0279_010
-        ...(options === null ? {} : { options }),
-      });
-      if (!sent.ok) {
-        event.json(400, { error: sent.error ?? "That could not be sent." });
-        return;
-      }
-      event.json(201, { processId: sent.processId, sender: chosen });
+    const mode = readMode(body.mode);
+    // The profile the command's chip chose, the one option the kernel reads;
+    // a gesture carries none. BO_0311_002 BO_0311_030
+    const commandOptions = body.commandOptions;
+    const chosenProfile =
+      !shape.gesture && commandOptions !== null && typeof commandOptions === "object" ? (commandOptions as Record<string, unknown>)["profile"] : undefined;
+    if (chosenProfile !== undefined && (typeof chosenProfile !== "string" || !isRecordId(chosenProfile))) {
+      event.json(400, { error: "a command's profile is a profile's id" });
       return;
     }
-
-    const mode = readMode(body.mode);
     const started = await conductRun({
       workspaceId: event.params.id ?? "",
       goal,
@@ -122,6 +102,8 @@ export const onPost: RequestHandler = (event) =>
       // The working mode in force on the document the run came from, which
       // the kernel refuses by name when it is not one. BO_0306_017
       ...(mode === undefined ? {} : { mode }),
+      ...(chosenProfile === undefined ? {} : { profile: chosenProfile }),
+      ...(shape.pinch === undefined ? {} : { pinch: shape.pinch }),
     });
     if (!started.ok) {
       event.json(started.reason === "conflict" ? 409 : started.reason === "refused" ? 400 : started.reason === "forbidden" ? 403 : 502, {

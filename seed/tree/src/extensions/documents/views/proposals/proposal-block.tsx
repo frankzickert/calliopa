@@ -11,11 +11,9 @@ import {
 } from "@builder.io/qwik";
 
 import { POLES, quadrantOf } from "../../lib/working-mode";
-import { Icon, type IconName } from "~/components/shell/icons";
-import { DERIVED_SECTIONS, derivedSection } from "~/extensions/documents/lib/depth";
+import { Icon } from "~/components/shell/icons";
 import { DRAG_MOVE_TOLERANCE_PX, LONG_PRESS_MS, movedDistance } from "~/lib/drag";
 import {
-  derivedNames,
   faceOf,
   heldEdit,
   INFERRED_RELATION_NAMES,
@@ -42,7 +40,7 @@ import { openingWords } from "../../lib/pointing";
 import type { Marked as MarkedTarget } from "../../lib/references";
 import { clickMarks } from "../press";
 import { MarkingContext } from "../marking/use-marking";
-import { StandingButtons } from "../standing/standing-toolbar";
+import { BlockBar } from "../block-bar";
 import { SWIPEABLE_PROPOSALS } from "../block-swipe";
 import type { Standing } from "../../lib/disposition";
 import { RowMarks, rowMarkingName, rowNumbers } from "../marking/row-marks";
@@ -56,6 +54,11 @@ import { HOVER_DEPTH_MS, hoverPointer, HOVER_POINTER } from "../../lib/pointer";
 interface Reach {
   hover: boolean;
   engaged: boolean;
+  /** On a pointer that hovers: the text takes typing once a click placed the
+   * caret in it, or the keyboard reached it — never while the pointer merely
+   * rests on it, since a drag starting in an editable text cannot leave it and
+   * a selection could not run on into the blocks around. DO_0023_001 */
+  armed: boolean;
 }
 
 const isText = (block: BlockView): block is TextBlockView => block.kind === "text";
@@ -68,13 +71,6 @@ const isTable = (block: BlockView): block is TableBlockView => block.kind === "t
 /** A proposed code block and a proposed output draw themselves too. BO_0289_018 */
 const isCode = (block: BlockView): block is CodeBlockView => block.kind === "sourcecode";
 const isOutput = (block: BlockView): block is OutputBlockView => block.kind === "output";
-
-/** The glyph a derived candidate's section carries; a synthesis, which stays
- * in the body, takes the flag. BO_0246_006 */
-const derivedIcon = (block: BlockView | null): IconName => {
-  const section = block === null ? null : derivedSection(block);
-  return DERIVED_SECTIONS.find((candidate) => candidate.kind === section)?.icon ?? "flag";
-};
 
 /** The caret or selection in the proposed text, or null when the page
  * cannot say. */
@@ -108,7 +104,7 @@ export const ProposalBlock = component$<{
   item: ProposedChange;
   proposer: Proposer;
   /** What the proposal does, in the line on its bottom border: the agent's
-   * note, or the derived words. BO_0265_011 */
+   * note, or the words for its kind. BO_0265_011 */
   words: string;
   /** Where accepting would move the block, in words, when it would move one. */
   destination: string | null;
@@ -121,24 +117,12 @@ export const ProposalBlock = component$<{
   /** Accepts a relation, or a proposed reason, with the reason the reader
    * typed on top. BO_0244_010 */
   settleReason$?: QRL<(itemId: string, relationId: string, baseRevisionId: string, reason: readonly Run[]) => Promise<boolean>>;
-  /** A system run's derived candidate: drawn in the derived idiom with no
-   * answer icons, accepted by use. BO_0246_006 */
-  derived?: boolean;
-  /** Whether the block a derived rewrite concerns is fixated, which the
-   * rewrite's name says it challenges. */
-  fixated?: boolean;
-  /** Whether the block a derived rewrite concerns is one a person took as
-   * their own by editing it, which the rewrite says it challenges. BO_0258_016 */
-  governed?: boolean;
-  /** Uses a derived candidate — pins it, which accepts it, or discards it,
-   * which rejects it — through the standing every path writes. */
-  use$?: QRL<(blockId: string, use: "fixate" | "discard") => void>;
   /** The block a removal or a move frames, as the reader sees it: the
    * revision and the words a mark on the proposal keeps. BO_0263_005 */
   framed?: BlockView;
   /** Accepts this proposal and gives the block it becomes a standing, from
-   * the three buttons a swipeable proposal carries while it is the subject —
-   * the path that is not the gesture. BO_0272_010 DO_0014_003 */
+   * the block bar's *Fixate* a swipeable proposal carries while it is the
+   * subject — the path that is not the gesture. DO_0014_003 BO_0315_013 */
   standing$?: QRL<(to: Standing) => void>;
   /** The idle grip's reach: where its arrows stop, and the step over the
    * drawn rows. BO_0263_013 */
@@ -182,9 +166,11 @@ export const ProposalBlock = component$<{
   /** Whether the document numbers the lines of its code, so a proposed code
    * block is numbered on its row exactly as an accepted one is. BO_0302_006 */
   numbersCode?: boolean;
-}>(({ item, proposer, words, destination, answer$, settle$, startDrag$, step$, settleReason$, derived, fixated, governed, use$, standing$, framed, grip, focus$, hoverFocus$, edit$, focused, editing, refinedBy, withdrawal, withdrawing, successor$, dropsFile, numbersCode }) => {
+}>(({ item, proposer, words, destination, answer$, settle$, startDrag$, step$, settleReason$, standing$, framed, grip, focus$, hoverFocus$, edit$, focused, editing, refinedBy, withdrawal, withdrawing, successor$, dropsFile, numbersCode }) => {
   const root = useSignal<HTMLElement>();
-  const reach = useStore<Reach>({ hover: false, engaged: false });
+  // A proposal being edited is drawn anew under the caret (its row's key says
+  // so, CA_0063_005), and stays armed across that. DO_0023_001
+  const reach = useStore<Reach>({ hover: false, engaged: false, armed: editing === true });
   /** The rest a hover focuses after, as a block row measures it. DO_0006_008 */
   const hover = useStore({ timer: 0 });
   const { store: markingStore, toggleReference$ } = useContext(MarkingContext);
@@ -199,21 +185,22 @@ export const ProposalBlock = component$<{
   // refiner's, and the proposer's under both. BO_0286_011
   const withdrawer = withdrawal ?? null;
   const shown = withdrawer ?? refiner ?? proposer;
-  const tone = derived === true || inferredCard ? "derived" : toneOf(shown);
+  const tone = inferredCard ? "derived" : toneOf(shown);
   const served = modeOf(shown);
   const strayed = driftLine(shown);
   const face = faceOf(shown);
-  const names =
-    derived === true
-      ? { ...proposalNames(item.kind, proposer, destination, refiner, withdrawer, withdrawing ?? 0), ...derivedNames(item.kind, item.block?.kind === "text" ? (item.block.blockKind ?? "") : "", fixated === true, governed === true) }
-      : inferredCard
-        ? { ...proposalNames(item.kind, proposer, destination, refiner, withdrawer, withdrawing ?? 0), ...INFERRED_RELATION_NAMES }
-        : proposalNames(item.kind, proposer, destination, refiner, withdrawer, withdrawing ?? 0);
+  const names = inferredCard
+    ? { ...proposalNames(item.kind, proposer, destination, refiner, withdrawer, withdrawing ?? 0), ...INFERRED_RELATION_NAMES }
+    : proposalNames(item.kind, proposer, destination, refiner, withdrawer, withdrawing ?? 0);
   // A work item concerns a block that stands and has no place of its own.
-  const work = item.kind === "relate" || item.kind === "reason" || item.kind === "state" || item.kind === "claim" || item.kind === "kind";
-  const movable = item.kind !== "remove" && !work;
+  const work = item.kind === "relate" || item.kind === "reason" || item.kind === "state";
+  // A gather is answered whole, as its group: its summary is not dragged
+  // or edited on its own, and a row it moves is framed by it and shows the
+  // block it moves. BO_0322_013
+  const gather = item.kind === "gather";
+  const movable = item.kind !== "remove" && !work && !gather;
   const block = item.block;
-  const own = (item.kind === "replace" || item.kind === "insert") && block !== null;
+  const own = (item.kind === "replace" || item.kind === "insert" || (gather && framed === undefined)) && block !== null;
   const ownText = own && isText(block);
   const ownMedia = own && isMedia(block);
   // A proposed table is drawn as it is, its cells read and not edited, until
@@ -223,10 +210,10 @@ export const ProposalBlock = component$<{
   const ownOutput = own && isOutput(block);
   // A proposal of the four kinds is markable in command mode: the mark
   // points at the proposal, with the revision and the words the reader
-  // sees, and who proposed it. A derived candidate is referenced by use, and
-  // a work item has no row of its own. BO_0263_005
+  // sees, and who proposed it. A work item has no row of its own.
+  // BO_0263_005
   const shownBlock = ownText || ownMedia || ownTable || ownCode || ownOutput ? block : (framed ?? null);
-  const markable = derived !== true && !work && !inferredCard && shownBlock !== null;
+  const markable = !work && !inferredCard && shownBlock !== null;
   const marked: MarkedTarget = {
     target: "proposal",
     group: item.groupId,
@@ -316,18 +303,17 @@ export const ProposalBlock = component$<{
   return (
     <div
       ref={root}
-      class={{ "proposal-block": true, "proposal-block--derived": derived === true }}
+      class="proposal-block"
       data-proposal-id={item.itemId}
       data-proposal-withdrawn={withdrawer === null ? undefined : ""}
       data-proposal-kind={item.kind}
       data-proposal-tone={tone}
-      data-proposal-derived-idiom={derived === true ? "true" : undefined}
       role="group"
       aria-label={names.block}
       // A tap focuses the proposal, which shows its chip and its grip; a
       // second tap edits it. A work item with nothing focusable of its own
       // takes a tab stop, so the keyboard reaches its chip. DO_0004_004
-      tabIndex={item.kind === "claim" || item.kind === "kind" || item.kind === "state" ? 0 : -1}
+      tabIndex={item.kind === "state" ? 0 : -1}
       data-engaged={reach.engaged ? "true" : undefined}
       data-focused={focused === true ? "true" : undefined}
       onFocusIn$={() => {
@@ -356,6 +342,7 @@ export const ProposalBlock = component$<{
         const next = event.relatedTarget as Node | null;
         if (next !== null && element.contains(next)) return;
         reach.engaged = false;
+        reach.armed = false;
       }}
       // Written out rather than spread: a spread beside the element's own
       // name compiles to the name twice.
@@ -366,37 +353,38 @@ export const ProposalBlock = component$<{
       data-mark-revision={markable ? marked.revisionId : undefined}
       data-mark-proposer={markable ? marked.proposer : undefined}
       data-reference={commanding && numbers.reference !== null ? numbers.reference : undefined}
+      data-reference-proposal={commanding && numbers.whole !== null ? numbers.whole : undefined}
     >
       {markable && <RowMarks blockId={item.blockId} marked={marked} />}
-      {/* The standing a swipe would give this proposal, for a pointer that
-          cannot swipe: the press accepts it and stands the block it becomes.
-          A proposal is the bar's subject like any other row, so it carries the
-          buttons while reading, focused or holding the caret, and carries none
-          in command mode. Until DO_0014 the row drew them under `commanding`,
-          where no rule ever lifted them out of `display: none`, so they were
-          never seen. BO_0272_010 DO_0014_003 */}
+      {/* The block bar, for a pointer that cannot swipe: *Remove* rejects the
+          proposal, *Fixate* accepts it and fixates the block it becomes, and
+          the arrows stage its place. A proposal is the bar's subject like any
+          other row, so it carries the bar while reading, focused or holding
+          the caret, and none in command mode. DO_0014_003 BO_0315_013 */}
       {markingStore.marking.mode === "reading" && (focused === true || editing === true) && standing$ !== undefined && SWIPEABLE_PROPOSALS.includes(item.kind) && (
-        <StandingButtons current="keep" set$={standing$} />
+        <BlockBar
+          label={names.block.replace(/^Proposed/u, "proposed")}
+          id={`proposal:${item.itemId}`}
+          arrows="row"
+          first={grip?.first ?? true}
+          last={grip?.last ?? true}
+          {...(movable && grip !== undefined ? { step$: grip.step$ } : {})}
+          standing="keep"
+          fixate$={$((_: string, to: Standing) => standing$(to))}
+          remove$={$(() => answer$(item.itemId, "rejected"))}
+        />
       )}
       {/* Its grip while reading: moving a proposal stages its place and
           answers nothing. A removal has none; its block carries its own.
           BO_0263_013 */}
-      {movable && derived !== true && grip !== undefined && markingStore.marking.mode === "reading" && (
+      {movable && grip !== undefined && markingStore.marking.mode === "reading" && (
         <RowGrip
           label={names.block.replace(/^Proposed/u, "proposed")}
-          first={grip.first}
-          last={grip.last}
           drag$={$((event: PointerEvent) => startDrag$(item.itemId, names.block, event))}
-          step$={$((direction: -1 | 1) => grip.step$(`proposal:${item.itemId}`, direction))}
         />
       )}
-      {derived === true && (
-        <span class="block-derived-mark proposal-block__derived-mark" aria-hidden="true">
-          <Icon name={derivedIcon(block)} size={14} />
-        </span>
-      )}
       {ownText ? (
-        <ProposalText item={item} block={block} reach={reach} settle$={settle$} mark$={$(() => toggleReference$(item.blockId, marked))} {...(edit$ === undefined ? {} : { edit$ })} />
+        <ProposalText item={item} block={block} reach={reach} settle$={settle$} mark$={$(() => toggleReference$(item.blockId, marked))} {...(edit$ === undefined || gather ? {} : { edit$ })} />
       ) : ownMedia && block !== null && isMedia(block) ? (
         <MediaBlock block={block} number={block.number} />
       ) : ownTable && block !== null && isTable(block) ? (
@@ -417,11 +405,6 @@ export const ProposalBlock = component$<{
           Accepting drops the file behind this table: the cells proposed are the whole table.
         </p>
       )}
-      {item.derivedFrom !== undefined && item.derivedFrom.length > 0 && (
-        <p class="proposal-block__meta" data-proposal-derived>
-          Derived from {item.derivedFrom.length === 1 ? "one block" : `${item.derivedFrom.length} blocks`}
-        </p>
-      )}
       {/* The chip on the bottom border: the proposer's face — the handle,
           and in command mode what marks a removal or a move — what the
           proposal does in words, and its answers, one border around controls
@@ -435,7 +418,7 @@ export const ProposalBlock = component$<{
           data-proposal-face={item.itemId}
           aria-label={
             commanding
-              ? rowMarkingName(names.block.replace(/^Proposed/u, "proposed"), numbers.reference, numbers.passages)
+              ? rowMarkingName(names.block.replace(/^Proposed/u, "proposed"), numbers.reference, numbers.passages, numbers.whole)
               : movable
                 ? `${names.face}. Drag it, or use the arrow keys, to move it.`
                 : names.face
@@ -490,31 +473,14 @@ export const ProposalBlock = component$<{
           </span>
         )}
         <span class="proposal-block__words" data-proposal-words>
-          {derived === true ? names.block : withdrawing !== undefined && withdrawing > 0 ? `${words}, withdrawing ${withdrawing}` : words}
+          {withdrawing !== undefined && withdrawing > 0 ? `${words}, withdrawing ${withdrawing}` : words}
         </span>
         {strayed !== null && (
           <span class="proposal-block__drift" data-proposal-drift>
             {strayed}
           </span>
         )}
-        {/* Beside the answer icons, a derived candidate keeps the two acts
-            that say what to do with the framing in one press: fixate accepts
-            it and makes it the reader's, discard rejects it. User decision,
-            2026-09-21. BO_0258_014 */}
-        {derived === true && use$ !== undefined && (
-          <span class="proposal-block__chip-use" data-derived-use>
-            <button type="button" class="proposal-block__word-button" data-derived-fixate onClick$={() => use$(item.blockId, "fixate")}>
-              Fixate this framing
-            </button>
-            <button type="button" class="proposal-block__word-button" data-derived-discard onClick$={() => use$(item.blockId, "discard")}>
-              Discard
-            </button>
-          </span>
-        )}
-        {/* Every candidate carries answer icons, a derived one included: it
-            is answered explicitly and no longer accepted by using it
-            (`BO_0258`, Decided). Its *Fixate this framing* stands beside them
-            and accepts in the same press. BO_0258_014 The *Possible relation*
+        {/* Every candidate carries answer icons. The *Possible relation*
             card answers here like any other proposal, with the card's own
             words on the icons. DO_0007_001 */}
         <div class="proposal-block__answers">
@@ -608,35 +574,15 @@ const KIND_WORDS: Readonly<Record<string, string>> = {
 
 /**
  * A work item drawn under the block it concerns (`BO_0244_010`): a relation
- * as *Possible relation* — its claim, what it does to which target, quoted
+ * as *Possible relation* — its block, what it does to which target, quoted
  * with its document, and its reason, which the reader may edit, and editing
- * accepts; a proposed reason the same way on a relation that stands; a claim
- * as its words; a kind as a line naming it. The origin says *Inferred* or
- * *Derived* where a run guessed or derived it.
+ * accepts; a proposed reason the same way on a relation that stands. The
+ * origin says *Inferred* or *Derived* where a run guessed or derived it.
  */
 const ProposalWork = component$<{
   item: ProposedChange;
   settleReason$?: QRL<(itemId: string, relationId: string, baseRevisionId: string, reason: readonly Run[]) => Promise<boolean>>;
 }>(({ item, settleReason$ }) => {
-  if (item.kind === "claim" && item.claim !== undefined) {
-    return (
-      <div class="proposal-block__work" data-proposal-work="claim">
-        <p class="proposal-block__label">Proposed claim</p>
-        <p class="block-text proposal-block__quote">
-          <Words runs={item.claim.text} />
-        </p>
-      </div>
-    );
-  }
-  if (item.kind === "kind" && item.block !== null && isText(item.block)) {
-    return (
-      <div class="proposal-block__work" data-proposal-work="kind">
-        <p class="proposal-block__label">
-          {item.block.blockKind === undefined ? "Proposed: no kind" : `Proposed kind: ${item.block.blockKind}`}
-        </p>
-      </div>
-    );
-  }
   const relation = item.relation;
   if (relation === undefined) return null;
   const origin = relation.origin === "inferred" ? "Inferred" : relation.origin === "derived" ? "Derived" : "Declared";
@@ -651,7 +597,7 @@ const ProposalWork = component$<{
           {item.previousState !== undefined && <span class="proposal-block__meta"> (now {item.previousState})</span>}
         </p>
         <p class="proposal-block__line">
-          <span class="proposal-block__field">This claim:</span>{" "}
+          <span class="proposal-block__field">This block:</span>{" "}
           <q class="proposal-block__quote">
             <Words runs={relation.source.text} />
           </q>
@@ -683,7 +629,7 @@ const ProposalWork = component$<{
         </span>
       </p>
       <p class="proposal-block__line">
-        <span class="proposal-block__field">This claim:</span>{" "}
+        <span class="proposal-block__field">This block:</span>{" "}
         <q class="proposal-block__quote">
           <Words runs={relation.source.text} />
         </q>
@@ -716,7 +662,7 @@ export const isInferredRelation = (item: ProposedChange): boolean =>
 /**
  * The *Possible relation* card (`BO_0247_005`, the material's screen 4): an
  * inferred relation under its source block in the derived idiom — an
- * *Inferred* chip, the claim it anchors on, what it does to which target
+ * *Inferred* chip, the block it anchors on, what it does to which target
  * quoted with its document, the two lines saying where the relation and its
  * reason came from, and the reason, editable where it is read: a press puts
  * the caret in it, and the item is accepted with the edit on top once the
@@ -740,7 +686,7 @@ const PossibleRelation = component$<{
         </span>
       </p>
       <p class="proposal-block__line">
-        <span class="proposal-block__field">This claim:</span>{" "}
+        <span class="proposal-block__field">This block:</span>{" "}
         <q class="proposal-block__quote">
           <Words runs={relation.source.text} />
         </q>
@@ -878,6 +824,8 @@ const ProposalText = component$<{
     phase: "idle" as "idle" | "typing" | "settling" | "settled",
     edited: false,
     focused: false,
+    /** A pointer press on the text, until its click. DO_0023_001 */
+    pressing: false,
     paint: 0,
     timer: 0,
   });
@@ -896,7 +844,7 @@ const ProposalText = component$<{
   // Written on the element as well: an attribute of a tag held in a
   // variable is set when the element is made and never patched. DO_0004_004
   useVisibleTask$(({ track }) => {
-    const editable = track(() => markingStore.marking.mode !== "command" && (reach.hover || reach.engaged));
+    const editable = track(() => markingStore.marking.mode !== "command" && (reach.hover ? reach.armed : reach.engaged));
     const element = host.value;
     if (element === undefined) return;
     element.setAttribute("contenteditable", editable ? "true" : "false");
@@ -949,20 +897,54 @@ const ProposalText = component$<{
       // typing into them would accept the proposal. BO_0263_005
       // On a phone the first tap focuses the proposal and shows its chip; the
       // text takes the caret on the second. DO_0004_004
-      contentEditable={markingStore.marking.mode !== "command" && (reach.hover || reach.engaged) ? "true" : "false"}
+      contentEditable={markingStore.marking.mode !== "command" && (reach.hover ? reach.armed : reach.engaged) ? "true" : "false"}
+      // Reached by the keyboard whether or not it takes typing yet: on a
+      // pointer that hovers the text is not editable at rest. DO_0023_001
+      tabIndex={0}
       data-proposal-text={item.itemId}
       data-mark-text
-      onClick$={(_: MouseEvent, element: HTMLElement) => {
-        if (markingStore.marking.mode !== "command" || !clickMarks(element)) return;
-        void mark$();
+      onPointerDown$={() => {
+        local.pressing = true;
       }}
-      onFocus$={() => {
+      onClick$={async (_: MouseEvent, element: HTMLElement) => {
+        local.pressing = false;
+        if (markingStore.marking.mode === "command") {
+          if (clickMarks(element)) void mark$();
+          return;
+        }
+        // A click arms the text where the caret landed, or over the words a
+        // drag selected inside it; a drag that ran on into other blocks left
+        // a selection this text does not hold, and arms nothing. DO_0023_001
+        if (!reach.hover || reach.armed) return;
+        const at = liveOffsets(element);
+        if (at === null) return;
+        reach.armed = true;
+        element.setAttribute("contenteditable", "true");
+        element.focus();
+        selectRange(element, at.start, at.end);
+        local.focused = true;
+        if (edit$ !== undefined) await edit$(true);
+        // The proposal drawn as the one being edited may have moved the words
+        // the caret was in; it is put back where the click left it.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (element.isConnected && liveOffsets(element) === null) selectRange(element, at.start, at.end);
+      }}
+      onFocus$={(_: FocusEvent, element: HTMLElement) => {
+        // A press gives the focus before its click decides what it meant, so
+        // the text is armed by the click; the keyboard arms it at once.
+        // DO_0023_001
+        if (reach.hover && !reach.armed) {
+          if (local.pressing || markingStore.marking.mode === "command") return;
+          reach.armed = true;
+          element.setAttribute("contenteditable", "true");
+        }
         local.focused = true;
         if (edit$ !== undefined) void edit$(true);
       }}
       // Leaving the text is a pause too, and the reader has gone elsewhere:
       // the typing is handed over at once, without taking the caret back.
       onBlur$={async () => {
+        local.pressing = false;
         local.focused = false;
         if (edit$ !== undefined) void edit$(false);
         await settleHere$();

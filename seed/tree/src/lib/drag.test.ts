@@ -4,12 +4,19 @@ import {
   EDGE_SCROLL_MAX_PX,
   EDGE_SCROLL_ZONE_PX,
   edgeScroll,
+  holdOver,
+  inMiddle,
   LONG_PRESS_MS,
   movedDistance,
   pointerIntent,
   PANEL_ICON_KIND,
   resolveDrop,
   resolveOperation,
+  SPRING_HOLD_MS,
+  springAction,
+  springDue,
+  springRepeats,
+  springs,
   SWIPE_LOCK_PX,
   BACK_GESTURE_EDGE_PX,
   TAB_SWIPE_PX,
@@ -196,5 +203,76 @@ describe("a library icon's drop", () => {
     expect(resolveDrop(icon, strip)).toBeNull();
     expect(resolveDrop(tab, column)).toBeNull();
     expect(resolveDrop(tab, strip)).toBe("move");
+  });
+});
+
+describe("a held drag opens the place it is held over", () => {
+  const block: DragPayload = {
+    itemId: "blk-1",
+    kind: "documents:document",
+    source: "workspace",
+    operations: ["move"],
+    preview: "A block",
+    from: "doc-1",
+  };
+
+  it("springs for what is dragged out of a view, never for a tab or a library icon", () => {
+    expect(springs(block)).toBe(true);
+    expect(springs(tab)).toBe(false);
+    expect(springs({ ...tab, kind: PANEL_ICON_KIND, source: "panel" })).toBe(false);
+    expect(springs(null)).toBe(false);
+  });
+
+  it("opens after the hold and not before", () => {
+    const hold = holdOver(null, "tab:b", 1000);
+    expect(springDue(hold, 1000 + SPRING_HOLD_MS - 1)).toBe(false);
+    expect(springDue(hold, 1000 + SPRING_HOLD_MS)).toBe(true);
+    expect(springDue(hold, 1000 + SPRING_HOLD_MS + 500)).toBe(true);
+  });
+
+  it("keeps its start while the pointer stays, and a leave or another place starts again", () => {
+    const hold = holdOver(null, "tab:b", 1000);
+    expect(holdOver(hold, "tab:b", 1400)).toBe(hold);
+    expect(holdOver(hold, null, 1400)).toBeNull();
+    const moved = holdOver(hold, "tab:c", 1400);
+    expect(moved).toEqual({ id: "tab:c", since: 1400 });
+    expect(springDue(moved, 1000 + SPRING_HOLD_MS)).toBe(false);
+    expect(springDue(holdOver(null, "tab:b", 1500), 1000 + SPRING_HOLD_MS)).toBe(false);
+  });
+
+  it("opens once: a hold that opened its place is not due again", () => {
+    expect(springDue({ id: "tab:b", since: null }, 1_000_000)).toBe(false);
+    expect(springDue(null, 1_000_000)).toBe(false);
+  });
+});
+
+describe("what a held place opens", () => {
+  it("names a tab, a step, the sheet, an icon's content or an entry's document", () => {
+    expect(springAction("tab:documents-d1")).toEqual({ open: "tab", tabId: "documents-d1" });
+    expect(springAction("tab-edge:before")).toEqual({ open: "step", step: -1 });
+    expect(springAction("tab-edge:after")).toEqual({ open: "step", step: 1 });
+    expect(springAction("library-handle")).toEqual({ open: "sheet" });
+    expect(springAction("library-icon:documents")).toEqual({ open: "icon", icon: "documents" });
+    expect(springAction("library:doc-7")).toEqual({ open: "entry", itemId: "doc-7" });
+    expect(springAction("tab:")).toBeNull();
+    expect(springAction("block:b1")).toBeNull();
+  });
+
+  it("repeats on a tab edge only", () => {
+    expect(springRepeats("tab-edge:after")).toBe(true);
+    expect(springRepeats("tab:documents-d1")).toBe(false);
+    expect(springRepeats("library:doc-7")).toBe(false);
+  });
+});
+
+describe("a target's middle", () => {
+  it("is the middle half of its height, the quarters above and below its edges", () => {
+    expect(inMiddle(100, 100, 40)).toBe(false);
+    expect(inMiddle(109, 100, 40)).toBe(false);
+    expect(inMiddle(110, 100, 40)).toBe(true);
+    expect(inMiddle(120, 100, 40)).toBe(true);
+    expect(inMiddle(130, 100, 40)).toBe(true);
+    expect(inMiddle(131, 100, 40)).toBe(false);
+    expect(inMiddle(120, 100, 0)).toBe(false);
   });
 });

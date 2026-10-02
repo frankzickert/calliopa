@@ -126,8 +126,25 @@ export function render(style: StyleId, works: readonly { readonly workId: string
   const entries: { workId: string; label?: string; entry: Segment[] }[] = [];
   if (bibliography !== false) {
     const [params, html] = bibliography;
+    // A style may cite a source in the text alone — APA and Chicago an
+    // unpublished interview or a conversation, as personal communication —
+    // and citeproc then leaves its entry out of the list while keeping its id
+    // in `entry_ids`, so the two are paired only after the ids it rendered
+    // nothing for are dropped. Found with BO_0313's sources beyond papers.
+    // Asked one id at a time of the same engine, once the labels and the
+    // list are made: a style file is parsed once per render.
+    const ids = params.entry_ids.map((entry) => entry[0]).filter((id): id is string => id !== undefined);
+    const listed =
+      ids.length === html.length
+        ? ids
+        : ids.filter((id) => {
+            engine.updateItems([id]);
+            const alone = engine.makeBibliography();
+            return alone !== false && alone[1].length > 0;
+          });
+    if (listed.length !== html.length) return { labels, entries };
     html.forEach((entry, index) => {
-      const workId = params.entry_ids[index]?.[0];
+      const workId = listed[index];
       if (workId === undefined) return;
       const margin = /<div class="csl-left-margin">([\s\S]*?)<\/div>/u.exec(entry);
       const body = margin === null ? entry : entry.replace(margin[0], "");

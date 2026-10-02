@@ -127,3 +127,26 @@ describe("what is never matched", () => {
     expect(found(runs, [computer, computing]).map((mention) => mention.keyword)).toEqual(["k-computer", "k-computing"]);
   });
 });
+
+// A keyword named on purpose (`calliopa-bootstrap`'s `BO_0310_023`): its words
+// are a mention by `named`, before the three rules, and start no second one.
+describe("a named keyword", () => {
+  it("is a mention by its words, whatever they say, and nothing inside it matches again", () => {
+    const runs: Run[] = [{ text: "the " }, { text: "quantum computers", keyword: "k-computing" }, { text: " and quantum computing" }];
+    expect(found(runs, [computer, computing, quantum])).toEqual([
+      { start: 4, end: 21, keyword: "k-computing", rule: "named", words: "quantum computers" },
+      { start: 26, end: 43, keyword: "k-computing", rule: "inflection", words: "quantum computing" },
+    ]);
+  });
+
+  it("is a mention with no keyword standing, and leaves a keyword's own document alone", () => {
+    const runs: Run[] = [{ text: "see " }, { text: "qubits", keyword: "k-gone" }];
+    expect(found(runs, [])).toEqual([{ start: 4, end: 10, keyword: "k-gone", rule: "named", words: "qubits" }]);
+    expect(found([{ text: "qubits", keyword: "k-qubit" }], [qubit], "k-qubit")).toEqual([]);
+  });
+
+  it("joins the words of one keyword across marks into one mention", () => {
+    const runs: Run[] = [{ text: "quantum ", keyword: "k-computer" }, { text: "computer", marks: ["bold"], keyword: "k-computer" }];
+    expect(found(runs, [computer]).map((mention) => [mention.start, mention.end, mention.rule])).toEqual([[0, 16, "named"]]);
+  });
+});
