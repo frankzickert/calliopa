@@ -309,6 +309,35 @@ export interface ViewActivity {
   seq: number;
 }
 
+/**
+ * A finished run played back in one tab (`BO_0340_004`): the tab it plays in
+ * and the run it plays, the command's words as typed so far, and the run as
+ * it unfolds — the same shape as a live run's activity, so the view draws it
+ * as one. `seq` rises with every step. The view reads its document and the
+ * staged items itself, by `runId`; nothing a replay shows is written, and a
+ * view in any other tab passes it over.
+ */
+export interface ViewReplay {
+  tabId: string | null;
+  itemId: string | null;
+  /** The original run, which the view reads the document and items by. */
+  runId: string | null;
+  /** The block the command was sent from. */
+  block: string | null;
+  /** The words typed so far, or null before the typing starts. */
+  words: string | null;
+  /** The run once sent, as it has unfolded so far. */
+  run: ViewRunActivity | null;
+  seq: number;
+}
+
+/** The key a replay's view reports its run chips under: its tab's, never
+ * its document's, so a replay never speaks for the document's own tab. */
+export const replayChipsKey = (tabId: string): string => `replay:${tabId}`;
+
+/** No replay playing. */
+export const NO_REPLAY: ViewReplay = { tabId: null, itemId: null, runId: null, block: null, words: null, run: null, seq: 0 };
+
 /** Who a run chip belongs to, drawn as the proposal's face is. */
 export type RunChipFace =
   | { readonly kind: "image"; readonly src: string }
@@ -471,7 +500,7 @@ export interface ViewCommand {
    * Sent in place of the document's mode in the aim, which stays for the
    * console's composer and gestures. DO_0025_008 */
   readonly mode?: WorkingMode;
-  /** The options the `command` places set on it, `profile` among them; absent
+  /** The options the `command` places set on it, `instruction` among them; absent
    * when none was set. BO_0311_030 */
   readonly options?: Readonly<Record<string, string>>;
 }
@@ -484,6 +513,9 @@ export interface ViewCommand {
  */
 export interface ViewCommandOptions {
   byCommand: Record<string, Readonly<Record<string, string>>>;
+  /** The option names set for one send on each command, cleared from
+   * `byCommand` once it is sent. BO_0336_051 */
+  onceByCommand?: Record<string, readonly string[]>;
 }
 
 /** Where a command's options are kept: its target and the block it is written in. */
@@ -492,6 +524,17 @@ export const commandKey = (itemId: string, blockId: string): string => `${itemId
 /** The options set on one command, none when nothing set one. */
 export const optionsOf = (options: ViewCommandOptions, itemId: string, blockId: string): Readonly<Record<string, string>> =>
   options.byCommand[commandKey(itemId, blockId)] ?? {};
+
+/** The options once a command is sent: those set for one send cleared. BO_0336_051 */
+export const afterSend = (options: ViewCommandOptions, itemId: string, blockId: string): ViewCommandOptions => {
+  const key = commandKey(itemId, blockId);
+  const once = options.onceByCommand?.[key] ?? [];
+  if (once.length === 0) return options;
+  let held = options.byCommand[key] ?? {};
+  for (const name of once) held = withOption(held, name, null);
+  const { [key]: _sent, ...onceRest } = options.onceByCommand ?? {};
+  return { byCommand: { ...options.byCommand, [key]: held }, onceByCommand: onceRest };
+};
 
 /** The options with one set, or cleared by `null`. */
 export const withOption = (held: Readonly<Record<string, string>>, name: string, value: string | null): Readonly<Record<string, string>> => {
@@ -635,6 +678,8 @@ export interface ViewBridge {
   readonly across: ViewAcross;
   /** The reader's run aimed at a target, while it goes. BO_0265_007 */
   readonly activity: ViewActivity;
+  /** A finished run played back in a tab. BO_0340_004 */
+  readonly replay: ViewReplay;
   /** Reports the open run groups on a target for the composer's chips.
    * BO_0265_008 */
   readonly setRunChips$: QRL<(itemId: string, chips: readonly RunChip[]) => void>;
@@ -707,7 +752,7 @@ export interface ViewBridge {
   /** The options `command` places set on the commands. BO_0311_030 */
   readonly commandOptions: ViewCommandOptions;
   /** Sets one option on one command, or clears it with `null`. BO_0311_030 */
-  readonly setCommandOption$: QRL<(itemId: string, blockId: string, name: string, value: string | null) => void>;
+  readonly setCommandOption$: QRL<(itemId: string, blockId: string, name: string, value: string | null, once?: boolean) => void>;
   /** Chooses the next command's speed. BO_0269_015 */
   readonly chooseSpeed$: QRL<(speed: Speed) => void>;
   /** Reads the agents again, answering the list, or null when it could not.

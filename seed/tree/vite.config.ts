@@ -13,6 +13,11 @@ export default defineConfig(() => ({
     qwikVite() as PluginOption,
     tsconfigPaths({ root: "." }),
   ],
+  // A production page inlines each derived signal's function, so a prop a
+  // component was handed from a loader reads its value once the page
+  // resumes; Qwik's optimizer serializes them only in development unless
+  // told otherwise. CA_0077_002
+  define: { "globalThis.qSerialize": true },
   server: {
     host: "0.0.0.0",
     port: 4300,

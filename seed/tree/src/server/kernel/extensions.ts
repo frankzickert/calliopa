@@ -1,4 +1,4 @@
-import { graphEnv } from "../ccgw/env";
+import { port } from "../port";
 import { forwardedHeaders } from "../request-context";
 import type { ImportRecord } from "~/lib/extension-import";
 import { call, jsonInit, refusalWithCode } from "./client";
@@ -334,7 +334,7 @@ export const kernelExtensions = {
   async decide(verb: "accept" | "reject", proposal: string, rationale: string): Promise<ImportDecision> {
     // The browser's host travels with the cookie, so the confirmation link
     // the kernel answers names the address the owner is on. BO_0241_006
-    const response = await fetch(`${graphEnv().kernelUrl}/__kernel/review/${verb}`, {
+    const response = await port.kernel(`/__kernel/review/${verb}`, {
       method: "POST",
       headers: { "content-type": "application/json", ...forwardedHeaders() },
       body: JSON.stringify({ proposal, rationale }),

@@ -26,5 +26,5 @@
     }
   },
   "include": ["src", "tests", "*.ts", "adapters/**/*.ts"],
-  "exclude": ["node_modules", "dist", "server"]
+  "exclude": ["node_modules", "dist", "server", "adapters/device"]
 }

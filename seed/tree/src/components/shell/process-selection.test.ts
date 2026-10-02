@@ -99,21 +99,21 @@ describe("the selected process, held per tab", () => {
   });
 });
 
-describe("a run guided by a profile", () => {
-  it("Given its detail, Then it names the profile where the run's detail is read, and a run with none says nothing", async () => {
+describe("a run guided by an instruction", () => {
+  it("Given its detail, Then it names the instruction where the run's detail is read, and a run with none says nothing", async () => {
     const { root, row, userEvent } = await mount();
     await userEvent(row("p1"), "click");
-    const line = root.querySelector("[data-process-profile]") as HTMLElement | null;
-    expect(line?.getAttribute("data-process-profile")).toBe("prof-1");
-    expect(line?.textContent?.replace(/\s+/gu, " ").trim()).toBe("Profile: Blog post");
-    expect(line?.querySelector("[data-process-profile-open]")?.textContent).toBe("Blog post");
+    const line = root.querySelector("[data-process-instruction]") as HTMLElement | null;
+    expect(line?.getAttribute("data-process-instruction")).toBe("prof-1");
+    expect(line?.textContent?.replace(/\s+/gu, " ").trim()).toBe("Instruction: Blog post");
+    expect(line?.querySelector("[data-process-instruction-open]")?.textContent).toBe("Blog post");
     await userEvent(row("p2"), "click");
-    expect(root.querySelector("[data-process-profile]")).toBeFalsy();
+    expect(root.querySelector("[data-process-instruction]")).toBeFalsy();
   });
 });
 
 describe("what a run was told at its start", () => {
-  it("Given its detail, Then it lists each extension's keywords sent beside the profile and names a tool that failed, and a run told nothing says nothing", async () => {
+  it("Given its detail, Then it lists each extension's keywords sent beside the instruction and names a tool that failed, and a run told nothing says nothing", async () => {
     const { root, row, userEvent } = await mount();
     await userEvent(row("p1"), "click");
     expect(root.querySelector('[data-process-context="keywords"]')?.textContent).toBe("Keywords: Quantum computing, Qubit");
@@ -121,5 +121,20 @@ describe("what a run was told at its start", () => {
     await userEvent(row("p2"), "click");
     expect(root.querySelector("[data-process-context]")).toBeFalsy();
     expect(root.querySelector("[data-process-context-failure]")).toBeFalsy();
+  });
+});
+
+describe("the replay's shortcut on a run's detail", () => {
+  it("Given the shortcut refused on a run, Then its detail says why in words, another run's detail does not, and no detail names a replay control", async () => {
+    const { root, row, userEvent } = await mount();
+    await userEvent("[data-host-refuse]", "click");
+    await userEvent(row("p1"), "click");
+    expect(root.querySelector("[data-replay-refusal]")).toBeFalsy();
+    await userEvent(row("p2"), "click");
+    expect(root.querySelector("[data-replay-refusal]")?.textContent).toBe("This run can no longer be replayed: the instance holds no record of it.");
+    expect(root.querySelector("[data-replay-refusal]")?.closest("[data-process-id]")?.getAttribute("data-process-id")).toBe("p2");
+    // Hidden: nothing in the panel offers or names it.
+    const panel = root.querySelector("[data-inspector-panel]") as HTMLElement;
+    expect(Array.from(panel.querySelectorAll("button, [title], [aria-label]")).some((element) => /replay/iu.test(`${element.textContent} ${element.getAttribute("title") ?? ""} ${element.getAttribute("aria-label") ?? ""}`))).toBe(false);
   });
 });

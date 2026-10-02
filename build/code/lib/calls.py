@@ -1,4 +1,4 @@
-"""Calls: one profile tool's code, run once in a throwaway container and answered.
+"""Calls: one instruction tool's code, run once in a throwaway container and answered.
 
 A call never touches a person's runtime or session. It starts a container from
 the runtime's image with the runtime's kernelspec, on no network at all or on
@@ -7,7 +7,7 @@ the input written to `/calliopa/input.json`. The kernel inside is reached by a
 driver from the service's own image started in the call's network namespace,
 so a call off every network is reached over its loopback alone. Both
 containers are removed when the call is answered, whatever happened.
-`docs/system/code-service.md`, Profile Tools. BO_0311_001
+`docs/system/code-service.md`, Instruction Tools. BO_0311_001
 """
 
 from __future__ import annotations

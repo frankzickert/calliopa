@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """A call's driver: the service's own image, standing in a call's network namespace.
 
-A profile tool's call runs in a throwaway container that may have no network
+An instruction tool's call runs in a throwaway container that may have no network
 at all, so the service cannot reach its kernel the way it reaches a session's.
 This driver is started beside it, sharing its namespace — and so its loopback
 and nothing else — speaks the kernel protocol to the kernel there, sends the
 code once and prints every output as one JSON line, ending with an `end` line.
 It reads everything from its environment and writes nothing but its standard
-output. `docs/system/code-service.md`, Profile Tools. BO_0311_001
+output. `docs/system/code-service.md`, Instruction Tools. BO_0311_001
 """
 
 from __future__ import annotations

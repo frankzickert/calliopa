@@ -684,91 +684,94 @@ Numbered*.
   [Block Editor View](./block-editor.md)), and it goes when the reader fixates the block again on
   the words it holds now.
 
-## Profiles
+## Instructions
 
-- [x] BO_0320_013 Widen the `document` declaration with optional `profileType` (`instructions` or `image`) and `imageBackend` (`higgsfield`, `openart` or `codex`). Export profile metadata reads and writes for `profiles`; preserve `imageBackend` when changing `profileType` away from `image`. The kernel reads the values at the run's pin for `media.generate` (`calliopa-bootstrap`'s `BO_0320_005`). The profile setup surface and run behavior are `profiles`' and `media`'s graph tasks.
-- `document` permits `video` among `profileType`'s values beside `instructions` and `image`
-  (`calliopa-bootstrap`'s `BO_0312`, 2026-10-01, a member revision): a video profile, whose
-  `imageBackend` names its video generator. `readProfileGeneration` answers it, and
-  `setProfileGeneration` refuses Codex for a video profile and keeps a stored backend when the type
-  changes (`BO_0320_013`).
+- An instruction holds no generation setup (`calliopa-bootstrap`'s `BO_0336_040`, landed 2026-10-02):
+  `document` declares neither `profileType` nor `imageBackend`, and nothing here reads or writes
+  them — what a picture or a video is made with is the format an instruction names in *Instruction*'s
+  *Format* field (`media`'s
+  [Generation Settings Live In The Format](../../../../media/docs/system/system.md#generation-settings-live-in-the-format)).
+  The executable migration `migration-bo-0336-profile-generation` (route
+  `kernel/migrations/profile-generation`, `clearProfileGenerationStatement`) clears both from
+  every established document holding either, once per instance, and nothing moves to a format
+  (user decision, 2026-10-02). Proven in `server/migrations.test.ts`.
 
 Under `calliopa-bootstrap`'s `BO_0298` (`docs/changes/BO_0298_FEAT_profiles.md`) and `BO_0311`
 (`docs/changes/completed/BO_0311_FEAT_profile-in-the-chip-with-tools.md`): a person keeps reusable
-instruction documents — profiles — on the instance and chooses one for each command from the chip
-of the block it is written in, and the command's run is guided by the profile's accepted content.
-A profile is a document, authored and revised in this editor through the proposal loop, and a
-person can ask an agent to draft or improve one. The extension is `profiles`, whose decisions and
-work are its own ([Profiles](../../../../profiles/docs/system/system.md)); the kernel's half — the
-run start reading the command's profile, its tools and the record — is `calliopa-bootstrap`'s
-`docs/system/ui-kernel.md`, *Profiles* and *The Profile In The Command, With Tools*; the run
-detail's line is `ui.shell`'s ([Processes](../../../../../../docs/system/workspace/processes.md#the-run-used-a-profile)).
+instruction documents — instructions — on the instance and chooses one for each command from the chip
+of the block it is written in, and the command's run is guided by the instruction's accepted content.
+An instruction is a document, authored and revised in this editor through the proposal loop, and a
+person can ask an agent to draft or improve one. The extension is `instructions`, whose decisions and
+work are its own ([Instructions](../../../../instructions/docs/system/system.md)); the kernel's half — the
+run start reading the command's instruction, its tools and the record — is `calliopa-bootstrap`'s
+`docs/system/ui-kernel.md`, *Instructions* and *The Instruction In The Command, With Tools*; the run
+detail's line is `ui.shell`'s ([Processes](../../../../../../docs/system/workspace/processes.md#the-run-used-an-instruction)).
 
-* Every run uses the profile's latest accepted content at run start; a run underway keeps what it
+* Every run uses the instruction's latest accepted content at run start; a run underway keeps what it
   received; a proposed edit awaiting acceptance is not an instruction. User decision, 2026-09-24
   (`BO_0298_Q2`).
-* A profile is told apart by a `record` value, and the Documents category leaves profiles out.
+* An instruction is told apart by a `record` value, and the Documents category leaves instructions out.
   User decision, 2026-09-25 (`BO_0298_Q4`).
-* A profile is neither an intention nor a replacement for skill selection; a command may carry
-  both. The prompt controls the request, the profile guides it, the intention's skills keep their
+* An instruction is neither an intention nor a replacement for skill selection; a command may carry
+  both. The prompt controls the request, the instruction guides it, the intention's skills keep their
   method rules. User decisions, 2026-09-25 (`BO_0298_Q5`, `BO_0298_Q6`).
-* The chosen profile belongs to the command, and no document names one (`BO_0308_Q7`, reversing
-  `BO_0298_Q1` and `BO_0298_Q8`); a document's attached profile was dropped on upgrade
+* The chosen instruction belongs to the command, and no document names one (`BO_0308_Q7`, reversing
+  `BO_0298_Q1` and `BO_0298_Q8`); a document's attached instruction was dropped on upgrade
   (`BO_0311_Q1`). User decisions, 2026-09-30.
-- The `record` value is `profile`, written by `profiles` and read by it — knowledge, never a
-  fence, the posture every declaration by instance holds; a document carrying it stays a document
+- The `record` value is `instruction`, written by `instructions` and read by it — knowledge, never a
+  fence, the posture every declaration by instance holds; a document using it stays a document
   when the extension is switched off.
-- The Documents category leaves profile documents out (`BO_0298_011`): `listDocuments` drops a
-  `document` carrying `record: profile`, established or started by a run alike, and lists
+- The Documents category leaves instruction documents out (`BO_0298_011`): `listDocuments` drops a
+  `document` carrying `record: instruction`, established or started by a run alike, and lists
   everything else.
-- What `profiles` is made of here (`BO_0298_012`, `BO_0311_020`; `server/documents.ts`,
-  `lib/profile.ts`): `createDocument` takes an optional `record` beside the title and the first
-  block, so a profile is created as any document is with its record in the same statement;
-  `listProfiles` answers the established documents carrying the record by title;
-  `profileSummary` answers whether a document is a profile, with its id and title; and
+- What `instructions` is made of here (`BO_0298_012`, `BO_0311_020`; `server/documents.ts`,
+  `lib/instruction.ts`): `createDocument` takes an optional `record` beside the title and the first
+  block, so an instruction is created as any document is with its record in the same statement;
+  `listInstructions` answers the established documents carrying the record by title;
+  `instructionSummary` answers whether a document is an instruction, with its id and title; and
   `clearProfileSlotsStatement` answers one script clearing the `profile` slot every document
-  still carries from before `BO_0311`, or none, which `profiles`' upgrade migration runs. The
-  vocabulary — `PROFILE_RECORD`, `UNNAMED_PROFILE`, `ProfileSummary` — is `lib/profile.ts`,
+  still carries from before `BO_0311`, or none, which `instructions`' upgrade migration runs. The
+  vocabulary — `INSTRUCTION_RECORD`, `UNNAMED_INSTRUCTION`, `InstructionSummary` — is `lib/instruction.ts`,
   client-safe.
 - The `profile` slot left the `document` declaration (`BO_0311_020`): the property and its
   description are gone from the member, staged through `kernel commit --members` — dropping an
   optional property is no breaking change (`calliopa-bootstrap`'s `validation.md`) — and the
-  values documents still carried are cleared by `profiles`' executable migration
+  values documents still carried are cleared by `instructions`' executable migration
   `migration-bo-0311-profile-in-the-chip` on every instance as it takes the release (a `SET` to
-  null removes the key). Proven by `tests/behavior/profiles.test.ts` over the one graph: a profile listed among
-  the profiles and not the documents, a document told apart as a profile or not, and a slot kept
+  null removes the key). Proven by `tests/behavior/instructions.test.ts` over the one graph: an instruction listed among
+  the instructions and not the documents, a document told apart as an instruction or not, and a slot kept
   from before cleared by one script and found nowhere after.
 
-## Document And Block Roles
+## Document And Block Structures
 
-A person structures a document with roles, which the `doc-block-roles` extension holds: a block
-takes roles — the document, the root block of its reading order, takes them the same way — a role
-offers roles to the blocks under it, and a role carries fields whose values the block holds
+A person structures a document with structures, which the `structures` extension holds: a block
+uses structures — the document, the root block of its reading order, uses them the same way — a structure
+allows structures to the blocks under it, and a structure carries fields whose values the block holds
 (`calliopa-bootstrap`'s `BO_0299`, 2026-09-25, and `BO_0309`, with `BO_0318` folded in,
 2026-09-30). The extension is `bundled`; its work and its truth are its own
-[system document](../../../../doc-block-roles/docs/system/system.md), and this section keeps the
+[system document](../../../../structures/docs/system/system.md), and this section keeps the
 decisions that touch this extension's documents and editor, and the places it draws.
 
-* Every block in the reading order can take a role that allows blocks — text, picture, table, code,
-  equation and the rest — so a picture can be the hook, and the document takes roles of its own.
-  User decision, 2026-09-25 (`BO_0299_Q8`). A role says whether blocks may take it, and *Keyword*,
-  *Profile*, *Format* and *Source* are taken by documents alone. User decision, 2026-10-01
-  (`calliopa-bootstrap`'s `BO_0332`; `doc-block-roles`' [Roles](../../../../doc-block-roles/docs/system/system.md#document-roles-and-block-roles)).
-* Roles are created and revised by anyone who can edit documents, and taken or given a value by the
-  person as truth at once, in every branch alike, no proposal raised; a run proposes roles and
+* Every block in the reading order can use a structure that allows blocks — text, picture, table, code,
+  equation and the rest — so a picture can be the hook, and the document uses structures of its own.
+  User decision, 2026-09-25 (`BO_0299_Q8`). A structure says whether blocks may use it, and *Keyword*,
+  *Instruction*, *Format* and *Source* are used by documents alone. User decision, 2026-10-01
+  (`calliopa-bootstrap`'s `BO_0332`; `structures`' [Structures](../../../../structures/docs/system/system.md#document-structures-and-block-structures)).
+* Structures are created and revised by anyone who can edit documents, and used or given a value by the
+  person as truth at once, in every branch alike, no proposal raised; a run proposes structures and
   values, which stand once the person accepts them (`BO_0299_Q2`, `BO_0308_Q4`).
 * A block's roles are visible while reading, as small pills at the block; they are taken, cleared
-  and given values from the roles chip beside the command chip of the block being edited
-  (`RO_0002`), and the document's from the roles line of its header, whose control is always
+  and given values from the structures chip beside the command chip of the block being edited
+  (`RO_0002`), and the document's from the structures line of its header, whose control is always
   drawn (`BO_0299_Q7`, `BO_0318_Q1`, `BO_0318_Q6`, `DO_0030_Q2`).
 - The word *role* is taken: `text.role` is the typographic role — `paragraph`, `h1`, `h2`, `h3`,
-  `quote`, `abstract` — read by the kernel's document tools as `role`. The roles extension's type
+  `quote`, `abstract` — read by the kernel's document tools as `role`. The structures extension's type
   keeps the name `blockRole`, and the typographic role keeps `role`.
-- The roles are the roles extension's own nodes and an assignment is a relation from the block or
+- The structures are the structures extension's own nodes and an assignment is a relation from the block or
   the `document` node, so this extension's declarations do not change for them: an
   `ext.relationtype` fences neither end, and every block kind is this extension's declaration.
-- The pills are a `headline` block place and the roles chip an `underCommand` block place, drawn
-  in the command chip's row (`RO_0002_002`); nothing of roles is in the document bar or the command
+- The pills are a `headline` block place and the structures chip an `underCommand` block place, drawn
+  in the command chip's row (`RO_0002_002`); nothing of structures is in the document bar or the command
   chip.
 - The document's place under its title (`BO_0309_031`, landed 2026-09-30, made the header's rows by
   `DO_0030_002`; `views/block-editor.tsx`, `block-editor.css`): inside the document's header,
@@ -778,10 +781,10 @@ decisions that touch this extension's documents and editor, and the places it dr
   form="full"`, `ui.shell`'s `BO_0309_030` and `DO_0030_001`). The rows are in the flow and drawn
   while reading and editing alike; an empty one takes no room. Their presses are their own
   (`stoppropagation:click`), and a control in them that keeps the caret leaves the title's edit
-  open. The roles extension draws the roles line and the values line there, the keywords extension
+  open. The structures extension draws the structures line and the values line there, the keywords extension
   the mentions line ([Block Editor View](./block-editor.md#the-document-header)).
-- The `ui.shell.documents` skill says nothing of roles: a run reads the skills of every active
-  extension that offers it a tool (`calliopa-bootstrap`'s `BO_0299_003`), so the roles extension's
+- The `ui.shell.documents` skill says nothing of structures: a run reads the skills of every active
+  extension that offers it a tool (`calliopa-bootstrap`'s `BO_0299_003`), so the structures extension's
   own skill reaches every run.
 
 ## Keywords
@@ -830,7 +833,7 @@ an active extension's `ext.tool` members and answers them through the callback (
 * A manuscript carries a glossary: every keyword the document mentions in its accepted reading
   order, with its definition, automatically. User decision, 2026-09-25.
 - Open: whether the extension is bundled and active on a fresh install (`BO_0301_Q1`, proposed
-  yes, as `doc-block-roles` is), and whether a keyword document's mention of *another* keyword is
+  yes, as `structures` is), and whether a keyword document's mention of *another* keyword is
   connected (`BO_0301_Q7`, proposed yes; only a keyword's mentions of its own names are left
   alone). Both proposals are in force until the user answers.
 - A mention is resolved in the read and stored nowhere, by the rule a citation set
@@ -860,7 +863,7 @@ an active extension's `ext.tool` members and answers them through the callback (
 
 - Under `calliopa-bootstrap`'s `BO_0310` (transferred 2026-09-30): a person names a keyword on
   purpose by typing `@`. Its decisions and the keyword side are `keywords`'
-  ([Keyword Is A Built-In Role](../../../../keywords/docs/system/system.md#keyword-is-a-built-in-role)),
+  ([Keyword Is A Built-In Role](../../../../keywords/docs/system/system.md#keyword-is-a-built-in-structure)),
   and the run schema is the kernel's (`ui-kernel.md` `BO_0310_001`).
 - The run primitive (`BO_0310_010`, landed 2026-09-30; `src/lib/runs.ts`, root-mapped `ui.shell`):
   `keyword` on the `Run` shape, the identity of the keyword document, on a run with words. It is
@@ -926,3 +929,56 @@ discarded becomes a retired block ([Block Editor View](./block-editor.md#swipe-r
   counted over CCGW before and after. `setBlockDisposition` and the command API's `setDisposition` take fixate and
   keep. The kernel's fixture `serve/testdata/documents-vocabulary.json` mirrors the declaration. The line that names
   the three values under [Implementation](#implementation) is revised.
+
+## Structures And Instructions
+
+Under `calliopa-bootstrap`'s `BO_0338`, promoted to draft by the user on 2026-10-02 and transferred
+here the same day: roles become structures and profiles become instructions, with every stored
+identifier (`calliopa-bootstrap`'s `ui-kernel.md`, *Structures And Instructions*). The structures
+are `structures`'
+([Roles Become Structures](../../../../structures/docs/system/system.md#roles-become-structures))
+and the instructions `instructions`'
+([Profiles Become Instructions](../../../../instructions/docs/system/system.md#profiles-become-instructions));
+this document's half is the `document` declaration and the editor that draws both.
+
+- A text block's `role` is its typographic role and keeps its name.
+- The `record` slot takes `instruction` where it took `profile` (`BO_0338_040`, 2026-10-02):
+  `lib/instruction.ts` names `INSTRUCTION_RECORD` and `InstructionSummary`, `lib/naming.ts` mints
+  *Untitled instruction*, `server/documents.ts` lists and tells apart instructions
+  (`listInstructions`, `instructionSummary`) and answers `moveInstructionRecordsStatement` for
+  `instructions`' migration, which moves `record: profile` and *Untitled profile*
+  (`FORMER_INSTRUCTION_RECORD`, `FORMER_UNNAMED_INSTRUCTION`, read by it alone). The slot clear of
+  the `profile` property a document carried before `BO_0311` keeps its name, as that is the
+  stored property it clears. Verified by `server/instruction-records.test.ts`.
+- What the editor shows of structures and instructions says so (`BO_0338_041`, 2026-10-02): the
+  pills, the chip's control and the place under the title are `structures`' and say structure;
+  the citation popover's empty state says *add one under Structures, Source*; the
+  `ui.shell.documents` skill names no structure and keeps *role* for the typographic one; and
+  `tests/behavior/instructions.test.ts` replaced the profiles suite.
+- This extension's docs speak the new terms (`BO_0338_042`, 2026-10-02): *Instructions* and *Document And
+  Block Structures* in this document, the header's structures line and pills in `block-editor.md` and
+  the structures chip in `command-mode.md`; the typographic role, the document's former `profile`
+  slot and the stored names keep their form.
+
+## A Structure Is A Document
+
+Under `structures`' `RO_0005`, set to draft by the user on 2026-10-02 and transferred the same day:
+a structure is a document using the built-in *Structure*, its fields blocks using *Field*
+([A Structure Is A Document](../../../../structures/docs/system/system.md#a-structure-is-a-document)).
+This extension holds the document and the editor; what it adds is that a structure's document is
+listed as any document and guarded where the release fixes it.
+
+* A structure's document stands among the documents, listed and found like any document. User
+  decision, 2026-10-02 (`RO_0005_Q2`).
+* A structure is retired, never deleted, and a built-in's title and release fields are the
+  release's.
+- [ ] RO_0005_020 The guards: a document carrying `record: structure` is never deleted — the route
+      refuses it in words and the document panel draws no *Delete* — and a node whose id begins
+      `structure:` is the release's: such a document's title is refused a change and drawn fixed,
+      and such a block is refused a removal, a merge into another and a move out of its document,
+      its words staying editable. The same rules hold for a run's proposal and at its acceptance.
+- [ ] RO_0005_021 The record: `record: structure` is named beside `instruction` (`lib/`), a
+      document carrying it is listed in the Documents category and found by search like any other,
+      and it is never told apart as an instruction is.
+- [ ] RO_0005_022 Verified: `tests/behavior/documents.test.ts` over the kernel harness for the
+      refusals and the listing; this section's tasks become truth once they land.

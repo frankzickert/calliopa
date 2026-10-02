@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { currentBranch } from "~/server/ccgw/branch-scope";
+
 import { TOOLS, ToolRefusal, answerTool } from "./tools";
 
 /**
@@ -8,7 +10,9 @@ import { TOOLS, ToolRefusal, answerTool } from "./tools";
  * tool, admitted by the kernel once per Send — and `collect_generation`, which
  * collects a paid job without paying again. Every refusal of `generate` comes
  * before the paid request; the kernel's own gate is proven in
- * `calliopa-bootstrap`'s `agenttools`.
+ * `calliopa-bootstrap`'s `agenttools`. What is made, and with what, is the
+ * format the run's instruction names, with the variation chosen beside Send put
+ * over it (`BO_0336_022`, `BO_0336_025`).
  */
 const kernel = vi.hoisted(() => ({
   calls: [] as { path: string; body?: unknown; grant?: string }[],
@@ -16,6 +20,11 @@ const kernel = vi.hoisted(() => ({
   generationsOk: true,
   fileType: "image/png",
   jobState: "completed",
+}));
+/** The roles each document carries at the pin, as `structures` reads them. */
+const graph = vi.hoisted(() => ({
+  pins: [] as unknown[],
+  roles: {} as Record<string, { structures: { id: string; values: Record<string, unknown> }[]; blocks?: { blockId: string; structures: { id: string; values: Record<string, unknown> }[] }[]; titles?: Record<string, string> }>,
 }));
 const doc = vi.hoisted(() => ({
   words: "a laurel on a hill",
@@ -43,6 +52,7 @@ vi.mock("~/server/kernel/client", () => ({
         ok: true,
         json: async () => ({
           services: [
+            { service: "codex", signedIn: true, reason: null, models: [{ model: "codex-image", kind: "image", default: true }], openSet: {} },
             {
               service: "higgsfield",
               signedIn: kernel.signedIn,
@@ -57,7 +67,10 @@ vi.mock("~/server/kernel/client", () => ({
         }),
       };
     }
-    if (path === "/__kernel/media/generations") return { ok: kernel.generationsOk, json: async () => ({ id: "job-1" }) };
+    if (path === "/__kernel/media/generations")
+      return kernel.generationsOk
+        ? { ok: true, json: async () => ({ id: "job-1" }) }
+        : { ok: false, json: async () => ({ error: "gpt_image_2 takes aspect_ratio 1:1, 3:2, 2:3" }) };
     if (path.endsWith("/file")) {
       return { ok: true, headers: new Headers({ "Content-Type": kernel.fileType }), arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
     }
@@ -78,16 +91,38 @@ vi.mock("~/extensions/documents/server/documents", () => ({
       ],
     },
   }),
-  composeMediaInsert: async (input: unknown) => {
-    doc.composed.push(input);
+  // The branch in force is recorded: the kernel stages what is composed into
+  // the run's group, which refuses a CREATE composed against truth.
+  composeMediaInsert: async (input: object) => {
+    doc.composed.push({ ...input, branch: currentBranch() });
     return { ok: true, blockId: "made-1", statement: "CREATE (b:image {id: $b_id})", parameters: {} as Record<string, unknown> };
   },
-  composeMediaFill: async (input: unknown) => {
-    doc.filled.push(input);
+  composeMediaFill: async (input: object) => {
+    doc.filled.push({ ...input, branch: currentBranch() });
     return { ok: true, statement: "SET b.reference = $reference", parameters: {} };
   },
   fillMediaBlock: async () => ({ outcome: "success" }),
   insertBlock: async () => ({ outcome: "success" }),
+}));
+
+vi.mock("~/extensions/structures/server/structures", () => ({
+  structuresOf: async (documentId: string, scope: { dataRevision?: number } = {}) => {
+    graph.pins.push(scope.dataRevision);
+    const held = graph.roles[documentId];
+    if (held === undefined) return { outcome: "noResult" };
+    return {
+      outcome: "success",
+      result: {
+        documentId,
+        dataRevision: 7,
+        structures: held.structures,
+        takeable: [],
+        blocks: (held.blocks ?? []).map((block) => ({ ...block, kind: "text", parentId: null, takeable: [] })),
+        inherited: [],
+        referenceTitles: held.titles ?? {},
+      },
+    };
+  },
 }));
 
 vi.mock("~/server/ccgw/blobs", () => ({
@@ -96,16 +131,33 @@ vi.mock("~/server/ccgw/blobs", () => ({
   blobHash: (id: string) => `sha256:${id}`,
   blobReference: (objectId: string, mediaType: string, size: number) => ({ _kind: "blob", hash: `sha256:${objectId}`, mediaType, size }),
 }));
-vi.mock("~/server/ccgw/branch-scope", () => ({ withBranch: (_branch: unknown, act: () => unknown) => act() }));
 vi.mock("~/server/processes", () => ({ createProcess: async () => ({ id: "p" }), moveProcess: async () => undefined }));
 vi.mock("~/server/session", () => ({ readSession: async () => null }));
 
 const run = { id: "arun-1", group: "node:run-1", pin: 7, person: "frankzickert", document: "doc-1" };
-const image = { ...run, profileType: "image", imageBackend: "higgsfield" };
-const video = { ...run, profileType: "video", imageBackend: "higgsfield" };
+const image = { ...run, instruction: "prof-img" };
+const video = { ...run, instruction: "prof-vid" };
 const spent = () => kernel.calls.filter((one) => one.path === "/__kernel/media/generations");
 
+/** An instruction naming *Instagram square* (image, Higgsfield, gpt_image_2, 1:1,
+ * 1k) with the variation *Story 9:16*, and one naming *Trailer* (video). */
+const seed = (square: Record<string, unknown> = {}) => {
+  graph.roles = {
+    "prof-img": { structures: [{ id: "builtin:profile", values: { format: "fmt-sq" } }], titles: { "fmt-sq": "Instagram square" } },
+    "prof-vid": { structures: [{ id: "builtin:profile", values: { format: "fmt-vid" } }], titles: { "fmt-vid": "Trailer" } },
+    "prof-none": { structures: [{ id: "builtin:profile", values: {} }] },
+    "fmt-sq": {
+      structures: [{ id: "builtin:format", values: { type: "image", provider: "higgsfield", model: "gpt_image_2", ratio: "1:1", quality: "1k", ...square } }],
+      blocks: [{ blockId: "var-story", structures: [{ id: "builtin:variation", values: { ratio: "9:16", model: "" } }] }, { blockId: "blk-plain", structures: [] }],
+    },
+    "fmt-vid": { structures: [{ id: "builtin:format", values: { type: "video", provider: "higgsfield", model: "kling_video" } }] },
+  };
+};
+seed();
+
 afterEach(() => {
+  seed();
+  graph.pins = [];
   kernel.calls = [];
   kernel.signedIn = true;
   kernel.generationsOk = true;
@@ -118,16 +170,19 @@ afterEach(() => {
 });
 
 describe("what an agent may reach", () => {
-  it("quotes without spending, and without a session", async () => {
-    const answer = await TOOLS.quote_generation({ input: { service: "openart", model: "byte-plus-seedream-5-pro", prompt: "a laurel" }, run });
-    expect(answer.result).toEqual({ status: "ok", cost: "$0.42" });
-    expect(kernel.calls.map((one) => one.path)).toEqual(["/__kernel/media/services", "/__kernel/media/quote"]);
+  it("quotes what the instruction's format would make, without spending and without a session", async () => {
+    const answer = await TOOLS.quote_generation({ input: { prompt: "a laurel", service: "openart", model: "byte-plus-seedream-5-pro" }, run: image });
+    expect(answer.result).toEqual({ format: "Instagram square", service: "higgsfield", model: "gpt_image_2", status: "ok", cost: "$0.42" });
+    expect(kernel.calls.at(-1)).toMatchObject({
+      path: "/__kernel/media/quote",
+      body: { service: "higgsfield", kind: "image", model: "gpt_image_2", prompt: "a laurel", options: { "aspect-ratio": "1:1", resolution: "1k" } },
+    });
     expect(answer.stage).toBeUndefined();
   });
 
-  it("refuses a quote without a service, a model or words", async () => {
+  it("refuses a quote without a format or words", async () => {
     await expect(TOOLS.quote_generation({ input: { prompt: "x" }, run })).rejects.toBeInstanceOf(ToolRefusal);
-    await expect(TOOLS.quote_generation({ input: { service: "openart", model: "m" }, run })).rejects.toBeInstanceOf(ToolRefusal);
+    await expect(TOOLS.quote_generation({ input: {}, run: image })).rejects.toBeInstanceOf(ToolRefusal);
   });
 
   // A tool's callback holds no person's session: every kernel call it makes
@@ -135,11 +190,11 @@ describe("what an agent may reach", () => {
   // anonymous and every generator as signed out (BO_0312_063).
   it("answers a tool under the run's grant, so each kernel call presents it", async () => {
     const answer = await answerTool("quote_generation", {
-      input: { service: "openart", model: "byte-plus-seedream-5-pro", prompt: "a laurel" },
-      run: { ...run, grant: "grant-1" },
+      input: { prompt: "a laurel" },
+      run: { ...image, grant: "grant-1" },
     });
-    expect(answer.result).toEqual({ status: "ok", cost: "$0.42" });
-    expect(kernel.calls.map((one) => one.grant)).toEqual(["grant-1", "grant-1"]);
+    expect(answer.result).toMatchObject({ status: "ok", cost: "$0.42" });
+    expect(kernel.calls.map((one) => one.grant)).toEqual(["grant-1", "grant-1", "grant-1"]);
   });
 
   it("offers the quote, the one spending tool and its collection", () => {
@@ -148,18 +203,45 @@ describe("what an agent may reach", () => {
 });
 
 describe("generate", () => {
-  it("makes an image under an image profile: the pending block composed before the one paid request, its job named", async () => {
+  it("makes an image with the instruction's format: the pending block composed before the one paid request, read at the run's pin", async () => {
     const answer = await TOOLS.generate({ input: { block: "blk-1" }, run: image });
-    expect(answer.result).toMatchObject({ status: "running", kind: "image", job: "job-1", block: "made-1" });
+    expect(answer.result).toMatchObject({ status: "running", kind: "image", job: "job-1", block: "made-1", format: "Instagram square", model: "gpt_image_2" });
     expect(doc.composed).toEqual([
       expect.objectContaining({ documentId: "doc-1", placement: { after: "blk-1" }, block: expect.objectContaining({ kind: "image", alt: "a laurel on a hill" }) }),
     ]);
-    expect(spent()).toEqual([{ path: "/__kernel/media/generations", body: { service: "higgsfield", kind: "image", model: "gpt_image_2", prompt: "a laurel on a hill" } }]);
+    // Composed in the run's group, where the kernel stages it: against truth
+    // the CREATE names itself established and the group refuses it after the
+    // job is paid for (the walk at pin 3796).
+    expect(doc.composed[0]).toMatchObject({ branch: "node:run-1" });
+    expect(spent()).toEqual([
+      {
+        path: "/__kernel/media/generations",
+        body: { service: "higgsfield", kind: "image", model: "gpt_image_2", prompt: "a laurel on a hill", options: { "aspect-ratio": "1:1", resolution: "1k" } },
+      },
+    ]);
     expect(kernel.calls.at(-1)?.path).toBe("/__kernel/media/generations");
-    expect(answer.stage?.[0]?.parameters["b_source"]).toMatchObject({ job: "job-1", service: "higgsfield", model: "gpt_image_2" });
+    expect(answer.stage?.[0]?.parameters["b_source"]).toMatchObject({ job: "job-1", service: "higgsfield", model: "gpt_image_2", format: "fmt-sq" });
+    expect(graph.pins).toEqual([7, 7]);
   });
 
-  it("makes a video under a video profile, animating the picture above", async () => {
+  it("puts the variation chosen beside Send over the format, an empty value its format's", async () => {
+    await TOOLS.generate({ input: { block: "blk-1" }, run: { ...image, variation: "var-story" } });
+    expect(spent()[0]?.body).toMatchObject({ model: "gpt_image_2", options: { "aspect-ratio": "9:16", resolution: "1k" } });
+  });
+
+  it("takes no model and no option from the run's own arguments", async () => {
+    await TOOLS.generate({ input: { block: "blk-1", model: "kling_video", options: { "aspect-ratio": "16:9" } }, run: image });
+    expect(spent()[0]?.body).toMatchObject({ kind: "image", model: "gpt_image_2", options: { "aspect-ratio": "1:1" } });
+  });
+
+  it("sends a value outside every suggestion as typed, and says the vendor's refusal in its own words", async () => {
+    seed({ model: "nano_banana_9" });
+    kernel.generationsOk = false;
+    await expect(TOOLS.generate({ input: { block: "blk-1" }, run: image })).rejects.toThrow("gpt_image_2 takes aspect_ratio 1:1, 3:2, 2:3");
+    expect(spent()[0]?.body).toMatchObject({ model: "nano_banana_9" });
+  });
+
+  it("makes a video with a video format, animating the picture above", async () => {
     const answer = await TOOLS.generate({ input: { block: "blk-1", words: "the laurel sways" }, run: video });
     expect(answer.result).toMatchObject({ kind: "video", job: "job-1" });
     expect(doc.composed[0]).toMatchObject({ block: { kind: "video" } });
@@ -171,13 +253,17 @@ describe("generate", () => {
     });
   });
 
-  it("refuses, before anything is spent, what it cannot make", async () => {
+  it("refuses, before anything is composed or spent, what it cannot make", async () => {
     const refusals: [string, () => Promise<unknown>, RegExp][] = [
-      ["no generation profile", () => TOOLS.generate({ input: { block: "blk-1" }, run: { ...run, profileType: "instructions" } }), /image- or video-generation profile/u],
-      // Codex is off for now (BO_0320_014), and never makes a video.
-      ["a Codex image profile", () => TOOLS.generate({ input: { block: "blk-1" }, run: { ...image, imageBackend: "codex" } }), /temporarily unavailable/u],
-      ["Codex for video", () => TOOLS.generate({ input: { block: "blk-1" }, run: { ...video, imageBackend: "codex" } }), /temporarily unavailable/u],
-      ["a model not offered", () => TOOLS.generate({ input: { block: "blk-1", model: "kling_video" }, run: image }), /No offered image model/u],
+      ["no instruction", () => TOOLS.generate({ input: { block: "blk-1" }, run }), /Choose an instruction/u],
+      ["an instruction naming no format", () => TOOLS.generate({ input: { block: "blk-1" }, run: { ...run, instruction: "prof-none" } }), /choose a format on the instruction/u],
+      ["a format of another type", () => (seed({ type: "PDF" }), TOOLS.generate({ input: { block: "blk-1" }, run: image })), /makes PDF, not a picture or a video/u],
+      ["no provider", () => (seed({ provider: "" }), TOOLS.generate({ input: { block: "blk-1" }, run: image })), /names no provider/u],
+      // Codex makes nothing yet (BO_0320_014).
+      ["Codex", () => (seed({ provider: "codex" }), TOOLS.generate({ input: { block: "blk-1" }, run: image })), /temporarily unavailable/u],
+      ["a provider that is none", () => (seed({ provider: "midjourney" }), TOOLS.generate({ input: { block: "blk-1" }, run: image })), /no generation service here/u],
+      ["no model", () => (seed({ model: "" }), TOOLS.generate({ input: { block: "blk-1" }, run: image })), /names no model/u],
+      ["a variation not the format's", () => (seed(), TOOLS.generate({ input: { block: "blk-1" }, run: { ...image, variation: "blk-plain" } })), /not one of Instagram square's/u],
       ["a wordless block", () => ((doc.words = ""), TOOLS.generate({ input: { block: "blk-1" }, run: image })), /no words/u],
       ["a video with no picture above", () => ((doc.words = "sway"), (doc.pictureAbove = false), TOOLS.generate({ input: { block: "blk-1" }, run: video })), /none above this block/u],
       ["no block of this Send", () => TOOLS.generate({ input: {}, run: image }), /prompt block from this Send/u],
@@ -185,25 +271,12 @@ describe("generate", () => {
     for (const [why, act, says] of refusals) {
       await expect(act(), why).rejects.toThrow(says);
     }
+    seed();
     kernel.signedIn = false;
     doc.words = "x";
     await expect(TOOLS.generate({ input: { block: "blk-1" }, run: image })).rejects.toThrow(/Sign in to Higgsfield/u);
     expect(spent()).toEqual([]);
     expect(doc.composed).toEqual([]);
-  });
-
-  it("follows what the owner offers, handed with the call rather than read from the state record", async () => {
-    // Only the video model is offered, so an image profile has nothing to make with.
-    await expect(
-      TOOLS.generate({ input: { block: "blk-1" }, run: image, settings: { id: "media", models: ["higgsfield:kling_video"] } }),
-    ).rejects.toThrow(/No offered image model/u);
-    const answer = await TOOLS.generate({ input: { block: "blk-1" }, run: image, settings: { id: "media", models: ["higgsfield:gpt_image_2"] } });
-    expect(answer.result).toMatchObject({ kind: "image", job: "job-1" });
-  });
-
-  it("says when the service refuses the job, after composing and without staging", async () => {
-    kernel.generationsOk = false;
-    await expect(TOOLS.generate({ input: { block: "blk-1" }, run: image })).rejects.toThrow(/refused the image job/u);
   });
 });
 
@@ -212,7 +285,7 @@ describe("collect_generation", () => {
     kernel.fileType = "video/mp4";
     const answer = await TOOLS.collect_generation({ input: { block: "made-1", job: "job-1" }, run: video });
     expect(answer.result).toMatchObject({ status: "completed", job: "job-1", block: "made-1" });
-    expect(doc.filled[0]).toMatchObject({ blockId: "made-1", jobId: "job-1", reference: { mediaType: "video/mp4" } });
+    expect(doc.filled[0]).toMatchObject({ blockId: "made-1", jobId: "job-1", reference: { mediaType: "video/mp4" }, branch: "node:run-1" });
     expect(spent()).toEqual([]);
   });
 

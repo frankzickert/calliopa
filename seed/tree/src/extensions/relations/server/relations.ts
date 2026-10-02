@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
 
+import { port } from "~/server/port";
 import { normalizeRuns } from "~/lib/runs";
 import { bareId, nodeRef } from "~/server/ccgw/nodes";
 import { query } from "~/server/ccgw/client";
@@ -79,7 +79,7 @@ export async function declareRelation(input: {
   if (source.result === target.result) {
     return refuse("sameBlock", "A relation's source and target are two different blocks.");
   }
-  const relationId = randomUUID();
+  const relationId = port.uuid();
   const parameters: Record<string, unknown> = {
     r_id: relationId,
     r_kind: input.relation.kind,

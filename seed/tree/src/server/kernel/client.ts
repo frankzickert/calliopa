@@ -1,5 +1,5 @@
-import { graphEnv } from "../ccgw/env";
 import { HttpError } from "../http-error";
+import { port } from "../port";
 import { forwardedCookie, forwardedGrant } from "../request-context";
 
 /**
@@ -36,7 +36,7 @@ export async function call(path: string, init: RequestInit): Promise<Response> {
   const grant = forwardedGrant();
   if (grant !== undefined && !headers.has("x-calliopa-run-grant")) headers.set("x-calliopa-run-grant", grant);
   try {
-    return await fetch(`${graphEnv().kernelUrl}${path}`, { ...init, headers });
+    return await port.kernel(path, { ...init, headers });
   } catch (error) {
     throw new HttpError(503, `the kernel is unreachable: ${String(error)}`);
   }
@@ -127,6 +127,8 @@ export interface PartyTest {
   readonly method?: string;
   readonly url: string;
   readonly expectStatus?: number;
+  /** Fixed headers beside the credential, such as an API version. BO_0319_047 */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 /** What the kernel answers about a party: everything but the values. */

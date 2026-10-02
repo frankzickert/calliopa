@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DocumentView } from "../server/assemble";
-import { UNNAMED_DOCUMENT, UNNAMED_PROFILE } from "../lib/naming";
+import { UNNAMED_DOCUMENT, UNNAMED_INSTRUCTION } from "../lib/naming";
 import { documentsApi, mountEditor, type SentCommand } from "./testing/editor-harness";
 
 /**
@@ -39,13 +39,13 @@ const mount = async (document: DocumentView) => {
   return { ...view, sent, title, renames, type };
 };
 
-describe("the title of a profile nobody has named", () => {
-  it("Given an unnamed profile, Then the field is empty under the profile's minted name as its placeholder", async () => {
-    const view = await mount({ ...unnamed, documentId: "prof-unnamed", title: UNNAMED_PROFILE, record: "profile" });
+describe("the title of an instruction nobody has named", () => {
+  it("Given an unnamed instruction, Then the field is empty under the instruction's minted name as its placeholder", async () => {
+    const view = await mount({ ...unnamed, documentId: "prof-unnamed", title: UNNAMED_INSTRUCTION, record: "instruction" });
     expect(view.title.textContent).toBe("");
     expect(view.title.getAttribute("data-unnamed")).toBe("true");
-    expect(view.title.getAttribute("data-placeholder")).toBe(UNNAMED_PROFILE);
-    expect(view.root.querySelector("h2.document-title")?.textContent).toContain(UNNAMED_PROFILE);
+    expect(view.title.getAttribute("data-placeholder")).toBe(UNNAMED_INSTRUCTION);
+    expect(view.root.querySelector("h2.document-title")?.textContent).toContain(UNNAMED_INSTRUCTION);
     await view.idle();
   });
 });

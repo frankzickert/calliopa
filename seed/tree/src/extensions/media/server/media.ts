@@ -1,8 +1,7 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { port } from "~/server/port";
 
 import { call } from "~/server/kernel/client";
+import { readCapabilities } from "~/server/capabilities";
 
 /**
  * What this extension knows of the media service.
@@ -16,9 +15,7 @@ import { call } from "~/server/kernel/client";
  * does (`src/server/agent/adapters.ts`, `BO_0273_025`).
  */
 
-const configDir = () =>
-  process.env.CALLIOPA_MEDIA_CONFIG_DIR ?? "/var/lib/calliopa/media-config";
-const loginDir = () => join(configDir(), "login");
+const files = port.config("media");
 
 export type GeneratorService = "higgsfield" | "openart";
 
@@ -52,10 +49,32 @@ export interface ServiceView {
    * it. BO_0273_042
    */
   readonly workspaces: readonly Workspace[] | null;
+  /** The vendor cannot be reached where the shell runs — a device, for a
+   * vendor whose way in is an instance's — so nothing signs in to it; its
+   * reason is why. BO_0319_043 */
+  readonly unavailable?: boolean;
 }
 
 /** The services the instance holds, with what each can make. */
 export async function roster(): Promise<readonly ServiceView[]> {
+  // On a device each generator is as its capability stands; there is no
+  // media service beside the cell to ask. BO_0319_043
+  if (port.where === "device") {
+    const capabilities = await readCapabilities();
+    return SERVICES.map((service) => {
+      const capability = capabilities.find((candidate) => candidate.id === `media:${service}`);
+      const ready = capability?.state === "ready";
+      return {
+        service,
+        signedIn: false,
+        reason: ready ? null : (capability?.reason ?? "This generator is not available here."),
+        models: [],
+        openSet: {},
+        workspaces: null,
+        unavailable: !ready,
+      };
+    });
+  }
   const response = await call("/__kernel/media/services", { method: "GET" });
   if (!response.ok) {
     // An unreachable generator is an ordinary outcome carried back as words:
@@ -117,7 +136,7 @@ export interface SignInState {
  * its credential lives in the runtime's own home; neither passes through here.
  */
 export async function requestSignIn(service: GeneratorService): Promise<string> {
-  const id = randomUUID();
+  const id = port.uuid();
   await write({ service, id });
   return id;
 }
@@ -157,10 +176,7 @@ export async function handBackRedirect(
 }
 
 async function write(request: Record<string, string>): Promise<void> {
-  await mkdir(loginDir(), { recursive: true });
-  const temporary = join(loginDir(), "request.json.tmp");
-  await writeFile(temporary, JSON.stringify(request), { mode: 0o600 });
-  await rename(temporary, join(loginDir(), "request.json"));
+  await files.replace("login/request.json", JSON.stringify(request), 0o600);
 }
 
 /**
@@ -171,7 +187,9 @@ async function write(request: Record<string, string>): Promise<void> {
 export async function signInState(id?: string): Promise<SignInState | null> {
   let held: SignInState;
   try {
-    held = JSON.parse(await readFile(join(loginDir(), "state.json"), "utf8")) as SignInState;
+    const text = await files.read("login/state.json");
+    if (text === null) return null;
+    held = JSON.parse(text) as SignInState;
   } catch {
     return null;
   }

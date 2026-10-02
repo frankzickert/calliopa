@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { RoleView } from "~/extensions/doc-block-roles/lib/roles";
+import type { StructureView } from "~/extensions/structures/lib/structures";
 
 import { chosenFrom, mergeStatement, type MergePair } from "./merge";
 
 /** The merge's one script (`BO_0310_021`), pure. */
-const role = (id: string, name: string, extra: Partial<RoleView> = {}): RoleView => ({
+const role = (id: string, name: string, extra: Partial<StructureView> = {}): StructureView => ({
   id,
   name,
   description: "",

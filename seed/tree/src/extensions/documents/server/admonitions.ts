@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { port } from "~/server/port";
 import { outsideBranch } from "~/server/ccgw/branch-scope";
 import { query, write } from "~/server/ccgw/client";
 import { bareId, contentOf, typeOf } from "~/server/ccgw/nodes";
@@ -48,7 +48,7 @@ export async function listAdmonitionPatterns(): Promise<GraphOutcome<readonly Ad
 
 export async function saveAdmonitionPattern(input: unknown, id?: string): Promise<GraphOutcome<AdmonitionPattern>> {
   if (!valid(input) || id === undefined && typeof input.image === "string" && input.image !== "") return { outcome: "validationFailure", failures: [{ operation: null, rule: "admonition-pattern", detail: "A pattern has a name, a six-digit hex color, an optional uploaded image, and an optional footline." }] };
-  const patternId = id ?? randomUUID();
+  const patternId = id ?? port.uuid();
   const values = { name: input.name.trim(), color: input.color.toLowerCase(), image: input.image ?? "", footline: input.footline ?? "" };
   const statement = id === undefined
     ? "CREATE (p:admonition_pattern {id: $id, name: $name, color: $color, image: $image, footline: $footline, status: \"established\"})"

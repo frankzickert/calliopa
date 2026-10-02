@@ -1,5 +1,5 @@
 import type { GraphOutcome } from "../outcome";
-import { graphEnv } from "./env";
+import { port } from "../port";
 
 /**
  * Bytes through CCGW. `BO_0207_016`
@@ -60,7 +60,7 @@ export function isBlobReference(value: unknown): value is BlobReference {
 export async function putBlob(bytes: Uint8Array): Promise<GraphOutcome<{ readonly hash: string; readonly size: number }>> {
   let response: Response;
   try {
-    response = await fetch(`${graphEnv().ccgwUrl}/v1/blobs`, {
+    response = await port.gateway("/v1/blobs", {
       method: "PUT",
       headers: { "content-type": "application/octet-stream" },
       body: bytes.slice().buffer as ArrayBuffer,
@@ -89,7 +89,7 @@ export async function putBlob(bytes: Uint8Array): Promise<GraphOutcome<{ readonl
 
 /** Reads a blob's bytes back, which a destination upload needs. */
 export async function readBlob(hash: string): Promise<Uint8Array> {
-  const response = await fetch(`${graphEnv().ccgwUrl}/v1/blobs/${encodeURIComponent(hash)}`);
+  const response = await port.gateway(`/v1/blobs/${encodeURIComponent(hash)}`);
   if (!response.ok) {
     throw new Error(`CCGW answered ${response.status} for blob ${hash}`);
   }

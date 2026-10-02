@@ -1,0 +1,23 @@
+{
+  "capabilities": {
+    "ccgwScopes": [
+      "query",
+      "propose"
+    ],
+    "renders": [
+      "routes",
+      "views"
+    ]
+  },
+  "category": "bundled",
+  "dependencies": {
+    "documents": "\u003e=0.1.0",
+    "ui.shell": "\u003e=0.1.0"
+  },
+  "entrypoint": "contributions",
+  "formerIds": [
+    "doc-block-roles"
+  ],
+  "id": "structures",
+  "version": "0.2.0"
+}

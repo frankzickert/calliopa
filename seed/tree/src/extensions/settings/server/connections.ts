@@ -13,6 +13,7 @@ import type { RegisteredParty } from "~/registry";
 import { parties, partyOf } from "~/server/registry";
 import { agentStatus, apiKeyModelConfigured, runtimeStatuses } from "~/server/agent/adapters";
 import { activeRuns } from "~/server/agent/bridge";
+import { port } from "~/server/port";
 
 /**
  * The store over the parties, kept by the kernel (`ui-kernel.md`,
@@ -198,19 +199,48 @@ function asAgent(
  */
 export async function assertParty(party: string): Promise<RegisteredParty> {
   const registered = await partyOf(party);
-  if (registered === undefined) {
+  if (registered === undefined || !here(registered)) {
     throw new HttpError(404, `unknown connection ${party}`);
   }
   return registered;
 }
 
+/** Whether a party exists at a place: everywhere, or only on an instance or only on a device. BO_0319_047 */
+export const existsAt = (party: Pick<RegisteredParty, "where">, where: "instance" | "device"): boolean =>
+  party.where === undefined || party.where === where;
+
+const here = (party: RegisteredParty): boolean => existsAt(party, port.where);
+
 /**
- * Every party the build contributes, by credential kind then name: the
- * roster is the registry's, so a party the kernel holds nothing for still
- * lists, unconfigured. CA_0049_003
+ * The subscription runtimes on a device: shown, never signed in, pointing at
+ * the key connection a device's runs use instead (`agent-sign-in.md`, On A
+ * Device). BO_0319_049
+ */
+const KEY_INSTEAD: Readonly<Record<string, string>> = { codex: "openai", "claude-code": "anthropic" };
+
+export function onDevice(record: ConnectionRecord): ConnectionRecord {
+  const instead = KEY_INSTEAD[record.party];
+  if (instead === undefined) return record;
+  return {
+    ...record,
+    state: "unconfigured",
+    lastError: null,
+    status: null,
+    signOutBlocked: null,
+    unavailable: {
+      reason: "Subscriptions are signed in on a Calliopa instance. This app uses an API key instead.",
+      instead,
+    },
+  };
+}
+
+/**
+ * Every party the build contributes for where the shell runs, by credential
+ * kind then name: the roster is the registry's, so a party the kernel holds
+ * nothing for still lists, unconfigured. CA_0049_003 BO_0319_047
  */
 export async function listConnections(): Promise<ConnectionRecord[]> {
-  const roster = [...(await parties())].sort((left, right) =>
+  const roster = [...(await parties())].filter(here).sort((left, right) =>
     left.credential === right.credential
       ? left.id.localeCompare(right.id)
       : left.credential.localeCompare(right.credential),
@@ -218,6 +248,8 @@ export async function listConnections(): Promise<ConnectionRecord[]> {
   const records = await Promise.all(
     roster.map(async (party) => asRecord(party, await kernelSecrets.read(party.id))),
   );
+  // A device runs no agent container to report on its runtimes. BO_0319_049
+  if (port.where === "device") return records.map(onDevice);
   const status = records.some((record) => record.kind === "status");
   const reported = status ? await runtimeStatuses() : {};
   const stamped = status ? await agentStatus() : null;

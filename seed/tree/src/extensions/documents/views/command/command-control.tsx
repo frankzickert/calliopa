@@ -96,7 +96,9 @@ export const CommandControl = component$<{
 
   /** What a `command` place says about this command, kept by the shell and
    * sent with it. BO_0311_030 */
-  const setOption$ = $((name: string, value: string | null) => bridge.setCommandOption$(documentId, blockId, name, value));
+  const setOption$ = $((name: string, value: string | null, once?: boolean) =>
+    bridge.setCommandOption$(documentId, blockId, name, value, once),
+  );
 
   /** Sends the way *Keep as content* says. DO_0025_001 */
   const send = $(async (asPrompt: boolean) => {

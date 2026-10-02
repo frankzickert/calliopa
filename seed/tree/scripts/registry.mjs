@@ -27,7 +27,9 @@ const SERVER_SHAPE = /export\s+const\s+contributions\b/u;
 
 /**
  * Every extension directory under `src/extensions/`, in name order, with the
- * halves of its entrypoint that exist. Throws a named error for a directory
+ * halves of its entrypoint that exist. An extension that moved to a new id
+ * keeps the place its first former id gave it (`placeOf`), so a rename moves
+ * nothing a person sees (`calliopa-bootstrap`'s `BO_0338`). Throws a named error for a directory
  * without a manifest, an id not matching its directory, an entrypoint that
  * resolves to no module, a half that does not export `contributions`, and a
  * declared dependency the tree does not hold.
@@ -132,7 +134,19 @@ export function scanExtensions(root) {
       }
     }
   }
+  entries.sort((left, right) => (placeOf(left.manifest) < placeOf(right.manifest) ? -1 : placeOf(left.manifest) > placeOf(right.manifest) ? 1 : 0));
   return entries;
+}
+
+/**
+ * The name an extension is ordered by: its first former id when it names
+ * any, else its own. BO_0338
+ * @param {Record<string, unknown>} manifest
+ * @returns {string}
+ */
+export function placeOf(manifest) {
+  const former = Array.isArray(manifest.formerIds) ? manifest.formerIds.find((id) => typeof id === "string" && id !== "") : undefined;
+  return typeof former === "string" ? former : String(manifest.id);
 }
 
 /**

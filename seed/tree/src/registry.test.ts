@@ -197,6 +197,21 @@ describe("building the server registry", () => {
     ).toThrow(expect.objectContaining({ code: "citation_resolver_collision" }));
   });
 
+  it("keys suggestion sources by extension and name, and refuses one name twice (BO_0336_052)", () => {
+    const answer = async () => ({ suggestions: [] });
+    const registry = buildServerRegistry([
+      { id: "media", contributions: { suggestionSources: [{ name: "provider", label: "Generation services", answer }] } },
+      { id: "documents", contributions: {} },
+    ]);
+    expect(Object.keys(registry.suggestionSources)).toEqual(["media:provider"]);
+    expect(registry.suggestionSources["media:provider"]).toMatchObject({ extension: "media", name: "provider", label: "Generation services" });
+    expect(() =>
+      buildServerRegistry([
+        { id: "media", contributions: { suggestionSources: [{ name: "provider", label: "a", answer }, { name: "provider", label: "b", answer }] } },
+      ]),
+    ).toThrow(expect.objectContaining({ code: "suggestion_source_collision" }));
+  });
+
   it("keys focused work by the qualified target kind, so the shell reaches it from a tab's own kind", () => {
     // Focused work is the shell's capability and the vocabulary the
     // extension's, so the shell asks the kind's owner for the child.

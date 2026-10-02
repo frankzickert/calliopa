@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { retireRefinementStatement, retireSetAsideStatement } from "./migrations";
+import { clearProfileGenerationStatement, retireRefinementStatement, retireSetAsideStatement } from "./migrations";
 
 // The migration that retires every block set aside (BO_0315_008): the value
 // cleared first, then the containment closed and the block related retired
@@ -64,3 +64,29 @@ describe("retireRefinementStatement", () => {
   });
 });
 
+
+// A profile's generation setup goes with calliopa-bootstrap's BO_0336: every
+// established document holding profileType or imageBackend has what it holds
+// cleared, and nothing else is touched (BO_0336_040).
+describe("clearProfileGenerationStatement", () => {
+  const node = (id: string, status: string, content: Record<string, unknown>) =>
+    ({ id, revision: { status, content: { _type: "document", ...content } } }) as unknown as Parameters<typeof clearProfileGenerationStatement>[0][number];
+
+  it("clears what each established document holds of the setup, in one script", () => {
+    expect(
+      clearProfileGenerationStatement([
+        node("node:p2", "established", { record: "profile", profileType: "image", imageBackend: "higgsfield" }),
+        node("node:p1", "established", { record: "profile", profileType: "video" }),
+        node("node:plain", "established", { title: "No profile" }),
+        node("node:cand", "candidate", { profileType: "image" }),
+      ]),
+    ).toEqual({
+      statement: "SET g0.profileType = null; SET g1.profileType = null, g1.imageBackend = null",
+      parameters: { g0NodeId: "node:p1", g1NodeId: "node:p2" },
+    });
+  });
+
+  it("answers an empty statement when no document holds it", () => {
+    expect(clearProfileGenerationStatement([node("node:plain", "established", { title: "x" })])).toEqual({ statement: "", parameters: {} });
+  });
+});

@@ -71,6 +71,7 @@ import {
 import {
   ViewBridgeContext,
   optionsOf,
+  replayChipsKey,
   type ViewAction,
   type ViewBarGroup,
   type InspectorFact,
@@ -127,6 +128,7 @@ import {
   describeOutcome,
   fetchChanges,
   fetchDocument,
+  fetchReplay,
   fetchProposals,
   reopenProposal,
   fetchRetired,
@@ -209,6 +211,8 @@ import {
   withdrawnCountOf,
   liveGroup,
   liveGroupsOf,
+  replayShown,
+  typedInto,
   shownAlone,
   toggledGroup,
   READ_MARK_MS,
@@ -578,6 +582,10 @@ const knownKeys = (state: DocumentState): string[] =>
   ].filter((key) => key !== "");
 
 export interface DocumentState {
+  /** Every item the replayed run staged, as it staged them; the ones its
+   * replay has reached so far stand in `proposals`. Absent outside a replay.
+   * BO_0340_008 */
+  replayItems?: ProposedChange[];
   /** Counts saves refused because documents came under separation of
    * duties; the branch line enters the proposal on each. BO_0212_011 */
   policyRefusals?: number;
@@ -791,6 +799,12 @@ const idleEditor = (): EditorState => ({
 
 export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   const bridge = useContext(ViewBridgeContext);
+  /** Whether this tab plays a finished run back (`BO_0340_008`): the
+   * document as it stood, read-only, its command typed and its run unfolding
+   * from the shell's replay rather than from a live run. Decided as the view
+   * mounts, since a replay's tab is opened for it and closed with it. */
+  const replaying = bridge.replay.tabId === tab.id && bridge.replay.runId !== null;
+  const replayRun = replaying ? bridge.replay.runId : null;
   const state = useStore<DocumentState>({
     document: null,
     codeLines: {},
@@ -819,7 +833,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     // brought this document forward — is acted on as this view mounts.
     // BO_0304_009
     revealSeen: bridge.reveal.itemId === tab.itemId && bridge.reveal.target !== null ? bridge.reveal.seq - 1 : bridge.reveal.seq,
-    activitySeen: bridge.activity.seq,
+    activitySeen: replaying ? -1 : bridge.activity.seq,
     runActivities: [],
     liveGroups: [],
     agentReads: {},
@@ -1059,6 +1073,22 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       state.notice = "This tab names no document.";
       return;
     }
+    // A replay reads the document as it stood when its run started, and the
+    // run's items as they were staged, once; it never reads the document as
+    // it stands, nor tells the shell a mode. BO_0340_008
+    if (replayRun !== null) {
+      if (state.document !== null) return;
+      const read = await fetchReplay(documentId, replayRun);
+      if (read.outcome !== "success") {
+        state.status = "failed";
+        state.notice = describeOutcome(read);
+        return;
+      }
+      state.replayItems = read.result.proposals.groups.flatMap((group) => [...group.items]);
+      state.proposals = { ...read.result.proposals, unanswered: 0, groups: read.result.proposals.groups.map((group) => ({ ...group, items: [] })) };
+      await adopt$(read.result.document, null, true);
+      return;
+    }
     // A read waits for the splits on their way: taken while one is under way,
     // it would not hold the block the reader is typing in. CA_0045_005
     await writesSettled(tab.id);
@@ -1106,6 +1136,12 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
    */
   const reloadProposals$ = $(async () => {
     if (documentId === null) return;
+    // A replay's items are the run's as staged, and stand once the replay has
+    // reached their staging: nothing is read again. BO_0340_008
+    if (replayRun !== null) {
+      if (state.proposals !== null && state.replayItems !== undefined) state.proposals = replayShown(state.proposals, state.replayItems, state.runActivities);
+      return;
+    }
     // A read already under way is not doubled: this call marks one more read
     // due and waits for it, and that read serves every call made meanwhile.
     // DO_0024_002
@@ -2366,7 +2402,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
    * revised from the revision and the words the document read holds, and the
    * caret goes nowhere. DO_0006_002
    */
-  const setRole$ = $(async (role: TextRole, on?: string) => {
+  const setStructure$ = $(async (role: TextRole, on?: string) => {
     // A block an instant split has not landed yet has no revision to name.
     await writesSettled(tab.id);
     const editing = on === undefined || on === editor.blockId;
@@ -3111,7 +3147,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       else if (held !== undefined && isText(held)) await turnIntoAdmonition$(blockId, act.patternId);
     }
     else if (act.act === "retire") await retire$(blockId);
-    else if (act.act === "role") await setRole$(act.role, blockId);
+    else if (act.act === "role") await setStructure$(act.role, blockId);
     else if (act.act === "toCode") await turnIntoCode$(blockId);
     else if (act.act === "toImage") await turnIntoImage$(blockId);
     else await standing.setStanding$(blockId, act.to);
@@ -4503,7 +4539,9 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
    * targets as they are staged, one read at a time. BO_0265_012 BO_0265_013 BO_0269_018
    */
   useVisibleTask$(async ({ track }) => {
-    const seq = track(() => bridge.activity.seq);
+    // A replay's tab takes its run from the replay alone, and no other tab
+    // takes it. BO_0340_008
+    const seq = track(() => (replaying ? bridge.replay.seq : bridge.activity.seq));
     if (seq === state.activitySeen) return;
     state.activitySeen = seq;
     if (documentId === null) return;
@@ -4511,7 +4549,9 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     // one's new events are read against what this view held of it.
     // BO_0269_018
     const held = state.runActivities;
-    const next = bridge.activity.runs.filter((run) => run.itemId === documentId);
+    const next = replaying
+      ? bridge.replay.run === null ? [] : [bridge.replay.run]
+      : bridge.activity.runs.filter((run) => run.itemId === documentId);
     if (next.length === 0 && held.length === 0) return;
     state.runActivities = next.map((run) => ({ runId: run.runId, agent: run.agent, running: run.running, events: [...run.events] }));
     let staged = false;
@@ -4552,6 +4592,38 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       }
     }
     if (staged && state.status === "ready") await reloadProposals$();
+  });
+
+  /**
+   * A replay's surface takes no press, key or focus: inert, which every key
+   * handler here already honours, so no edit, answer or command is reachable
+   * and the replay cannot be mistaken for the document. BO_0340_008
+   */
+  useVisibleTask$(({ track }) => {
+    track(() => state.status);
+    if (replaying && root.value !== undefined) root.value.inert = true;
+  });
+
+  /**
+   * A replay types its command into the block it was sent from, a character
+   * at a time as the shell's schedule hands the words over; before the typing
+   * starts the block reads as it stood. Only the drawn words change: nothing
+   * is saved. BO_0340_008
+   */
+  useVisibleTask$(({ track }) => {
+    if (!replaying) return;
+    const words = track(() => bridge.replay.words);
+    track(() => state.loaded);
+    const block = bridge.replay.block;
+    if (words === null || block === null || state.document === null) return;
+    state.document = {
+      ...state.document,
+      // A row is keyed by its revision, so the typed words are a revision of
+      // their own for the drawing alone; it names nothing in the graph.
+      blocks: typedInto(state.document.blocks, block, words, (held, typed) =>
+        isText(held) ? { ...held, revisionId: `${held.revisionId.split("#")[0]}#typed-${typed.length}`, runs: typed === "" ? [] : [{ text: typed }] } : held,
+      ),
+    };
   });
 
   /**
@@ -4600,7 +4672,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     const said = JSON.stringify(chips);
     if (said === reportedChips.value) return;
     reportedChips.value = said;
-    void bridge.setRunChips$(documentId, chips);
+    void bridge.setRunChips$(replaying ? replayChipsKey(tab.id) : documentId, chips);
   });
 
   /** A run chip's *Reject all* or *Accept all*, pressed for this document.
@@ -4610,6 +4682,9 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     if (seq === state.answerAllSeen) return;
     state.answerAllSeen = seq;
     const { itemId, group, answer } = bridge.answerAll;
+    // A replay answers nothing: what it shows was answered, or not, long ago.
+    // BO_0340_008
+    if (replaying) return;
     if (itemId !== documentId || group === null || answer === null) return;
     // A session's answers go through its card and its rejected rows.
     // CA_0057_008
@@ -4894,6 +4969,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       class="view view--block-editor"
       data-view-body="block-editor"
       data-editor-mode={marking.store.marking.mode}
+      data-replay={replaying ? "" : undefined}
       ref={root}
       // A .csv or .tsv dropped anywhere in the tab becomes a table: after the
       // row it fell on (the row's own handler), or at the end of the document

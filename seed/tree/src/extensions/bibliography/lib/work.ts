@@ -1,4 +1,4 @@
-import { CSL_TYPES, type FieldValue, type FileValue } from "~/extensions/doc-block-roles/lib/roles";
+import { CSL_TYPES, type FieldValue, type FileValue } from "~/extensions/structures/lib/structures";
 
 /**
  * The bibliography's vocabulary (`BO_0291_015`, reshaped by `BO_0313`): a
@@ -353,7 +353,7 @@ export const fetchedOf = (text: string): Fetched | undefined => {
 };
 
 /** *Source*'s field keys for the record's plain text fields
- * (`doc-block-roles`' `BO_0313_010`). */
+ * (`structures`' `BO_0313_010`). */
 const PLAIN_FIELDS: readonly (readonly [keyof WorkRecord, string])[] = [
   ["container-title", "container"],
   ["volume", "volume"],

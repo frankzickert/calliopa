@@ -17,13 +17,13 @@
 - `src/contract.ts` declares the shape. The client half (`ClientContributions`) carries `sections` — each a name, a title, the empty-body line, optionally the bare kind its rows open, an optional create control (`createLabel` and a `create$` QRL answering what to open) and optionally a component, in which case the component is the body — `kinds`, a record from bare kind to the `ViewContribution` it opens with (id, name, further bare `targetKinds`, inspector line, drag operations, component), and `views` for a kind that offers several. The server half (`ServerContributions`) carries `readers` by section name (an item section's reader answers `LibraryItem[]` — id, label, optional badge, optional open target with a bare kind; a component section's reader answers what its component takes), `routes` (method, path with `[name]` and `[...rest]` segments, and a handler over the request event), and `parties` (id, kind `service` or `channel`, how the credential works, label, purpose, configuration fields with their checks, and the probe the kernel runs). `BO_0202_001` `BO_0202_002`
 * An extension contributes a default library icon (`ClientContributions.icon`); each section uses it unless `LibrarySection.icon` gives that section a standalone icon. Both carry a title and a Phosphor name from the shell's icon table (`LibraryIcon` in `src/contract.ts`). The registry refuses a section with neither icon (`section_icon_missing`), an unknown icon name (`icon_unknown`) or conflicting icon definitions sharing an id (`library_icon_collision`). `REGISTRY.libraryIcons` groups default sections under the extension id and keys a standalone section icon by its qualified section key, in contribution order; the icon column draws these entries ([Layout](./layout.md#panels-as-activity-bars)). A standalone icon carries only its section. `ui.shell`'s Extensions section remains under *Extensions*, Phosphor `puzzle-piece`; Admonition patterns has its own *Admonition patterns* entry with Phosphor `info` (`CA_0070_004`).
 - The view bridge a contributed view is handed carries the workspace it is mounted in (`workspaceId`, read-only, `CA_0050_001`) beside the inspector and the save state; and the shell's process registry is a surface a contributed route may produce into through `createProcess` and `moveProcess` in `src/server/processes.ts`, its affected item a kind the registry knows qualified by the extension, shown on the three surfaces with no further contract ([Processes](./processes.md), `CA_0050_002`, `CA_0050_003`).
-- An extension that declares another extension as a dependency may import that extension's server modules directly — `manuscripts` reads `doc-block-roles`' `rolesOf` and `documents`' `readDocument` — one process, no HTTP hop; the dependency is what allows the import, and the registry's `dependency_missing` refusal is what keeps a tree honest about it. User decision, 2026-09-15 (`CS_0001_005`).
+- An extension that declares another extension as a dependency may import that extension's server modules directly — `manuscripts` reads `structures`' `rolesOf` and `documents`' `readDocument` — one process, no HTTP hop; the dependency is what allows the import, and the registry's `dependency_missing` refusal is what keeps a tree honest about it. User decision, 2026-09-15 (`CS_0001_005`).
 - `src/server/kernel/client.ts`: `kernelSecrets.request` takes `headers` (forwarded by the broker, the kernel's own refused) and `blob` with an optional `range` — a body the kernel streams from CCGW — and answers `location` and `range` beside the status and text; `kernelSecrets.signIn(party)` starts the kernel's device flow and answers the code and URL; `PartyView` carries an oauth party's `provider`, `flow` and `paths`, and a `PartyDescriptor` may declare `credential: "oauth"` with its `provider`, its `paths` and a `fixed` configuration the kind writes rather than the reader types. `tests/behavior/kernel-surfaces.test.ts` proves the client half over the kernel harness against a stub provider and a stub destination: the sign-in, the flow verifying, the token never answered, the headers and `Location` and `Range` through, a blob slice with its length, a path outside the prefixes refused (`BO_0252_006`, the shell half of `BO_0252` in `calliopa-bootstrap`).
 - The parties are the ones the build contributes: no extension answers a party roster at runtime
   (`calliopa-bootstrap`'s `BO_0312_061`, below), so `parties()`, `partyOf()` and `isChannelParty()`
   in `src/server/registry.ts` answer the static descriptors, async still so their callers do not
   change with where a party comes from.
-- Two slots arrived with `BO_0264`. A route an extension marks `kernelCallback` — a trigger, a context, a tool the kernel calls — is answered only when the request carries the secret the kernel generated at its start and handed this process as `CALLIOPA_KERNEL_CALLBACK_SECRET`, in `X-Calliopa-Kernel-Callback`; `dispatch` refuses anything else `403`, and the kernel strips the header from every browser request it forwards (`src/server/kernel-callback.ts`, `BO_0264_002`). `settingsSections` on the client half — a name, a title and a component — are drawn below the settings tab's own sections while their extension is active, keyed `<ext>:<name>` and refused twice as `settings_section_collision` (`BO_0264_016`); one marked `owner: true` is drawn for the owner alone, heading and all, which `profiles`' *Profile tools* is (`BO_0311_040`). Reads at an earlier data revision run inside `atDataRevision` (`src/server/ccgw/branch-scope.ts`), which the CCGW client honours for every read that names none, against truth.
+- Two slots arrived with `BO_0264`. A route an extension marks `kernelCallback` — a trigger, a context, a tool the kernel calls — is answered only when the request carries the secret the kernel generated at its start and handed this process as `CALLIOPA_KERNEL_CALLBACK_SECRET`, in `X-Calliopa-Kernel-Callback`; `dispatch` refuses anything else `403`, and the kernel strips the header from every browser request it forwards (`src/server/kernel-callback.ts`, `BO_0264_002`). `settingsSections` on the client half — a name, a title and a component — are drawn below the settings tab's own sections while their extension is active, keyed `<ext>:<name>` and refused twice as `settings_section_collision` (`BO_0264_016`); one marked `owner: true` is drawn for the owner alone, heading and all, which `instructions`' *Profile tools* is (`BO_0311_040`). Reads at an earlier data revision run inside `atDataRevision` (`src/server/ccgw/branch-scope.ts`), which the CCGW client honours for every read that names none, against truth.
 - `src/registry.ts` is the merge: `buildRegistry(host, entries)` qualifies sections and kinds, gives a kind's default view that kind and a further view the kinds it names, and refuses by name a section key contributed twice (`section_collision`), a kind contributed twice (`kind_collision`), a view id from two extensions (`view_collision`) and a view presenting a kind nothing contributes (`target_kind_unknown`); `buildServerRegistry(entries)` keys readers by section and tables by extension, and refuses a table naming one method and path twice (`route_collision`), a rest segment that is not last (`route_shape`) and a party from two extensions (`party_collision`). `matchRoute` walks a table in the order the extension listed it. The merge runs where the generated module is evaluated — the server at startup, the unit project, the promotion gate's serve probe — so a collision is refused before a pin serves it. `BO_0202_001` `BO_0202_004`
 - `scripts/registry.mjs` is the scan, plain JavaScript so node runs it without a build: `scanExtensions` reads every directory under `src/extensions/` in name order and fails by name a directory without a manifest (`manifest_missing`), a manifest that is not JSON (`manifest_unreadable`), an id not matching its directory (`id_mismatch`), an entrypoint that names no module or is not a module name beside the manifest (`entrypoint_missing`, `entrypoint_shape`), a half that does not export `contributions` (`entrypoint_shape`), a declared dependency the tree does not hold (`dependency_missing`) and a declared range the version present does not satisfy (`dependency_out_of_range`, `BO_0219_007` — the grammar `satisfies` reads is the kernel's: comparator sets joined by `||`, `^`, `~`, the six comparators, bare and partial versions, `*`); `emitClient` and `emitServer` write the two modules; `writeRegistry` touches a file only when its text changed. `scripts/registry-plugin.mjs` runs it at `configResolved` and again in watch mode when a manifest or an entrypoint changes; `scripts/gen-registry.mjs` is `pnpm gen`, which `prebuild`, `pretypecheck`, `precheck` and `pretest:*` run, so a fresh checkout typechecks before Vite starts. Both are unit-tested over fixture trees (`src/registry-scan.test.ts`, `src/registry.test.ts`), including every named error. `BO_0202_001` `BO_0202_011`
 - The host's own contributions are `src/components/shell/host-contributions.tsx`, merged first with bare names: the `context` placeholder for every host kind and the `outline` placeholder for the structural ones. `context` presents anything, which is what makes view resolution total: a tab whose kind nothing contributes any more — an extension that left the tree — opens there and says so, rather than being refused with the workspace. `BO_0202_004`
@@ -36,8 +36,8 @@
   `kind` a section's own extension contributes — one of the two, never both
   (`section_opens`) — and refused by name when nothing contributes it (`target_kind_unknown`),
   while a bare `kind` stays as it always was. The shell re-reads such a section when a tab of
-  that kind is renamed or goes, as it re-reads that kind's own sections; before it, a Profiles
-  row kept a profile's old title until the next reload. `profiles` is the first to use it.
+  that kind is renamed or goes, as it re-reads that kind's own sections; before it, an Instructions
+  row kept an instruction's old title until the next reload. `instructions` is the first to use it.
 
 ## Consumers
 
@@ -82,9 +82,9 @@
 
 ## A Chip Beside The Command Chip
 
-- Under the `doc-block-roles` change `RO_0002` (set to draft by the user on 2026-10-01): the roles
+- Under the `structures` change `RO_0002` (set to draft by the user on 2026-10-01): the structures
   of the block being edited stand in a chip of their own beside the command chip
-  ([Roles](../../../src/extensions/doc-block-roles/docs/system/system.md#the-roles-chip)). The chip
+  ([Structures](../../../src/extensions/structures/docs/system/system.md#the-structures-chip)). The chip
   names no extension, as the `command` place does not.
 - `underCommand` is one more `BlockPlace` (`RO_0002_001`, landed 2026-10-01; `src/contract.ts`):
   drawn in a chip of its own in the command chip's row, wherever the command chip is drawn —
@@ -114,8 +114,8 @@
   into the decoration bar (`BO_0274_004`), the bar draws it after the view's groups, and its
   actions — a `choice` is a dropdown, a `toggle` and a `button` what they say — are drawn by the
   shell. `code`'s *Code*, `manuscripts`' *Manuscript* and, on a
-  profile's document for the owner alone, `profiles`' *Profile tools* stand there
-  ([Profiles](../../../src/extensions/profiles/docs/system/system.md)).
+  instruction's document for the owner alone, `instructions`' *Instruction tools* stand there
+  ([Instructions](../../../src/extensions/instructions/docs/system/system.md)).
 
 ## A Place Under The Title
 
@@ -127,14 +127,14 @@
   `src/contract.ts`, beside `end`): the document header's lines under its title, drawn by the
   active view for the document, handed `DocumentPlaceProps`, while reading and editing alike. They
   carry nothing of a command's own — no agent, pointing, attachments or *Send* — and nothing is
-  drawn when no provider contributes. `documents`' view draws it (`BO_0309_031`); `doc-block-roles`
+  drawn when no provider contributes. `documents`' view draws it (`BO_0309_031`); `structures`
   contributes the roles and values lines, `keywords` the mentions line. The title stands outside
   the document's decoration provider, so a contribution there reads for itself.
 - The header's rows and forms (`DO_0030_001`, landed 2026-10-01, under `documents`' `DO_0030`,
   [Block Editor View](../../../src/extensions/documents/docs/system/documents/block-editor.md#the-document-header)):
   each `title` contribution is drawn as a row of its own (`.document-title-place__row`,
   `data-title-place-row` naming the extension), in extension order as every document place is, so
-  `doc-block-roles`' rows stand before `keywords`'; a row whose contribution draws nothing takes no
+  `structures`' rows stand before `keywords`'; a row whose contribution draws nothing takes no
   room. `DocumentPlaceProps.form` (`DocumentPlaceForm`) says where it is drawn: `full` in the
   header, `compact` in the one line that stays under the bar once the header has scrolled away,
   where a contribution draws only what that line holds or nothing, and with no row wrapper. Absent
@@ -143,7 +143,7 @@
 
 ## Options On A Command
 
-- Under `calliopa-bootstrap`'s `BO_0311` (transferred 2026-09-30): the profile is chosen per
+- Under `calliopa-bootstrap`'s `BO_0311` (transferred 2026-09-30): the instruction is chosen per
   command in the chip, so a control a `command` place draws must be able to say something about
   the command it sits in.
 - A `command` place receives `setOption$(name, value)` for the command it is drawn in
@@ -153,14 +153,49 @@
   through `setCommandOption$` — the editor puts them on the `ViewCommand` it sends
   (`ViewCommand.options`), and the shell sends them as `commandOptions` in the run request when
   *Send* is pressed. An option no one set is not sent. They live as long as the command does in
-  the page, and remembering one across commands is the contributing extension's. `profile` is the
-  first the kernel reads: the runs route (`src/routes/api/workspaces/[id]/runs`) takes it from
+  the page, and remembering one across commands is the contributing extension's. `instruction` is the
+  first the kernel reads: the runs route (`src/routes/api/workspaces/[id]/runs`) uses it from
   `commandOptions`, refuses one that is no record id in words, and hands it through
-  `conductRun` and `startBridgeRun` as the intake's `profile` (`calliopa-bootstrap`'s
+  `conductRun` and `startBridgeRun` as the intake's `instruction` (`calliopa-bootstrap`'s
   `ui-kernel.md` `BO_0311_002`). A gesture carries none.
 - Proven in `documents`' `command-decorations.test.ts`: a `command` place setting one option and
   clearing another, and *Send* carrying what was set and nothing cleared; and a command nothing
   set one on sending none.
+
+### A Variation And Suggestions
+
+Under `calliopa-bootstrap`'s `BO_0336` (promoted to draft by the user on 2026-10-02 and transferred
+here the same day; owned in the graph by `media`): a variation of the instruction's format is chosen
+beside *Send*, and a structure's field may ask an extension for suggestions.
+
+- The runs route takes `variation` from `commandOptions` beside `instruction` (`BO_0336_050`, landed
+  2026-10-02; `src/routes/api/workspaces/[id]/runs`): one that is no record id is refused in words,
+  and it is handed through `conductRun` and `startBridgeRun` as the intake's `variation`
+  (`calliopa-bootstrap`'s `ui-kernel.md` `BO_0336_001`). A gesture carries none. Proven in
+  `src/server/agent/bridge.test.ts`.
+- A `command` place reads its command's options (`BO_0336_051`, landed 2026-10-02): its props carry
+  `commandOptions`, what the shell holds for that command, read by `documents`' `BlockDecorations`
+  for the `command` place alone, so a choice re-draws the places and not the command chip around
+  them. `setOption$(name, value, once?)` marks an option for one send: the shell keeps the names
+  set so per command (`ViewCommandOptions.onceByCommand`) and clears them once the command is sent
+  (`afterSend`), the rest kept. Proven in `documents`' `command-decorations.test.ts` — a place
+  reading what another set, and *Send* carrying an option set for one send beside the others — and
+  `view-bridge.test.ts` for `afterSend`.
+- Every closure `shell.tsx` hands to `$()` captures what it reads from the `Shell` component in
+  the production build (`CA_0078_001`, landed 2026-10-02): a store a closure reads is declared
+  above it, since the optimizer moves each closure into a segment of its own and passes it only
+  what was in scope where it was captured — `sendCommand$` reads `commandOptions` to clear an
+  option set for one send. Proven in `src/components/shell/shell-captures.test.ts`, which runs
+  the optimizer as the build does and checks every segment's captures; the dev transform the
+  other tests run under keeps the closures inline and cannot show it.
+- Suggestion sources (`BO_0336_052`, landed 2026-10-02; `src/contract.ts`, `src/registry.ts`,
+  `src/server/registry.ts`, `src/routes/api/suggestions`): `ServerContributions.suggestionSources`
+  is a list of `{name, label, answer(values)}`, `answer` giving `{suggestions: {value, label?}[],
+  note?}`. The registry keys each as `<extension>:<name>` and refuses one name twice
+  (`suggestion_source_collision`). `GET /api/suggestions` lists `{source, label}` for a person's
+  own field, and `GET /api/suggestions/<extension>/<name>` answers one with the subject's values as
+  the query, a source the build does not hold answering 404 and one that throws answering no
+  suggestions and saying so. Proven in `src/registry.test.ts` and `src/server/suggestions.test.ts`.
 
 ## Senders And Rosters After Publishing
 
@@ -175,5 +210,28 @@
   runs route's sender branch and `POST /api/workspaces/:id/runs/quote` are gone, and the agent menu
   lists the agents alone: `SelectableRuntime` lost `icon` and `options`, the chip its axis controls,
   the bridge `chooseOption$`, `quoteSend$` and `agents.options` and `agents.cost`, and *Send* its
-  quoted cost. A picture or a video is made by the agent's tool under a profile
+  quoted cost. A picture or a video is made by the agent's tool under an instruction
   (`BO_0308_Q10`). Proven in `agent-menu.test.ts`, the menu drawing no control beside the agents.
+
+## Structures And Instructions
+
+Under `calliopa-bootstrap`'s `BO_0338`, promoted to draft by the user on 2026-10-02 and transferred
+here the same day: roles become structures and profiles become instructions, with every stored
+identifier and route, and `doc-block-roles` and `profiles` become `structures` and `instructions`
+(`calliopa-bootstrap`'s `ui-kernel.md`, *Structures And Instructions*, and `extension-model.md`,
+*An Extension Moves To A New Id*). This half is the shell's.
+
+- The command's option is `instruction` (`BO_0338_050`, 2026-10-02): the chip sets it, the runs
+  route reads `commandOptions.instruction`, refuses one that is no record id in words (*a
+  command's instruction is an instruction's id*), and `conductRun` and `startBridgeRun` send it
+  to the kernel's intake as `instruction` (`calliopa-bootstrap`'s `BO_0338_003`) beside
+  `variation`.
+- The run's detail reads its instruction (`BO_0338_051`, 2026-10-02): `GET
+  /api/processes/:id/instruction` answers the run record's `instruction`, the shell reads it into
+  `ProposedRead.instruction`, and the detail's line says *Instruction: <title>*
+  (`data-process-instruction`).
+- The shell shows *Structures* and *Instructions* where it showed *Roles* and *Profiles*
+  (`BO_0338_052`, 2026-10-02): the categories' names are the extensions' own contributions,
+  ordered by their former ids so nothing moves, and the run's detail says *Instruction*.
+- The shell's docs speak the new terms (`BO_0338_053`, 2026-10-02): this document's lines on the chip,
+  the command's option and the run's detail, and *The Run Used An Instruction* in `processes.md`.

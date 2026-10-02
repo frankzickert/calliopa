@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { ALIAS_ROLE, DEFINITION_ROLE, KEYWORD_ROLE, type DocumentRolesView, type RoleView } from "~/extensions/doc-block-roles/lib/roles";
-import { MIGRATIONS as ROLE_MIGRATIONS } from "~/extensions/doc-block-roles/server/migrations";
-import { createRole, readRole, reviseRole, rolesOf, setRole, setValues } from "~/extensions/doc-block-roles/server/roles";
+import { ALIAS_STRUCTURE, DEFINITION_STRUCTURE, KEYWORD_STRUCTURE, type DocumentStructuresView, type StructureView } from "~/extensions/structures/lib/structures";
+import { MIGRATIONS as ROLE_MIGRATIONS } from "~/extensions/structures/server/migrations";
+import { createStructure, readStructure, reviseStructure, structuresOf, setStructure, setValues } from "~/extensions/structures/server/structures";
 import { createDocument, deleteDocument, insertBlock, readDocument, renameDocument, restoreBlock, retireBlock, reviseTextBlock } from "~/extensions/documents/server/documents";
 import { write } from "~/server/ccgw/client";
 import { readGraphEnv } from "~/server/ccgw/env";
@@ -72,7 +72,7 @@ describe.skipIf(!configured)("keywords over CCGW", () => {
     await migrate(ok(await ROLE_MIGRATIONS["builtin-roles"]!()), "the built-in roles");
     await migrate(ok(await ROLE_MIGRATIONS["keyword-builtins"]!()), "what Keyword offers and sends");
     // The definition goes with a prompt, as on a fresh install.
-    ok(await retried(() => reviseRole(KEYWORD_ROLE, { command: "sendWithPrompt", entry: DEFINITION_ROLE, on: true })));
+    ok(await retried(() => reviseStructure(KEYWORD_STRUCTURE, { command: "sendWithPrompt", entry: DEFINITION_STRUCTURE, on: true })));
     await settle();
 
     const first = ok<{ documentId: string; blockId: string }>(await createDocument({ title: "Quantum computing" }));
@@ -84,14 +84,14 @@ describe.skipIf(!configured)("keywords over CCGW", () => {
     await settle();
     const aliases = ok<{ blockId: string }>(await insertBlock({ documentId: computing, block: { kind: "text", runs: [{ text: "QC\nquantum computation" }] }, placement: { after: computingFirst } })).blockId;
     await settle();
-    ok(await setRole({ documentId: computing, role: KEYWORD_ROLE, taken: true }));
-    ok(await setRole({ documentId: computing, blockId: computingFirst, role: DEFINITION_ROLE, taken: true }));
-    ok(await setRole({ documentId: computing, blockId: aliases, role: ALIAS_ROLE, taken: true }));
+    ok(await setStructure({ documentId: computing, structure: KEYWORD_STRUCTURE, taken: true }));
+    ok(await setStructure({ documentId: computing, blockId: computingFirst, structure: DEFINITION_STRUCTURE, taken: true }));
+    ok(await setStructure({ documentId: computing, blockId: aliases, structure: ALIAS_STRUCTURE, taken: true }));
 
     const second = ok<{ documentId: string; blockId: string }>(await createDocument({ title: "Qubit" }));
     qubit = second.documentId;
     await settle();
-    ok(await setRole({ documentId: qubit, role: KEYWORD_ROLE, taken: true }));
+    ok(await setStructure({ documentId: qubit, structure: KEYWORD_STRUCTURE, taken: true }));
 
     const third = ok<{ documentId: string; blockId: string }>(await createDocument({ title: "An essay" }));
     essay = third.documentId;
@@ -162,10 +162,10 @@ describe.skipIf(!configured)("keywords over CCGW", () => {
     expect(answer.items).toEqual([{ id: computing, title: "Quantum computing" }]);
     expect(answer.section).toContain("- Quantum computing\n  Definition: Computing with qubits, as a field.");
     expect(answer.section).not.toContain("Qubit");
-    ok(await retried(() => reviseRole(KEYWORD_ROLE, { command: "sendWithPrompt", entry: DEFINITION_ROLE, on: false })));
+    ok(await retried(() => reviseStructure(KEYWORD_STRUCTURE, { command: "sendWithPrompt", entry: DEFINITION_STRUCTURE, on: false })));
     await settle();
     expect(await promptKeywords({ input: { document: essay, block: prompt }, run: { id: "run", group: "group", pin: 0 } })).toEqual({ section: "", items: [] });
-    ok(await retried(() => reviseRole(KEYWORD_ROLE, { command: "sendWithPrompt", entry: DEFINITION_ROLE, on: true })));
+    ok(await retried(() => reviseStructure(KEYWORD_STRUCTURE, { command: "sendWithPrompt", entry: DEFINITION_STRUCTURE, on: true })));
     await settle();
     // A block with no keyword sends nothing.
     expect(await promptKeywords({ input: { document: essay, block: essaySecond }, run: { id: "run", group: "group", pin: 0 } })).toEqual({ section: "", items: [] });
@@ -176,43 +176,43 @@ describe.skipIf(!configured)("keywords over CCGW", () => {
     created.push(made.id);
     expect(made.title).toBe("entanglement");
     await settle();
-    const roles = ok<DocumentRolesView>(await rolesOf(made.id));
-    expect(roles.roles.map((role) => role.id)).toEqual([KEYWORD_ROLE]);
+    const roles = ok<DocumentStructuresView>(await structuresOf(made.id));
+    expect(roles.structures.map((role) => role.id)).toEqual([KEYWORD_STRUCTURE]);
     expect(ok<readonly { id: string }[]>(await keywordsOf()).map((keyword) => keyword.id)).toContain(made.id);
     expect((await createKeyword("   ")).outcome).toBe("validationFailure");
   });
 
   it("merges the roles a person chose before into the built-ins, and retires them", async () => {
-    let mine = ok<RoleView>(await createRole({ name: "Keyword (mine)" }));
-    const meaning = ok<RoleView>(await createRole({ name: "Meaning" }));
-    const names = ok<RoleView>(await createRole({ name: "Other names" }));
-    const example = ok<RoleView>(await createRole({ name: "Example" }));
+    let mine = ok<StructureView>(await createStructure({ name: "Keyword (mine)" }));
+    const meaning = ok<StructureView>(await createStructure({ name: "Meaning" }));
+    const names = ok<StructureView>(await createStructure({ name: "Other names" }));
+    const example = ok<StructureView>(await createStructure({ name: "Example" }));
     await settle();
-    mine = ok<RoleView>(await reviseRole(mine.id, { command: "addField", name: "Domain", type: "text" }));
+    mine = ok<StructureView>(await reviseStructure(mine.id, { command: "addField", name: "Domain", type: "text" }));
     await settle();
     for (const offered of [meaning.id, names.id, example.id]) {
-      mine = ok<RoleView>(await reviseRole(mine.id, { command: "offer", role: offered }));
+      mine = ok<StructureView>(await reviseStructure(mine.id, { command: "offer", structure: offered }));
       await settle();
     }
     const made = ok<{ documentId: string; blockId: string }>(await createDocument({ title: "Superposition" }));
     created.push(made.documentId);
     await settle();
-    ok(await setRole({ documentId: made.documentId, role: mine.id, taken: true }));
+    ok(await setStructure({ documentId: made.documentId, structure: mine.id, taken: true }));
     await settle();
-    ok(await setValues({ documentId: made.documentId, role: mine.id, values: { [mine.fields[0]!.key]: "physics" } }));
-    ok(await setRole({ documentId: made.documentId, blockId: made.blockId, role: meaning.id, taken: true }));
+    ok(await setValues({ documentId: made.documentId, structure: mine.id, values: { [mine.fields[0]!.key]: "physics" } }));
+    ok(await setStructure({ documentId: made.documentId, blockId: made.blockId, structure: meaning.id, taken: true }));
     await settle();
 
     await migrate(ok(await mergeKeywordRoles({ id: "keywords", keywordRole: mine.id, definitionRole: { kind: "block", id: meaning.id }, aliasRole: names.id })), "the merge");
-    const keyword = ok<RoleView>(await readRole(KEYWORD_ROLE));
+    const keyword = ok<StructureView>(await readStructure(KEYWORD_STRUCTURE));
     expect(keyword.fields.map((field) => field.name)).toContain("Domain");
-    expect(keyword.offers).toEqual(expect.arrayContaining([DEFINITION_ROLE, ALIAS_ROLE, example.id]));
+    expect(keyword.offers).toEqual(expect.arrayContaining([DEFINITION_STRUCTURE, ALIAS_STRUCTURE, example.id]));
     expect(keyword.offers).not.toContain(meaning.id);
-    const roles = ok<DocumentRolesView>(await rolesOf(made.documentId));
-    expect(roles.roles.map((role) => role.id)).toEqual([KEYWORD_ROLE]);
-    expect(roles.roles[0]!.values[mine.fields[0]!.key]).toBe("physics");
-    expect(roles.blocks[0]!.roles.map((role) => role.id)).toEqual([DEFINITION_ROLE]);
-    for (const id of [mine.id, meaning.id, names.id]) expect(ok<RoleView>(await readRole(id)).retired).toBe(true);
+    const roles = ok<DocumentStructuresView>(await structuresOf(made.documentId));
+    expect(roles.structures.map((role) => role.id)).toEqual([KEYWORD_STRUCTURE]);
+    expect(roles.structures[0]!.values[mine.fields[0]!.key]).toBe("physics");
+    expect(roles.blocks[0]!.structures.map((role) => role.id)).toEqual([DEFINITION_STRUCTURE]);
+    for (const id of [mine.id, meaning.id, names.id]) expect(ok<StructureView>(await readStructure(id)).retired).toBe(true);
     expect(ok<readonly { id: string }[]>(await keywordsOf()).map((entry) => entry.id)).toContain(made.documentId);
     // Nothing left to merge: every chosen role is retired.
     expect(ok<{ statement: string }>(await mergeKeywordRoles({ keywordRole: mine.id, definitionRole: { kind: "block", id: meaning.id }, aliasRole: names.id })).statement).toBe("");

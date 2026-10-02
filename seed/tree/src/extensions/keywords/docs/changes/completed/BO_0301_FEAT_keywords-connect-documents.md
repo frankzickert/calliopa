@@ -211,7 +211,7 @@ implementation.
 - Read from the checkout `.local/tree-bo0298-stage4` on 2026-09-25, the newest tree at hand,
   after `BO_0298` completed at head 2674. The graph paths below name the authoritative extension
   docs; this idea does not establish their behavior.
-- `doc-block-roles`: `src/extensions/doc-block-roles/docs/system/system.md` — the catalogue
+- `doc-block-roles`: `src/extensions/structures/docs/system/system.md` — the catalogue
   (`readCatalogue`, `GET /api/x/doc-block-roles/roles`), `rolesOf` as the interface a dependent
   extension imports directly, `read_document_roles` as the precedent for an `ext.tool` beside a
   skill, and `BO_0299_019`–`BO_0299_020` still open there.

@@ -359,6 +359,10 @@ Each of these arrives as its own change, adding its model and validation before 
 - [ ] Make the pointer-drag scenarios prove their gesture without racing it. "When a drag crosses two blocks, Then neither becomes an editor" and "When a block is dropped on another, Then it lands where the keyboard move would put it" in `tests/browser/block-editor.spec.ts` fail intermittently on trees that do not touch dragging: both were seen failing before and during `CA_0017`, and each time a completion gate run that failed on one passed unchanged on the next run, most recently during `CA_0038`, where the same run also timed out inside the accessibility analysis on the retired-toggle scenario. The gesture is synthesised from pointer events whose timing the scenario does not pin, so what it observes depends on when the surface happens to have settled. Nothing in the product waits on this; this line carries no task identifier because no change document owns it yet.
 - The phone was walked on the served build at pin 387, and the user accepted it and set the change completed on 2026-09-11. The walk covered what the harness and the layout measurement could not reach: the keyboard staying open through a press on another block, the arrow keys across a boundary, Backspace at a block's start and Enter pressed repeatedly and typed straight on, with the text's width, the handle's margin and the arrows on the top border seen on the phone itself (`CA_0045_006`).
 - [ ] CA_0008_012 Offer the conflict outcome a recovery path. The editor names the conflict on the affected block and stops, which is correct but leaves the reader to reload the tab by hand; decide what re-reading a conflicted block should look like and build it.
+- [ ] CA_0079_003 The tests expect what `CA_0070` and `CA_0071` made true: `server/vocabulary.test.ts` reads `admonition` in the committed vocabulary, and `views/bar.test.ts`'s *block controls are icons in one settled order* expects no `block-add-admonition` control, since an admonition is chosen from the block-type picker ([Admonitions](#admonitions)). Nothing in the editor changes (`CA_0079`).
+- [ ] CA_0079_004 `views/bar.test.ts`'s *link toggle pressed* waits for the `block-link-address` field and *the editor did not settle*. Find whether the test presses something the bar no longer draws or the toggle no longer opens the field. A test behind the code is brought up to it; a regression is named in `CA_0079` and fixed, with a `Fixed` release-note line.
+- [ ] CA_0079_005 `views/handover.test.ts`'s *characters typed into the tail before its split lands* never sees the tail's `revise`. Settle it the same way: a test behind the instant split, or text typed into a split tail that is not saved, a regression to name and fix (`CA_0079`).
+- [ ] CA_0079_006 `views/reference-math.test.ts`'s *offers the document's numbered equations* never sees `block-reference-equation` in the bar of a sentence block in a document holding a numbered equation. Settle it the same way, against [References From The Hash](#references-from-the-hash) and `block-document-model.md`'s numbered equations (`CA_0079`).
 
 ## Never Waiting On A Read
 
@@ -638,11 +642,11 @@ shell's half — the muted row in the drawer and the muted tab label — is
   `contributions.ts`, the headline and the library reader all ask it, so the mint and the three
   surfaces cannot drift apart. Exactly those words are unnamed; a title that merely begins with
   them, or differs in case, is a name.
-- A profile is minted under its own words (`calliopa-bootstrap`'s `BO_0298_014`, found in the
-  walk 2026-09-25): `UNNAMED_PROFILE` in `lib/naming.ts`, unnamed by the same rule, and
+- An instruction is minted under its own words (`calliopa-bootstrap`'s `BO_0298_014`, found in the
+  walk 2026-09-25): `UNNAMED_INSTRUCTION` in `lib/naming.ts`, unnamed by the same rule, and
   `unnamedTitle` answers the placeholder a document's headline paints from its `record` — the
-  profile's words for a profile, the document's for everything else — so the view carries
-  `record` and the `profiles` section draws an unnamed profile's row muted as the Documents
+  instruction's words for an instruction, the document's for everything else — so the view carries
+  `record` and the `instructions` section draws an unnamed instruction's row muted as the Documents
   section does.
 - The headline is a placeholder field (`DO_0012_002`). `.document-title__text` carries
   `data-unnamed` and `data-placeholder`, and `block-editor.css` paints the minted words over the
@@ -938,7 +942,7 @@ from the code block before it. What is stored and what the read resolves is
   [Manuscripts](../../../../manuscripts/docs/system/system.md#formats-per-document)).
 * The abstract is a `text` block of the role `abstract`, proposable like any block. User decision,
   2026-09-23.
-* Authors, affiliations and keywords are the person's *Paper* role, taken and filled in from the
+* Authors, affiliations and keywords are the person's *Paper* structure, used and filled in from the
   chip under the title like any role, and the venue is a role of the person's own; the editor draws
   no front matter of its own. User decisions, 2026-09-23 (`BO_0293_Q3`) and 2026-09-30
   (`calliopa-bootstrap`'s `BO_0312_Q3`).
@@ -1486,27 +1490,27 @@ Under `calliopa-bootstrap`'s `BO_0322` (`docs/changes/BO_0322_FEAT_a-pinch-deepe
   — the route, the title and the `title` place — becomes one header. The roles, their values and
   the mentions in it stay their extensions' contributions, drawn through the place
   ([Contribution Contract](../../../../../../docs/system/workspace/contribution-contract.md#a-place-under-the-title),
-  `DO_0030_001`; `doc-block-roles`' [Roles](../../../../doc-block-roles/docs/system/system.md#the-document-header),
+  `DO_0030_001`; `structures`' [Structures](../../../../structures/docs/system/system.md#the-document-header),
   `DO_0030_004`–`DO_0030_005`; `keywords`' [Keywords](../../../../keywords/docs/system/system.md#the-mentions-in-the-header),
   `DO_0030_006`).
 * The header is one unit above the first block, stacked: the route on its own small line, only
-  when the route holds more than one document; the title; the roles line; the values line; the
+  when the route holds more than one document; the title; the structures line; the values line; the
   mentions line. The same order on a desktop and a phone, with one spacing between its lines and
   the blocks' text alignment. User decision, 2026-10-01 (`DO_0030_Q3`).
-* The roles line holds the document's own roles as pills, the roles from above when the document
+* The structures line holds the document's own structures as pills, the structures from above when the document
   is a block's focused work as their own pills — muted, marked *from above*, never removable there
-  — and the control to take a role, always drawn (`DO_0030_Q2`, `DO_0030_Q4`).
-* The values line shows, while reading, the field values the document's own roles hold that are
-  filled in, compactly, per role — *Blog post: 12 Oct 2026 · Format: PDF*. Empty fields are left
-  out; a missing required value stays the pill's `!`. Values are edited in the role control, not
+  — and the control to use a structure, always drawn (`DO_0030_Q2`, `DO_0030_Q4`).
+* The values line shows, while reading, the field values the document's own structures hold that are
+  filled in, compactly, per structure — *Blog post: 12 Oct 2026 · Format: PDF*. Empty fields are left
+  out; a missing required value stays the pill's `!`. Values are edited in the structure control, not
   in the line (`DO_0030_Q1`, `DO_0030_Q6`).
-* On a document carrying *Keyword*, the mentions line says how many blocks mention it, and a press
+* On a document using *Keyword*, the mentions line says how many blocks mention it, and a press
   lists the mentioning blocks, each opening its document; on any other document it is absent
   (`DO_0030_Q1`).
 * The save state and the last change are not in the header; the save state stays in the shell's
   header (`DO_0030_Q1`).
 * The header scrolls with the document. Once it has scrolled past, a compact one-line header — the
-  title and the role pills — stays under the bar until the document is scrolled back up to it. A
+  title and the structure pills — stays under the bar until the document is scrolled back up to it. A
   press on the compact line scrolls the document back to the full header. On a phone the compact
   line carries the title first and the pills after it as far as the width allows, the rest counted
   as *+N* (`DO_0030_Q5`, `DO_0030_Q7`).
@@ -1533,31 +1537,31 @@ Under `calliopa-bootstrap`'s `BO_0322` (`docs/changes/BO_0322_FEAT_a-pinch-deepe
   `.document-header-anchor`, a sticky box of no height first in the surface, so its appearing
   moves no content. A sticky box is held inside the surface's padding, so the anchor's `top` is
   `-0.5rem`, the row's clearance taken back, which puts the line directly under the bar. On a phone the pills take at
-  most half the line less the gap, and the title the rest; `doc-block-roles` counts the pills that
+  most half the line less the gap, and the title the rest; `structures` counts the pills that
   do not fit (`DO_0030_004`).
 - Verified 2026-10-01 (`DO_0030_007`): `views/document-header.test.ts` in the render harness — the
   header holding the route, the title and the place in that order and the first block outside it;
-  no route for a route of one; the rows in extension order (`doc-block-roles`, `keywords`); the
+  no route for a route of one; the rows in extension order (`structures`, `keywords`); the
   compact line absent at rest with its anchor first in the surface; `CompactLine` saying the title,
   drawing no row wrappers and scrolling the surface to the top on a press; `headerHasLeft` for a
   header in view, above and below; the stylesheet's anchor and edges. Measured in Chromium
   (Playwright 1.62.1) over the editor's real DOM dumped from the harness with a full header — a
-  focused work's route, an inherited and four own roles, values and a keyword's mentions — at 360,
-  390 and 1280 CSS px: the route, the title's text, the roles line, the values line, the mentions
+  focused work's route, an inherited and four own structures, values and a keyword's mentions — at 360,
+  390 and 1280 CSS px: the route, the title's text, the structures line, the values line, the mentions
   line and the first block's text all start at one x (14.6px on the phones, 38.6px on the
   desktop); the header begins 48px below the surface's top, under a 40px bar; the compact line
   stands 40px below it, 36px high, one line, its pills inside it, the title 177px of 353px at 360,
   and the surface's scroll height unchanged by its appearing. The observer and the *+N* count run
   only in a live page and are the walk's. Mutations — rows drawn without their wrapper, the
-  sighting ignoring where the header went — each failed a test. `doc-block-roles`' 80 and
+  sighting ignoring where the header went — each failed a test. `structures`' 80 and
   `keywords`' 31 unit tests pass; the unit project's failures are the nine already failing at head 3729
   (`line-breaks`, equations, `bar`, `sources`, the vocabulary), none new.
 - The release line (`DO_0030_008`): `calliopa-bootstrap`'s `docs/release-notes/unreleased.md`, under
-  *Changed*: the roles line says a document's roles and their values stand in its header and that
-  focused work's header shows the roles from above, and a line of its own says the header, the
+  *Changed*: the structures line says a document's structures and their values stand in its header and that
+  focused work's header shows the structures from above, and a line of its own says the header, the
   mentions count replacing the list at a keyword document's end, and the compact line.
 - [ ] DO_0030_009 Walked by the user on the served build, on a desktop and a phone: a focused work's
-      header with its route, title, own and inherited roles and a role taken from the always-drawn
+      header with its route, title, own and inherited structures and a structure used from the always-drawn
       control; a document with filled and empty values; a keyword document's mentions, listed and
       opened; scrolling down to the compact line and pressing it back to the top; on the phone the
       pills counted as *+N*.

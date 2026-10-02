@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { MIGRATIONS as ROLE_MIGRATIONS } from "~/extensions/doc-block-roles/server/migrations";
-import { documentsCarrying, rolesOf } from "~/extensions/doc-block-roles/server/roles";
+import { MIGRATIONS as ROLE_MIGRATIONS } from "~/extensions/structures/server/migrations";
+import { documentsCarrying, structuresOf } from "~/extensions/structures/server/structures";
 import { createDocument, deleteDocument, insertBlock, listDocuments, readDocument } from "~/extensions/documents/server/documents";
 import { query, write } from "~/server/ccgw/client";
 import { readGraphEnv } from "~/server/ccgw/env";
@@ -94,7 +94,7 @@ describe.skipIf(!configured)("sources are documents", () => {
     expect(documents).toEqual(expect.arrayContaining([page.workId, interview.workId, dataset.workId]));
     const carrying = ok<readonly { id: string }[]>(await documentsCarrying("builtin:source")).map((document) => document.id);
     expect(carrying).toEqual(expect.arrayContaining([page.workId, interview.workId, dataset.workId]));
-    const roles = ok<{ roles: readonly { id: string; values: Record<string, unknown> }[] }>(await rolesOf(dataset.workId));
+    const roles = ok<{ roles: readonly { id: string; values: Record<string, unknown> }[] }>(await structuresOf(dataset.workId));
     expect(roles.roles.find((role) => role.id === "builtin:source")?.values).toMatchObject({ kind: "dataset", doi: `10.9999/bo0313-${stamp}`, publisher: "Hydrology Office" });
 
     const duplicate = await addWork({ record: { title: "The same readings", kind: "dataset", DOI: `https://doi.org/10.9999/BO0313-${stamp}` } });

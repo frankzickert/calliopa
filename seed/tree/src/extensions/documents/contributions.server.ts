@@ -12,6 +12,7 @@ import {
   handleDocumentList,
   handleDocumentRead,
   handleProposalsRead,
+  handleReplayRead,
   handleRetiredRead,
   unknownDocument,
   handleWorkingMode,
@@ -107,6 +108,14 @@ const routes: readonly ApiRoute[] = [
     // BO_0315_015
     handle: (event, params) =>
       document((id) => handleProposalsRead(id, new URL(event.request.url).searchParams.get("rejected") === "1"))(event, params),
+  },
+  {
+    /** A finished run's document at its pin and what it staged, for a
+     * replay: `?run=<id>`. BO_0340_007 */
+    method: "GET",
+    path: "d/[id]/replay",
+    handle: (event, params) =>
+      document((id) => handleReplayRead(id, new URL(event.request.url).searchParams.get("run") ?? ""))(event, params),
   },
   {
     method: "GET",

@@ -6,8 +6,9 @@ import { composeMediaFill, composeMediaInsert } from "~/extensions/documents/ser
 
 import { anyGeneratorSignedIn } from "./source";
 import { pictureAbove, promptOf, startFrame, type ReferenceBytes } from "./make";
-import { roster } from "./media";
-import { offeredFrom, offeredRoster } from "./offered";
+import { roster, SERVICES } from "./media";
+import { readFormat, type GenerationFormat } from "./format";
+import { qualityAxisOf, RATIO_AXES } from "./suggestions";
 
 /**
  * `media.generate` is a spending tool: the kernel admits it only once in a
@@ -25,8 +26,10 @@ export interface ToolCall {
     readonly pin: number;
     readonly person?: string;
     readonly document?: string;
-    readonly profileType?: string;
-    readonly imageBackend?: string;
+    /** The instruction the command chose, by id (`calliopa-bootstrap`'s `BO_0336_001`). */
+    readonly instruction?: string;
+    /** The variation of its format chosen beside Send, by block id. */
+    readonly variation?: string;
     /** What the tool's kernel calls present in place of a session. BO_0312_063 */
     readonly grant?: string;
   };
@@ -47,88 +50,86 @@ export class ToolRefusal extends Error {}
 
 const text = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
 
+const NAMES: Readonly<Record<string, string>> = { higgsfield: "Higgsfield", openart: "OpenArt", codex: "Codex" };
+
+/** What a generation under the run's instruction makes, and with what, or the
+ * refusal in words before anything is composed or spent (`BO_0336_022`). */
+async function formatToMake(request: ToolCall): Promise<GenerationFormat & { readonly kind: "image" | "video" }> {
+  const read = await readFormat(request.run);
+  if (!read.ok) throw new ToolRefusal(read.refusal);
+  const format = read.format;
+  const kind = format.type === "image" || format.type === "video" ? format.type : null;
+  if (kind === null) {
+    throw new ToolRefusal(`${format.title} makes ${format.type === "" ? "nothing yet" : format.type}, not a picture or a video: choose a format of type image or video on the instruction.`);
+  }
+  if (format.provider === "") throw new ToolRefusal(`${format.title} names no provider: choose one in the format.`);
+  // Codex makes nothing yet, and is never a fallback for anything (BO_0320_014).
+  if (format.provider === "codex") throw new ToolRefusal("Image generation through Codex is temporarily unavailable: choose another provider in the format.");
+  if (!(SERVICES as readonly string[]).includes(format.provider)) {
+    throw new ToolRefusal(`${format.title} names ${format.provider}, which is no generation service here: choose Higgsfield or OpenArt in the format.`);
+  }
+  const service = (await roster()).find((one) => one.service === format.provider);
+  if (service === undefined || !service.signedIn) {
+    throw new ToolRefusal(service?.reason ?? `Sign in to ${NAMES[format.provider] ?? format.provider} in Settings before generating.`);
+  }
+  if (format.model === "") throw new ToolRefusal(`${format.title} names no model: choose one in the format.`);
+  return { ...format, kind };
+}
+
+/** The format's ratio and quality as the model's axes, under the service's
+ * names; a value the model does not take is the vendor's to refuse. */
+const optionsOf = (format: GenerationFormat): Record<string, string> => ({
+  ...(format.ratio === "" ? {} : { [RATIO_AXES[0] ?? "aspect-ratio"]: format.ratio }),
+  ...(format.quality === "" ? {} : { [qualityAxisOf(format.provider, format.model)]: format.quality }),
+});
+
+/** The service's own words for a refusal, or these. */
+async function refusalOf(response: Response, fallback: string): Promise<string> {
+  const said = (await response.json().catch(() => ({}))) as { error?: unknown; message?: unknown };
+  const words = typeof said.error === "string" ? said.error : typeof said.message === "string" ? said.message : "";
+  return words.trim() === "" ? fallback : words.trim();
+}
+
 /**
- * What a generation would cost, for a run. No session gate, and that is not an
- * oversight: a quote is the adapters' dry run, which spends nothing, and the
- * boundary that matters is that no tool reaches the route that does.
+ * What a generation under the run's instruction would cost, for a run. No session
+ * gate, and that is not an oversight: a quote is the adapters' dry run, which
+ * spends nothing. What is quoted is what the format would make.
  */
 async function quoteGeneration(request: ToolCall): Promise<ToolAnswer> {
-  const service = text(request.input["service"]);
-  const model = text(request.input["model"]);
-  const kind = text(request.input["kind"]) === "video" ? "video" : "image";
-  const prompt = text(request.input["prompt"]);
-  if (service === "" || model === "") throw new ToolRefusal("Name the service and the model to quote.");
   // The extension ships active, so a run may reach for this on an instance
   // where nothing is signed in. It is told what to say rather than meeting a
   // failed call. BO_0273_020
   const held = await anyGeneratorSignedIn();
   if (!held.any) throw new ToolRefusal(held.words);
+  const format = await formatToMake(request);
+  const prompt = text(request.input["prompt"]);
   if (prompt === "") throw new ToolRefusal("Give the words the picture would be made from.");
-
+  const options = optionsOf(format);
   const answer = await call("/__kernel/media/quote", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ service, kind, model, prompt }),
+    body: JSON.stringify({ service: format.provider, kind: format.kind, model: format.model, prompt, ...(Object.keys(options).length === 0 ? {} : { options }) }),
   });
-  if (!answer.ok) throw new ToolRefusal("The media service is not answering.");
-  return { result: await answer.json() };
+  if (!answer.ok) throw new ToolRefusal(await refusalOf(answer, "The media service is not answering."));
+  return { result: { format: format.title, service: format.provider, model: format.model, ...(await answer.json()) } };
 }
-
-const stringOptions = (value: unknown): Record<string, string> => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
-  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
-};
-
-/** The backends each kind of profile may name: Codex makes pictures only. */
-const BACKENDS: Readonly<Record<"image" | "video", readonly string[]>> = {
-  image: ["higgsfield", "openart", "codex"],
-  video: ["higgsfield", "openart"],
-};
 
 /**
  * Start one image or video job and stage its pending block into the person's
- * Send group (`calliopa-bootstrap`'s `BO_0312_041`). What is made is the
- * profile's kind — an image or a video profile, its backend saved with it
- * (`BO_0320`); no *Format* is read (`BO_0332_034`). A video animates
- * the nearest picture above the block, as a send to a video model did
- * (`BO_0273_045`). Every refusal comes before the paid request.
+ * Send group (`calliopa-bootstrap`'s `BO_0312_041`). What is made, and with
+ * what, is the format the run's instruction names, with the variation chosen
+ * beside Send (`BO_0336_022`); the run's own arguments name no model and no
+ * option. A video animates the nearest picture above the block, as a send to
+ * a video model did (`BO_0273_045`). Every refusal comes before the paid
+ * request.
  */
 async function generate(request: ToolCall): Promise<ToolAnswer> {
   const documentId = request.run.document ?? "";
   const blockId = text(request.input["block"]);
-  const backend = text(request.run.imageBackend);
-  if (backend === "codex") {
-    throw new ToolRefusal("Image generation is temporarily unavailable for this profile.");
-  }
-  const kind = request.run.profileType === "image" || request.run.profileType === "video" ? request.run.profileType : null;
-  if (kind === null || !BACKENDS[kind].includes(backend)) {
-    throw new ToolRefusal("Choose an image- or video-generation profile with its backend before generating.");
-  }
+  const format = await formatToMake(request);
+  const { kind } = format;
   if (documentId === "" || blockId === "" || request.run.group === "") {
     throw new ToolRefusal(`A ${kind} generation needs the document and prompt block from this Send.`);
-  }
-  // The profile says what is made, an image or a video; no Format is read,
-  // since Format is what a whole document is produced as (calliopa-bootstrap's
-  // BO_0332_034).
-  const all = await roster();
-  const service = all.find((one) => one.service === backend);
-  if (service === undefined || !service.signedIn) {
-    throw new ToolRefusal(service?.reason ?? `Sign in to ${backend} in Settings before generating.`);
-  }
-  const offered = backend === "codex" ? service.models : (await offeredRoster(offeredFrom(request.settings))).find((one) => one.service === backend)?.models ?? [];
-  const requestedModel = text(request.input["model"]);
-  if (backend === "codex" && requestedModel !== "" && requestedModel !== "codex-image") {
-    throw new ToolRefusal("The Codex image profile uses the codex-image model.");
-  }
-  const model = backend === "codex"
-    ? "codex-image"
-    : requestedModel === ""
-      ? offered.find((one) => one.kind === kind && one.default)?.model ?? offered.find((one) => one.kind === kind)?.model ?? ""
-      : offered.some((one) => one.model === requestedModel && one.kind === kind)
-        ? requestedModel
-        : "";
-  if (model === "" || !service.models.some((one) => one.model === model && one.kind === kind)) {
-    throw new ToolRefusal(`No offered ${kind} model is available for ${backend}.`);
   }
   const prompt = text(request.input["words"]) || await promptOf(documentId, blockId);
   if (prompt === "") throw new ToolRefusal(`This block has no words to make ${kind === "video" ? "a video" : "an image"} from.`);
@@ -146,22 +147,24 @@ async function generate(request: ToolCall): Promise<ToolAnswer> {
     references = [bytes];
   }
 
-  // Compose before the paid request, so an invalid placement never spends.
-  const plan = await composeMediaInsert({
+  const service = format.provider;
+  const { model } = format;
+  // Compose before the paid request, so an invalid placement never spends,
+  // and in the run's group, as the kernel stages it there: composed against
+  // truth the CREATE names itself established, which a proposal refuses, and
+  // the job would be paid for with nowhere to land (BO_0312_042's walk).
+  const plan = await withBranch(request.run.group, () => composeMediaInsert({
     documentId,
-    block: { kind, alt: prompt, source: { extension: "media", service: backend, model, prompt, pending: true } },
+    block: { kind, alt: prompt, source: { extension: "media", service, model, prompt, pending: true } },
     placement: { after: blockId },
-  });
+  }));
   if (!plan.ok) throw new ToolRefusal(plan.refusal);
-  const options = stringOptions(request.input["options"]);
-  if (backend === "codex" && Object.keys(options).length > 0) {
-    throw new ToolRefusal("Codex image generation does not take model options; follow the image profile instead.");
-  }
+  const options = optionsOf(format);
   const started = await call("/__kernel/media/generations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      service: backend,
+      service,
       kind,
       model,
       prompt,
@@ -169,16 +172,18 @@ async function generate(request: ToolCall): Promise<ToolAnswer> {
       ...(Object.keys(options).length === 0 ? {} : { options }),
     }),
   });
-  if (!started.ok) throw new ToolRefusal(`The media service refused the ${kind} job.`);
+  // A value the vendor does not take is refused in the vendor's own words.
+  if (!started.ok) throw new ToolRefusal(await refusalOf(started, `The media service refused the ${kind} job.`));
   const job = (await started.json()) as { id?: string };
   if (typeof job.id !== "string" || job.id === "") throw new ToolRefusal("The media service returned no job id.");
   plan.parameters["b_source"] = {
-    extension: "media", service: backend, model, prompt, job: job.id,
-    cost: backend === "codex" ? "unavailable" : undefined,
+    extension: "media", service, model, prompt, job: job.id,
+    format: format.id, ...(format.variation === undefined ? {} : { variation: format.variation }),
+    ...(Object.keys(options).length === 0 ? {} : { options }),
     proposedAt: new Date().toISOString(),
   };
   return {
-    result: { status: "running", kind, job: job.id, block: plan.blockId, ...(backend === "codex" ? { cost: "unavailable" } : {}) },
+    result: { status: "running", kind, job: job.id, block: plan.blockId, format: format.title, model },
     stage: [{ statement: plan.statement, parameters: plan.parameters, rationale: `stage ${kind} generation job ${job.id}` }],
   };
 }

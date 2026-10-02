@@ -1,4 +1,4 @@
-"""A profile tool's call against the real daemon: a throwaway container from the runtime's image,
+"""An instruction tool's call against the real daemon: a throwaway container from the runtime's image,
 off every network or on the runtimes' network, its environment and input read, and nothing of it
 left after a success, a failure or a timeout. No mocks; the socket must be reachable and the
 service must run in its own image, since the driver is started from it. BO_0311_001"""

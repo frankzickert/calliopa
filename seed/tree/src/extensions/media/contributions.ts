@@ -1,6 +1,7 @@
 import { contributions as declare } from "~/contract";
 
 import { SourcePanel } from "./views/block/source-panel";
+import { VariationChoice } from "./views/command/variation";
 import { GeneratorsSection } from "./views/settings/section";
 
 /**
@@ -12,9 +13,9 @@ import { GeneratorsSection } from "./views/settings/section";
  * picture stays a picture when this is switched off — and it does not generate:
  * the generators and the vendor credentials are the stack's media service.
  *
- * Nothing stands in the command chip any more: a model is chosen in the agent
- * menu and sent to with *Send*, so the dropdown and the cost button the chip
- * once carried are gone (`BO_0273_035`).
+ * In the command chip stands the variation of the instruction's format, chosen
+ * for one send (`calliopa-bootstrap`'s `BO_0336_023`); which model makes what
+ * is the format's to say.
  */
 export const contributions = declare({
   settingsSections: [
@@ -22,7 +23,7 @@ export const contributions = declare({
   ],
   decorations: {
     document: {
-      places: { below: SourcePanel },
+      places: { below: SourcePanel, command: VariationChoice },
     },
   },
 });

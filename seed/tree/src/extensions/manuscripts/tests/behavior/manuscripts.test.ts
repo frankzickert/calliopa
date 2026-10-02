@@ -3,9 +3,9 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { addWork } from "~/extensions/bibliography/server/works";
-import { MIGRATIONS as ROLE_MIGRATIONS } from "~/extensions/doc-block-roles/server/migrations";
-import { createRole, readRole, reviseRole, rolesOf, setRole, setValues } from "~/extensions/doc-block-roles/server/roles";
-import type { RoleView } from "~/extensions/doc-block-roles/lib/roles";
+import { MIGRATIONS as ROLE_MIGRATIONS } from "~/extensions/structures/server/migrations";
+import { createStructure, readStructure, reviseStructure, structuresOf, setStructure, setValues } from "~/extensions/structures/server/structures";
+import type { StructureView } from "~/extensions/structures/lib/structures";
 import { createDocument, deleteDocument, fillMediaBlock, insertBlock, readDocument, setFigure } from "~/extensions/documents/server/documents";
 import { blobHash, blobReference, objectIdOfHash, putBlob, readBlob } from "~/server/ccgw/blobs";
 import { query, write } from "~/server/ccgw/client";
@@ -104,19 +104,19 @@ function png(): Uint8Array {
 
 describe.skipIf(!configured)("manuscripts as formats over CCGW", () => {
   const works: string[] = [];
-  let venue: RoleView;
-  let paper: RoleView;
+  let venue: StructureView;
+  let paper: StructureView;
 
   beforeAll(async () => {
     await builtins();
-    venue = ok<RoleView>(await createRole({ name: "IEEE conference" }));
-    paper = ok<RoleView>(await createRole({ name: "Paper under test" }));
+    venue = ok<StructureView>(await createStructure({ name: "IEEE conference" }));
+    paper = ok<StructureView>(await createStructure({ name: "Paper under test" }));
     await settle();
-    venue = ok<RoleView>(await reviseRole(venue.id, { command: "addField", name: "Template", type: "text" }));
-    paper = ok<RoleView>(await reviseRole(paper.id, { command: "addField", name: "Authors", type: "longText" }));
+    venue = ok<StructureView>(await reviseStructure(venue.id, { command: "addField", name: "Template", type: "text" }));
+    paper = ok<StructureView>(await reviseStructure(paper.id, { command: "addField", name: "Authors", type: "longText" }));
     await settle();
-    venue = ok<RoleView>(await reviseRole(venue.id, { command: "addField", name: "Citation style", type: "text" }));
-    paper = ok<RoleView>(await reviseRole(paper.id, { command: "addField", name: "Keywords", type: "text" }));
+    venue = ok<StructureView>(await reviseStructure(venue.id, { command: "addField", name: "Citation style", type: "text" }));
+    paper = ok<StructureView>(await reviseStructure(paper.id, { command: "addField", name: "Keywords", type: "text" }));
     expect(venue.fields.map((field) => field.key)).toEqual(["template", "citationStyle"]);
     expect(paper.fields.map((field) => field.key)).toEqual(["authors", "keywords"]);
   });
@@ -134,15 +134,15 @@ describe.skipIf(!configured)("manuscripts as formats over CCGW", () => {
   async function formatted(title: string): Promise<{ documentId: string; blockId: string }> {
     const created = ok<{ documentId: string; blockId: string }>(await createDocument({ title }));
     await settle();
-    ok(await setRole({ documentId: created.documentId, role: "builtin:format", taken: true }));
+    ok(await setStructure({ documentId: created.documentId, structure: "builtin:format", taken: true }));
     await settle();
-    ok(await setValues({ documentId: created.documentId, role: "builtin:format", values: { type: "PDF" } }));
-    ok(await setRole({ documentId: created.documentId, role: venue.id, taken: true }));
+    ok(await setValues({ documentId: created.documentId, structure: "builtin:format", values: { type: "PDF" } }));
+    ok(await setStructure({ documentId: created.documentId, structure: venue.id, taken: true }));
     await settle();
-    ok(await setValues({ documentId: created.documentId, role: venue.id, values: { template: "ieee" } }));
-    ok(await setRole({ documentId: created.documentId, role: paper.id, taken: true }));
+    ok(await setValues({ documentId: created.documentId, structure: venue.id, values: { template: "ieee" } }));
+    ok(await setStructure({ documentId: created.documentId, structure: paper.id, taken: true }));
     await settle();
-    ok(await setValues({ documentId: created.documentId, role: paper.id, values: { authors: "Ada Lovelace <ada@example.org>", keywords: "provenance, records" } }));
+    ok(await setValues({ documentId: created.documentId, structure: paper.id, values: { authors: "Ada Lovelace <ada@example.org>", keywords: "provenance, records" } }));
     await settle();
     return created;
   }
@@ -157,7 +157,7 @@ describe.skipIf(!configured)("manuscripts as formats over CCGW", () => {
 
     // A block named, as a run that read the old tool might, is not read: the
     // document is projected whole. BO_0332_030
-    const projected = await projectForKernel({ input: { document: documentId, block: blockId, venueRole: venue.id, paperRole: paper.id }, run });
+    const projected = await projectForKernel({ input: { document: documentId, block: blockId, venueStructure: venue.id, paperStructure: paper.id }, run });
     expect(projected).toMatchObject({ document: documentId, venue: "ieee", revision: pin });
     expect(projected).not.toHaveProperty("block");
     expect(projected.request.venue).toBe("ieee");
@@ -172,12 +172,12 @@ describe.skipIf(!configured)("manuscripts as formats over CCGW", () => {
     expect(head).toContain('"manuscript."');
 
     // Format is never taken on a block, so a block never carries it.
-    expect(refusedAs(await setRole({ documentId, blockId, role: "builtin:format", taken: true }))).toBe("blockNotAllowed");
+    expect(refusedAs(await setStructure({ documentId, blockId, structure: "builtin:format", taken: true }))).toBe("blockNotAllowed");
     const bare = ok<{ documentId: string }>(await createDocument({ title: "No Format here" }));
     await settle();
     await expect(projectForKernel({ input: { document: bare.documentId }, run: { ...run, pin: 0 } })).rejects.toThrow(/carries no Format role/u);
-    await expect(projectForKernel({ input: { document: documentId, venueRole: "builtin:keyword" }, run })).rejects.toThrow(/not taken on the document/u);
-    ok(await setValues({ documentId, role: "builtin:format", values: { type: "image" } }));
+    await expect(projectForKernel({ input: { document: documentId, venueStructure: "builtin:keyword" }, run })).rejects.toThrow(/not taken on the document/u);
+    ok(await setValues({ documentId, structure: "builtin:format", values: { type: "image" } }));
     await settle();
     await expect(projectForKernel({ input: { document: documentId }, run: { ...run, pin: 0 } })).rejects.toThrow(/Format as image, not PDF/u);
 
@@ -239,10 +239,10 @@ describe.skipIf(!configured)("manuscripts as formats over CCGW", () => {
     const created = ok<{ documentId: string }>(await createDocument({ title: "A Manuscript Out Of The Record" }));
     const documentId = created.documentId;
     await settle();
-    ok(await setRole({ documentId, role: "builtin:format", taken: true }));
-    ok(await setRole({ documentId, role: venue.id, taken: true }));
+    ok(await setStructure({ documentId, structure: "builtin:format", taken: true }));
+    ok(await setStructure({ documentId, structure: venue.id, taken: true }));
     await settle();
-    ok(await setValues({ documentId, role: venue.id, values: { template: "ieee" } }));
+    ok(await setValues({ documentId, structure: venue.id, values: { template: "ieee" } }));
     ok(await insertBlock({ documentId, block: { kind: "text", role: "abstract", runs: [{ text: "We show that a record can emit a paper." }] }, placement: { at: "end" } }));
     ok(await insertBlock({ documentId, block: { kind: "text", role: "h1", runs: [{ text: "Introduction" }] }, placement: { at: "end" } }));
     const picture = ok<{ blockId: string; revisionId: string }>(await insertBlock({ documentId, block: { kind: "image" }, placement: { at: "end" } }));
@@ -264,7 +264,7 @@ describe.skipIf(!configured)("manuscripts as formats over CCGW", () => {
     await settle();
     const pin = ok<{ dataRevision?: number }>(await readDocument(documentId)).dataRevision ?? 0;
     const run = { id: "arun-real", group: "node:run-real", pin, person: "ann", principal: "claude" };
-    const projected = await projectForKernel({ input: { document: documentId, venueRole: venue.id }, run });
+    const projected = await projectForKernel({ input: { document: documentId, venueStructure: venue.id }, run });
     expect(projected.document).toBe(documentId);
 
     // What the kernel does between the two routes: the service typesets,
@@ -346,14 +346,14 @@ describe.skipIf(!configured)("manuscripts as formats over CCGW", () => {
     const content = node.outcome === "success" ? (node.result.nodes[0]?.revision.content ?? {}) : {};
     for (const key of ["authors", "affiliations", "keywords", "venue"]) expect(content[key] ?? null).toBeNull();
     expect(document.revisionId).not.toBe(head.revisionId);
-    const roles = ok<{ roles: { id: string; name: string; builtin: boolean; values: Record<string, unknown> }[] }>(await rolesOf(created.documentId));
+    const roles = ok<{ roles: { id: string; name: string; builtin: boolean; values: Record<string, unknown> }[] }>(await structuresOf(created.documentId));
     const taken = roles.roles.find((role) => role.name === "Paper");
     expect(taken).toBeDefined();
     expect(taken?.builtin).toBe(false);
     expect(taken?.values).toEqual({ authors: "Ada Lovelace*", affiliations: "Analytical Engines Ltd", keywords: "provenance" });
     // An ordinary role the person can rename.
-    const renamed = ok<RoleView>(await reviseRole(taken?.id ?? "", { command: "rename", name: "Journal paper" }));
+    const renamed = ok<StructureView>(await reviseStructure(taken?.id ?? "", { command: "rename", name: "Journal paper" }));
     expect(renamed.name).toBe("Journal paper");
-    expect(ok<RoleView>(await readRole(taken?.id ?? "")).fields.map((field) => field.key)).toEqual(["authors", "affiliations", "keywords"]);
+    expect(ok<StructureView>(await readStructure(taken?.id ?? "")).fields.map((field) => field.key)).toEqual(["authors", "affiliations", "keywords"]);
   });
 });

@@ -121,3 +121,48 @@ Under `BO_0306`, transferred 2026-09-29 (the bar's half is [Block Editor](./bloc
   `proposerOf` reading the mode and the drift and ignoring a mode outside the poles. Each
   assertion was shown to bite.
 - Walked by the user on the served build at pin 3096 on 2026-09-29, and it worked (`BO_0306_016`): the two toggles showing explore and create on a fresh document, each press switching its pole and kept on reopening, runs sent in the quadrants landing proposals whose chips name them, and a run made to stray drawing the drift line. Before it, a probe account signed in against the served kernel read not found for a document never set, wrote a mode and read it back, and had a value outside the poles refused.
+
+## A Replayed Run
+
+Under `calliopa-bootstrap`'s `BO_0340`, set to draft by the user on 2026-10-02 and transferred
+here the same day: a finished run can be replayed, and the editor plays it in the document. The
+decisions, the shortcut, the schedule and the transient entry are `ui.shell`'s
+[Processes](../../../../../../docs/system/workspace/processes.md), *Replaying A Run*; the editor
+receives the replay through the view bridge and plays what the schedule says.
+
+* The document is shown as it stood when the run started, read-only, and the real document is
+  never touched: nothing is written, no proposal is answered, no mark is kept. User decision,
+  2026-10-02 (`BO_0340_Q4`).
+* The run's proposal is shown as it was staged, pending, even when it has since been accepted,
+  rejected or withdrawn. User decision, 2026-10-02 (`BO_0340_Q5`).
+
+- The document at the run's pin and its items as staged (`BO_0340_007`). `GET d/[id]/replay?run=<id>`
+  answers `readReplayDocument` (`server/documents.ts`): it reads the run's record through the
+  shell's `readBridgeRun`, refuses a run it holds no record of and a run of another document, and
+  `replayDocumentAt` reads the document under `atDataRevision(pin)`. The items are the run's own
+  activity — each staged item reports its kind, the block it stands on and the member its
+  decision covers — built by `stagedItems` from each member's revision carrying the group's
+  `_proposal` stamp, read as truth, through the group's overlay and through its rejected overlay
+  (`stampedMembers`; a read the group's state refuses reads nothing), so an item reads as staged
+  whether its group is open, accepted or rejected. A member revised again since, whose newest
+  revision no longer carries the stamp, has no staged content left and is left out, as is an item
+  that proposes what stood; the relation kinds are drawn as the marks their activity reports.
+  CCGW's touched set answers nothing for a group no longer open, which is why the activity names
+  the items.
+- The editor plays a replay (`BO_0340_008`). `BlockEditorView` is a replay's when the bridge's
+  `replay` names its tab: `reload$` reads `fetchReplay` once and nothing else, holding every staged
+  item in `state.replayItems` and none in `state.proposals`; the activity task takes the replay's
+  run in place of the reader's runs, so its read marks, live group and chip are a live run's; and
+  `reloadProposals$` answers `replayShown` (`lib/agent-at-work.ts`), the items whose staging the
+  replay has reached. The source block's words are the typed ones (`typedInto`), under a revision
+  of their own for the drawing alone, since a row is keyed by revision. The surface is `inert`
+  (`data-replay`), so no edit, answer or command is reachable, and a whole-run answer handed over
+  is ignored. Chips are reported under the tab's key, never the document's.
+- Verified (`BO_0340_009`), 2026-10-02: `views/replay.test.ts` through the render harness (the
+  document drawn as it stood and inert, the words typed into the block, the read mark and each
+  staged item arriving at its step and not before, the chip's end, a whole-run answer ignored,
+  nothing sent), each case shown to fail with its code taken out; `lib/agent-at-work.test.ts`
+  (*a replayed run in the document*); `server/replay.test.ts` (`stagedItems`); and
+  `tests/behavior/replay.test.ts` over the kernel harness (the document at the pin after a rewrite
+  and an insert were accepted, both read as staged with the note, and a rejected rewrite read as
+  staged).

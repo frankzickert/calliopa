@@ -1,0 +1,25 @@
+/* The variation beside Send (calliopa-bootstrap's BO_0336_023): a compact
+   select in the command chip's line, in the chip's own tokens. Its host takes
+   no room of its own. */
+.media-variation-host {
+  display: contents;
+}
+
+.media-variation {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.media-variation__select {
+  max-width: 12rem;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.85em;
+  color: var(--text);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  padding: 0.125rem 0.375rem;
+  text-overflow: ellipsis;
+}

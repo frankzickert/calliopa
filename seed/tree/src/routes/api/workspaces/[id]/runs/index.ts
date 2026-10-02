@@ -76,13 +76,21 @@ export const onPost: RequestHandler = (event) =>
     }
 
     const mode = readMode(body.mode);
-    // The profile the command's chip chose, the one option the kernel reads;
+    // The instruction the command's chip chose, the one option the kernel reads;
     // a gesture carries none. BO_0311_002 BO_0311_030
     const commandOptions = body.commandOptions;
-    const chosenProfile =
-      !shape.gesture && commandOptions !== null && typeof commandOptions === "object" ? (commandOptions as Record<string, unknown>)["profile"] : undefined;
-    if (chosenProfile !== undefined && (typeof chosenProfile !== "string" || !isRecordId(chosenProfile))) {
-      event.json(400, { error: "a command's profile is a profile's id" });
+    const chosenInstruction =
+      !shape.gesture && commandOptions !== null && typeof commandOptions === "object" ? (commandOptions as Record<string, unknown>)["instruction"] : undefined;
+    if (chosenInstruction !== undefined && (typeof chosenInstruction !== "string" || !isRecordId(chosenInstruction))) {
+      event.json(400, { error: "a command's instruction is an instruction's id" });
+      return;
+    }
+    // The variation of the instruction's format chosen beside Send; the kernel
+    // refuses one that is not the format's. BO_0336_050
+    const chosenVariation =
+      !shape.gesture && commandOptions !== null && typeof commandOptions === "object" ? (commandOptions as Record<string, unknown>)["variation"] : undefined;
+    if (chosenVariation !== undefined && (typeof chosenVariation !== "string" || !isRecordId(chosenVariation))) {
+      event.json(400, { error: "a command's variation is a variation block's id" });
       return;
     }
     const started = await conductRun({
@@ -102,7 +110,8 @@ export const onPost: RequestHandler = (event) =>
       // The working mode in force on the document the run came from, which
       // the kernel refuses by name when it is not one. BO_0306_017
       ...(mode === undefined ? {} : { mode }),
-      ...(chosenProfile === undefined ? {} : { profile: chosenProfile }),
+      ...(chosenInstruction === undefined ? {} : { instruction: chosenInstruction }),
+      ...(chosenVariation === undefined ? {} : { variation: chosenVariation }),
       ...(shape.pinch === undefined ? {} : { pinch: shape.pinch }),
     });
     if (!started.ok) {

@@ -96,7 +96,7 @@
           "locatorWhenItHelps": "Give a locator — p. 12, §3, fig. 2 — when the claim rests on one place in a long work; leave it out otherwise.",
           "oneWorkOnce": "propose_work refuses a source already here and names it: cite that one.",
           "readBeforeCiting": "Read the sources with read_works before citing, and cite by the workId it answers. A source cited twice keeps its number.",
-          "sourcesAreDocuments": "A source is a document carrying the Source role, of any CSL type — a paper, a book, a web page, an interview, a conversation, a dataset, software, a report. Its body holds the person's notes on it: read it with read_document when what you cite rests on them."
+          "sourcesAreDocuments": "A source is a document using the Source structure, of any CSL type — a paper, a book, a web page, an interview, a conversation, a dataset, software, a report. Its body holds the person's notes on it: read it with read_document when what you cite rests on them."
         },
         "goal": "Cite what a claim rests on, from the sources here, where a reader would want to follow it; add a source only from a record you fetched.",
         "id": "bibliography.citing",
@@ -113,7 +113,7 @@
       "nodeId": "node:bibliography.propose_work",
       "type": "ext.tool",
       "content": {
-        "description": "Propose a source: the record fetch_record answered for it, as it came — one CSL-JSON item of any type, a paper, a web page, an interview, a dataset — and what you fetched it from. The source is staged into your proposal group as a document carrying the Source role, its fields filled from the record, never written as truth: the person accepts it with the rest. A source sharing a DOI, an ISBN or an address with one already here is refused, naming that source: cite it instead. Fetch the record first; do not draft one from memory. Once proposed, cite it by the workId this answers, which is the source document's identity.",
+        "description": "Propose a source: the record fetch_record answered for it, as it came — one CSL-JSON item of any type, a paper, a web page, an interview, a dataset — and what you fetched it from. The source is staged into your proposal group as a document using the Source structure, its fields filled from the record, never written as truth: the person accepts it with the rest. A source sharing a DOI, an ISBN or an address with one already here is refused, naming that source: cite it instead. Fetch the record first; do not draft one from memory. Once proposed, cite it by the workId this answers, which is the source document's identity.",
         "id": "bibliography.propose_work",
         "inputSchema": {
           "additionalProperties": false,
@@ -142,7 +142,7 @@
       "nodeId": "node:bibliography.read_works",
       "type": "ext.tool",
       "content": {
-        "description": "The sources at your pin — every document carrying the Source role, of any kind: each one's identity as workId, a line saying who, when and what, its record but for the abstract, and whether it holds a file, narrowed by every word of an optional query. Read it before citing: a citation names a source by the workId this answers. It stages nothing.",
+        "description": "The sources at your pin — every document using the Source structure, of any kind: each one's identity as workId, a line saying who, when and what, its record but for the abstract, and whether it holds a file, narrowed by every word of an optional query. Read it before citing: a citation names a source by the workId this answers. It stages nothing.",
         "id": "bibliography.read_works",
         "inputSchema": {
           "additionalProperties": false,
@@ -360,318 +360,6 @@
       }
     },
     {
-      "extension": "doc-block-roles",
-      "nodeId": "node:blockRole",
-      "type": "ext.blocktype",
-      "content": {
-        "id": "blockRole",
-        "name": "blockRole",
-        "optionalProperties": [
-          "description",
-          "retired",
-          "builtin",
-          "fields",
-          "formerId",
-          "sendWithPrompt",
-          "blocks"
-        ],
-        "permittedChildTypes": [],
-        "properties": {
-          "blocks": "false when blocks may not take the role: it is taken by documents alone; absent or true, blocks may take it (BO_0332). A built-in's is the release's: Keyword, Profile, Format and Source are taken by documents alone",
-          "builtin": "true for a built-in role (Keyword, Profile, Format, Source, Definition, Alias): never renamed, retired or restored",
-          "description": "what a block of this role does, in the person's words",
-          "fields": "the fields the role carries, an ordered list of {key, name, type, required, options?, default?}; key is minted once and never changes, type is text, longText, number, date, boolean, choice, reference or file",
-          "formerId": "the id the role had as a documentRole before BO_0309, by which a reader still holding it finds the role",
-          "id": "the role's identity: a UUID the shell mints, or builtin:<name> for a built-in; the node id is node:<id>",
-          "name": "the role's name, as the chip's control and the Roles category offer it",
-          "order": "the role's place among the roles, a number; the built-ins come first",
-          "retired": "true once the role is retired: nothing offers it any more, assignments stay and say so",
-          "sendWithPrompt": "on builtin:keyword alone: the field keys and offered-role ids whose words go with a prompt that includes a keyword (BO_0310)"
-        },
-        "requiredProperties": [
-          "id",
-          "name",
-          "order"
-        ],
-        "semantics": "A role (BO_0299; the one role type since BO_0309): a root node with no parent and no block flag, taken by a document or by any block in its reading order through hasBlockRole, several per subject. A role offers roles through offers, and a block may take a role offered by a role on any block above it, never on itself. A role says whether blocks may take it (blocks); the document always may. It carries fields, whose values a subject holds in a roleFields node. Retired, never deleted."
-      }
-    },
-    {
-      "extension": "doc-block-roles",
-      "nodeId": "node:documentRole",
-      "type": "ext.blocktype",
-      "content": {
-        "id": "documentRole",
-        "name": "documentRole",
-        "optionalProperties": [
-          "description",
-          "retired"
-        ],
-        "permittedChildTypes": [],
-        "properties": {
-          "description": "what a document of this role was, in the person's words",
-          "id": "the role's identity, a UUID the shell minted; the node id is node:<id>",
-          "name": "the role's name",
-          "retired": "true once the role was retired"
-        },
-        "requiredProperties": [
-          "id",
-          "name"
-        ],
-        "semantics": "A document role before BO_0309. The migration one-role-type makes each a blockRole carrying its id as formerId and retires it; nothing writes one any more. The declaration stays until every install has run the migration."
-      }
-    },
-    {
-      "extension": "doc-block-roles",
-      "nodeId": "node:roleFields",
-      "type": "ext.blocktype",
-      "content": {
-        "id": "roleFields",
-        "name": "roleFields",
-        "optionalProperties": [
-          "values",
-          "files"
-        ],
-        "permittedChildTypes": [],
-        "properties": {
-          "files": "the blob references of the file values, at the top level so the blobs stay live (binary-content.md)",
-          "id": "a UUID the shell mints; the node id is node:<id>",
-          "role": "the id of the role whose fields these are, the same role fieldsFor reaches",
-          "values": "the values, keyed by the field's key: text, a number, true/false, a YYYY-MM-DD date, a choice's option, a node id for a reference, or {hash, filename, mediaType, size} for a file"
-        },
-        "requiredProperties": [
-          "id",
-          "role"
-        ],
-        "semantics": "One block's (or document's) values for one role it takes (BO_0309): a root node with no parent and no block flag, joined to the block by fieldsOf and to the role by fieldsFor, since relations carry no properties. A value is written as the person's truth at once, or proposed by a run. It stays when the role is cleared, so taking the role again finds it."
-      }
-    },
-    {
-      "extension": "doc-block-roles",
-      "nodeId": "node:migration-bo-0309-builtin-roles",
-      "type": "ext.migration",
-      "content": {
-        "id": "migration-bo-0309-builtin-roles",
-        "migrates": [
-          "blockRole"
-        ],
-        "rationale": "BO_0309 gives every instance the built-in roles Keyword, Profile, Format and Source (BO_0308_Q5), with the fixed ids builtin:keyword, builtin:profile, builtin:format and builtin:source and builtin: true. The route answers one script creating those the instance does not hold, and nothing when it holds them all, so a person's fields and offers on a built-in are never overwritten by a release. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003).",
-        "route": "kernel/migrations/builtin-roles"
-      }
-    },
-    {
-      "extension": "doc-block-roles",
-      "nodeId": "node:migration-bo-0309-one-role-type",
-      "type": "ext.migration",
-      "content": {
-        "id": "migration-bo-0309-one-role-type",
-        "migrates": [
-          "documentRole",
-          "hasDocumentRole",
-          "blockRole",
-          "offers"
-        ],
-        "rationale": "BO_0309 makes document roles and block roles one role type. A node never changes its type, so the route answers one script that makes each documentRole a new blockRole carrying its name, description and retired flag and its old id as formerId, placed after the roles already there; re-relates each offers from it and each document's hasDocumentRole to it as the new role's offers and the document's hasBlockRole, closing the old relations; and retires the old node. Nothing is lost: block roles keep their ids and their assignments, a reader holding a former id finds the role by it, and every document and block answers the same role names. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003), on this instance and on every install that takes the release.",
-        "route": "kernel/migrations/one-role-type"
-      }
-    },
-    {
-      "extension": "doc-block-roles",
-      "nodeId": "node:migration-bo-0310-keyword-builtins",
-      "type": "ext.migration",
-      "content": {
-        "after": [
-          "migration-bo-0309-builtin-roles"
-        ],
-        "id": "migration-bo-0310-keyword-builtins",
-        "migrates": [
-          "blockRole",
-          "offers"
-        ],
-        "rationale": "BO_0310 makes Keyword offer the built-ins Definition and Alias on every instance, through offers a release makes, and sends the definition with a prompt. The built-ins themselves are created by migration-bo-0309-builtin-roles, which now holds them. The route answers one script relating the offers that do not stand, and setting sendWithPrompt to [builtin:definition] where Keyword holds none, so a person's switches are never reset by an upgrade; nothing when all stand. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003).",
-        "route": "kernel/migrations/keyword-builtins"
-      }
-    },
-    {
-      "extension": "doc-block-roles",
-      "nodeId": "node:migration-bo-0312-format-fields",
-      "type": "ext.migration",
-      "content": {
-        "after": [
-          "migration-bo-0309-builtin-roles"
-        ],
-        "id": "migration-bo-0312-format-fields",
-        "migrates": [
-          "blockRole"
-        ],
-        "rationale": "BO_0312 makes Format's release fields available on every instance: the required type choice and the schema text field. The migration preserves fields a person added and installs or repairs only the two release fields.",
-        "route": "kernel/migrations/format-fields"
-      }
-    },
-    {
-      "extension": "doc-block-roles",
-      "nodeId": "node:migration-bo-0313-source-fields",
-      "type": "ext.migration",
-      "content": {
-        "after": [
-          "migration-bo-0309-builtin-roles"
-        ],
-        "id": "migration-bo-0313-source-fields",
-        "migrates": [
-          "blockRole"
-        ],
-        "rationale": "BO_0313 makes a source a document carrying the built-in Source, its CSL record the role's fields: Kind (a required choice of every CSL type), Authors and Editors (long text, one Family, Given per line), Issued, Container, Volume, Issue, Pages, Publisher, Place, DOI, ISBN, URL, Accessed (text), Abstract (long text), Tags (text), File (file) and Fetched (text). The route answers one SET of Source's fields that installs or repairs these release fields by key and keeps every field a person added beside them; an instance where they stand answers an empty statement.",
-        "route": "kernel/migrations/source-fields"
-      }
-    },
-    {
-      "extension": "doc-block-roles",
-      "nodeId": "node:fieldsFor",
-      "type": "ext.relationtype",
-      "content": {
-        "id": "fieldsFor",
-        "name": "fieldsFor",
-        "semantics": "A roleFields node holds the values of a role: directed from the roleFields node to the blockRole. Declared by doc-block-roles under BO_0309_010."
-      }
-    },
-    {
-      "extension": "doc-block-roles",
-      "nodeId": "node:fieldsOf",
-      "type": "ext.relationtype",
-      "content": {
-        "id": "fieldsOf",
-        "name": "fieldsOf",
-        "semantics": "A roleFields node holds values for a subject: directed from the roleFields node to the block or document taking the role. Declared by doc-block-roles under BO_0309_010."
-      }
-    },
-    {
-      "extension": "doc-block-roles",
-      "nodeId": "node:hasBlockRole",
-      "type": "ext.relationtype",
-      "content": {
-        "id": "hasBlockRole",
-        "name": "hasBlockRole",
-        "semantics": "A block or a document carries a role: directed from the document node, or from any block in its reading order, to the blockRole, several per subject (BO_0309). Every block kind may carry one (BO_0299_Q8). Taken by the person as truth at once, or proposed by a run and established by the person's acceptance (BO_0308_Q4). Declared by doc-block-roles under BO_0299_011."
-      }
-    },
-    {
-      "extension": "doc-block-roles",
-      "nodeId": "node:hasDocumentRole",
-      "type": "ext.relationtype",
-      "content": {
-        "id": "hasDocumentRole",
-        "name": "hasDocumentRole",
-        "semantics": "A document carried a document role before BO_0309: the migration one-role-type relates each as a hasBlockRole from the same document and closes it; nothing writes one any more. The declaration stays until every install has run the migration."
-      }
-    },
-    {
-      "extension": "doc-block-roles",
-      "nodeId": "node:offers",
-      "type": "ext.relationtype",
-      "content": {
-        "id": "offers",
-        "name": "offers",
-        "semantics": "A role offers a role: directed from one blockRole to another, any number each way (BO_0309). A block may take a role offered by a role on itself or on any block above it in its reading order, the document counting as the top. Declared by doc-block-roles under BO_0299_011, widened by BO_0309."
-      }
-    },
-    {
-      "extension": "doc-block-roles",
-      "nodeId": "node:doc-block-roles.roles",
-      "type": "ext.skill",
-      "content": {
-        "conventions": {
-          "documentRolesOnTheDocument": "A role marked documentOnly — Keyword, Profile, Format and Source always — is taken by the document alone: propose it on the document, never on a block, and propose_roles refuses it on a block. A block's role marked notOnBlock was taken before the role became the document's alone; leave it unless the person asks you to clear it. A part that should carry a document role on its own is a block's focused work, whose document takes it.",
-          "profileSaysHow": "A profile may say how a role is written; its own blocks can carry the same roles. Where the profile speaks to a role, follow it; where it is silent, the role's description, its fields and its name are the guide.",
-          "proposeWhenAsked": "Propose a role or a value with propose_roles when the command asks for it, or when a value the command needs is missing and the words say what it is. A role or a value the person set is rewritten only on the person's word. It stands only once the person accepts it.",
-          "readRolesFirst": "Before proposing into a document, call read_document_roles once. The answer carries the document's own roles and, per block in reading order, its roles, each with its description, its fields and their values, what is missing, and what the block can take.",
-          "roleIsNotTheTypographicRole": "A block's roles are not its role in read_document: that one is the typographic role — paragraph, h1, quote. Keep the two apart.",
-          "roledBlockIsThePlace": "When the command asks for what a role is for and a block already carries that role, propose a rewrite of that block or answer from it; never insert a second block of the role. Insert one only where no block carries it; an empty roled block is asking to be written.",
-          "writeByRole": "A block's roles say what the block is for: write a Hook as a hook, a Closing as a closing that answers the hook. The role's description is the person's own account of it and outranks your idea of the word. A block carrying several roles serves each."
-        },
-        "goal": "Write a document whose blocks carry roles by those roles: each block by the roles the person gave it, the whole by the document's own; and, where the command asks for it, propose a role or a value for the person to accept.",
-        "id": "doc-block-roles.roles",
-        "outputContract": "A conclusion naming the roles you wrote under and which roles the proposed blocks serve, and any role or value you proposed; the blocks and the proposed roles and values staged into the run's group.",
-        "permittedOperations": "read_document_roles to read the roles and their values; propose_roles to propose taking or clearing a role, or a field's value; propose_document_changes to propose the words.",
-        "preconditions": [
-          "read_document_roles answers for the document. If nothing in it carries a role and the command asks for none, write it as you would any document and read nothing more here.",
-          "You can name the block you are writing into or proposing for; its roles are read by blockId from the answer."
-        ]
-      }
-    },
-    {
-      "extension": "doc-block-roles",
-      "nodeId": "node:doc-block-roles.propose_roles",
-      "type": "ext.tool",
-      "content": {
-        "description": "Propose roles for one block, or for the document when you name no block: roles to take and to clear, and values for a role's fields. It is staged into your proposals and stands only once the person accepts it. A role must be one the block can take where it stands (read_document_roles' takeable), and a value one of its field's type — a date as YYYY-MM-DD, a choice as one of its options.",
-        "id": "doc-block-roles.propose_roles",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "block": {
-              "description": "The block, as a record id; leave it out for the document's own roles.",
-              "type": "string"
-            },
-            "clear": {
-              "description": "Role ids to clear.",
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "document": {
-              "description": "The document, as a record id.",
-              "type": "string"
-            },
-            "take": {
-              "description": "Role ids to take.",
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "values": {
-              "additionalProperties": {
-                "type": "object"
-              },
-              "description": "Values by role id, then by field key.",
-              "type": "object"
-            }
-          },
-          "required": [
-            "document"
-          ],
-          "type": "object"
-        },
-        "name": "propose_roles",
-        "route": "kernel/tools/propose_roles"
-      }
-    },
-    {
-      "extension": "doc-block-roles",
-      "nodeId": "node:doc-block-roles.read_document_roles",
-      "type": "ext.tool",
-      "content": {
-        "description": "The document's own roles and each block's, in reading order, at your pin: several per block, each with its description, its fields and their values, and the missing required ones; and per block the roles it can take where it stands (takeable). What the person established, never a candidate's. Read it before proposing into a document whose blocks carry roles, and write each block by its roles: a Hook block is written as a hook.",
-        "id": "doc-block-roles.read_document_roles",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "document": {
-              "description": "The document, as a record id.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "document"
-          ],
-          "type": "object"
-        },
-        "name": "read_document_roles",
-        "route": "kernel/tools/read_document_roles"
-      }
-    },
-    {
       "extension": "documents",
       "nodeId": "node:admonition",
       "type": "ext.blocktype",
@@ -771,8 +459,6 @@
           "keywords",
           "venue",
           "citationStyle",
-          "imageBackend",
-          "profileType",
           "formatCode",
           "lineNumbers"
         ],
@@ -792,16 +478,6 @@
             "ieee",
             "apa",
             "chicago-author-date"
-          ],
-          "imageBackend": [
-            "higgsfield",
-            "openart",
-            "codex"
-          ],
-          "profileType": [
-            "instructions",
-            "image",
-            "video"
           ]
         },
         "properties": {
@@ -810,11 +486,9 @@
           "citationStyle": "the document's own citation style, by the id of a style the bibliography ships; absent, the document follows the instance's default (BO_0291_037)",
           "formatCode": "whether a settled edit of a code block, and an accepted one, is pretty-printed through the code service's formatter: absent or true means on, false means off; switched per document from the bar's Format code toggle, written by the person as their own edit (BO_0296_013)",
           "id": "the document's identity, a UUID the shell mints; the node id is node:<id>",
-          "imageBackend": "the saved generation backend for an image or a video profile — higgsfield, openart, or codex for an image alone; retained when profileType changes",
           "intention": "the marking a reader gave the whole document: the marks value of an established ext.intention declaration; unconstrained here because intention extensions are declared per instance and a permitted set in this declaration would refuse a marking the instance legitimately declares — the agent bridge refuses an unknown intention at run start",
           "keywords": "the manuscript's keywords, in order (BO_0293)",
           "lineNumbers": "whether each line of a code block is numbered in the document: absent or true means shown, false means hidden; switched per document from the bar's Line numbers toggle, written by the person as their own edit, and nothing of it reaches a run (BO_0302_003)",
-          "profileType": "the profile mode: instructions (absent means the same), image or video; image and video reveal the generation backend selector",
           "record": "the record slot carried over from the previous document type: names a record declaration; no permitted set, per the recorded non-enforcement of BO_0199_002",
           "runtime": "the runtime the document is connected to for running its code blocks, by its id; absent means none. Written by the kernel as the person's own edit (BO_0289)",
           "title": "the document's title",
@@ -1152,6 +826,19 @@
     },
     {
       "extension": "documents",
+      "nodeId": "node:migration-bo-0336-profile-generation",
+      "type": "ext.migration",
+      "content": {
+        "id": "migration-bo-0336-profile-generation",
+        "migrates": [
+          "document"
+        ],
+        "rationale": "BO_0336 moves what a picture or a video is made with from the profile to a format: the document declaration drops profileType and imageBackend in the same release. The route answers one script clearing both from every established document holding either, and nothing when none does. Nothing moves to a format: a profile names a format by the person's choice (user decision, 2026-10-02). The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003).",
+        "route": "kernel/migrations/profile-generation"
+      }
+    },
+    {
+      "extension": "documents",
       "nodeId": "node:focuses",
       "type": "ext.relationtype",
       "content": {
@@ -1210,6 +897,55 @@
       }
     },
     {
+      "extension": "instructions",
+      "nodeId": "node:migration-bo-0311-profile-in-the-chip",
+      "type": "ext.migration",
+      "content": {
+        "after": [
+          "migration-bo-0309-builtin-roles"
+        ],
+        "id": "migration-bo-0311-profile-in-the-chip",
+        "migrates": [
+          "document",
+          "hasBlockRole"
+        ],
+        "rationale": "BO_0311 chooses the profile per command in the chip, and makes Profile a built-in role every profile carries (BO_0308_Q5, BO_0308_Q7, BO_0311_Q1). The route answers one script relating every document carrying record profile that does not take builtin:profile to it, and clearing the profile slot every document still carries from before, so every chip starts at No profile; nothing when both stand. The document declaration drops profile in the same release. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003).",
+        "route": "kernel/migrations/profile-in-the-chip"
+      }
+    },
+    {
+      "extension": "instructions",
+      "nodeId": "node:migration-bo-0311-profile-record",
+      "type": "ext.migration",
+      "content": {
+        "after": [
+          "migration-bo-0311-profile-in-the-chip"
+        ],
+        "id": "migration-bo-0311-profile-record",
+        "migrates": [
+          "document"
+        ],
+        "rationale": "BO_0311_015: a document taking Profile is a profile. A document given Profile from its chip before taking the role wrote record profile carries the role without the record, so the chip, the run start and the grant do not read it as a profile. The route answers one script setting record profile on every such carrier, nothing when all hold it. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003).",
+        "route": "kernel/migrations/profile-record"
+      }
+    },
+    {
+      "extension": "instructions",
+      "nodeId": "node:migration-bo-0338-instructions-from-profiles",
+      "type": "ext.migration",
+      "content": {
+        "after": [
+          "migration-bo-0311-profile-record"
+        ],
+        "id": "migration-bo-0338-instructions-from-profiles",
+        "migrates": [
+          "document"
+        ],
+        "rationale": "BO_0338: profiles are instructions. Every document carrying record profile carries record instruction, and one still titled Untitled profile is titled Untitled instruction, so it stays unnamed. The route answers one script for every such document, nothing once none is left. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003).",
+        "route": "kernel/migrations/instructions-from-profiles"
+      }
+    },
+    {
       "extension": "keywords",
       "nodeId": "node:migration-bo-0310-merge-keyword-roles",
       "type": "ext.migration",
@@ -1236,7 +972,7 @@
       "content": {
         "conventions": {
           "mentionsAreDerived": "A mention is resolved from the words when the document is read and stored nowhere: you write the words, and the connection follows. Do not add links, marks or brackets to make one. Where a sentence must name a keyword whose words would not match it, write those words as a run carrying keyword, the keyword document's id, as a person does by typing @; it is words, never a link or an atom.",
-          "neverMark": "You never mark a document as a keyword, give it or its blocks a role, or propose a definition into a keyword's document unless asked to in that document: marking and defining are the person's acts.",
+          "neverMark": "You never mark a document as a keyword, give it or its blocks a structure, or propose a definition into a keyword's document unless asked to in that document: marking and defining are the person's acts.",
           "preferTheTitle": "Use the keyword's title in your words rather than an alias, so the mention is drawn and the glossary carries the name the person chose. A plural or a possessive of the title is fine; a different word is not the keyword.",
           "promptKeywordsArrive": "The keywords the prompt includes reach you at your start, in their own section of your instructions, with what the person chose to send of each. Write by those words; read_keywords answers the rest of the document.",
           "readKeywordsFirst": "Before proposing into a document, call read_keywords once. Where the document mentions a keyword, its definition is in the answer; where you are about to write a keyword the document does not mention yet, the instance's keywords are listed by name.",
@@ -1244,11 +980,11 @@
         },
         "goal": "Write about a keyword as the keyword's own document defines it: read the definition before writing, keep the keyword's title, and never mark a document as a keyword yourself.",
         "id": "keywords.keywords",
-        "outputContract": "A conclusion naming the keywords the proposed words are about and where their definitions were read; the blocks staged into the run's group; no keyword marked and no role assigned.",
-        "permittedOperations": "read_keywords to read the document's mentions and the instance's keywords; read_document to read a keyword's document whole when its definition is not enough; propose_document_changes to propose the words. Nothing you hold marks a keyword or assigns a role.",
+        "outputContract": "A conclusion naming the keywords the proposed words are about and where their definitions were read; the blocks staged into the run's group; no keyword marked and no structure assigned.",
+        "permittedOperations": "read_keywords to read the document's mentions and the instance's keywords; read_document to read a keyword's document whole when its definition is not enough; propose_document_changes to propose the words. Nothing you hold marks a keyword or assigns a structure.",
         "preconditions": [
           "read_keywords answers for the document. If the instance holds no keywords, write as you would any document and read nothing more here.",
-          "A keyword is a document carrying the built-in role Keyword; its definition and its aliases are its blocks carrying the built-in roles Definition and Alias."
+          "A keyword is a document using the built-in structure Keyword; its definition and its aliases are its blocks using the built-in structures Definition and Alias."
         ]
       }
     },
@@ -1287,7 +1023,7 @@
       "nodeId": "node:keywords.read_keywords",
       "type": "ext.tool",
       "content": {
-        "description": "The keywords this document mentions, in reading order at your pin — each mention's block and character range, the keyword's title, its definition and its aliases — and the names of every keyword the instance holds. Read it before writing about a keyword, and write it as its definition has it. It stages nothing, and you never mark a document as a keyword or give it a role — that is the person's act.",
+        "description": "The keywords this document mentions, in reading order at your pin — each mention's block and character range, the keyword's title, its definition and its aliases — and the names of every keyword the instance holds. Read it before writing about a keyword, and write it as its definition has it. It stages nothing, and you never mark a document as a keyword or give it a structure — that is the person's act.",
         "id": "keywords.read_keywords",
         "inputSchema": {
           "additionalProperties": false,
@@ -1441,20 +1177,20 @@
       "content": {
         "conventions": {
           "aRenditionNotABlock": "A rendition is kept on the document carrying Format: it proposes no block and changes no property. Do not describe it as a change to the document.",
-          "nameTheRoles": "Name the venue role and the paper role your profile points at. The tool reads their values by field key — template, citationStyle, authors, affiliations, keywords — and answers which it read and which were missing. A missing key is something the person sets on the role: say so, or propose the value.",
-          "onceIsEnough": "Make one rendition, read it, and say what you found. Every rendition is kept on the document and listed with your process; make another only after the document or its roles changed.",
-          "readTheAnswer": "The answer is the LaTeX source, the log's warnings, what was left out and the role fields read and missing — never the PDF. Read the omitted list first: every line names a block the paper could not carry and why. Then the missing fields. Then the warnings. Then the source, for what the venue's rules ask that the document does not give.",
-          "readTheRolesFirst": "Read the document's roles before making anything. The document carries Format (PDF), the venue and the paper; the venue and the paper are the person's own roles, named by their ids, never looked up by name. If the document carries no Format, or Format is not a PDF, propose Format on the document rather than calling the tool — never on a block: Format is taken by documents alone. A part to be formatted on its own is opened as a block's focused work, whose document takes Format.",
-          "sayItAsAProposal": "What the venue still needs goes into the document as a proposal — the missing block, a question under the section it concerns, a role value — and into your conclusion. Never edit the source: the manuscript is a projection of the record, and the record is what is corrected."
+          "nameTheRoles": "Name the venue structure and the paper structure your instruction points at. The tool reads their values by field key — template, citationStyle, authors, affiliations, keywords — and answers which it read and which were missing. A missing key is something the person sets on the structure: say so, or propose the value.",
+          "onceIsEnough": "Make one rendition, read it, and say what you found. Every rendition is kept on the document and listed with your process; make another only after the document or its structures changed.",
+          "readTheAnswer": "The answer is the LaTeX source, the log's warnings, what was left out and the structure fields read and missing — never the PDF. Read the omitted list first: every line names a block the paper could not carry and why. Then the missing fields. Then the warnings. Then the source, for what the venue's rules ask that the document does not give.",
+          "readTheRolesFirst": "Read the document's structures before making anything. The document carries Format (PDF), the venue and the paper; the venue and the paper are the person's own structures, named by their ids, never looked up by name. If the document carries no Format, or Format is not a PDF, propose Format on the document rather than calling the tool — never on a block: Format is taken by documents alone. A part to be formatted on its own is opened as a block's focused work, whose document takes Format.",
+          "sayItAsAProposal": "What the venue still needs goes into the document as a proposal — the missing block, a question under the section it concerns, a structure value — and into your conclusion. Never edit the source: the manuscript is a projection of the record, and the record is what is corrected."
         },
-        "goal": "Make a manuscript — a PDF with its LaTeX source and references — of a document carrying Format, its whole reading order, when a profile the person wrote tells you to, or when the person asks for one; read what came back and say what the venue still needs as a proposal.",
+        "goal": "Make a manuscript — a PDF with its LaTeX source and references — of a document using Format, its whole reading order, when an instruction the person wrote tells you to, or when the person asks for one; read what came back and say what the venue still needs as a proposal.",
         "id": "manuscripts.making",
-        "outputContract": "A conclusion naming the document, the venue, the outcome, which role fields were read and which were missing, what was left out and what the venue still needs; the kept rendition staged into the run's group with its files; any proposed blocks or role values staged beside it.",
-        "permittedOperations": "read_document_roles to read the document's roles and their values first. make_manuscript, the kernel's, to make and keep one rendition of the document at your pin, naming the venue role (its template and citationStyle fields) and the paper role (its authors, affiliations and keywords) the profile points at. read_document to read the blocks. propose_document_changes and propose_roles to say what the manuscript needs. Nothing you hold writes truth.",
+        "outputContract": "A conclusion naming the document, the venue, the outcome, which structure fields were read and which were missing, what was left out and what the venue still needs; the kept rendition staged into the run's group with its files; any proposed blocks or structure values staged beside it.",
+        "permittedOperations": "read_document_structures to read the document's structures and their values first. make_manuscript, the kernel's, to make and keep one rendition of the document at your pin, naming the venue structure (its template and citationStyle fields) and the paper structure (its authors, affiliations and keywords) the instruction points at. read_document to read the blocks. propose_document_changes and propose_structures to say what the manuscript needs. Nothing you hold writes truth.",
         "preconditions": [
           "The manuscripts extension is active and the instance has a typesetting service: make_manuscript is listed, and refuses in words when there is no service.",
-          "The document to make it of carries the built-in Format role with its type PDF: a manuscript is made of its whole reading order and kept on it. Format is never on a block.",
-          "No profile ships: a fresh install makes no manuscript until the person writes a profile that asks for one. The profile's words say which venue and paper roles to name."
+          "The document to make it of uses the built-in Format structure with its type PDF: a manuscript is made of its whole reading order and kept on it. Format is never on a block.",
+          "No instruction ships: a fresh install makes no manuscript until the person writes an instruction that asks for one. The instruction's words say which venue and paper structures to name."
         ]
       }
     },
@@ -1464,19 +1200,20 @@
       "type": "ext.skill",
       "content": {
         "conventions": {
-          "cost": "For Codex, proceed without a quote and say the cost is unavailable. Do not ask for a second confirmation. For a backend with an available quote, quote before generation and say the amount.",
+          "cost": "Quote before you generate and say the amount in the vendor's own words. Do not ask for a second confirmation.",
           "followJob": "A running job is not a finished picture or video. Keep collecting its existing job; never start a second job to retry collection.",
+          "formatDecides": "The format the instruction names decides what is made and with what — provider, model, ratio and quality — and the variation the person chose beside Send, when there is one. Never name a model, a provider or an option in tool arguments, and never ask the person to choose one in words: a different result needs a variation or another format.",
           "oneAtATime": "Generate at most one image or video in a Send. A second generation requires another Send.",
-          "profileChoosesBackend": "Use the backend saved in the profile. Never select another backend in tool arguments.",
           "theBlockIsThePrompt": "Use the prompt block’s words unless the person or task supplies replacement words.",
-          "videoNeedsAPicture": "A video opens on the picture above the block. Make the picture in an earlier Send with an image profile, then send the words for the motion with a video profile."
+          "videoNeedsAPicture": "A video opens on the picture above the block. Make the picture in an earlier Send under an instruction whose format makes images, then send the words for the motion under one whose format makes video."
         },
-        "goal": "Generate one image or one video under the person's selected image or video profile, then leave it in the Send's review group.",
+        "goal": "Generate one image or one video as the format the person's selected instruction names, then leave it in the Send's review group.",
         "id": "media.pictures",
         "outputContract": "A conclusion naming the generated image or video and its cost status; the pending block and its completed blob staged in the Send's review group.",
         "permittedOperations": "media.generate once in the Send, then media.collect_generation with the returned pending block and job id until it completes. The kernel admits at most one spending tool call per Send.",
         "preconditions": [
-          "The Send carries an image- or video-generation profile with an available saved backend. If its backend is signed out, tell the person to sign in to it in Settings and do not call generate.",
+          "The Send carries an instruction whose Format field names a format of type image or video. If it names none, tell the person to choose a format on the instruction and do not call generate.",
+          "The format's provider is signed in. If it is not, tell the person to sign in to it in Settings and do not call generate.",
           "A video animates the nearest picture above the block: if there is none, say so and do not call generate.",
           "The person has not said they do not want an image or a video."
         ]
@@ -1487,13 +1224,13 @@
       "nodeId": "node:media.collect_generation",
       "type": "ext.tool",
       "content": {
-        "description": "Read and collect an image job already started by media.generate. Supply its pending image block and job id. This does not start or pay for another generation.",
+        "description": "Read and collect an image or video job already started by media.generate. Supply its pending block and job id. This does not start or pay for another generation.",
         "id": "media.collect_generation",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
             "block": {
-              "description": "The pending image block id returned by media.generate.",
+              "description": "The pending image or video block id returned by media.generate.",
               "type": "string"
             },
             "job": {
@@ -1516,25 +1253,14 @@
       "nodeId": "node:media.generate",
       "type": "ext.tool",
       "content": {
-        "description": "Generate one image with this Send's image profile. The selected block must carry Format.type=image. The profile selects the backend; do not choose or override it. Use the block's words unless words is supplied. This is the one paid generation available per Send. It stages a pending image and returns a job id; call collect_generation with that job and block until it completes. Codex cost is unavailable and is not quoted.",
+        "description": "Generate one image or one video under this Send's instruction, made as the format the instruction names: its type says image or video, and its provider, model, ratio and quality — or those of the variation the person chose beside Send — say what it is made with. Name no model and no option; the format decides them. Use the block's words unless words is supplied. A video animates the nearest picture above the block. This is the one paid generation available per Send. It stages a pending image or video after the block and returns a job id; call collect_generation with that job and block until it completes. With no format on the instruction it refuses, and you tell the person to choose a format on the instruction.",
         "id": "media.generate",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
             "block": {
-              "description": "The text block whose words form the image prompt.",
+              "description": "The text block whose words form the prompt; the image or video is placed after it.",
               "type": "string"
-            },
-            "model": {
-              "description": "An offered image model for the profile-selected backend. Omit for its default; Codex uses codex-image.",
-              "type": "string"
-            },
-            "options": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "description": "Values for offered model axes.",
-              "type": "object"
             },
             "words": {
               "description": "Optional replacement prompt words.",
@@ -1553,120 +1279,26 @@
     },
     {
       "extension": "media",
-      "nodeId": "node:media.propose_generation",
-      "type": "ext.tool",
-      "content": {
-        "description": "Propose a picture or a moving picture after a block, made from that block's own words. It proposes and does not make: what you stage is a picture that does not exist yet, and a person presses to make it with the cost in front of them. You cannot spend, and no tool you hold can. Use it when a document would be clearer with a picture and you can say which block it belongs after.",
-        "id": "media.propose_generation",
-        "inputSchema": {
-          "additionalProperties": false,
-          "properties": {
-            "afterBlockId": {
-              "description": "The block the picture follows, and whose words are its prompt.",
-              "type": "string"
-            },
-            "documentId": {
-              "description": "The document, as a record id.",
-              "type": "string"
-            },
-            "kind": {
-              "description": "image or video, matching the model's own kind.",
-              "type": "string"
-            },
-            "model": {
-              "description": "The model, as the generators list them. The model decides whether a picture or a moving picture is made.",
-              "type": "string"
-            },
-            "prompt": {
-              "description": "Words to use instead of the block's own. Leave it out unless the block's words would make a poor picture.",
-              "type": "string"
-            },
-            "service": {
-              "description": "The generator: higgsfield or openart. Ask the person which they have signed in to rather than guessing.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "service",
-            "model",
-            "documentId",
-            "afterBlockId"
-          ],
-          "type": "object"
-        },
-        "name": "propose_generation",
-        "route": "kernel/tools/propose_generation"
-      }
-    },
-    {
-      "extension": "media",
       "nodeId": "node:media.quote_generation",
       "type": "ext.tool",
       "content": {
-        "description": "What a picture or a moving picture would cost, before anyone makes it. Free: nothing is spent by asking. Use it when a person wonders whether something is worth making, or before you propose one, so the cost is in front of them when they decide.",
+        "description": "What the picture or moving picture this Send's instruction would make costs, before anyone makes it: the format the instruction names, with the variation chosen beside Send, decides the service, the model and the options. Free: nothing is spent by asking. Use it before you generate, so the cost is in front of the person when they decide.",
         "id": "media.quote_generation",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
-            "kind": {
-              "description": "image or video, matching the model's own kind.",
-              "type": "string"
-            },
-            "model": {
-              "description": "The model, as the generators list them. The model decides whether a picture or a moving picture is made.",
-              "type": "string"
-            },
             "prompt": {
               "description": "The words the picture would be made from.",
-              "type": "string"
-            },
-            "service": {
-              "description": "The generator: higgsfield or openart. Ask the person which they have signed in to rather than guessing.",
               "type": "string"
             }
           },
           "required": [
-            "service",
-            "model",
             "prompt"
           ],
           "type": "object"
         },
         "name": "quote_generation",
         "route": "kernel/tools/quote_generation"
-      }
-    },
-    {
-      "extension": "profiles",
-      "nodeId": "node:migration-bo-0311-profile-in-the-chip",
-      "type": "ext.migration",
-      "content": {
-        "after": [
-          "migration-bo-0309-builtin-roles"
-        ],
-        "id": "migration-bo-0311-profile-in-the-chip",
-        "migrates": [
-          "document",
-          "hasBlockRole"
-        ],
-        "rationale": "BO_0311 chooses the profile per command in the chip, and makes Profile a built-in role every profile carries (BO_0308_Q5, BO_0308_Q7, BO_0311_Q1). The route answers one script relating every document carrying record profile that does not take builtin:profile to it, and clearing the profile slot every document still carries from before, so every chip starts at No profile; nothing when both stand. The document declaration drops profile in the same release. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003).",
-        "route": "kernel/migrations/profile-in-the-chip"
-      }
-    },
-    {
-      "extension": "profiles",
-      "nodeId": "node:migration-bo-0311-profile-record",
-      "type": "ext.migration",
-      "content": {
-        "after": [
-          "migration-bo-0311-profile-in-the-chip"
-        ],
-        "id": "migration-bo-0311-profile-record",
-        "migrates": [
-          "document"
-        ],
-        "rationale": "BO_0311_015: a document taking Profile is a profile. A document given Profile from its chip before taking the role wrote record profile carries the role without the record, so the chip, the run start and the grant do not read it as a profile. The route answers one script setting record profile on every such carrier, nothing when all hold it. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003).",
-        "route": "kernel/migrations/profile-record"
       }
     },
     {
@@ -1746,6 +1378,370 @@
       }
     },
     {
+      "extension": "structures",
+      "nodeId": "node:blockRole",
+      "type": "ext.blocktype",
+      "content": {
+        "id": "blockRole",
+        "name": "blockRole",
+        "optionalProperties": [
+          "description",
+          "retired",
+          "builtin",
+          "fields",
+          "formerId",
+          "sendWithPrompt",
+          "blocks"
+        ],
+        "permittedChildTypes": [],
+        "properties": {
+          "blocks": "false when blocks may not use the structure: it is used by documents alone; absent or true, blocks may use it (BO_0332). A built-in's is the release's: Keyword, Instruction, Format and Source are used by documents alone",
+          "builtin": "true for a built-in structure (Keyword, Instruction, Format, Source, Definition, Alias): never renamed, retired or restored",
+          "description": "what a block of this structure does, in the person's words",
+          "fields": "the fields the structure carries, an ordered list of {key, name, type, required, options?, default?}; key is minted once and never changes, type is text, longText, number, date, boolean, choice, reference or file",
+          "formerId": "the id the structure had as a documentRole before BO_0309, by which a reader still holding it finds the structure",
+          "id": "the structure's identity: a UUID the shell mints, or builtin:<name> for a built-in; the node id is node:<id>",
+          "name": "the structure's name, as the chip's control and the Structures category show it",
+          "order": "the structure's place among the structures, a number; the built-ins come first",
+          "retired": "true once the structure is retired: nothing allows it any more, assignments stay and say so",
+          "sendWithPrompt": "on builtin:keyword alone: the field keys and allowed-structure ids whose words go with a prompt that includes a keyword (BO_0310)"
+        },
+        "requiredProperties": [
+          "id",
+          "name",
+          "order"
+        ],
+        "semantics": "A structure (BO_0299; the one structure type since BO_0309): a root node with no parent and no block flag, used by a document or by any block in its reading order through hasBlockRole, several per subject. A structure allows structures through offers, and a block may use a structure allowed by a structure on any block above it, never on itself. A structure says whether blocks may use it (blocks); the document always may. It carries fields, whose values a subject holds in a roleFields node. Retired, never deleted."
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:documentRole",
+      "type": "ext.blocktype",
+      "content": {
+        "id": "documentRole",
+        "name": "documentRole",
+        "optionalProperties": [
+          "description",
+          "retired"
+        ],
+        "permittedChildTypes": [],
+        "properties": {
+          "description": "what a document of this structure was, in the person's words",
+          "id": "the structure's identity, a UUID the shell minted; the node id is node:<id>",
+          "name": "the structure's name",
+          "retired": "true once the structure was retired"
+        },
+        "requiredProperties": [
+          "id",
+          "name"
+        ],
+        "semantics": "A document structure before BO_0309. The migration one-role-type makes each a blockRole carrying its id as formerId and retires it; nothing writes one any more. The declaration stays until every install has run the migration."
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:roleFields",
+      "type": "ext.blocktype",
+      "content": {
+        "id": "roleFields",
+        "name": "roleFields",
+        "optionalProperties": [
+          "values",
+          "files"
+        ],
+        "permittedChildTypes": [],
+        "properties": {
+          "files": "the blob references of the file values, at the top level so the blobs stay live (binary-content.md)",
+          "id": "a UUID the shell mints; the node id is node:<id>",
+          "role": "the id of the structure whose fields these are, the same structure fieldsFor reaches",
+          "values": "the values, keyed by the field's key: text, a number, true/false, a YYYY-MM-DD date, a choice's option, a node id for a reference, or {hash, filename, mediaType, size} for a file"
+        },
+        "requiredProperties": [
+          "id",
+          "role"
+        ],
+        "semantics": "One block's (or document's) values for one structure it uses (BO_0309): a root node with no parent and no block flag, joined to the block by fieldsOf and to the structure by fieldsFor, since relations carry no properties. A value is written as the person's truth at once, or proposed by a run. It stays when the structure is cleared, so using the structure again finds it."
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:migration-bo-0309-builtin-roles",
+      "type": "ext.migration",
+      "content": {
+        "id": "migration-bo-0309-builtin-roles",
+        "migrates": [
+          "blockRole"
+        ],
+        "rationale": "BO_0309 gives every instance the built-in roles Keyword, Profile, Format and Source (BO_0308_Q5), with the fixed ids builtin:keyword, builtin:profile, builtin:format and builtin:source and builtin: true. The route answers one script creating those the instance does not hold, and nothing when it holds them all, so a person's fields and offers on a built-in are never overwritten by a release. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003).",
+        "route": "kernel/migrations/builtin-roles"
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:migration-bo-0309-one-role-type",
+      "type": "ext.migration",
+      "content": {
+        "id": "migration-bo-0309-one-role-type",
+        "migrates": [
+          "documentRole",
+          "hasDocumentRole",
+          "blockRole",
+          "offers"
+        ],
+        "rationale": "BO_0309 makes document roles and block roles one role type. A node never changes its type, so the route answers one script that makes each documentRole a new blockRole carrying its name, description and retired flag and its old id as formerId, placed after the roles already there; re-relates each offers from it and each document's hasDocumentRole to it as the new role's offers and the document's hasBlockRole, closing the old relations; and retires the old node. Nothing is lost: block roles keep their ids and their assignments, a reader holding a former id finds the role by it, and every document and block answers the same role names. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003), on this instance and on every install that takes the release.",
+        "route": "kernel/migrations/one-role-type"
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:migration-bo-0310-keyword-builtins",
+      "type": "ext.migration",
+      "content": {
+        "after": [
+          "migration-bo-0309-builtin-roles"
+        ],
+        "id": "migration-bo-0310-keyword-builtins",
+        "migrates": [
+          "blockRole",
+          "offers"
+        ],
+        "rationale": "BO_0310 makes Keyword offer the built-ins Definition and Alias on every instance, through offers a release makes, and sends the definition with a prompt. The built-ins themselves are created by migration-bo-0309-builtin-roles, which now holds them. The route answers one script relating the offers that do not stand, and setting sendWithPrompt to [builtin:definition] where Keyword holds none, so a person's switches are never reset by an upgrade; nothing when all stand. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003).",
+        "route": "kernel/migrations/keyword-builtins"
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:migration-bo-0312-format-fields",
+      "type": "ext.migration",
+      "content": {
+        "after": [
+          "migration-bo-0309-builtin-roles"
+        ],
+        "id": "migration-bo-0312-format-fields",
+        "migrates": [
+          "blockRole"
+        ],
+        "rationale": "BO_0312 makes Format's release fields available on every instance: the required type choice and the schema text field. The migration preserves fields a person added and installs or repairs only the two release fields.",
+        "route": "kernel/migrations/format-fields"
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:migration-bo-0313-source-fields",
+      "type": "ext.migration",
+      "content": {
+        "after": [
+          "migration-bo-0309-builtin-roles"
+        ],
+        "id": "migration-bo-0313-source-fields",
+        "migrates": [
+          "blockRole"
+        ],
+        "rationale": "BO_0313 makes a source a document carrying the built-in Source, its CSL record the role's fields: Kind (a required choice of every CSL type), Authors and Editors (long text, one Family, Given per line), Issued, Container, Volume, Issue, Pages, Publisher, Place, DOI, ISBN, URL, Accessed (text), Abstract (long text), Tags (text), File (file) and Fetched (text). The route answers one SET of Source's fields that installs or repairs these release fields by key and keeps every field a person added beside them; an instance where they stand answers an empty statement.",
+        "route": "kernel/migrations/source-fields"
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:migration-bo-0336-generation-fields",
+      "type": "ext.migration",
+      "content": {
+        "after": [
+          "migration-bo-0336-variation",
+          "migration-bo-0312-format-fields"
+        ],
+        "id": "migration-bo-0336-generation-fields",
+        "migrates": [
+          "blockRole",
+          "offers"
+        ],
+        "rationale": "BO_0336 moves what a picture or a video is made with into the format: Format's release fields gain provider, model, ratio and quality, open text fields suggesting from media's sources; Profile's gain format, an optional reference to a document carrying Format; Variation carries the same four; and Format offers Variation. The route answers one script relating the offer where it does not stand and installing or repairing those release fields by key, keeping every field a person added; nothing when all stand. Nothing migrates a profile's former type or backend: a profile names a format by the person's choice.",
+        "route": "kernel/migrations/generation-fields"
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:migration-bo-0336-variation",
+      "type": "ext.migration",
+      "content": {
+        "after": [
+          "migration-bo-0313-source-fields",
+          "migration-bo-0310-keyword-builtins"
+        ],
+        "id": "migration-bo-0336-variation",
+        "migrates": [
+          "blockRole"
+        ],
+        "rationale": "BO_0336 adds the built-in Variation (builtin:variation), a block's role offered by Format, naming another way to make a format. The route is builtin-roles', which answers one script creating the built-ins an instance does not hold, so it creates Variation with its release fields here and nothing where it stands. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003).",
+        "route": "kernel/migrations/builtin-roles"
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:migration-bo-0338-builtin-names",
+      "type": "ext.migration",
+      "content": {
+        "after": [
+          "migration-bo-0309-builtin-roles"
+        ],
+        "id": "migration-bo-0338-builtin-names",
+        "migrates": [
+          "blockRole"
+        ],
+        "rationale": "BO_0338_022: a built-in's name and description are the release's, and the release now names Profile Instruction. The route answers one script setting every built-in's stored name and description to the release's where they differ, the node and its id kept, nothing when all match. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003).",
+        "route": "kernel/migrations/builtin-names"
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:fieldsFor",
+      "type": "ext.relationtype",
+      "content": {
+        "id": "fieldsFor",
+        "name": "fieldsFor",
+        "semantics": "A roleFields node holds the values of a structure: directed from the roleFields node to the blockRole. Declared by doc-block-structures under BO_0309_010."
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:fieldsOf",
+      "type": "ext.relationtype",
+      "content": {
+        "id": "fieldsOf",
+        "name": "fieldsOf",
+        "semantics": "A roleFields node holds values for a subject: directed from the roleFields node to the block or document using the structure. Declared by doc-block-structures under BO_0309_010."
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:hasBlockRole",
+      "type": "ext.relationtype",
+      "content": {
+        "id": "hasBlockRole",
+        "name": "hasBlockRole",
+        "semantics": "A block or a document uses a structure: directed from the document node, or from any block in its reading order, to the blockRole, several per subject (BO_0309). Every block kind may carry one (BO_0299_Q8). Taken by the person as truth at once, or proposed by a run and established by the person's acceptance (BO_0308_Q4). Declared by doc-block-structures under BO_0299_011."
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:hasDocumentRole",
+      "type": "ext.relationtype",
+      "content": {
+        "id": "hasDocumentRole",
+        "name": "hasDocumentRole",
+        "semantics": "A document carried a document structure before BO_0309: the migration one-role-type relates each as a hasBlockRole from the same document and closes it; nothing writes one any more. The declaration stays until every install has run the migration."
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:offers",
+      "type": "ext.relationtype",
+      "content": {
+        "id": "offers",
+        "name": "offers",
+        "semantics": "A structure allows a structure: directed from one blockRole to another, any number each way (BO_0309). A block may use a structure allowed by a structure on itself or on any block above it in its reading order, the document counting as the top. Declared by doc-block-structures under BO_0299_011, widened by BO_0309."
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:doc-block-roles.roles",
+      "type": "ext.skill",
+      "content": {
+        "conventions": {
+          "allowedFromAbove": "A structure allows other structures: a block can use a structure that a structure used above it allows, at any depth, and a structure no structure allows on any block.",
+          "documentRolesOnTheDocument": "A structure marked documentOnly — Keyword, Instruction, Format and Source always — is used by the document alone: propose it on the document, never on a block, and propose_structures refuses it on a block. A block's structure marked notOnBlock was used before the structure became the document's alone; leave it unless the person asks you to clear it. A part that should use a document structure on its own is a block's focused work, whose document uses it.",
+          "profileSaysHow": "An instruction may say how a structure is written; its own blocks can use the same structures. Where the instruction speaks to a structure, follow it; where it is silent, the structure's description, its fields and its name are the guide.",
+          "proposeWhenAsked": "Propose a structure or a value with propose_structures when the command asks for it, or when a value the command needs is missing and the words say what it is. A structure or a value the person set is rewritten only on the person's word. It stands only once the person accepts it.",
+          "readRolesFirst": "Before proposing into a document, call read_document_structures once. The answer carries the structures the document uses and, per block in reading order, the structures it uses, each with its description, its fields and their values, what is missing, and which structures the block can use (usable).",
+          "roleIsNotTheTypographicRole": "A block's structures are not its role in read_document: that one is the typographic role — paragraph, h1, quote.",
+          "roledBlockIsThePlace": "When the command asks for what a structure is for and a block already uses that structure, propose a rewrite of that block or answer from it; never insert a second block of the structure. Insert one only where no block uses it; an empty block using a structure is asking to be written.",
+          "writeByRole": "A block's structures say what the block is for: write a Hook as a hook, a Closing as a closing that answers the hook. The structure's description is the person's own account of it and outranks your idea of the word. A block using several structures serves each."
+        },
+        "goal": "Write a document by the structures its blocks use: each block by the structures the person gave it, the whole by the document's own; and, where the command asks for it, propose a structure or a value for the person to accept.",
+        "id": "doc-block-roles.roles",
+        "outputContract": "A conclusion naming the structures you wrote under and which structures the proposed blocks serve, and any structure or value you proposed; the blocks and the proposed structures and values staged into the run's group.",
+        "permittedOperations": "read_document_structures to read the structures and their values; propose_structures to propose using or clearing a structure, or a field's value; propose_document_changes to propose the words.",
+        "preconditions": [
+          "read_document_structures answers for the document. If nothing in it uses a structure and the command asks for none, write it as you would any document and read nothing more here.",
+          "You can name the block you are writing into or proposing for; its structures are read by blockId from the answer."
+        ]
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:doc-block-roles.propose_roles",
+      "type": "ext.tool",
+      "content": {
+        "description": "Propose structures for one block, or for the document when you name no block: structures to use and to clear, and values for a structure's fields. It is staged into your proposals and stands only once the person accepts it. A structure must be one the block can use where it stands (read_document_structures' usable), and a value one of its field's type — a date as YYYY-MM-DD, a choice as one of its options.",
+        "id": "doc-block-roles.propose_roles",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "block": {
+              "description": "The block, as a record id; leave it out for the document's own structures.",
+              "type": "string"
+            },
+            "clear": {
+              "description": "Structure ids to clear.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "document": {
+              "description": "The document, as a record id.",
+              "type": "string"
+            },
+            "use": {
+              "description": "Structure ids to use.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "values": {
+              "additionalProperties": {
+                "type": "object"
+              },
+              "description": "Values by structure id, then by field key.",
+              "type": "object"
+            }
+          },
+          "required": [
+            "document"
+          ],
+          "type": "object"
+        },
+        "name": "propose_structures",
+        "route": "kernel/tools/propose_structures"
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:doc-block-roles.read_document_roles",
+      "type": "ext.tool",
+      "content": {
+        "description": "The structures the document uses and each block's, in reading order, at your pin: several per block, each with its description, its fields and their values, and the missing required ones; and per block the structures it can use where it stands (usable). What the person established, never a candidate's. Read it before proposing into a document whose blocks use structures, and write each block by its structures: a Hook block is written as a hook.",
+        "id": "doc-block-roles.read_document_roles",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {
+            "document": {
+              "description": "The document, as a record id.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "document"
+          ],
+          "type": "object"
+        },
+        "name": "read_document_structures",
+        "route": "kernel/tools/read_document_structures"
+      }
+    },
+    {
       "extension": "ui.shell",
       "nodeId": "node:attachment",
       "type": "ext.blocktype",
@@ -1791,15 +1787,15 @@
     "calliopa-base",
     "calliopa-extension",
     "code",
-    "doc-block-roles",
     "documents",
+    "instructions",
     "keywords",
     "manuscripts",
     "media",
-    "profiles",
     "publishing",
     "relations",
     "settings",
+    "structures",
     "ui.shell"
   ]
 }

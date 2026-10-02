@@ -4,9 +4,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   type ViewActivity,
+  type ViewReplay,
+  NO_REPLAY,
   type ViewAnswerAll,
   type ViewToggleRun, ViewBridgeContext, type ViewBridge, type ViewBar,
-  type ViewFocus, type ViewAgents, type ViewComposeBlock, type ViewInspector, type ViewProposed, type ViewReveal, type ViewPointing, type ViewAcross, type ViewCommandOptions } from "./view-bridge";
+  type ViewFocus, type ViewAgents, type ViewComposeBlock, type ViewInspector, type ViewProposed, type ViewReveal, type ViewPointing, type ViewAcross, type ViewCommandOptions, afterSend } from "./view-bridge";
 
 /**
  * A contributed view reads the workspace it is mounted in off the bridge:
@@ -34,6 +36,7 @@ const Host = component$<{ workspaceId: string }>(({ workspaceId }) => {
     across: useStore<ViewAcross>({ document: null, title: "", seq: 0 }),
     focus: useStore<ViewFocus>({ itemId: null, blockId: null, seq: 0 }),
     activity: useStore<ViewActivity>({ runs: [], seq: 0 }),
+    replay: useStore<ViewReplay>({ ...NO_REPLAY }),
     answerAll: useStore<ViewAnswerAll>({ itemId: null, group: null, answer: null, seq: 0 }),
     toggleRun: useStore<ViewToggleRun>({ itemId: null, key: null, seq: 0 }),
     setRunChips$: noop,
@@ -76,5 +79,23 @@ describe("the workspace on the view bridge", () => {
     await dom.render(jsx(Host, { workspaceId: "ws-4f2" }));
     const root = dom.screen as unknown as HTMLElement;
     expect(root.querySelector("[data-workspace-id]")?.getAttribute("data-workspace-id")).toBe("ws-4f2");
+  });
+});
+
+describe("options set for one send", () => {
+  it("clears them from the sent command once it is sent and keeps the rest", () => {
+    const options: ViewCommandOptions = {
+      byCommand: { "doc-1/blk-a": { instruction: "prof-9", variation: "var-1" }, "doc-1/blk-b": { variation: "var-2" } },
+      onceByCommand: { "doc-1/blk-a": ["variation"], "doc-1/blk-b": ["variation"] },
+    };
+    const sent = afterSend(options, "doc-1", "blk-a");
+    expect(sent.byCommand["doc-1/blk-a"]).toEqual({ instruction: "prof-9" });
+    expect(sent.byCommand["doc-1/blk-b"]).toEqual({ variation: "var-2" });
+    expect(sent.onceByCommand).toEqual({ "doc-1/blk-b": ["variation"] });
+  });
+
+  it("leaves a command with nothing set for one send as it was", () => {
+    const options: ViewCommandOptions = { byCommand: { "doc-1/blk-a": { instruction: "prof-9" } } };
+    expect(afterSend(options, "doc-1", "blk-a")).toBe(options);
   });
 });

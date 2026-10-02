@@ -10,12 +10,12 @@
   carries the keywords it mentions as its glossary (`calliopa-bootstrap`'s `BO_0301`, requested
   and decided by the user on 2026-09-25).
 - It is `bundled` and active on a fresh install, and costs an install nothing until a document
-  takes the built-in role *Keyword*: with none, no block is matched and nothing is drawn
+  uses the built-in structure *Keyword*: with none, no block is matched and nothing is drawn
   (`BO_0301_Q1`, proposed and in force). Its release line is `calliopa-bootstrap`'s
   `distribution.md` (`BO_0301_001`–`BO_0301_002`, `BO_0310_005`).
-- It depends on `doc-block-roles`, whose built-in roles *Keyword*, *Definition* and *Alias* mark a
+- It depends on `structures`, whose built-in structures *Keyword*, *Definition* and *Alias* mark a
   keyword and hold its definition and its aliases
-  ([Document And Block Roles](../../../doc-block-roles/docs/system/system.md)); on
+  ([Document And Block Structures](../../../structures/docs/system/system.md)); on
   `documents`, whose words are matched and whose editor draws the mention
   ([Block Document Model](../../../documents/docs/system/documents/block-document-model.md#keywords)
   holds the decisions, [Block Editor](../../../documents/docs/system/documents/block-editor.md),
@@ -33,15 +33,15 @@
 
 ## What This Extension Holds
 
-* A person marks a document as a keyword by giving it a document role; no second way of saying
+* A person marks a document as a keyword by giving it a document structure; no second way of saying
   *this document is a keyword* exists. A mention of a keyword in the words of a block is
   connected without the person doing anything at the mention. The request, 2026-09-25.
 * Matching is English and follows three rules in order: the title in every inflection wins —
   *quantum computers* reaches *Quantum computer*, *quantum computing* never does — then the
   aliases in every inflection, then, only where the first two reach nothing, the full stem
-  (`BO_0301_Q3`). Aliases are a block role, one per line (`BO_0301_Q4`).
-* A keyword's definition is the first block carrying the definition role, else the face of the
-  first focused-work child carrying it as its document role, else the first paragraph
+  (`BO_0301_Q3`). Aliases are a block structure, one per line (`BO_0301_Q4`).
+* A keyword's definition is the first block using the definition structure, else the face of the
+  first focused-work child using it as its document structure, else the first paragraph
   (`BO_0301_Q5`).
 * A run learns of mentions through this extension's tool and skill, never through the kernel's
   `read_document` (`BO_0301_Q6`).
@@ -71,16 +71,16 @@
   only (`server/stem.ts`): a suffix the stemmer strips — *computingly* — is the third rule's by
   design. Proven in `lib/match.test.ts`.
 - The reads and the interface (`BO_0301_014`, landed 2026-09-25; `server/keywords.ts`):
-  `keywordsOf()` — every document carrying *Keyword* (`builtin:keyword`) as its own, read by
-  `doc-block-roles`' `documentsCarrying`, then each read whole for its title, the lines of its
-  blocks carrying *Alias* (`builtin:alias`) and its definition, the first block carrying
-  *Definition* (`builtin:definition`), else a focused-work child carrying it, else the first
+  `keywordsOf()` — every document using *Keyword* (`builtin:keyword`) as its own, read by
+  `structures`' `documentsCarrying`, then each read whole for its title, the lines of its
+  blocks using *Alias* (`builtin:alias`) and its definition, the first block using
+  *Definition* (`builtin:definition`), else a focused-work child using it, else the first
   paragraph (`BO_0310_020`, landed 2026-09-30);
   `mentionsOf(documentId, {branch?, dataRevision?})` — the `DocumentMentionsView`: each text
   block of the reading order that is not a prompt with its mentions, and the
   keywords they name, read as truth as it stands, in a branch so a mention in an open proposal
   counts where it would land, or at a data revision — with `notKeywords`, the title of each
-  document a block names with `@` that carries *Keyword* no more, empty for one that is gone;
+  document a block names with `@` that uses *Keyword* no more, empty for one that is gone;
   and `mentionedIn(documentId)` — whether the
   document is a keyword and every document with a block in its reading order mentioning it, one
   unbounded read of every document and its text blocks matched with every keyword, so the
@@ -93,9 +93,9 @@
   glossary. This shape is the extension's contract: widening it is an ordinary change, and a field
   is never renamed under a reader.
 - [ ] BO_0301_014 (the measure) The cost of `keywordsOf` over the dogfood instance: each keyword
-      costs a document read and a roles read, so a mention read costs a handful of queries per
+      costs a document read and a structures read, so a mention read costs a handful of queries per
       keyword. Measure on the instance once a dozen keywords stand; if it shows in the editor's
-      read, fold the keyword documents' blocks and block roles into two rooted queries before any
+      read, fold the keyword documents' blocks and block structures into two rooted queries before any
       index is considered.
 - The mention in the editor (`BO_0301_015`, landed 2026-09-25; `views/provider.tsx`,
   `KeywordsProvider`): a decoration provider of the `document` kind reading the document's
@@ -109,7 +109,7 @@
   editor and opens no editor; the provider opens the keyword document in a tab through the
   bridge. A block being edited is drawn by the editor's own element, so its mentions leave with
   the edit and return with the next read. With the extension switched off nothing is written and
-  nothing is drawn. A named keyword whose document carries *Keyword* no more is drawn under its
+  nothing is drawn. A named keyword whose document uses *Keyword* no more is drawn under its
   title with *Not a keyword* in its card, and one whose document is gone as `keyword-gone`,
   muted, a press opening nothing (`BO_0310_023`).
 - Where a keyword is mentioned is said by the mentions line in its document's header
@@ -126,65 +126,65 @@
   stages nothing, and a missing or malformed document is refused `422` in words. The skill says
   to read the keywords before proposing into a document, to write about a keyword as its
   definition has it, to prefer the title over an alias, never to mark a document or assign a
-  role, and that a mention follows from the words alone.
-## Keyword Is A Built-In Role
+  structure, and that a mention follows from the words alone.
+## Keyword Is A Built-In Structure
 
 Under `calliopa-bootstrap`'s `BO_0310` (`docs/changes/BO_0310_FEAT_keyword-is-a-built-in-role.md`,
 part 2 of `BO_0308`, promoted to draft by the user on 2026-09-30 and transferred here the same
-day). *Keyword* is a built-in role, so no one chooses which role means keyword. Typing `@` in a
+day). *Keyword* is a built-in structure, so no one chooses which structure means keyword. Typing `@` in a
 sentence names a keyword through a list, and a prompt carries the chosen fields of every keyword it
-includes. It follows `BO_0309` (`doc-block-roles`' *One Role Type With Fields*). This change's
+includes. It follows `BO_0309` (`structures`' *One Structure Type With Fields*). This change's
 document stands as a member of this extension, `docs/changes/BO_0310_FEAT_keyword-is-a-built-in-role.md`,
 at the status it holds in `calliopa-bootstrap`.
 
-* *Keyword* is a built-in role, offering the built-ins *Definition* and *Alias*. The Keywords
-  section's three role choices (`BO_0301_Q2`) go, and the *Keywords* category folds into *Roles*,
+* *Keyword* is a built-in structure, offering the built-ins *Definition* and *Alias*. The Keywords
+  section's three structure choices (`BO_0301_Q2`) go, and the *Keywords* category folds into *Structures*,
   where *Keyword* lists the keywords (`BO_0308_Q5`, `BO_0308_Q11`).
 * Mentions are still found automatically. Typing `@` in the words of a block opens a list of the
   keywords, whose last entry is *Create keyword "…"*: a document carrying *Keyword*, titled with
   what was typed, named in the text (`BO_0308_Q6`).
 * A prompt carries the chosen fields of every keyword it includes, named with `@` or matched
-  automatically (`BO_0310_Q1`). Which fields go is set once, on the *Keyword* role's page, one
-  *Send with prompt* switch per field and offered role, *Definition* on by default (`BO_0310_Q2`).
+  automatically (`BO_0310_Q1`). Which fields go is set once, on the *Keyword* structure's page, one
+  *Send with prompt* switch per field and offered structure, *Definition* on by default (`BO_0310_Q2`).
 * `@` only names a keyword and never points the command at its document; `#` stays the pointing
   (`BO_0310_Q3`).
-* On upgrade, the person's own roles chosen as the keyword, definition and alias roles merge into
-  the built-ins: their fields, offered roles and assignments move over, and the old roles are
+* On upgrade, the person's own structures chosen as the keyword, definition and alias structures merge into
+  the built-ins: their fields, offered structures and assignments move over, and the old structures are
   retired (`BO_0310_Q4`).
 - A named keyword is a `keyword` run (`documents`' `BO_0310_010`), drawn, hovered and pressed as
   every mention is.
 - The built-ins in use (`BO_0310_020`, landed 2026-09-30; `server/keywords.ts`): *Keyword*,
   *Definition* and *Alias* are found by their fixed ids, `builtin:keyword`, `builtin:definition`
-  and `builtin:alias`, which `doc-block-roles` holds (`BO_0310_030`); there is nothing to choose
+  and `builtin:alias`, which `structures` holds (`BO_0310_030`); there is nothing to choose
   and nothing to set.
 - The merge (`BO_0310_021`, landed 2026-09-30; `server/merge.ts`, `mergeKeywordRoles`): the
   executable migration `migration-bo-0310-merge-keyword-roles`, route
-  `kernel/migrations/merge-keyword-roles`, after `doc-block-roles`' `keyword-builtins`, applied
-  once on every instance as it takes the release (`BO_0312_Q7`). It reads the roles the settings
+  `kernel/migrations/merge-keyword-roles`, after `structures`' `keyword-builtins`, applied
+  once on every instance as it takes the release (`BO_0312_Q7`). It reads the structures the settings
   record chose from the settings the kernel hands the call, since a callback carries no session
   (`calliopa-bootstrap`'s `BO_0312_003`, widened by `BO_0310`), each found through the catalogue by
-  its id or its former id. For each chosen role that is not a built-in and not retired: its fields
+  its id or its former id. For each chosen structure that is not a built-in and not retired: its fields
   are copied onto the built-in, a field whose name the built-in already holds kept once with its
-  values moved to the built-in's key; what it offers is offered by the built-in, a chosen role's
-  offer of another chosen role becoming nothing since the built-ins offer each other; every
+  values moved to the built-in's key; what it offers is offered by the built-in, a chosen structure's
+  offer of another chosen structure becoming nothing since the built-ins offer each other; every
   `hasBlockRole` to it is closed and related to the built-in, a subject already taking the built-in
   keeping its one; each `roleFields` node moves to the built-in (`role` and `fieldsFor`), rekeyed,
   or its values join the built-in's node where the subject has one, the built-in's own values
-  kept; and the chosen role is retired. One script, as the owner; nothing chosen, or everything
+  kept; and the chosen structure is retired. One script, as the owner; nothing chosen, or everything
   merged already, answers an empty statement. Technical decision at implementation: the settings
   record stays on the kernel's volume unread, since a migration's callback holds no session to
   remove it with and nothing reads it any more.
 - The section went (`BO_0310_022`, landed 2026-09-30): the Keywords category, `views/section.tsx`,
   the reader `keywords`, the settings module and the `/api/x/keywords/settings` route are gone.
-  The keywords are listed under *Roles*, as the documents carrying *Keyword* on its row
-  (`doc-block-roles`' `BO_0309_015`).
+  The keywords are listed under *Structures*, as the documents carrying *Keyword* on its row
+  (`structures`' `BO_0309_015`).
 - The `@` list (`BO_0310_024`, landed 2026-09-30; `views/provider.tsx`): the provider registers
   `@` in `documents`' inline triggers (`BO_0310_011`) with every keyword as an entry by title,
   found by its title and its aliases, the aliases shown beside it, and *Create keyword* last.
   Choosing writes a `keyword` run of the keyword's title and a space after it. Create posts
   `POST /api/x/keywords/keywords {title}` (`createKeyword`), which makes the document through
   `documents`' `createDocument` outside any branch and takes `builtin:keyword` on it with
-  `doc-block-roles`' `setRole`, both the person's truth at once, answering the keyword; a title of
+  `structures`' `setStructure`, both the person's truth at once, answering the keyword; a title of
   1 to 200 characters, spaces folded, else refused in words. The list is read when the document
   is read and again after a create.
 - The run-start tool (`BO_0310_025`, landed 2026-09-30; `server/tools.ts`, `promptKeywords`): the
@@ -192,9 +192,9 @@ at the status it holds in `calliopa-bootstrap`.
   `atRunStart: true`, so the kernel calls it at a command's run start and never offers it to the
   run. At the run's pin it reads the prompt block — a prompt is read here though mentions skip
   prompts — finds its mentions, named and automatic, in the order they stand, and for each keyword
-  the entries *Keyword*'s `sendWithPrompt` switches on, in the order the role page lists them:
+  the entries *Keyword*'s `sendWithPrompt` switches on, in the order the structure page lists them:
   *Definition* as the keyword's definition reads, with its fallbacks; a field of *Keyword* as the
-  keyword document's value; another offered role as the words of the blocks carrying it; each cut
+  keyword document's value; another offered structure as the words of the blocks carrying it; each cut
   to 2000 characters. It answers `section`, one line per keyword by title with its words indented
   under it, after a sentence telling the run to write each as the person defined it; and `items`,
   the keywords sent. A keyword with nothing to send is left out, and a prompt with none answers an
@@ -210,11 +210,11 @@ at the status it holds in `calliopa-bootstrap`.
   create making the keyword and naming it; *not a keyword* and gone drawn; the foot's list and
   press. `server/merge.test.ts` for the merge's one script; `server/tools.test.ts` for the tools'
   input. `tests/behavior/keywords.test.ts` over CCGW under the kernel harness, beside
-  `doc-block-roles`' suite writing the same built-in — the keywords by the built-ins; a document
+  `structures`' suite writing the same built-in — the keywords by the built-ins; a document
   mentioned at once by the plural, an alias, the stem and `@`, nothing under the code mark;
   *Mentioned in* counting the named mention; the run-start section with *Definition* on and off;
-  create; the merge of chosen roles into the built-ins with their fields, offers, assignments and
-  values and the chosen roles retired; a mention gone with its block retired, a rename followed;
+  create; the merge of chosen structures into the built-ins with their fields, offers, assignments and
+  values and the chosen structures retired; a mention gone with its block retired, a rename followed;
   the tool's answer and refusal. Two mutations — the named characters left matchable, a keyword
   growing at its edge — each failed a test. `tsc --noEmit` clean.
 - Walked 2026-10-01 on the served build, pin 3308 (`BO_0310_026`): `@quan` offered *Quantum
@@ -229,15 +229,15 @@ at the status it holds in `calliopa-bootstrap`.
 ## The Mentions In The Header
 
 - Under `documents`' `DO_0030` (set to draft by the user on 2026-10-01 and transferred the same
-  day): on a document carrying *Keyword*, the document's header carries a mentions line
+  day): on a document using *Keyword*, the document's header carries a mentions line
   ([Block Editor View](../../../documents/docs/system/documents/block-editor.md#the-document-header)),
   this extension's contribution to the `title` place (`ui.shell`'s `DO_0030_001`), standing after
-  the roles extension's rows by extension order.
+  the structures extension's rows by extension order.
 * The header's mentions line is the one place a keyword document lists where it is mentioned:
   *Mentioned in* at its foot goes. User decision, 2026-10-01 (`DO_0030_Q8`).
 - The mentions line (`DO_0030_006`, landed 2026-10-01; `views/mentions-line.tsx`, `MentionsLine`,
   contributed to the `title` place, and nothing at `end`): with `form="full"`, on a
-  document carrying *Keyword* that is mentioned anywhere, a button (`data-mentions-toggle`) saying
+  document using *Keyword* that is mentioned anywhere, a button (`data-mentions-toggle`) saying
   *Mentioned in N blocks* — *1 block* in the singular — the mentioning blocks counted over every
   document `mentionedIn` answers (`mentionCount`), read again when the document's data revision
   moves; a press unfolds under it (`data-mentions-list`) the mentioning blocks grouped by document,
@@ -247,3 +247,32 @@ at the status it holds in `calliopa-bootstrap`.
   unfolded and folded, a press opening a document, the singular, nothing on a document that is no
   keyword or is mentioned nowhere, nothing read for the compact line, and `title` the extension's
   only document place. A count mutated to count documents failed a test.
+
+## Roles Become Structures
+
+Under `calliopa-bootstrap`'s `BO_0338`, promoted to draft by the user on 2026-10-02 and transferred
+here the same day: roles become structures and profiles become instructions, with every stored
+identifier and route, and `doc-block-roles` and `profiles` become `structures` and `instructions`
+([Roles Become Structures](../../../structures/docs/system/system.md#roles-become-structures)).
+
+- *Keyword* is a built-in structure that allows *Definition* and *Alias* in what a run is told and
+  in the code (`BO_0338_070`, 2026-10-02): the `keywords.keywords` skill and `read_keywords`' description
+  say structure and *use*, the readers call `structures`' names
+  (`structuresOf`, `setStructure`, `KEYWORD_STRUCTURE`), and the manifest depends on `structures`.
+  The owner's settings keep their stored keys (`keywordRole`, `definitionRole`, `aliasRole`), and
+  the executed migration `migration-bo-0310-merge-keyword-roles` its id and route.
+- This document speaks the new terms (`BO_0338_071`, 2026-10-02): *Keyword Is A Built-In Structure*, a
+  document *using* *Keyword*, its blocks *using* *Definition* and *Alias*; the settings' stored keys
+  keep their names.
+
+## A Structure Is A Document
+
+Under `structures`' `RO_0005` (2026-10-02): every structure becomes a document and *Keyword*'s id
+becomes `structure:keyword`
+([A Structure Is A Document](../../../structures/docs/system/system.md#a-structure-is-a-document)).
+
+- [ ] RO_0005_030 Keywords follow: the merge into *Keyword* (`server/merge.ts`) moves a person's
+      structure's *Field* blocks, allows, assignments and values into *Keyword*'s document and
+      retires the merged structure; the settings and the tools read *Keyword* and its
+      *Send with prompt* entries by the new ids, a former id found through the catalogue; the
+      suites green over the documents.

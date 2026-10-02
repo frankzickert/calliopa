@@ -13,6 +13,7 @@ import type {
   ProposedTarget,
   ServerContributions,
   SettingsSection,
+  SuggestionSource,
   ViewContribution,
 } from "~/contract";
 
@@ -290,6 +291,13 @@ export interface ServerRegistry {
   readonly focusedWork: Readonly<Record<string, FocusedWorkContribution>>;
   /** The one citation resolver, with the extension that answers. BO_0291_030 */
   readonly citations?: { readonly extension: string; readonly resolve: NonNullable<ServerContributions["citations"]> };
+  /** Every suggestion source by `<ext>:<name>`, in extension order. BO_0336_052 */
+  readonly suggestionSources: Readonly<Record<string, RegisteredSuggestionSource>>;
+}
+
+/** A suggestion source with the extension answering it. BO_0336_052 */
+export interface RegisteredSuggestionSource extends SuggestionSource {
+  readonly extension: string;
 }
 
 export function buildServerRegistry(
@@ -301,8 +309,18 @@ export function buildServerRegistry(
   const proposedTargets: RegisteredProposedTargets[] = [];
   const itemGlyphs: NonNullable<ServerContributions["itemGlyphs"]>[] = [];
   const focusedWork: Record<string, FocusedWorkContribution> = {};
+  const suggestionSources: Record<string, RegisteredSuggestionSource> = {};
   let citations: ServerRegistry["citations"];
   for (const { id, contributions } of entries) {
+    // A field names a source by its qualified name, so one name answers
+    // once. BO_0336_052
+    for (const source of contributions.suggestionSources ?? []) {
+      const key = qualify(id, source.name);
+      if (suggestionSources[key] !== undefined) {
+        throw new RegistryError("suggestion_source_collision", `${id} contributes the suggestion source ${source.name} twice`);
+      }
+      suggestionSources[key] = { ...source, extension: id };
+    }
     if (contributions.citations !== undefined) {
       // One answer to how a citation reads: a second would make the same
       // document read two ways. BO_0291_030
@@ -365,6 +383,7 @@ export function buildServerRegistry(
     proposedTargets,
     itemGlyphs,
     focusedWork,
+    suggestionSources,
     ...(citations === undefined ? {} : { citations }),
   };
 }

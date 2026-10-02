@@ -53,8 +53,8 @@ export interface ProposedRead {
   documents: ProposedItem[];
   /** BO_0229_011 */
   attachments: BridgeAttachment[];
-  /** The profile the run was guided by, from its record; null for none. BO_0298_031 */
-  profile: { readonly id: string; readonly title: string } | null;
+  /** The instruction the run was guided by, from its record; null for none. BO_0298_031 BO_0338_051 */
+  instruction: { readonly id: string; readonly title: string } | null;
   /** What each extension told the run at its start, from its record. BO_0310_040 */
   context: RunContextEntry[];
   /** What the run did, in the contract's own words. CA_0058_006 */
@@ -90,10 +90,14 @@ export const InspectorPanel = component$<{
   viewId: string | undefined;
   openTarget$: QRL<(target: OpenTarget) => void>;
   acknowledge$: QRL<(id: string) => void>;
+  /** Why the replay's shortcut, pressed on a process's detail, played
+   * nothing, said in that detail. BO_0340_003 */
+  refusal?: { readonly processId: string; readonly words: string } | null;
 }>(
   ({
     registry,
     tabs,
+    refusal,
     proposed,
     inspector,
     declared,
@@ -127,27 +131,27 @@ export const InspectorPanel = component$<{
         <h3>{detail.title}</h3>
         <p data-process-state={detail.state}>{detail.state}</p>
         <p data-process-step>{detail.step ?? "no step reported"}</p>
-        {/* The profile that guided the run, named where the run's detail is
+        {/* The instruction that guided the run, named where the run's detail is
             read and nowhere else; a press opens it. BO_0298_031 */}
-        {proposed.processId === detail.id && proposed.profile !== null && (
-          <p class="process-trigger" data-process-profile={proposed.profile.id}>
-            {"Profile: "}
+        {proposed.processId === detail.id && proposed.instruction !== null && (
+          <p class="process-trigger" data-process-instruction={proposed.instruction.id}>
+            {"Instruction: "}
             <button
               type="button"
-              data-process-profile-open
+              data-process-instruction-open
               onClick$={() =>
                 openTarget$({
                   kind: DOCUMENT_KIND,
-                  itemId: proposed.profile?.id ?? "",
-                  title: proposed.profile?.title ?? "",
+                  itemId: proposed.instruction?.id ?? "",
+                  title: proposed.instruction?.title ?? "",
                 })
               }
             >
-              {proposed.profile.title}
+              {proposed.instruction.title}
             </button>
           </p>
         )}
-        {/* What each extension told the run at its start, beside the profile:
+        {/* What each extension told the run at its start, beside the instruction:
             the keywords sent, or that the extension's tool failed. BO_0310_040 */}
         {proposed.processId === detail.id &&
           proposed.context.map((entry) =>
@@ -195,6 +199,11 @@ export const InspectorPanel = component$<{
         {detail.error !== null && (
           <p class="process-error" data-process-error>
             {detail.error}
+          </p>
+        )}
+        {refusal !== undefined && refusal !== null && refusal.processId === detail.id && (
+          <p class="process-error" role="status" data-replay-refusal>
+            {refusal.words}
           </p>
         )}
         {proposed.processId === detail.id && proposed.events.length > 0 && (

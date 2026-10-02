@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
 
+import { port } from "~/server/port";
 import { withBranch } from "~/server/ccgw/branch-scope";
 import { readSession } from "~/server/session";
 import { insertBlock } from "~/extensions/documents/server/documents";
@@ -40,7 +40,7 @@ export interface Proposed {
 }
 
 /** The group one generation's proposal stands in. */
-export const generationGroup = (): string => `node:media-${randomUUID()}`;
+export const generationGroup = (): string => `node:media-${port.uuid()}`;
 
 export async function proposeGeneration(input: ProposeRequest): Promise<Proposed> {
   const person = await readSession();

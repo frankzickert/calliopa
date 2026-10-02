@@ -1,5 +1,5 @@
-import { documentsCarrying, rolesOf, setRole } from "~/extensions/doc-block-roles/server/roles";
-import { ALIAS_ROLE, DEFINITION_ROLE, KEYWORD_ROLE } from "~/extensions/doc-block-roles/lib/roles";
+import { documentsCarrying, structuresOf, setStructure } from "~/extensions/structures/server/structures";
+import { ALIAS_STRUCTURE, DEFINITION_STRUCTURE, KEYWORD_STRUCTURE } from "~/extensions/structures/lib/structures";
 import { blocksOf, CONTAINS, type TextBlockView } from "~/extensions/documents/server/assemble";
 import { createDocument, readDocument } from "~/extensions/documents/server/documents";
 import { DOCUMENT_TYPE } from "~/extensions/documents/server/vocabulary";
@@ -61,7 +61,7 @@ const aliasLines = (runs: readonly Run[]): string[] =>
 
 /** The documents carrying *Keyword* as their own, with their titles. */
 async function keywordDocuments(): Promise<GraphOutcome<{ id: string; title: string }[]>> {
-  const carrying = await documentsCarrying(KEYWORD_ROLE);
+  const carrying = await documentsCarrying(KEYWORD_STRUCTURE);
   // An instance that has not run the built-ins' migration holds no Keyword.
   if (carrying.outcome === "validationFailure") return { outcome: "success", result: [] };
   if (carrying.outcome !== "success") return carrying as GraphOutcome<never>;
@@ -80,11 +80,11 @@ export interface KeywordReading {
 export async function readKeywordDocument(id: string): Promise<GraphOutcome<KeywordReading & { readonly title: string; readonly all: Awaited<ReturnType<typeof readDocument>> }>> {
   const document = await readDocument(id);
   if (document.outcome !== "success") return document as GraphOutcome<never>;
-  const roles = await rolesOf(id);
+  const roles = await structuresOf(id);
   if (roles.outcome !== "success") return roles as GraphOutcome<never>;
   // A block carries several roles since the one role type (BO_0309_012).
-  const rolesOfBlock = new Map(roles.result.blocks.map((block) => [block.blockId, block.roles.filter((role) => role.proposed !== "role").map((role) => role.id)] as const));
-  const keyword = roles.result.roles.find((role) => role.id === KEYWORD_ROLE);
+  const rolesOfBlock = new Map(roles.result.blocks.map((block) => [block.blockId, block.structures.filter((role) => role.proposed !== "structure").map((role) => role.id)] as const));
+  const keyword = roles.result.structures.find((role) => role.id === KEYWORD_STRUCTURE);
   return {
     outcome: "success",
     result: {
@@ -108,11 +108,11 @@ async function readKeyword(id: string, title: string): Promise<GraphOutcome<Keyw
   if (read.outcome !== "success") return read as GraphOutcome<never>;
   const { blocks, rolesOfBlock } = read.result;
   const carries = (blockId: string, role: string): boolean => (rolesOfBlock.get(blockId) ?? []).includes(role);
-  const aliases = blocks.filter((block) => carries(block.blockId, ALIAS_ROLE)).flatMap((block) => aliasLines(block.runs));
+  const aliases = blocks.filter((block) => carries(block.blockId, ALIAS_STRUCTURE)).flatMap((block) => aliasLines(block.runs));
 
   let definition: readonly Run[] | null = null;
   let source: Keyword["definitionSource"] = null;
-  const defined = blocks.find((block) => carries(block.blockId, DEFINITION_ROLE));
+  const defined = blocks.find((block) => carries(block.blockId, DEFINITION_STRUCTURE));
   if (defined !== undefined) {
     definition = defined.runs;
     source = "block";
@@ -124,8 +124,8 @@ async function readKeyword(id: string, title: string): Promise<GraphOutcome<Keyw
       for (const block of whole.result.blocks) {
         const child = faces.result[block.blockId];
         if (child === undefined) continue;
-        const childRoles = await rolesOf(child.itemId);
-        if (childRoles.outcome !== "success" || !childRoles.result.roles.some((role) => role.proposed !== "role" && role.id === DEFINITION_ROLE)) continue;
+        const childRoles = await structuresOf(child.itemId);
+        if (childRoles.outcome !== "success" || !childRoles.result.structures.some((role) => role.proposed !== "structure" && role.id === DEFINITION_STRUCTURE)) continue;
         definition = child.face ?? [];
         source = "child";
         break;
@@ -133,7 +133,7 @@ async function readKeyword(id: string, title: string): Promise<GraphOutcome<Keyw
     }
   }
   if (definition === null) {
-    const paragraph = blocks.find((block) => block.role === "paragraph" && block.runs.some((run) => run.text.trim() !== "") && !carries(block.blockId, ALIAS_ROLE));
+    const paragraph = blocks.find((block) => block.role === "paragraph" && block.runs.some((run) => run.text.trim() !== "") && !carries(block.blockId, ALIAS_STRUCTURE));
     if (paragraph !== undefined) {
       definition = paragraph.runs;
       source = "paragraph";
@@ -293,7 +293,7 @@ export async function createKeyword(typed: string): Promise<GraphOutcome<{ id: s
   const created = await outsideBranch(() => createDocument({ title }));
   if (created.outcome !== "success") return created as GraphOutcome<never>;
   const documentId = created.result.documentId;
-  const taken = await setRole({ documentId, role: KEYWORD_ROLE, taken: true });
+  const taken = await setStructure({ documentId, structure: KEYWORD_STRUCTURE, taken: true });
   if (taken.outcome !== "success") return taken as GraphOutcome<never>;
   return { outcome: "success", result: { id: documentId, title, aliases: [] } };
 }

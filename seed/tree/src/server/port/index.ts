@@ -4,4 +4,10 @@
  * the device build points it at its own (`CA_0076`). CA_0074_001
  */
 export { port } from "#port";
-export type { AgentConfigFiles, Port, PortEnvName, Scope } from "./port";
+export type {
+  ConfigDirectory,
+  ConfigFiles,
+  Port,
+  PortEnvName,
+  Scope,
+} from "./port";

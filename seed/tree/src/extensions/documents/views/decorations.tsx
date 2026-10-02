@@ -1,4 +1,6 @@
-import { component$, Slot, type JSXOutput, type QRL } from "@builder.io/qwik";
+import { component$, Slot, useContext, type JSXOutput, type QRL } from "@builder.io/qwik";
+
+import { optionsOf, ViewBridgeContext } from "~/components/shell/view-bridge";
 
 import { REGISTRY } from "~/registry.gen";
 import type { BlockPlace, Decorations, DocumentPlace, DocumentPlaceForm } from "~/contract";
@@ -29,8 +31,14 @@ export const BlockDecorations = component$<{
   active: boolean;
   /** The `command` place's: sets an option on the command it is drawn in.
    * The command control hands it over; no other place has one. BO_0311_030 */
-  setOption$?: QRL<(name: string, value: string | null) => void>;
-}>(({ at, documentId, blockId, revisionId, active, setOption$ }) => (
+  setOption$?: QRL<(name: string, value: string | null, once?: boolean) => void>;
+}>(({ at, documentId, blockId, revisionId, active, setOption$ }) => {
+  // The `command` place reads the options set on its command, read here
+  // rather than by the chip, so a choice re-draws the places alone and not
+  // the command it stands in. BO_0336_051
+  const bridge = useContext(ViewBridgeContext, null);
+  const commandOptions = at === "command" && bridge !== null ? optionsOf(bridge.commandOptions, documentId, blockId) : undefined;
+  return (
   <>
     {sets().map(({ extension, decorations }) => {
       const Drawn = decorations.places[at];
@@ -42,11 +50,13 @@ export const BlockDecorations = component$<{
           revisionId={revisionId}
           active={active}
           {...(setOption$ === undefined ? {} : { setOption$ })}
+          {...(commandOptions === undefined ? {} : { commandOptions })}
         />
       );
     })}
   </>
-));
+  );
+});
 
 /**
  * The contributed providers, wrapped around the document's blocks so a

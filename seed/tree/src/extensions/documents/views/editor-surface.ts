@@ -12,7 +12,7 @@ import type { DocumentProposals } from "../server/documents";
  * and nothing else: the contract is the host's and cannot name a document.
  * The richer surface travels here instead, through a context this extension
  * exports and a decorating extension imports under its declared dependency
- * (`contribution-contract.md`), as `manuscripts` and `doc-block-roles` do.
+ * (`contribution-contract.md`), as `manuscripts` and `structures` do.
  *
  * It is deliberately narrow: what the editor knows and a decoration cannot
  * read for itself. Everything a decoration is about it reads through its own

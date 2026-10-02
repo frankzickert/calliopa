@@ -47,8 +47,8 @@ export async function probe(reach: () => Promise<unknown>): Promise<DependencySt
   }
 }
 
-/** One GET that must answer 2xx for the dependency to count as reachable. */
-export async function reachUrl(url: string): Promise<void> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`${url} answered ${response.status}`);
+/** One GET through the port that must answer 2xx for the dependency to count as reachable. */
+export async function reach(via: (path: string) => Promise<Response>, path: string): Promise<void> {
+  const response = await via(path);
+  if (!response.ok) throw new Error(`${path} answered ${response.status}`);
 }

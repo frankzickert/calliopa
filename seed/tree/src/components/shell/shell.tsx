@@ -4,6 +4,7 @@ import {
   noSerialize,
   type NoSerialize,
   useContextProvider,
+  useOnDocument,
   useSignal,
   useStore,
   useTask$,
@@ -49,15 +50,29 @@ import {
   openTabBeside,
   selectTab,
   updateTab,
+  withoutReplays,
   type RouteEntry,
   type Tab,
   type TabsState,
 } from "~/lib/tabs";
 import {
   activeProcessCount,
+  isActive,
   tabProcessState,
   type ProcessRecord,
 } from "~/lib/process";
+import {
+  isReplayId,
+  isReplayShortcut,
+  playedOf,
+  replayActivity,
+  replayExecutionRun,
+  replayProcess,
+  replaySchedule,
+  replayTabId,
+  type ReplayRun,
+} from "~/lib/replay";
+import { playSteps, stopSteps } from "~/lib/replay-player";
 import { endedForDocuments } from "~/lib/ended-processes";
 import { tabUnnamed } from "~/lib/library";
 import {
@@ -170,6 +185,8 @@ import {
   type ViewMessage,
   type ViewProposed,
   type ViewActivity,
+  type ViewReplay,
+  NO_REPLAY,
   type ViewAnswerAll,
   type ViewToggleRun,
   type RunChip,
@@ -178,6 +195,7 @@ import {
   type ViewPointing,
   type ViewAcross,
   type ViewCommandOptions,
+  afterSend,
   commandKey,
   withOption,
 } from "./view-bridge";
@@ -192,7 +210,7 @@ import {
   withEvents,
   type FollowedRun,
 } from "~/lib/followed-runs";
-import { documentOf } from "~/lib/command-target";
+import { DOCUMENT_KIND, documentOf } from "~/lib/command-target";
 import { RunChips } from "./run-chips";
 import "./shell.css";
 
@@ -409,6 +427,20 @@ export const Shell = component$<{
   /** The reader's runs aimed at documents, as they go. BO_0265_007
    * BO_0269_014 */
   const activity = useStore<ViewActivity>({ runs: [], seq: 0 });
+  /**
+   * A finished run played back in a tab of its own (`BO_0340_004`): what the
+   * replay's view reads, and beside it the run, how many of its steps have
+   * played, the original process's title, when the replay started, and the
+   * last refusal the shortcut met, said in the detail it was pressed in.
+   */
+  const replay = useStore<ViewReplay>({ ...NO_REPLAY });
+  const player = useStore<{
+    run: ReplayRun | null;
+    played: number;
+    title: string;
+    startedAt: number;
+    refusal: { processId: string; words: string } | null;
+  }>({ run: null, played: 0, title: "", startedAt: 0, refusal: null });
   /** The open run groups each document's view reported, for the chips above
    * the command field, and the last answer pressed on one. BO_0265_008 */
   const runChips = useStore<{ byItem: Record<string, readonly RunChip[]> }>({ byItem: {} });
@@ -445,7 +477,7 @@ export const Shell = component$<{
     tabs: workspace.tabs,
     activeTabId: workspace.activeTabId,
   });
-  const proposed = useStore<ProposedRead>({ processId: null, documents: [], attachments: [], profile: null, context: [], events: [] });
+  const proposed = useStore<ProposedRead>({ processId: null, documents: [], attachments: [], instruction: null, context: [], events: [] });
   /**
    * The runs of the document in the active tab, for the inspector's
    * *Execution* section: read when the tab changes, when a run this shell
@@ -504,11 +536,13 @@ export const Shell = component$<{
       // The captured signal is read in the body, not in a default parameter:
       // the optimizer only lifts identifiers it finds inside the closure.
       const preferredViews = nextPreferred ?? preferred.value;
+      // A replay's tab is never stored: a reload leaves none. BO_0340_004
+      const stored = withoutReplays(nextTabs);
       const response = await fetch(`/api/workspaces/${workspace.id}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          ...nextTabs,
+          ...stored,
           layout: nextLayout,
           preferredViews,
         }),
@@ -733,6 +767,21 @@ export const Shell = component$<{
     }
   });
 
+  /** What `command` places set on each command, sent with it. BO_0311_030
+   * Declared before `sendCommand$`, which clears it, so the closure captures
+   * it in the production build. CA_0078_001 */
+  const commandOptions = useStore<ViewCommandOptions>({ byCommand: {} });
+  const setCommandOption$ = $((itemId: string, blockId: string, name: string, value: string | null, once?: boolean) => {
+    const key = commandKey(itemId, blockId);
+    commandOptions.byCommand = { ...commandOptions.byCommand, [key]: withOption(commandOptions.byCommand[key] ?? {}, name, value) };
+    // An option for one send is cleared once the command is sent. BO_0336_051
+    const held = (commandOptions.onceByCommand?.[key] ?? []).filter((candidate) => candidate !== name);
+    commandOptions.onceByCommand = {
+      ...commandOptions.onceByCommand,
+      [key]: once === true && value !== null && value !== "" ? [...held, name] : held,
+    };
+  });
+
   /**
    * Sends a command written in a block of a document. The marks it carries
    * are the ones the view last reported for the document, copied at the
@@ -774,13 +823,19 @@ export const Shell = component$<{
         // The working mode the command carries. BO_0306_017 DO_0025_008
         ...(mode === undefined ? {} : { mode }),
         ...(command.attachments.length === 0 ? {} : { attachments: command.attachments }),
-        // What the command's places set on it — the profile its chip chose.
+        // What the command's places set on it — the instruction its chip chose.
         // An option no one set is not sent. BO_0311_030
         ...(command.options === undefined || Object.keys(command.options).length === 0 ? {} : { commandOptions: command.options }),
       },
       command.itemId,
     );
     run.sending = false;
+    // What was set for one send goes with it. BO_0336_051
+    if (started.ok) {
+      const sent = afterSend(commandOptions, command.itemId, command.source.block);
+      commandOptions.byCommand = sent.byCommand;
+      commandOptions.onceByCommand = sent.onceByCommand ?? {};
+    }
     return started;
   });
 
@@ -840,12 +895,6 @@ export const Shell = component$<{
   });
 
   const chooseAgent$ = $((agent: string) => chooseAgent(run, agent));
-  /** What `command` places set on each command, sent with it. BO_0311_030 */
-  const commandOptions = useStore<ViewCommandOptions>({ byCommand: {} });
-  const setCommandOption$ = $((itemId: string, blockId: string, name: string, value: string | null) => {
-    const key = commandKey(itemId, blockId);
-    commandOptions.byCommand = { ...commandOptions.byCommand, [key]: withOption(commandOptions.byCommand[key] ?? {}, name, value) };
-  });
   /** The next command's speed; the kernel remembers it for the person when a
    * run starts with it. BO_0269_015 */
   const chooseSpeed$ = $((speed: Speed) => {
@@ -875,17 +924,23 @@ export const Shell = component$<{
     proposed.processId = selected;
     proposed.documents = [];
     proposed.attachments = [];
-    proposed.profile = null;
+    proposed.instruction = null;
     proposed.context = [];
     proposed.events = [];
     if (selected === null) return;
+    // A replay's entry reads nothing: its events are the replay's, as far as
+    // it has played. BO_0340_004
+    if (isReplayId(selected)) {
+      if (player.run !== null) proposed.events = [...playedOf(replaySchedule(player.run), player.played).events];
+      return;
+    }
 
     const [response, attached, guided, told] = await Promise.all([
       fetch(`/api/processes/${selected}/proposals`),
       // What the run was sent with, from its own record. BO_0229_011
       fetch(`/api/processes/${selected}/attachments`),
-      // The profile that guided it, from the same record. BO_0298_031
-      fetch(`/api/processes/${selected}/profile`),
+      // The instruction that guided it, from the same record. BO_0298_031 BO_0338_051
+      fetch(`/api/processes/${selected}/instruction`),
       // What each extension told it at its start, from the same record. BO_0310_040
       fetch(`/api/processes/${selected}/context`),
     ]);
@@ -896,7 +951,7 @@ export const Shell = component$<{
       proposed.attachments = (await attached.json()) as BridgeAttachment[];
     }
     if (guided.ok && selectedProcess(registry.selection, tabs.activeTabId) === selected) {
-      proposed.profile = (await guided.json()) as { id: string; title: string } | null;
+      proposed.instruction = (await guided.json()) as { id: string; title: string } | null;
     }
     if (told.ok && selectedProcess(registry.selection, tabs.activeTabId) === selected) {
       proposed.context = (await told.json()) as RunContextEntry[];
@@ -913,7 +968,7 @@ export const Shell = component$<{
     const selected = track(() => selectedProcess(registry.selection, tabs.activeTabId));
     const items = track(() => registry.items);
     const record = items.find((process) => process.id === selected);
-    if (selected === null || record?.runId === undefined) return;
+    if (selected === null || record?.runId === undefined || isReplayId(selected)) return;
     const read = proposed.processId === selected && proposed.events.length > 0;
     const going = record.state === "queued" || record.state === "running";
     if (read && !going) return;
@@ -929,6 +984,100 @@ export const Shell = component$<{
     const kept = keepOpenTabs(registry.selection, open);
     if (kept !== registry.selection) registry.selection = kept;
   });
+
+  /** A replay's entry, selected, shows its events as they arrive. BO_0340_004 */
+  useTask$(({ track }) => {
+    const played = track(() => player.played);
+    const selected = track(() => selectedProcess(registry.selection, tabs.activeTabId));
+    if (player.run === null || !isReplayId(selected)) return;
+    proposed.processId = selected;
+    proposed.events = [...playedOf(replaySchedule(player.run), played).events];
+  });
+  /** Closing a replay's tab ends the replay, its entry with it. BO_0340_004 */
+  useTask$(({ track }) => {
+    const open = track(() => tabs.tabs);
+    const tabId = replay.tabId;
+    if (tabId === null || open.some((tab) => tab.id === tabId)) return;
+    stopSteps(tabId);
+    Object.assign(replay, { ...NO_REPLAY, seq: replay.seq + 1 });
+    player.run = null;
+    player.played = 0;
+  });
+  /**
+   * Plays a finished run back (`BO_0340_004`): reads what its record holds,
+   * opens a tab beside the active one on its document — closing a replay
+   * already playing — and plays the schedule into the replay's view and its
+   * transient entry. A refusal is said in the detail the key was pressed in.
+   */
+  const startReplay$ = $(async (record: ProcessRecord) => {
+    player.refusal = null;
+    const runId = record.runId ?? "";
+    let response: Response;
+    try {
+      response = await fetch(`/api/runs/${encodeURIComponent(runId)}/replay`);
+    } catch {
+      player.refusal = { processId: record.id, words: "The run could not be read: the server could not be reached." };
+      return;
+    }
+    const body = (await response.json().catch(() => ({}))) as ReplayRun & { error?: string };
+    if (!response.ok) {
+      player.refusal = { processId: record.id, words: body.error ?? "This run could not be replayed." };
+      return;
+    }
+    const run: ReplayRun = body;
+    const tabId = replayTabId(run.runId);
+    let next: TabsState = tabs;
+    if (replay.tabId !== null) {
+      stopSteps(replay.tabId);
+      next = closeTab(next, replay.tabId);
+    }
+    // The document's own tab gives the replay's its kind, view and title.
+    const own = next.tabs.find((tab) => tab.itemId === run.document && tab.replay === undefined);
+    const kind = own?.kind ?? DOCUMENT_KIND;
+    next = openTabBeside(next, {
+      id: tabId,
+      kind,
+      title: own?.title ?? record.itemLabel ?? record.title,
+      itemId: run.document,
+      viewType: own?.viewType ?? preferredView(REGISTRY, preferred.value, run.document, kind).id,
+      selection: null,
+      drawerContext: kind,
+      unsaved: false,
+      replay: run.runId,
+    });
+    Object.assign(replay, { tabId, itemId: run.document, runId: run.runId, block: run.block, words: null, run: null, seq: replay.seq + 1 });
+    player.run = run;
+    player.played = 0;
+    player.title = record.title;
+    player.startedAt = Date.now();
+    tabs.tabs = next.tabs;
+    tabs.activeTabId = next.activeTabId;
+    const steps = replaySchedule(run);
+    playSteps(tabId, steps, (count) => {
+      if (replay.tabId !== tabId) return;
+      const played = playedOf(steps, count);
+      player.played = count;
+      replay.words = played.words;
+      replay.run = replayActivity(run, played);
+      replay.seq += 1;
+    });
+  });
+  /**
+   * The replay's shortcut, named nowhere: `Ctrl+Alt+R` (`Cmd+Alt+R` on a
+   * Mac) while an ended run's detail is open in the *Execution* section. A
+   * run still going is left alone. BO_0340_003
+   */
+  useOnDocument(
+    "keydown",
+    $((event: KeyboardEvent) => {
+      if (!isReplayShortcut(event)) return;
+      const selected = selectedProcess(registry.selection, tabs.activeTabId);
+      const record = registry.items.find((process) => process.id === selected);
+      if (record?.runId === undefined || isActive(record.state)) return;
+      event.preventDefault();
+      void startReplay$(record);
+    }),
+  );
 
   const acknowledge$ = $(async (id: string) => {
     const response = await fetch(`/api/processes/${id}/acknowledge`, {
@@ -1330,6 +1479,7 @@ export const Shell = component$<{
     pointing,
     across,
     activity,
+    replay,
     answerAll,
     toggleRun,
     setRunChips$: $((itemId: string, chips: readonly RunChip[]) => {
@@ -1503,6 +1653,20 @@ export const Shell = component$<{
   const activeView = active
     ? resolveView(REGISTRY, active.kind, active.viewType).view
     : undefined;
+  // A replay's entry, while one plays: its tab's run of the document and its
+  // transient process, beside the registry's and never in it. BO_0340_004
+  const replayPlayed = player.run === null ? null : playedOf(replaySchedule(player.run), player.played);
+  const replayRecord =
+    player.run === null || replayPlayed === null
+      ? null
+      : replayProcess(player.run, replayPlayed, {
+          title: player.title,
+          workspaceId: workspace.id,
+          itemKind: active?.kind ?? DOCUMENT_KIND,
+          startedAt: new Date(player.startedAt).toISOString(),
+        });
+  const onReplay = active !== undefined && active.replay !== undefined && active.id === replay.tabId && replayRecord !== null;
+  const shownRegistry: ProcessRegistry = replayRecord === null ? registry : { items: [...registry.items, replayRecord], selection: registry.selection };
 
   return (
     <>
@@ -1947,7 +2111,8 @@ export const Shell = component$<{
             </button>
             <h2>Inspector</h2>
             <InspectorPanel
-              registry={registry}
+              registry={shownRegistry}
+              refusal={player.refusal}
               tabs={tabs}
               proposed={proposed}
               inspector={inspector}
@@ -1964,10 +2129,14 @@ export const Shell = component$<{
             <ExecutionSection
               itemId={documentOf(active)}
               selection={active?.selection ?? null}
-              read={execution}
-              processes={registry.items.map(executionProcess)}
+              read={
+                onReplay && player.run !== null && replayPlayed !== null
+                  ? { itemId: player.run.document, runs: [replayExecutionRun(player.run, replayPlayed, player.startedAt)], error: null }
+                  : execution
+              }
+              processes={(onReplay ? shownRegistry : registry).items.map(executionProcess)}
               selected={selectedProcess(registry.selection, tabs.activeTabId)}
-              chips={runChips.byItem[documentOf(active) ?? ""] ?? []}
+              chips={chipsFor(runChips.byItem, active)}
               answerAll={answerAll}
               toggleRun={toggleRun}
               layout={layout}

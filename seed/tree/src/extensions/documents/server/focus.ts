@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
 
+import { port } from "~/server/port";
 import type { ChildFace, ChildPlan, FocusedWorkContribution } from "~/contract";
 import { orderBetween } from "~/lib/order";
 import { runsText } from "~/lib/runs";
@@ -55,8 +55,8 @@ async function planDocumentChild(input: {
   if (block === undefined) return refuse("unknownBlock", `Block ${input.blockId} is not in this document.`);
   if (block.kind !== "text") return refuse("blockKind", `A ${block.kind} block does not open as focused work.`);
   const title = childTitle(runsText(block.runs));
-  const documentId = randomUUID();
-  const blockId = randomUUID();
+  const documentId = port.uuid();
+  const blockId = port.uuid();
   const parameters: Record<string, unknown> = { cd: nodeRef(documentId), cb: nodeRef(blockId) };
   const statements = [
     `CREATE (d:${DOCUMENT_TYPE} {${properties("d", { id: documentId, title }, parameters)}})`,

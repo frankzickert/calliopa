@@ -1,4 +1,4 @@
-import { graphEnv } from "./ccgw/env";
+import { port } from "./port";
 import { forwardedCookie } from "./request-context";
 
 /** Who a request is signed in as: a name and a class, never a credential. */
@@ -21,7 +21,7 @@ export async function readSession(): Promise<Person | null> {
   const cookie = forwardedCookie();
   if (cookie === undefined) return null;
   try {
-    const response = await fetch(`${graphEnv().kernelUrl}/__kernel/session`, { headers: { cookie } });
+    const response = await port.kernel("/__kernel/session", { headers: { cookie } });
     if (!response.ok) return null;
     const body = (await response.json()) as { name?: unknown; class?: unknown; owner?: unknown };
     if (typeof body.name !== "string" || body.name === "") return null;

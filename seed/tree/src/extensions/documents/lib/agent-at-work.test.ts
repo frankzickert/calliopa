@@ -17,6 +17,8 @@ import {
   shownAlone,
   summaryWords,
   toggledGroup,
+  replayShown,
+  typedInto,
 } from "./agent-at-work";
 
 const item = (kind: string, member: string, extra: Partial<ProposedChange> = {}): ProposedChange => ({
@@ -251,5 +253,32 @@ describe("the agent at work in the document", () => {
         { runId: "arun-quiet", agent: "codex", running: true, events: [read([])] },
       ]),
     ).toEqual(["node:run-live"]);
+  });
+});
+
+describe("a replayed run in the document", () => {
+  const proposals: DocumentProposals = {
+    documentId: "doc-1",
+    unanswered: 0,
+    groups: [{ groupId: "node:run-a", items: [], stagedBy: [], proposer: { kind: "agent", agent: "codex" } as never }],
+  };
+  const staged = [item("replace", "node:blk-a"), item("insert", "node:blk-n"), item("remove", "node:blk-b")];
+  const stage = (action: string, block: string): DocumentActivity => ({ document: "doc-1", scope: "blocks", action, blocks: [block], group: "node:run-a" });
+
+  it("Given the replay has reached some stagings, Then only their items stand, counted, in their group", () => {
+    const running = [{ runId: "replay:r1", agent: "codex", running: true, events: [read(["blk-a"]), stage("replace", "blk-a")] }];
+    const shown = replayShown(proposals, staged, running);
+    expect(shown.groups[0]?.items.map((entry) => entry.kind)).toEqual(["replace"]);
+    expect(shown.unanswered).toBe(1);
+    const all = replayShown(proposals, staged, [{ ...running[0]!, running: false, events: [...running[0]!.events, stage("insert", "blk-n"), stage("remove", "blk-b")] }]);
+    expect(all.groups[0]?.items.map((entry) => entry.kind)).toEqual(["replace", "insert", "remove"]);
+    // A read of a block is no staging of it.
+    expect(replayShown(proposals, staged, [{ ...running[0]!, events: [read(["blk-n"])] }]).groups[0]?.items).toEqual([]);
+  });
+
+  it("Given words typed so far, Then the block sent from carries them and every other block stands", () => {
+    const blocks = [{ blockId: "blk-a", runs: ["A"] }, { blockId: "blk-b", runs: ["B"] }];
+    const typed = typedInto(blocks, "node:blk-a", "ti", (block, words) => ({ ...block, runs: [words] }));
+    expect(typed).toEqual([{ blockId: "blk-a", runs: ["ti"] }, { blockId: "blk-b", runs: ["B"] }]);
   });
 });

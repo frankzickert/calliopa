@@ -1,23 +1,23 @@
-import { randomUUID } from "node:crypto";
 
+import { port } from "~/server/port";
 import { CONTAINS } from "~/extensions/documents/server/assemble";
 import { blockContentFor } from "~/extensions/documents/server/documents";
 import {
   FIELDS_FOR,
   FIELDS_OF,
-  HAS_BLOCK_ROLE,
-  ROLE_FIELDS_TYPE,
-  SOURCE_ROLE,
+  HAS_BLOCK_STRUCTURE,
+  STRUCTURE_FIELDS_TYPE,
+  SOURCE_STRUCTURE,
   type FieldValue,
   type FileValue,
-} from "~/extensions/doc-block-roles/lib/roles";
+} from "~/extensions/structures/lib/structures";
 import { orderBetween } from "~/lib/order";
 import { currentBranch } from "~/server/ccgw/branch-scope";
 import { blobReference, objectIdOfHash, type BlobReference } from "~/server/ccgw/blobs";
 import { query, type ReadNode, type ReadResult } from "~/server/ccgw/client";
 import { bareId, nodeRef } from "~/server/ccgw/nodes";
 import { commit } from "~/server/ccgw/script";
-import type { GraphOutcome } from "~/server/outcome";
+import { respond, type GraphOutcome, type OutcomeResponse } from "~/server/outcome";
 
 import { SOURCE_RECORD, duplicateOf, fieldsOfRecord, readWorkRecord, recordOfSource, type WorkRecord } from "../lib/work";
 
@@ -31,7 +31,7 @@ import { SOURCE_RECORD, duplicateOf, fieldsOfRecord, readWorkRecord, recordOfSou
  * and a run only ever proposes one. The identifier is the identity for
  * duplicates: a DOI, an ISBN or a URL a source already holds adds nothing and
  * answers the existing source. A source's fields are edited where every
- * role's are, in the inspector (`doc-block-roles`), and it is deleted as the
+ * role's are, in the inspector (`structures`), and it is deleted as the
  * document it is.
  */
 
@@ -70,7 +70,7 @@ function sourceValues(read: ReadResult | null): Map<string, { readonly nodeId: s
   for (const relation of read.relations) {
     if (relation.type !== FIELDS_OF || relation.validity.status !== "active" || relation.to.nodeId === undefined) continue;
     const node = byId.get(relation.fromNodeId);
-    if (node === undefined || contentOf(node)["_type"] !== ROLE_FIELDS_TYPE || contentOf(node)["role"] !== SOURCE_ROLE) continue;
+    if (node === undefined || contentOf(node)["_type"] !== STRUCTURE_FIELDS_TYPE || contentOf(node)["role"] !== SOURCE_STRUCTURE) continue;
     const values = contentOf(node)["values"];
     out.set(relation.to.nodeId, {
       nodeId: node.id,
@@ -132,6 +132,20 @@ export async function readWork(workId: string): Promise<GraphOutcome<WorkView>> 
   return { outcome: "success", result: work };
 }
 
+/**
+ * A source's read as its routes answer it: a document that is no source is an
+ * ordinary answer, `200` with `noResult`, rather than a refusal, since a
+ * source's places ask it of every document opened and the browser logs every
+ * `4xx` as a failed request (`BI_0001`). Every other outcome answers as
+ * `respond` answers it.
+ */
+export function sourceAnswer<T>(outcome: GraphOutcome<T>): OutcomeResponse<T> {
+  if (outcome.outcome === "validationFailure" && outcome.failures.some((failure) => failure.rule === "unknownWork")) {
+    return { status: 200, body: { outcome: "noResult", detail: outcome.failures[0]?.detail ?? "not a source" } };
+  }
+  return respond(outcome);
+}
+
 /** The live blob references a set of values holds, which CCGW keeps a blob
  * alive by at the node's top level (`binary-content.md`). */
 export function filesOf(values: Readonly<Record<string, FieldValue>>): BlobReference[] {
@@ -152,7 +166,7 @@ export interface SourceIds {
   readonly fieldsId: string;
 }
 
-export const mintSourceIds = (): SourceIds => ({ documentId: randomUUID(), blockId: randomUUID(), fieldsId: randomUUID() });
+export const mintSourceIds = (): SourceIds => ({ documentId: port.uuid(), blockId: port.uuid(), fieldsId: port.uuid() });
 
 /**
  * The statements that write one source document (`BO_0313_020`): the
@@ -180,20 +194,20 @@ export function sourceStatements(
     [`${prefix}b_order`]: block["order"],
     [`${prefix}b_runs`]: block["runs"],
     [`${prefix}f_id`]: ids.fieldsId,
-    [`${prefix}f_role`]: SOURCE_ROLE,
+    [`${prefix}f_role`]: SOURCE_STRUCTURE,
     [`${prefix}f_values`]: values,
     [`${prefix}f_files`]: filesOf(values),
     [`${prefix}dref`]: nodeRef(ids.documentId),
     [`${prefix}bref`]: nodeRef(ids.blockId),
     [`${prefix}fref`]: nodeRef(ids.fieldsId),
-    [`${prefix}rref`]: nodeRef(SOURCE_ROLE),
+    [`${prefix}rref`]: nodeRef(SOURCE_STRUCTURE),
   });
   return [
     `CREATE (${prefix}d:${DOCUMENT_TYPE} {id: $${prefix}d_id, title: $${prefix}d_title, record: $${prefix}d_record${status}})`,
     `CREATE (${prefix}b:text {id: $${prefix}b_id, order: $${prefix}b_order, runs: $${prefix}b_runs${status}})`,
     `RELATE ${prefix}dref -[${prefix}c:${CONTAINS}]-> ${prefix}bref`,
-    `RELATE ${prefix}dref -[${prefix}h:${HAS_BLOCK_ROLE}]-> ${prefix}rref`,
-    `CREATE (${prefix}f:${ROLE_FIELDS_TYPE} {id: $${prefix}f_id, role: $${prefix}f_role, values: $${prefix}f_values, files: $${prefix}f_files${status}})`,
+    `RELATE ${prefix}dref -[${prefix}h:${HAS_BLOCK_STRUCTURE}]-> ${prefix}rref`,
+    `CREATE (${prefix}f:${STRUCTURE_FIELDS_TYPE} {id: $${prefix}f_id, role: $${prefix}f_role, values: $${prefix}f_values, files: $${prefix}f_files${status}})`,
     `RELATE ${prefix}fref -[${prefix}fo:${FIELDS_OF}]-> ${prefix}dref`,
     `RELATE ${prefix}fref -[${prefix}ff:${FIELDS_FOR}]-> ${prefix}rref`,
   ];
@@ -264,11 +278,11 @@ export async function fillWork(input: {
   };
   const statements = ["SET d.title = $d_title"];
   if (stored === undefined) {
-    const id = randomUUID();
+    const id = port.uuid();
     const status = currentBranch() === undefined ? ', status: "established"' : "";
-    Object.assign(parameters, { f_id: id, f_role: SOURCE_ROLE, fref: nodeRef(id), sref: nodeRef(input.workId), rref: nodeRef(SOURCE_ROLE) });
+    Object.assign(parameters, { f_id: id, f_role: SOURCE_STRUCTURE, fref: nodeRef(id), sref: nodeRef(input.workId), rref: nodeRef(SOURCE_STRUCTURE) });
     statements.push(
-      `CREATE (f:${ROLE_FIELDS_TYPE} {id: $f_id, role: $f_role, values: $f_values, files: $f_files${status}})`,
+      `CREATE (f:${STRUCTURE_FIELDS_TYPE} {id: $f_id, role: $f_role, values: $f_values, files: $f_files${status}})`,
       `RELATE fref -[fo:${FIELDS_OF}]-> sref`,
       `RELATE fref -[ff:${FIELDS_FOR}]-> rref`,
     );

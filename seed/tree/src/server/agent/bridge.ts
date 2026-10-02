@@ -1,7 +1,7 @@
 import type { CommandTarget } from "~/lib/command-target";
 import type { SentMark } from "~/lib/execution";
 import type { ActiveRuns, HermesModel } from "~/lib/connections";
-import { graphEnv } from "../ccgw/env";
+import { port } from "../port";
 import { forwardedCookie } from "../request-context";
 import type { RunEvent } from "./run-events";
 
@@ -58,15 +58,18 @@ export interface BridgeRun {
   readonly source?: { readonly block: string; readonly revisionId: string };
   readonly touched?: readonly string[];
   readonly references?: readonly SentMark[];
-  /** The profile the run start read for the command, as its chip chose it,
-   * by id and title; the words it received are the profile as
+  /** The instruction the run start read for the command, as its chip chose it,
+   * by id and title; the words it received are the instruction as
    * established at `pin`. Absent when none was chosen. BO_0298_002 */
-  readonly profile?: { readonly id: string; readonly title: string };
+  readonly instruction?: { readonly id: string; readonly title: string };
   /** What each extension's run-start tool sent the run, or why it sent
    * nothing (`calliopa-bootstrap`'s `BO_0310_003`). */
   readonly context?: readonly RunContextEntry[];
   readonly archived?: boolean;
   readonly startedAt?: number;
+  /** The run's whole trace as the record keeps it, each event with its time,
+   * which a replay plays back. BO_0340_001 */
+  readonly events?: readonly BridgeEvent[];
 }
 
 /** One extension's run-start context as the record keeps it: the items sent,
@@ -108,7 +111,7 @@ export const judgementWords = (judgement: BridgeJudgement | undefined): string =
 export const conclusionOf = (run: BridgeRun): string => run.conclusion?.trim() || judgementWords(run.judgement);
 
 /** One normalized event on the bridge's stream. */
-interface BridgeEvent {
+export interface BridgeEvent {
   readonly type: string;
   readonly text?: string;
   readonly tool?: string;
@@ -128,9 +131,8 @@ interface BridgeEvent {
   readonly at: number;
 }
 
-function base(): string {
-  return `${graphEnv().kernelUrl}/__kernel/agent`;
-}
+/** The agent surface's routes under the kernel. */
+const AGENT = "/__kernel/agent";
 
 async function ask<T>(path: string, init: RequestInit, read: (body: unknown) => T): Promise<BridgeReply<T>> {
   // The agent surface is read as the person whose browser asked; in prod the
@@ -140,7 +142,7 @@ async function ask<T>(path: string, init: RequestInit, read: (body: unknown) => 
   if (cookie !== undefined && !headers.has("cookie")) headers.set("cookie", cookie);
   let response: Response;
   try {
-    response = await fetch(`${base()}${path}`, { ...init, headers });
+    response = await port.kernel(`${AGENT}${path}`, { ...init, headers });
   } catch (error) {
     return { ok: false, status: 503, detail: `The kernel could not be reached: ${String(error)}` };
   }
@@ -189,9 +191,13 @@ export function startBridgeRun(input: {
   /** The working mode the person chose for the document, which the kernel
    * records on the run and names in its instructions. BO_0306_017 */
   readonly mode?: { readonly field: string; readonly work: string };
-  /** The profile the command's chip chose, by its document's id; the kernel
+  /** The instruction the command's chip chose, by its document's id; the kernel
    * reads it at the run's pin and refuses one it cannot honour. BO_0311_002 */
-  readonly profile?: string;
+  readonly instruction?: string;
+  /** The variation of that instruction's format chosen beside Send, a block id;
+   * the kernel refuses one that is not the format's (`BO_0336_001`).
+   * BO_0336_050 */
+  readonly variation?: string;
   /** A pinch on the target's one block, zooming in or out; the kernel names
    * the base skill's convention for it to the run. BO_0322_016 */
   readonly pinch?: "in" | "out";
@@ -206,7 +212,8 @@ export function startBridgeRun(input: {
         ...(input.goal === "" ? {} : { goal: input.goal }),
         ...(input.intention === undefined || input.intention === "" ? {} : { intention: input.intention }),
         ...(input.mode === undefined ? {} : { mode: input.mode }),
-        ...(input.profile === undefined || input.profile === "" ? {} : { profile: input.profile }),
+        ...(input.instruction === undefined || input.instruction === "" ? {} : { instruction: input.instruction }),
+        ...(input.variation === undefined || input.variation === "" ? {} : { variation: input.variation }),
         ...(input.pinch === undefined ? {} : { pinch: input.pinch }),
         context: input.context ?? "",
         agent: input.agent ?? "",
@@ -350,6 +357,14 @@ export function translateBridgeEvent(runId: string, event: BridgeEvent): RunEven
   }
 }
 
+/** A run's recorded events in the contract's words, in the order the record
+ * keeps them, each with the time it was recorded at. BO_0340_001 */
+export const recordedEvents = (run: BridgeRun): RunEvent[] =>
+  (run.events ?? []).flatMap((event) => {
+    const translated = translateBridgeEvent(run.id, event);
+    return translated === null ? [] : [translated];
+  });
+
 /** A `document.activity` event, or nothing when it names no document or
  * action to show. BO_0265_006 */
 function documentActivity(runId: string, at: number, event: BridgeEvent): RunEvent | null {
@@ -422,7 +437,7 @@ export async function followBridgeEvents(
   if (cookie !== undefined) headers.set("cookie", cookie);
   let response: Response;
   try {
-    response = await fetch(`${base()}/runs/${encodeURIComponent(runId)}/events`, {
+    response = await port.kernel(`${AGENT}/runs/${encodeURIComponent(runId)}/events`, {
       headers,
       signal: controller.signal,
     });

@@ -78,8 +78,11 @@ export async function conductRun(input: {
   readonly intention?: string;
   /** The working mode in force on the document, passed through. BO_0306_017 */
   readonly mode?: WorkingMode;
-  /** The profile the command's chip chose, passed through. BO_0311_002 */
-  readonly profile?: string;
+  /** The instruction the command's chip chose, passed through. BO_0311_002 */
+  readonly instruction?: string;
+  /** The variation of the instruction's format chosen beside Send, passed
+   * through. BO_0336_050 */
+  readonly variation?: string;
   /** A pinch on a block, passed through. BO_0322_016 */
   readonly pinch?: "in" | "out";
 }): Promise<ConductedRun> {
@@ -98,7 +101,8 @@ export async function conductRun(input: {
     ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
     ...(input.intention === undefined || input.intention === "" ? {} : { intention: input.intention }),
     ...(input.mode === undefined ? {} : { mode: input.mode }),
-    ...(input.profile === undefined ? {} : { profile: input.profile }),
+    ...(input.instruction === undefined ? {} : { instruction: input.instruction }),
+    ...(input.variation === undefined ? {} : { variation: input.variation }),
     ...(input.pinch === undefined ? {} : { pinch: input.pinch }),
   });
   if (!started.ok) {

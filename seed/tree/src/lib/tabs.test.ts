@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY_TABS, activeTab, closeAllTabs, closeTab, moveTab, neighbourTab, openAlongRoute, openTab, openTabBeside, routeOf, selectTab, tabsBeside, type Tab, updateTab } from "./tabs";
+import { EMPTY_TABS, activeTab, closeAllTabs, closeTab, moveTab, neighbourTab, openAlongRoute, openTab, openTabBeside, routeOf, selectTab, tabsBeside, type Tab, updateTab, withoutReplays } from "./tabs";
 
 const tab = (
   id: string,
@@ -180,5 +180,20 @@ describe("a tab opened by a held drag", () => {
     expect(revealed.tabs.map((each) => each.id)).toEqual(["a", "b", "c"]);
     expect(revealed.activeTabId).toBe("c");
     expect(openTabBeside(EMPTY_TABS, tab("a", "doc-a")).activeTabId).toBe("a");
+  });
+});
+
+describe("a replay's tab", () => {
+  it("Given a document's own tab, Then its replay opens a tab of its own, and the workspace record keeps neither the replay tab nor it as active", () => {
+    const own = tab("doc", "doc-1", "block-editor");
+    const replay: Tab = { ...own, id: "replay-tab-r1", replay: "r1" };
+    const opened = openTabBeside(openTab(EMPTY_TABS, own), replay);
+    expect(opened.tabs.map((entry) => entry.id)).toEqual(["doc", "replay-tab-r1"]);
+    expect(opened.activeTabId).toBe("replay-tab-r1");
+    expect(withoutReplays(opened)).toEqual({ tabs: [own], activeTabId: "doc" });
+    expect(withoutReplays(openTab(EMPTY_TABS, replay))).toEqual({ tabs: [], activeTabId: null });
+    const later = openTab(opened, tab("later"));
+    expect(withoutReplays(later).activeTabId).toBe("later");
+    expect(withoutReplays(three)).toBe(three);
   });
 });

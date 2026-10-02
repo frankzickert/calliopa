@@ -1,6 +1,6 @@
 import type { GraphOutcome } from "../outcome";
 import { currentBranch, currentDataRevision, outsideBranch } from "./branch-scope";
-import { graphEnv } from "./env";
+import { port } from "../port";
 import { forwardedHeaders } from "../request-context";
 
 /**
@@ -96,11 +96,15 @@ interface Envelope {
   readonly pending?: string;
 }
 
-async function post(url: string, body: unknown): Promise<{ readonly status: number; readonly envelope: Envelope }> {
+async function post(
+  reach: (path: string, init?: RequestInit) => Promise<Response>,
+  path: string,
+  body: unknown,
+): Promise<{ readonly status: number; readonly envelope: Envelope }> {
   // The bridge resolves the person from the session the browser holds, so
   // the request's cookie travels with the call, and the browser's host with
   // it, which a parked action's confirmation link names. BO_0208_007 BO_0241_006
-  const response = await fetch(url, {
+  const response = await reach(path, {
     method: "POST",
     headers: { "content-type": "application/json", ...forwardedHeaders() },
     body: JSON.stringify(body),
@@ -138,7 +142,7 @@ export async function query(read: GraphRead): Promise<GraphOutcome<ReadResult>> 
   const overlay = read.proposalOverlay ?? branch;
   let answer;
   try {
-    answer = await post(`${graphEnv().ccgwUrl}/v1/cypher/query`, {
+    answer = await post(port.gateway, "/v1/cypher/query", {
       statement: read.statement,
       parameters: read.parameters ?? {},
       ...(read.roots === undefined ? {} : { roots: read.roots }),
@@ -212,7 +216,7 @@ export interface TouchedSet {
 
 export async function touchedSet(proposal: string): Promise<GraphOutcome<TouchedSet>> {
   try {
-    const response = await fetch(`${graphEnv().ccgwUrl}/v1/proposals/${proposal}/touched`);
+    const response = await port.gateway(`/v1/proposals/${proposal}/touched`);
     if (!response.ok) {
       return { outcome: "storageError", detail: `touched set of ${proposal}: ${response.status}` };
     }
@@ -233,7 +237,7 @@ export async function touchedSet(proposal: string): Promise<GraphOutcome<Touched
 export async function reachingGroups(nodes: readonly string[], rejected = false): Promise<GraphOutcome<readonly TouchedSet[]>> {
   if (nodes.length === 0) return { outcome: "success", result: [] };
   try {
-    const response = await fetch(`${graphEnv().ccgwUrl}/v1/proposals/reaching`, {
+    const response = await port.gateway("/v1/proposals/reaching", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ nodes: [...nodes], ...(rejected ? { rejected: true } : {}) }),
@@ -266,7 +270,7 @@ export async function write(
 ): Promise<GraphOutcome<Written>> {
   let answer;
   try {
-    answer = await post(`${graphEnv().kernelUrl}/__kernel/review/write`, {
+    answer = await post(port.kernel, "/__kernel/review/write", {
       statement,
       parameters,
       rationale,
@@ -305,7 +309,7 @@ export async function stage(
 ): Promise<GraphOutcome<Written>> {
   let answer;
   try {
-    answer = await post(`${graphEnv().kernelUrl}/__kernel/review/stage`, {
+    answer = await post(port.kernel, "/__kernel/review/stage", {
       proposal,
       statement,
       parameters,
@@ -348,7 +352,7 @@ export interface Standing {
 /** The core's standing read: the drift judgement per member, made without deciding. BO_0250_002 */
 export async function standing(proposal: string): Promise<GraphOutcome<Standing>> {
   try {
-    const response = await fetch(`${graphEnv().ccgwUrl}/v1/proposals/${proposal}/standing`);
+    const response = await port.gateway(`/v1/proposals/${proposal}/standing`);
     // A branch nothing has staged into yet has no group for the core to know.
     if (response.status === 404) return { outcome: "noResult", detail: `No proposal ${proposal}.` };
     if (!response.ok) {
@@ -378,7 +382,7 @@ export interface Decided {
 export async function decideGroup(decision: Decision, proposal: string, rationale: string): Promise<GraphOutcome<Decided>> {
   let answer;
   try {
-    answer = await post(`${graphEnv().kernelUrl}/__kernel/review/${decision}`, {
+    answer = await post(port.kernel, `/__kernel/review/${decision}`, {
       proposal,
       rationale,
       ...(decision === "accept" ? { gather: true } : {}),
@@ -412,7 +416,7 @@ export async function decide(
 ): Promise<GraphOutcome<Decided>> {
   let answer;
   try {
-    answer = await post(`${graphEnv().kernelUrl}/__kernel/review/${decision}`, {
+    answer = await post(port.kernel, `/__kernel/review/${decision}`, {
       proposal,
       member,
       rationale,

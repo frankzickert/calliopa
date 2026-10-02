@@ -118,17 +118,26 @@ choose_owner_name() {
 # The port Calliopa listens on (BO_0221_002): asked once, on the run that
 # creates .env, in the owner prompt's shape — CALLIOPA_PORT in the
 # environment answers silently, the terminal is asked otherwise, no terminal
-# or an empty answer keeps 8090. An integer from 1024 to 65534, because the
-# confirmation origin is published on the next port; a port that already has
-# a listener, or whose next one has, is named and the question asked again.
-# The confirmation port itself is never asked: it is derived below on every
-# run, so changing CALLIOPA_PORT in .env and re-running this script is the
-# whole change.
-port_rule="the port is a number from 1024 to 65534 (the next port is used too)"
+# or an empty answer keeps 8090. Every port the install publishes stands in a
+# row from this one (BO_0337): the port itself, the confirmation origin, the
+# candidate origin and the media service's login callback. So it is an integer
+# from 1024 to 65532, and a row with a port that already has a listener is
+# named and the question asked again. The other three are never asked: they
+# are derived below on every run, so changing CALLIOPA_PORT in .env and
+# re-running this script is the whole change.
+# 8092 is the one number refused inside the range: its callback, 8095, is the
+# port the media service answers on inside its own container.
+row_size=4
+port_rule="the port is a number from 1024 to 65532, not 8092 (the next three are used too)"
 port_valid() {
-  printf '%s' "$1" | grep -Eq '^[0-9]+$' && [ "$1" -ge 1024 ] && [ "$1" -le 65534 ]
+  printf '%s' "$1" | grep -Eq '^[0-9]+$' && [ "$1" -ge 1024 ] && [ "$1" -le $(( 65535 - row_size + 1 )) ] \
+    && [ "$(( $1 + 3 ))" -ne 8095 ]
 }
-# Prints the ports among $1 and $1+1 that already have a listener. The
+# The row as a person reads it: "8090–8093".
+port_row() {
+  printf '%s–%s' "$1" "$(( $1 + row_size - 1 ))"
+}
+# Prints the ports of the row from $1 that already have a listener. The
 # listing comes from ss or netstat where one exists; otherwise a connect to
 # loopback stands in, which sees a listener on the default bind and misses
 # one bound elsewhere — the best a host without either tool can say.
@@ -139,7 +148,7 @@ ports_in_use() {
   elif command -v netstat >/dev/null 2>&1; then
     listing="$(netstat -ltn 2>/dev/null || true)"
   fi
-  for candidate in "$1" "$(( $1 + 1 ))"; do
+  for candidate in $(seq "$1" "$(( $1 + row_size - 1 ))"); do
     if [ -n "$listing" ]; then
       if printf '%s\n' "$listing" | grep -Eq "[:.]${candidate}[[:space:]]"; then
         printf '%s ' "$candidate"
@@ -163,7 +172,7 @@ choose_port() {
     return
   fi
   while :; do
-    printf 'Which port should Calliopa listen on? [8090]: ' > /dev/tty
+    printf 'Which port should Calliopa listen on? Calliopa uses this port and the next three (%s) [8090]: ' "$(port_row 8090)" > /dev/tty
     IFS= read -r answer < /dev/tty || answer=""
     [ -z "$answer" ] && answer=8090
     if ! port_valid "$answer"; then
@@ -172,7 +181,7 @@ choose_port() {
     fi
     used="$(ports_in_use "$answer")"
     if [ -n "$used" ]; then
-      echo "port(s) ${used}already in use on this machine (Calliopa needs ${answer} and $(( answer + 1 ))) — try another" > /dev/tty
+      echo "port(s) ${used}already in use on this machine (Calliopa needs $(port_row "$answer")) — try another" > /dev/tty
       continue
     fi
     printf '%s' "$answer"
@@ -237,6 +246,15 @@ if grep -q '^CALLIOPA_CANDIDATE_PORT=' .env; then
   sed -i "s|^CALLIOPA_CANDIDATE_PORT=.*|CALLIOPA_CANDIDATE_PORT=${candidate_port}|" .env
 else
   printf 'CALLIOPA_CANDIDATE_PORT=%s\n' "$candidate_port" >> .env
+fi
+# The media service's login callback, the row's last port: a vendor's login
+# redirects the browser to 127.0.0.1 on it, and the service's CLI listens on
+# the same number inside its container. BO_0337_001
+callback_port=$(( port + 3 ))
+if grep -q '^CALLIOPA_MEDIA_CALLBACK_PORT=' .env; then
+  sed -i "s|^CALLIOPA_MEDIA_CALLBACK_PORT=.*|CALLIOPA_MEDIA_CALLBACK_PORT=${callback_port}|" .env
+else
+  printf 'CALLIOPA_MEDIA_CALLBACK_PORT=%s\n' "$callback_port" >> .env
 fi
 
 # Install is zero-secret: agent credentials are configured at first start
@@ -377,6 +395,8 @@ case "${bind:-0.0.0.0}" in
     echo "install complete. Calliopa is running at http://${bind}:${port}"
     ;;
 esac
+echo "It uses the ports $(port_row "$port"): ${port} Calliopa, $(( port + 1 )) confirmations,"
+echo "$(( port + 2 )) proposed changes, $(( port + 3 )) generator sign-ins (this machine only)."
 echo "${updater_note}"
 echo
 echo "If you have not chosen the owner's password yet, open Calliopa now and"

@@ -255,6 +255,31 @@ export async function readRefinement(): Promise<GraphOutcome<Refinement>> {
   };
 }
 
+/** The properties a profile's generation setup was kept in before
+ * `calliopa-bootstrap`'s `BO_0336`, which a format replaces. */
+export const PROFILE_GENERATION_PROPERTIES = ["profileType", "imageBackend"] as const;
+
+/**
+ * The script that clears a profile's former generation setup from every
+ * established document holding it (`BO_0336_040`): what a picture or a video
+ * is made with is a format's now, and nothing of the setup moves to one — a
+ * profile names a format by the person's choice. Empty when none holds it.
+ */
+export function clearProfileGenerationStatement(documents: readonly ReadNode[]): MigrationStatement {
+  const statements: string[] = [];
+  const parameters: Record<string, unknown> = {};
+  documents
+    .filter((node) => typeOf(node) === DOCUMENT_TYPE && node.revision.status === "established")
+    .map((node) => ({ id: node.id, held: PROFILE_GENERATION_PROPERTIES.filter((property) => contentOf(node)[property] !== undefined) }))
+    .filter((one) => one.held.length > 0)
+    .sort((left, right) => (left.id < right.id ? -1 : 1))
+    .forEach((one, index) => {
+      parameters[`g${index}NodeId`] = one.id;
+      statements.push(`SET ${one.held.map((property) => `g${index}.${property} = null`).join(", ")}`);
+    });
+  return { statement: statements.join("; "), parameters };
+}
+
 /** The migrations this extension runs, by the route segment its member names. */
 export const MIGRATIONS: Readonly<Record<string, () => Promise<GraphOutcome<MigrationStatement>>>> = {
   /** The discarded standing goes: every block set aside is retired. BO_0315_008 */
@@ -268,5 +293,12 @@ export const MIGRATIONS: Readonly<Record<string, () => Promise<GraphOutcome<Migr
     const found = await readRefinement();
     if (found.outcome !== "success") return found as GraphOutcome<never>;
     return { outcome: "success", result: retireRefinementStatement(found.result) };
+  },
+  /** A profile's generation setup goes; a format holds it. BO_0336_040 */
+  "profile-generation": async () => {
+    const read = await query({ statement: `MATCH (d:${DOCUMENT_TYPE}) RETURN GRAPH d`, unbounded: true, purpose: "documents holding a profile's generation setup" });
+    if (read.outcome === "noResult") return { outcome: "success", result: { statement: "", parameters: {} } };
+    if (read.outcome !== "success") return read as GraphOutcome<never>;
+    return { outcome: "success", result: clearProfileGenerationStatement(read.result.nodes) };
   },
 };

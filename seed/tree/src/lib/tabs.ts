@@ -58,6 +58,9 @@ export interface Tab {
    * started. Navigation only — no governance, ownership or containment
    * meaning. CA_0047_003 */
   readonly route?: readonly RouteEntry[];
+  /** The finished run this tab plays back (`BO_0340_004`): a replay's tab,
+   * never stored in the workspace record and closed with the replay. */
+  readonly replay?: string;
 }
 
 export interface TabsState {
@@ -87,7 +90,9 @@ export function openTab(state: TabsState, tab: Tab): TabsState {
       tab.itemId !== null &&
       candidate.itemId === tab.itemId &&
       candidate.kind === tab.kind &&
-      candidate.viewType === tab.viewType,
+      candidate.viewType === tab.viewType &&
+      // A replay's tab and the document's own tab are two tabs. BO_0340_004
+      candidate.replay === tab.replay,
   );
   return existing
     ? { ...state, activeTabId: existing.id }
@@ -136,6 +141,20 @@ export function openAlongRoute(
     unsaved: false,
     route: target.route,
   });
+}
+
+/** The tabs as the workspace record keeps them: without a replay's tab,
+ * which is never stored, and with another tab active when it was the active
+ * one — the one before it, else the one after. BO_0340_004 */
+export function withoutReplays(state: TabsState): TabsState {
+  if (!state.tabs.some((tab) => tab.replay !== undefined)) return state;
+  const tabs = state.tabs.filter((tab) => tab.replay === undefined);
+  const active = state.tabs.find((tab) => tab.id === state.activeTabId);
+  if (active === undefined || active.replay === undefined) return { tabs, activeTabId: state.activeTabId };
+  const index = state.tabs.indexOf(active);
+  const before = state.tabs.slice(0, index).reverse().find((tab) => tab.replay === undefined);
+  const after = state.tabs.slice(index + 1).find((tab) => tab.replay === undefined);
+  return { tabs, activeTabId: (before ?? after)?.id ?? null };
 }
 
 export function selectTab(state: TabsState, id: string): TabsState {

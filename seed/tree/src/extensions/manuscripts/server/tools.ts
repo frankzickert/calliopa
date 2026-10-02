@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
 
+import { port } from "~/server/port";
 import { readDocument } from "~/extensions/documents/server/documents";
 import { isBlobReference } from "~/server/ccgw/blobs";
 import { atDataRevision } from "~/server/ccgw/branch-scope";
@@ -8,7 +8,7 @@ import { isRecordId } from "~/server/uuid";
 import { isOutcome, isRenditionType, type Outcome, type RenditionType } from "../lib/rendition";
 import { citedWorks, figuresOf, glossaryOf, renditionWrite } from "./make";
 import { project } from "./project";
-import { MakingRefusal, readMaking } from "./roles-read";
+import { MakingRefusal, readMaking } from "./structures-read";
 
 /**
  * This extension's half of a run's manuscript (`BO_0293_023`, and
@@ -59,7 +59,7 @@ export function documentOfInput(input: Readonly<Record<string, unknown>>): strin
   return document;
 }
 
-const roleOfInput = (input: Readonly<Record<string, unknown>>, key: "venueRole" | "paperRole"): string | undefined => {
+const structureOfInput = (input: Readonly<Record<string, unknown>>, key: "venueStructure" | "paperStructure"): string | undefined => {
   const role = text(input[key]);
   return role === "" ? undefined : role;
 };
@@ -105,8 +105,8 @@ export async function projectForKernel(call: ToolCall): Promise<Projected> {
   try {
     making = await readMaking({
       documentId,
-      ...(roleOfInput(call.input, "venueRole") === undefined ? {} : { venueRole: roleOfInput(call.input, "venueRole") as string }),
-      ...(roleOfInput(call.input, "paperRole") === undefined ? {} : { paperRole: roleOfInput(call.input, "paperRole") as string }),
+      ...(structureOfInput(call.input, "venueStructure") === undefined ? {} : { venueStructure: structureOfInput(call.input, "venueStructure") as string }),
+      ...(structureOfInput(call.input, "paperStructure") === undefined ? {} : { paperStructure: structureOfInput(call.input, "paperStructure") as string }),
       ...(call.run.pin > 0 ? { dataRevision: call.run.pin } : {}),
     });
   } catch (error) {
@@ -191,7 +191,7 @@ export function keptForKernel(call: ToolCall): ToolAnswer {
   const kept = keptOfInput(call.input);
   const by = text(call.run.principal) !== "" ? text(call.run.principal) : text(call.run.person);
   if (by === "") throw new ToolRefusal("a kept manuscript says who made it: the run names its principal");
-  const renditionId = randomUUID();
+  const renditionId = port.uuid();
   const write = renditionWrite({
     renditionId,
     of: kept.document,

@@ -1,5 +1,5 @@
+import { port } from "~/server/port";
 import { readStanding, storedValue, type Standing } from "~/extensions/documents/lib/disposition";
-import { randomBytes, randomUUID } from "node:crypto";
 
 import { orderBetween } from "~/lib/order";
 import { proposerOf, type Proposer } from "~/extensions/documents/lib/proposals";
@@ -16,7 +16,9 @@ import {
   type ReadResult,
   type TouchedSet,
 } from "~/server/ccgw/client";
-import { branchGroupOf, currentBranch, outsideBranch } from "~/server/ccgw/branch-scope";
+import { atDataRevision, branchGroupOf, currentBranch, outsideBranch } from "~/server/ccgw/branch-scope";
+import { readBridgeRun, recordedEvents } from "~/server/agent/bridge";
+import type { DocumentActivity } from "~/server/agent/run-events";
 import type { GraphOutcome, NonEmpty } from "~/server/outcome";
 import { assembleDocument, assembleRetired, blocksOf, CONTAINS, RETIRED, formatsCode, placeCodeLines, toBlock, type BlockView, type DocumentView } from "./assemble";
 import { formatSource } from "./format";
@@ -39,7 +41,8 @@ import {
   type RelationView,
 } from "./work";
 import { childrenOf, focusOf } from "~/server/focused-work";
-import { PROFILE_RECORD, type ProfileGeneration, type ProfileSummary } from "../lib/profile";
+import { FORMER_INSTRUCTION_RECORD, INSTRUCTION_RECORD, type InstructionSummary } from "../lib/instruction";
+import { FORMER_UNNAMED_INSTRUCTION, UNNAMED_INSTRUCTION } from "../lib/naming";
 import { DOCUMENT_TARGET_KIND } from "./focus";
 import { FOCUSES, gatherOf, reachesDocument } from "./reach";
 import {
@@ -680,13 +683,13 @@ const properties = (
 export async function createDocument(input: {
   readonly title: string;
   readonly block?: NewBlock;
-  /** The record slot, set in the same statement — `profile` for a profile
+  /** The record slot, set in the same statement — `instruction` for an instruction
    * (`BO_0298_012`); absent for an ordinary document. */
   readonly record?: string;
 }): Promise<GraphOutcome<CreatedDocument>> {
   const block = input.block ?? { kind: "text" as const };
-  const documentId = randomUUID();
-  const blockId = randomUUID();
+  const documentId = port.uuid();
+  const blockId = port.uuid();
   const parameters: Record<string, unknown> = {
     dref: nodeRef(documentId),
     bref: nodeRef(blockId),
@@ -758,8 +761,8 @@ export async function listDocuments(): Promise<GraphOutcome<readonly ListedDocum
     if (typeOf(node) !== DOCUMENT_TYPE) continue;
     if (node.revision.status !== "established") continue;
     if (containedIds.has(node.id) || seen.has(node.id)) continue;
-    // A profile lists in the Profiles category and nowhere else. BO_0298_011
-    if (contentOf(node)["record"] === PROFILE_RECORD) continue;
+    // An instruction lists in the Instructions category and nowhere else. BO_0298_011
+    if (contentOf(node)["record"] === INSTRUCTION_RECORD) continue;
     seen.add(node.id);
     const title = contentOf(node)["title"];
     summaries.push({
@@ -782,7 +785,7 @@ export async function listDocuments(): Promise<GraphOutcome<readonly ListedDocum
       typeOf(node) === DOCUMENT_TYPE &&
       node.revision.status === "candidate" &&
       typeof node.revision.content?.["_proposal"] === "string" &&
-      node.revision.content?.["record"] !== PROFILE_RECORD &&
+      node.revision.content?.["record"] !== INSTRUCTION_RECORD &&
       !seen.has(node.id) &&
       !containedIds.has(node.id),
   );
@@ -1080,8 +1083,8 @@ export async function turnIntoAdmonition(input: { readonly documentId: string; r
   if (patterns.outcome !== "success") return patterns as GraphOutcome<never>;
   if (!patterns.result.some((pattern) => pattern.id === input.patternId)) return refuse("unknownPattern", `No admonition pattern ${input.patternId}.`);
 
-  const admonitionId = randomUUID();
-  const childId = randomUUID();
+  const admonitionId = port.uuid();
+  const childId = port.uuid();
   const parameters: Record<string, unknown> = {
     dref: nodeRef(input.documentId),
     admonitionRef: nodeRef(admonitionId),
@@ -1113,7 +1116,7 @@ export async function insertAdmonitionChild(input: { readonly documentId: string
   const before = parent.block.children[at - 1]?.order ?? "";
   const after = parent.block.children[at]?.order ?? "";
   const order = orderBetween(before, after);
-  const blockId = randomUUID();
+  const blockId = port.uuid();
   const parameters: Record<string, unknown> = { parentRef: nodeRef(input.parentBlockId), childRef: nodeRef(blockId) };
   const statement = [
     `CREATE (b:text {${properties("b", { id: blockId, order, runs: normalizeRuns(input.runs ?? []) }, parameters, true)}})`,
@@ -1197,7 +1200,7 @@ export async function composeMediaInsert(input: {
   const order = orderFor(loaded.document.blocks, input.placement);
   if ("failure" in order) return { ok: false, refusal: `Nothing to place that after in ${input.documentId}.` };
 
-  const blockId = randomUUID();
+  const blockId = port.uuid();
   const parameters: Record<string, unknown> = {
     dref: nodeRef(input.documentId),
     bref: nodeRef(blockId),
@@ -1256,7 +1259,7 @@ export async function insertBlock(input: {
     if (!patterns.result.some((pattern) => pattern.id === patternId)) return refuse("unknownPattern", `No admonition pattern ${patternId}.`);
   }
 
-  const blockId = randomUUID();
+  const blockId = port.uuid();
   const parameters: Record<string, unknown> = {
     dref: nodeRef(input.documentId),
     bref: nodeRef(blockId),
@@ -1269,7 +1272,7 @@ export async function insertBlock(input: {
     let childOrder = "";
     input.block.children.forEach((child, index) => {
       childOrder = orderBetween(childOrder, "");
-      const childId = randomUUID();
+      const childId = port.uuid();
       const alias = `child${index}`;
       const ref = `${alias}Ref`;
       parameters[ref] = nodeRef(childId);
@@ -1294,7 +1297,7 @@ export async function turnIntoImage(input: { readonly documentId: string; readon
   if ("failure" in located) return located.failure;
   if (located.block.kind !== "text") return refuse("blockKind", `Block ${input.blockId} is not a text block.`);
   const captionRuns = normalizeRuns(located.block.runs.map(({ text, link, marks: _marks, ...rest }) => ({ text, ...(link === undefined ? {} : { link }), ...rest })));
-  const blockId = randomUUID();
+  const blockId = port.uuid();
   const parameters: Record<string, unknown> = { dref: nodeRef(input.documentId), bref: nodeRef(blockId), cRelationId: located.block.containmentId, dref2: nodeRef(input.documentId), oref: nodeRef(input.blockId) };
   const statement = [
     `CREATE (b:image {${properties("b", { id: blockId, order: located.block.order, captionRuns }, parameters, true)}})`,
@@ -1311,7 +1314,7 @@ export async function turnImageIntoText(input: { readonly documentId: string; re
   if ("failure" in located) return located.failure;
   if (located.block.kind !== "image") return refuse("blockKind", `Block ${input.blockId} is not an image block.`);
   const runs = normalizeRuns(located.block.captionRuns ?? (located.block.caption === undefined ? [] : [{ text: located.block.caption }]));
-  const blockId = randomUUID();
+  const blockId = port.uuid();
   const parameters: Record<string, unknown> = { dref: nodeRef(input.documentId), bref: nodeRef(blockId), cRelationId: located.block.containmentId, dref2: nodeRef(input.documentId), oref: nodeRef(input.blockId) };
   const statement = [
     `CREATE (b:text {${properties("b", { id: blockId, order: located.block.order, runs, ...(input.role === "paragraph" ? {} : { role: input.role }) }, parameters, true)}})`,
@@ -1334,7 +1337,7 @@ export async function turnIntoCode(input: {
     return refuse("blockKind", `Block ${input.blockId} is a ${located.block.kind} block; only a text block turns into code.`);
   }
   const source = located.block.runs.map((run) => run.text).join("");
-  const blockId = randomUUID();
+  const blockId = port.uuid();
   const parameters: Record<string, unknown> = {
     dref: nodeRef(input.documentId),
     bref: nodeRef(blockId),
@@ -1761,7 +1764,7 @@ export async function splitTextBlock(input: {
       return taken as GraphOutcome<SplitBlocks>;
     }
   }
-  const tailBlockId = input.tailBlockId ?? randomUUID();
+  const tailBlockId = input.tailBlockId ?? port.uuid();
   const parameters: Record<string, unknown> = {
     bNodeId: nodeRef(input.blockId),
     head,
@@ -2360,6 +2363,11 @@ const parseItemId = (
   return { groupId, kind, members };
 };
 
+/** Bytes as lowercase hexadecimal, as a change group's identifier carries them. */
+function hex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 /**
  * Stages a group of proposed changes against one document. Nothing here
  * changes the document: content an item introduces is staged as a candidate
@@ -2380,7 +2388,7 @@ export async function proposeDocumentChanges(input: {
   const loaded = await loadDocument(input.documentId);
   if (!loaded.ok) return loaded.outcome;
 
-  const groupId = `node:chg-${randomBytes(8).toString("hex")}`;
+  const groupId = `node:chg-${hex(port.randomBytes(8))}`;
   const siblings: BlockView[] = [...loaded.document.blocks];
   const statements: string[] = [];
   const parameters: Record<string, unknown> = {};
@@ -2437,7 +2445,7 @@ export async function proposeDocumentChanges(input: {
         kind: "divider",
         order: order.order,
       });
-      const blockId = randomUUID();
+      const blockId = port.uuid();
       parameters[`${alias}d`] = documentNode;
       parameters[`${alias}n`] = nodeRef(blockId);
       statements.push(
@@ -2959,6 +2967,147 @@ async function readRejectedGroup(
     items.push({ itemId: itemId(groupId, kind, [nodeId]), groupId, kind, blockId: block.blockId, block: proposed });
   }
   return { outcome: "success", result: items };
+}
+
+/** A replayed run's document as it stood when the run started, and the
+ * proposal the run staged as it was staged (`BO_0340_007`). */
+export interface ReplayDocument {
+  readonly document: DocumentView;
+  readonly proposals: DocumentProposals;
+}
+
+/**
+ * The document a finished run was sent from, read at the run's pin, and the
+ * items the run staged into it as they were staged, whatever has been
+ * answered since (`BO_0340_007`). The run's own activity names each item —
+ * its kind, the block it stands on and the member its decision covers — and
+ * the members keep the group's `_proposal` stamp once accepted, so an item's
+ * content is the stamped revision of its member: read as a candidate while
+ * the group is open, as truth once accepted, and through the rejected
+ * overlay once rejected. A member revised again since, whose newest
+ * revision no longer carries the stamp, has no staged content left to read
+ * and is left out; so are the relation kinds, which a replay draws as the
+ * marks their activity reports. Nothing is written.
+ */
+export async function readReplayDocument(documentId: string, runId: string): Promise<GraphOutcome<ReplayDocument>> {
+  const run = await readBridgeRun(runId);
+  if (!run.ok) return refuse("unknownRun", run.status === 404 ? "This run can no longer be replayed: the instance holds no record of it." : `The run could not be read: ${run.detail}`);
+  if (bareId(run.value.artifact ?? "") !== bareId(documentId)) return refuse("otherDocument", "This run was not sent from this document.");
+  return replayDocumentAt(documentId, {
+    runId: run.value.id,
+    pin: run.value.pin,
+    group: run.value.group ?? "",
+    startedAt: run.value.startedAt ?? 0,
+    activity: recordedEvents(run.value).flatMap((event) => (event.kind === "documentActivity" ? [event.activity] : [])),
+  });
+}
+
+/** The graph half of a replay's read, given what the run's record says: the
+ * document at the pin, and the items its activity names as they were staged.
+ * BO_0340_007 */
+export async function replayDocumentAt(
+  documentId: string,
+  run: { readonly runId: string; readonly pin: number; readonly group: string; readonly startedAt: number; readonly activity: readonly DocumentActivity[] },
+): Promise<GraphOutcome<ReplayDocument>> {
+  const read = await atDataRevision(run.pin, () => loadDocument(documentId));
+  if (!read.ok) return read.outcome;
+  const document = read.document;
+  const documentNode = nodeRef(documentId);
+  const activity = run.activity.filter((entry) => entry.action !== "read" && nodeRef(entry.document) === documentNode);
+  const empty: DocumentProposals = { documentId, unanswered: 0, groups: [] };
+  if (run.group === "" || activity.length === 0) return { outcome: "success", result: { document, proposals: empty } };
+  const members = await stampedMembers(run.group);
+  if (members.outcome !== "success") return members as GraphOutcome<never>;
+  const items = stagedItems(run.group, document, activity, members.result);
+  if (items.length === 0) return { outcome: "success", result: { document, proposals: empty } };
+  const nodes = [...members.result.values()];
+  const provenance = nodes.find((node) => node.revision.content?.["_type"] === "agent.run");
+  return {
+    outcome: "success",
+    result: {
+      document,
+      proposals: {
+        documentId,
+        unanswered: items.length,
+        groups: [
+          {
+            groupId: run.group,
+            items,
+            stagedBy: [...new Set(nodes.map((node) => node.revision.createdBy))].filter((name) => name !== "").sort(),
+            proposer: proposerFrom(run.group, nodes),
+            run: { runId: run.runId, stagedAt: provenance?.revision.createdAt ?? run.startedAt },
+          },
+        ],
+      },
+    },
+  };
+}
+
+/** Every node carrying the group's stamp, read as truth, as candidates and
+ * through the open or rejected overlay alike, the stamped revision kept. A
+ * read the group's state refuses — an overlay of a closed group — reads
+ * nothing rather than failing the replay. BO_0340_007 */
+async function stampedMembers(group: string): Promise<GraphOutcome<ReadonlyMap<string, ReadNode>>> {
+  const statement = "MATCH (n) WHERE n._proposal = $g RETURN GRAPH n ROOT n INCLUDE CANDIDATES";
+  const reads = await outsideBranch(() =>
+    Promise.all([
+      query({ statement, parameters: { g: group }, unbounded: true, purpose: "replayed proposal members" }),
+      query({ statement, parameters: { g: group }, proposalOverlay: group, unbounded: true, purpose: "replayed proposal members" }),
+      query({ statement, parameters: { g: group }, proposalOverlay: group, proposalOverlayRejected: true, unbounded: true, purpose: "replayed proposal members" }),
+    ]),
+  );
+  if (reads.every((read) => read.outcome === "storageError")) return reads[0] as GraphOutcome<never>;
+  const members = new Map<string, ReadNode>();
+  for (const read of reads) {
+    if (read.outcome !== "success") continue;
+    for (const node of read.result.nodes) {
+      if (node.revision.content?.["_proposal"] === group && !members.has(node.id)) members.set(node.id, node);
+    }
+  }
+  return { outcome: "success", result: members };
+}
+
+/** The block items a run's activity names, each once, with its staged
+ * content against the document as it stood. Pure. BO_0340_007 */
+export function stagedItems(
+  group: string,
+  document: DocumentView,
+  activity: readonly DocumentActivity[],
+  members: ReadonlyMap<string, ReadNode>,
+): ProposedChange[] {
+  const standing = new Map(document.blocks.map((block) => [block.blockId, block]));
+  const items: ProposedChange[] = [];
+  const seen = new Set<string>();
+  for (const entry of activity) {
+    const blockId = entry.blocks[0];
+    const member = entry.member ?? "";
+    if (blockId === undefined || member === "") continue;
+    const key = `${entry.action}|${blockId}`;
+    if (seen.has(key)) continue;
+    const note = entry.note === undefined ? {} : { note: entry.note };
+    if (entry.action === "remove") {
+      if (!standing.has(blockId)) continue;
+      seen.add(key);
+      items.push({ itemId: itemId(group, "remove", [member]), groupId: group, kind: "remove", blockId, block: null, ...note });
+      continue;
+    }
+    if (entry.action !== "insert" && entry.action !== "replace" && entry.action !== "move") continue;
+    const node = members.get(member);
+    if (node === undefined) continue;
+    const block = standing.get(blockId);
+    if (entry.action === "insert") {
+      if (block !== undefined) continue;
+      seen.add(key);
+      items.push({ itemId: itemId(group, "insert", [member]), groupId: group, kind: "insert", blockId, block: placeCodeLines(toBlock(node, ""), document.blocks), ...note });
+      continue;
+    }
+    if (block === undefined) continue;
+    const proposed = toBlock(node, block.containmentId);
+    if (sameBlock(block, proposed)) continue;
+    seen.add(key);
+    items.push({ itemId: itemId(group, entry.action, [member]), groupId: group, kind: entry.action, blockId, block: proposed, ...note });
+  }
+  return items;
 }
 
 /**
@@ -3552,11 +3701,11 @@ export async function promoteBlock(input: {
 }
 
 /**
- * Profiles (`BO_0298_011`–`BO_0298_012`): a profile is a document carrying
- * `record: profile`, and these are the reads the `profiles` extension's
- * routes are made of. The profile is chosen per command and no document names
+ * Instructions (`BO_0298_011`–`BO_0298_012`, `BO_0338`): an instruction is a document
+ * carrying `record: instruction`, and these are the reads the `instructions`
+ * extension's routes are made of. The instruction is chosen per command and no document names
  * one (`calliopa-bootstrap`'s `BO_0311`); the kernel reads the command's at a
- * run's start (`ui-kernel.md`, The Profile In The Command, With Tools).
+ * run's start (`ui-kernel.md`, Structures And Instructions).
  */
 
 /** One document node's content as established, or null when the pin holds none. */
@@ -3570,56 +3719,90 @@ async function documentContent(id: string): Promise<GraphOutcome<Record<string, 
   return { outcome: "success", result: node === undefined || node.revision.status !== "established" ? null : contentOf(node) };
 }
 
-const isProfile = (content: Record<string, unknown> | null): content is Record<string, unknown> =>
-  content !== null && content["record"] === PROFILE_RECORD;
+const isInstruction = (content: Record<string, unknown> | null): content is Record<string, unknown> =>
+  content !== null && content["record"] === INSTRUCTION_RECORD;
 
-const profileOf = (id: string, content: Record<string, unknown>): ProfileSummary => ({
+const instructionOf = (id: string, content: Record<string, unknown>): InstructionSummary => ({
   id,
   title: typeof content["title"] === "string" ? content["title"] : "",
 });
 
-const byProfileTitle = (left: ProfileSummary, right: ProfileSummary): number => {
+const byInstructionTitle = (left: InstructionSummary, right: InstructionSummary): number => {
   const a = left.title.toLowerCase();
   const b = right.title.toLowerCase();
   return a < b ? -1 : a > b ? 1 : 0;
 };
 
-/** Every profile of the instance, by title. */
-export async function listProfiles(): Promise<GraphOutcome<readonly ProfileSummary[]>> {
+/** Every instruction of the instance, by title. */
+export async function listInstructions(): Promise<GraphOutcome<readonly InstructionSummary[]>> {
   const read = await outsideBranch(() =>
     query({
       statement: `MATCH (d:${DOCUMENT_TYPE} {record: $record}) RETURN GRAPH d`,
-      parameters: { record: PROFILE_RECORD },
+      parameters: { record: INSTRUCTION_RECORD },
       unbounded: true,
-      purpose: "profiles",
+      purpose: "instructions",
     }),
   );
   if (read.outcome === "noResult") return { outcome: "success", result: [] };
   if (read.outcome !== "success") return read as GraphOutcome<never>;
-  const listed: ProfileSummary[] = [];
+  const listed: InstructionSummary[] = [];
   for (const node of read.result.nodes) {
     if (typeOf(node) !== DOCUMENT_TYPE || node.revision.status !== "established") continue;
     const content = contentOf(node);
-    if (!isProfile(content)) continue;
-    listed.push(profileOf(bareId(node.id), content));
+    if (!isInstruction(content)) continue;
+    listed.push(instructionOf(bareId(node.id), content));
   }
-  return { outcome: "success", result: listed.sort(byProfileTitle) };
+  return { outcome: "success", result: listed.sort(byInstructionTitle) };
 }
 
-/** The profile a document is, by its id and title, or null when it is no
- * profile — what the chip and the grant control ask of the document they are
+/** The instruction a document is, by its id and title, or null when it is no
+ * instruction — what the chip and the grant control ask of the document they are
  * drawn on. BO_0311_011 BO_0311_012 */
-export async function profileSummary(documentId: string): Promise<GraphOutcome<ProfileSummary | null>> {
+export async function instructionSummary(documentId: string): Promise<GraphOutcome<InstructionSummary | null>> {
   const document = await documentContent(documentId);
   if (document.outcome !== "success") return document as GraphOutcome<never>;
-  return { outcome: "success", result: isProfile(document.result) ? profileOf(documentId, document.result) : null };
+  return { outcome: "success", result: isInstruction(document.result) ? instructionOf(documentId, document.result) : null };
+}
+
+/**
+ * One script moving every instruction kept as a profile to the instruction's
+ * names (`calliopa-bootstrap`'s `BO_0338`): `record: profile` becomes
+ * `record: instruction`, and one still titled as an unnamed profile is titled as
+ * an unnamed instruction, so it stays unnamed. Empty once none is left.
+ * Idempotent: run by `instructions`' executable migration.
+ */
+export async function moveInstructionRecordsStatement(): Promise<GraphOutcome<{ readonly statement: string; readonly parameters: Record<string, unknown> }>> {
+  const read = await outsideBranch(() =>
+    query({ statement: `MATCH (d:${DOCUMENT_TYPE}) RETURN GRAPH d`, unbounded: true, purpose: "instructions kept as profiles" }),
+  );
+  if (read.outcome === "noResult") return { outcome: "success", result: { statement: "", parameters: {} } };
+  if (read.outcome !== "success") return read as GraphOutcome<never>;
+  return { outcome: "success", result: instructionRecordsStatement(read.result.nodes) };
+}
+
+/** The script `moveInstructionRecordsStatement` answers, from the documents
+ * read: one SET per established document still carrying `record: profile`. */
+export function instructionRecordsStatement(nodes: readonly ReadNode[]): { readonly statement: string; readonly parameters: Record<string, unknown> } {
+  const statements: string[] = [];
+  const parameters: Record<string, unknown> = { recordNow: INSTRUCTION_RECORD, titleNow: UNNAMED_INSTRUCTION };
+  nodes
+    .filter((node) => typeOf(node) === DOCUMENT_TYPE && node.revision.status === "established" && contentOf(node)["record"] === FORMER_INSTRUCTION_RECORD)
+    .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0))
+    .forEach((node, index) => {
+      parameters[`i${index}NodeId`] = node.id;
+      statements.push(
+        contentOf(node)["title"] === FORMER_UNNAMED_INSTRUCTION ? `SET i${index}.record = $recordNow, i${index}.title = $titleNow` : `SET i${index}.record = $recordNow`,
+      );
+    });
+  if (statements.length === 0) return { statement: "", parameters: {} };
+  return { statement: statements.join("; "), parameters };
 }
 
 /**
  * One script clearing the `profile` slot every document still carries — the
  * profile a person attached before the chip chose it per command — or none
  * when no document carries one (`BO_0311_020`, `BO_0311_Q1`). Idempotent: run
- * by `profiles`' executable migration, which drops the attachments on upgrade.
+ * by `instructions`' executable migration, which drops the attachments on upgrade.
  */
 export async function clearProfileSlotsStatement(): Promise<GraphOutcome<{ readonly statement: string; readonly parameters: Record<string, unknown> }>> {
   const read = await outsideBranch(() =>
@@ -3640,47 +3823,3 @@ export async function clearProfileSlotsStatement(): Promise<GraphOutcome<{ reado
   return { outcome: "success", result: { statement: statements.join("; "), parameters } };
 }
 
-/** Structured image-generation settings on a profile document. */
-export async function readProfileGeneration(documentId: string): Promise<GraphOutcome<ProfileGeneration | null>> {
-  const document = await documentContent(documentId);
-  if (document.outcome !== "success") return document as GraphOutcome<never>;
-  if (document.result === null) return { outcome: "noResult", detail: `No document ${documentId}.` };
-  if (!isProfile(document.result)) return { outcome: "success", result: null };
-  const type = document.result["profileType"];
-  const backend = document.result["imageBackend"];
-  return { outcome: "success", result: {
-    profileType: type === "image" || type === "video" ? type : "instructions",
-    imageBackend: backend === "higgsfield" || backend === "openart" || backend === "codex" ? backend : null,
-  } };
-}
-
-/** Save structured profile settings. Omitting a backend preserves the saved value. */
-export async function setProfileGeneration(input: {
-  readonly documentId: string;
-  readonly profileType: "instructions" | "image" | "video";
-  readonly imageBackend?: "higgsfield" | "openart" | "codex";
-}): Promise<GraphOutcome<ProfileGeneration>> {
-  // Codex makes pictures only: a video profile's backend is a video
-  // generator's (`calliopa-bootstrap`'s BO_0312). BO_0320_012
-  if (input.profileType === "video" && input.imageBackend === "codex") {
-    return { outcome: "validationFailure", failures: [{ operation: null, rule: "profile", detail: "Codex makes pictures only; a video profile uses Higgsfield or OpenArt." }] };
-  }
-  const document = await documentContent(input.documentId);
-  if (document.outcome !== "success") return document as GraphOutcome<never>;
-  if (document.result === null || !isProfile(document.result)) {
-    return { outcome: "validationFailure", failures: [{ operation: null, rule: "profile", detail: `${input.documentId} is not a profile.` }] };
-  }
-  const current = await readProfileGeneration(input.documentId);
-  if (current.outcome !== "success" || current.result === null) return current as GraphOutcome<never>;
-  // The saved backend stays when the type changes, a Codex one included
-  // (BO_0320_013); `media.generate` refuses Codex for a video. BO_0312
-  const backend = input.imageBackend ?? current.result.imageBackend;
-  const statement = input.imageBackend === undefined
-    ? "SET d.profileType = $profileType"
-    : "SET d.profileType = $profileType, d.imageBackend = $imageBackend";
-  const parameters: Record<string, unknown> = { dNodeId: nodeRef(input.documentId), profileType: input.profileType };
-  if (input.imageBackend !== undefined) parameters["imageBackend"] = input.imageBackend;
-  const written = await outsideBranch(() => write(statement, parameters, `set generation profile ${input.documentId}`));
-  if (written.outcome !== "success") return written as GraphOutcome<never>;
-  return { outcome: "success", result: { profileType: input.profileType, imageBackend: backend } };
-}

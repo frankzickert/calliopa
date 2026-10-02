@@ -5,7 +5,7 @@
 - This document is the entry point of `bibliography`, the extension that keeps the sources a
   person cites — a paper, a book, a web page, an interview, a conversation, a dataset, a piece of
   software, a report, anything CSL names — and lets a document cite them: a source is a document
-  carrying the built-in *Source*, its record fetched from a DOI, an ISBN, a PMID, an arXiv id or a
+  using the built-in *Source*, its record fetched from a DOI, an ISBN, a PMID, an arXiv id or a
   URL where there is one and typed where there is none, a citation written into a sentence and
   drawn in a citation style, and the reference list derived from a document's citations. It is
   Zotero's shape inside Calliopa (`calliopa-bootstrap`'s `BO_0291`, requested and decided by the
@@ -15,9 +15,9 @@
   the Zotero translation server behind a front the kernel forwards to, which is the fixed layer's
   because fetching the web is the fixed layer's.
 - It depends on `documents`, whose `text` runs carry the citation, whose editor draws it and whose
-  documents a source is; on `doc-block-roles`, whose built-in *Source* a source carries and whose
+  documents a source is; on `structures`, whose built-in *Source* a source carries and whose
   fields hold its record; and on `ui.shell`, whose frame it contributes into and whose run library
-  holds the `cite` atom. It draws no library category: a source is listed under *Roles → Source*
+  holds the `cite` atom. It draws no library category: a source is listed under *Structures → Source*
   and among the documents. The manifest names the entrypoint `contributions`, with a client half
   and a server half.
 - Its change documents carry the prefix `BI`. A `BI` change that alters what a release ships
@@ -26,12 +26,12 @@
 
 ## What This Extension Holds
 
-* A source covers non-academic sources as well as papers. *Source* is a built-in role, and the
-  *Sources* category folds into *Roles*, where *Source* lists the sources (`BO_0308_Q5`,
+* A source covers non-academic sources as well as papers. *Source* is a built-in structure, and the
+  *Sources* category folds into *Structures*, where *Source* lists the sources (`BO_0308_Q5`,
   `BO_0308_Q11`). User decisions.
-* A source is a document carrying *Source*. It can hold the person's notes, be mentioned and carry
-  other roles, and its CSL record is the role's fields (`BO_0313_Q1`). User decision, 2026-09-30.
-* Source documents appear in the Documents category as well as under *Roles → Source*
+* A source is a document using *Source*. It can hold the person's notes, be mentioned and carry
+  other structures, and its CSL record is the structure's fields (`BO_0313_Q1`). User decision, 2026-09-30.
+* Source documents appear in the Documents category as well as under *Structures → Source*
   (`BO_0313_Q3`). User decision, 2026-09-30.
 * The add form offers paper, book, web page, interview, conversation, dataset, software and report
   up front, and every other CSL type behind *More* (`BO_0313_Q2`). User decision, 2026-09-30.
@@ -50,12 +50,12 @@
   IEEE on a fresh install, and a document may choose another. User decision, 2026-09-24.
 * English only: the `en-US` CSL locale ships and every reference list uses English terms. User
   decision, 2026-09-24.
-* `citeproc-js` is taken under AGPL-3.0 of its dual licence, used unmodified. User decision,
+* `citeproc-js` is used under AGPL-3.0 of its dual licence, used unmodified. User decision,
   2026-09-24.
 - A source document is a `document` carrying `record: source` beside *Source*, so the kernel checks
-  a citation's target the way it recognizes a profile, without the roles' vocabulary
+  a citation's target the way it recognizes an instruction, without the structures' vocabulary
   (`calliopa-bootstrap`'s `ui-kernel.md`, *Sources Are Documents*). Its title is the CSL title;
-  *Source*'s release fields hold the rest (`doc-block-roles`' `BO_0313_010`): *Kind* (every CSL
+  *Source*'s release fields hold the rest (`structures`' `BO_0313_010`): *Kind* (every CSL
   type), *Authors* and *Editors* (one *Family, Given* per line, a line without a comma an
   institution), *Issued* and *Accessed* (text: a year, a year and month, a date, or words, since
   CSL allows a year alone), *Container*, *Volume*, *Issue*, *Pages*, *Publisher*, *Place*, *DOI*,
@@ -109,9 +109,22 @@ Nothing here is claimed, and each is small enough for one session.
   case off a DOI, hyphens off an ISBN, the fragment and a trailing slash off a URL). `fillWork`
   writes a fetched record over the title and the fields it holds, keeping the rest, against the
   base revision the caller read, a stale base answering a `conflict`. A source's fields are
-  otherwise edited in the inspector, as every role's are, and it is deleted as the document it
+  otherwise edited in the inspector, as every structure's are, and it is deleted as the document it
   is. `GET /api/x/bibliography/works` lists the sources and `GET .../works/[id]` reads one. Every
-  CSL type is a kind (`WORK_KINDS`, `doc-block-roles`' `CSL_TYPES`).
+  CSL type is a kind (`WORK_KINDS`, `structures`' `CSL_TYPES`).
+- A source's two reads answer a document that is no source as an ordinary answer (`BI_0001_001`,
+  `server/works.ts`'s `sourceAnswer`): `GET .../works/[id]` and `.../works/[id]/cited-by` answer
+  `200` with the outcome `noResult` and the words of `unknownWork`, which `readWork` still refuses
+  for its other callers (`fillWork`, `manuscripts`' make), so opening a document logs no failed
+  request. A source reads as before; an identifier that is no record identifier stays `404`;
+  `.../works/[id]/file` is unchanged. `SourceProvider` and `CitedBy` read `noResult` as no source,
+  as they read the refusal before. The open document's structures do not reach the two places — the
+  editor surface's `DocumentView` carries none, they are `structures`' — so asking nothing would
+  have cost a read of its own (measured at draft, 2026-10-02).
+- Verified 2026-10-02 by `server/source-answer.test.ts` in `check` (a document that is no source
+  answered `200` with `noResult` and the refusal's words; a source, another refusal and a storage
+  error answered as before; failing before the change) and `typecheck`. `BI_0001_002`
+- Verified by the user on the instance's production pin 4021 (2026-10-02): a document that is no source opened with no failed request, and a source kept *Fill from identifier* and *Cited by*. `BI_0001_002`
 - The works suite runs under the kernel harness, `TestShellDocumentsOverCCGW`, whose scratch CCGW
   signs in its fixture human, so the truth writes it makes need no one's seat (`BO_0291_032`). It
   waits past the kernel's 250 ms write floor between writes of the same node.
@@ -131,14 +144,14 @@ Nothing here is claimed, and each is small enough for one session.
   been proven live in `calliopa-bootstrap`'s `bibliography-service.md`; the live press through
   this route is the walk's (`documents`' `BO_0291_028`).
 - A source carries its file in *Source*'s *File* (`BO_0291_018`, `BO_0313_021`): chosen in the
-  inspector's field, uploaded through `documents`' blob route as every role's file is, and kept
+  inspector's field, uploaded through `documents`' blob route as every structure's file is, and kept
   alive by the reference `roleFields` holds in `files`. `GET /api/x/bibliography/works/[id]/file`
   streams it back typed as its media type and `inline` under its name, immutable, since the
   generic blob route answers every object as octet-stream; the cite card's file link reads it. A fetched record never brings the
   file, and a fill keeps it.
 - The surfaces (`BO_0291_019`, `BO_0313_021`, landed 2026-10-01; `contributions.ts`,
   `views/new-source.tsx`, `views/source.tsx`, `views/record-form.ts`, `views/bibliography.css`).
-  This extension contributes no library category. *Roles → Source*'s `+` (`doc-block-roles`'
+  This extension contributes no library category. *Structures → Source*'s `+` (`structures`'
   `BO_0313_011`) opens the kind `bibliography:new-source`, *Add source*: the eight kinds up front
   as pressable choices — *Paper*, *Book*, *Web page*, *Interview*, *Conversation*, *Dataset*,
   *Software*, *Report* (`FRONT_KINDS`, `kindWords`) — and *More*, a list of every other CSL type
@@ -147,7 +160,7 @@ Nothing here is claimed, and each is small enough for one session.
   route's words; and the fields typed for a source with neither — title, authors one per line as
   *Family, Given*, date, container, publisher, place, volume, issue, pages, DOI, ISBN, URL.
   *Add source* writes it through `addWork` and opens it as the document it is, its body for notes
-  and its fields in the inspector (`doc-block-roles`, `BO_0309`). On a source document,
+  and its fields in the inspector (`structures`, `BO_0309`). On a source document,
   `SourceProvider` puts *Fill from identifier* in the bar as its own group, *Source*, opening a
   line above the first block that fetches and writes through `fillWork`, then has the editor read
   the document again; and the document's `end` place draws, after the reference list, *Cited by*.
@@ -225,24 +238,24 @@ Nothing here is claimed, and each is small enough for one session.
 
 Under `calliopa-bootstrap`'s `BO_0313` (`docs/changes/BO_0313_FEAT_sources-beyond-papers.md`,
 part 5 of `BO_0308`, promoted to draft by the user on 2026-09-30, transferred the same day and set
-ready by the user): a source is a document carrying the built-in *Source*, of any CSL type, and
-the *Sources* category folds into *Roles*. It follows `BO_0309`, and its migration takes
+ready by the user): a source is a document using the built-in *Source*, of any CSL type, and
+the *Sources* category folds into *Structures*. It follows `BO_0309`, and its migration takes
 `BO_0312_001`'s executable path. The kernel's half is `ui-kernel.md`, *Sources Are Documents*;
-`doc-block-roles` holds *Source*'s fields and the row's `+` (`BO_0313_010`, `BO_0313_011`),
+`structures` holds *Source*'s fields and the row's `+` (`BO_0313_010`, `BO_0313_011`),
 `documents` the citation of a source document (`BO_0313_030`), and `manuscripts` the projection
 (`BO_0313_040`). The decisions are in *What This Extension Holds* above, and the lines above are
 what is served.
 
 - Every `work` becomes a source document (`BO_0313_023`, landed 2026-10-01;
   `server/migrations.ts`, the member `migration-bo-0313-sources-are-documents`, route
-  `kernel/migrations/sources-are-documents`, `after` `doc-block-roles`'
+  `kernel/migrations/sources-are-documents`, `after` `structures`'
   `migration-bo-0313-source-fields`). The route reads every established `work` under the names it
   was stored by — a record that no longer reads keeps its title and a kind CSL names — and every
   established `text` block whose runs cite one, and answers one script: each work as a source
   document (`sourceStatements`, its file moved to *File*), each `cite` run naming a work rewritten
   to name its document with its locator kept, and each work retired. The kernel writes it as one
   truth change set under the owner when it serves the pin carrying the member, once per instance,
-  as the release is taken (`BO_0312_Q7`); an instance without works answers an empty statement.
+  as the release is used (`BO_0312_Q7`); an instance without works answers an empty statement.
   A citation staged in a proposal still open is not rewritten: it is no established block, and
   answering it after the migration draws it as missing. The `work` declaration stays one release
   (`BO_0313_026`).
@@ -263,10 +276,33 @@ what is served.
   `migration-bo-0313-source-fields` at revision 3476 and `migration-bo-0313-sources-are-documents`
   at 3477, after which the dogfood instance held no `work`, four source documents with their fields
   filled from the records, and five citations, every one naming a source document. The user walked
-  the served build: *Roles → Source* and its `+`, a web page, an interview and a dataset added and
+  the served build: *Structures → Source* and its `+`, a web page, an interview and a dataset added and
   cited, the IEEE and APA lists, *Fill from identifier* and *Cited by*. The migrated citations were
   not walked; the graph read and the behaviour suite stand for them.
 - [ ] BO_0313_026 A release after `BO_0313`, once every install has run the migration: the `work`
       declaration dropped with an `ext.migration` naming it, the kernel harness's vocabulary copy
       dropping it in step (`calliopa-bootstrap`'s `BO_0313_001`), and `WORK_TYPE`, `storedKey` and
       the migration's reading of a work removed with it.
+
+## Roles Become Structures
+
+Under `calliopa-bootstrap`'s `BO_0338`, promoted to draft by the user on 2026-10-02 and transferred
+here the same day: roles become structures and profiles become instructions, with every stored
+identifier and route, and `doc-block-roles` and `profiles` become `structures` and `instructions`
+([Roles Become Structures](../../../structures/docs/system/system.md#roles-become-structures)).
+
+- *Source* is a built-in structure in what a run is told (`BO_0338_095`, 2026-10-02):
+  `read_works`' and `propose_work`'s descriptions and the `bibliography.citing` skill say a
+  document *using* *Source*; the readers call `structures`' names and the manifest depends on
+  `structures`.
+- This document speaks the new terms (`BO_0338_096`, 2026-10-02): *Source* is a built-in structure, listed
+  under *Structures → Source*, a source a document *using* it.
+
+## A Structure Is A Document
+
+Under `structures`' `RO_0005` (2026-10-02): every structure becomes a document and *Source*'s id
+becomes `structure:source`
+([A Structure Is A Document](../../../structures/docs/system/system.md#a-structure-is-a-document)).
+
+- [ ] RO_0005_050 A source is related to *Source* by the id `structures` names (`server/works.ts`)
+      and read by it; its fields keep their keys; the suites green over the documents.

@@ -1,5 +1,5 @@
-import { readCatalogue } from "~/extensions/doc-block-roles/server/roles";
-import { DEFINITION_ROLE, KEYWORD_ROLE, shownValue } from "~/extensions/doc-block-roles/lib/roles";
+import { readCatalogue } from "~/extensions/structures/server/structures";
+import { DEFINITION_STRUCTURE, KEYWORD_STRUCTURE, shownValue } from "~/extensions/structures/lib/structures";
 import { readDocument } from "~/extensions/documents/server/documents";
 import type { Run } from "~/lib/runs";
 import { atDataRevision } from "~/server/ccgw/branch-scope";
@@ -122,7 +122,7 @@ const wordsOf = (runs: readonly Run[]): string =>
 async function sentOf(keyword: Keyword, send: readonly string[]): Promise<string[]> {
   const catalogue = await readCatalogue();
   if (catalogue.outcome !== "success") return [];
-  const role = catalogue.result.byId.get(KEYWORD_ROLE);
+  const role = catalogue.result.byId.get(KEYWORD_STRUCTURE);
   if (role === undefined) return [];
   const read = await readKeywordDocument(keyword.id);
   if (read.outcome !== "success") return [];
@@ -137,7 +137,7 @@ async function sentOf(keyword: Keyword, send: readonly string[]): Promise<string
     }
     const name = catalogue.result.byId.get(entry)?.name ?? entry;
     const words =
-      entry === DEFINITION_ROLE
+      entry === DEFINITION_STRUCTURE
         ? definitionText(keyword.definition, SENT_WORDS)
         : read.result.blocks
             .filter((block) => (read.result.rolesOfBlock.get(block.blockId) ?? []).includes(entry))
@@ -177,7 +177,7 @@ export async function promptKeywords(call: ToolCall): Promise<RunStartAnswer> {
     }
     if (included.length === 0) return empty;
     const catalogue = await readCatalogue();
-    const send = catalogue.outcome === "success" ? (catalogue.result.byId.get(KEYWORD_ROLE)?.sendWithPrompt ?? []) : [];
+    const send = catalogue.outcome === "success" ? (catalogue.result.byId.get(KEYWORD_STRUCTURE)?.sendWithPrompt ?? []) : [];
     const parts: string[] = [];
     const items: { id: string; title: string }[] = [];
     for (const keyword of included) {

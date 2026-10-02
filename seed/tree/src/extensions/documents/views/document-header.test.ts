@@ -60,7 +60,7 @@ describe("the document's header", () => {
   it("Then each extension's title contribution is a row of its own, in extension order", async () => {
     const view = await mount();
     const rows = Array.from(view.root.querySelectorAll("[data-document-title-place] [data-title-place-row]")).map((row) => row.getAttribute("data-title-place-row"));
-    expect(rows).toEqual(["doc-block-roles", "keywords"]);
+    expect(rows).toEqual(["structures", "keywords"]);
   });
 
   it("Then the compact line is absent at rest, and its anchor stands at the top of the surface, before the header", async () => {

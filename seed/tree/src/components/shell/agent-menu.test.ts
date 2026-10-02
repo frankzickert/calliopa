@@ -318,7 +318,7 @@ describe("the agent list follows sign-in", () => {
 
 describe("no model in the menu", () => {
   /**
-   * A picture is made by the agent's tool under a profile, so the menu offers
+   * A picture is made by the agent's tool under an instruction, so the menu offers
    * agents alone and draws no control of a model's (`calliopa-bootstrap`'s
    * `BO_0312_040`, which took the senders of `BO_0273_035` out).
    */

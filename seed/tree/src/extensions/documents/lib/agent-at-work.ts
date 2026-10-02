@@ -323,3 +323,34 @@ export function runChipsOf(
   }
   return chips;
 }
+
+/**
+ * A replay's proposals so far (`BO_0340_008`): of every item its run staged,
+ * the ones whose staging the replay has reached — an item stands once an
+ * activity of its kind on its block has played — each group keeping its
+ * place, counted as unanswered as the run left them.
+ */
+export function replayShown(
+  proposals: DocumentProposals,
+  items: readonly ProposedChange[],
+  activities: readonly RunActivity[],
+): DocumentProposals {
+  const reached = new Set(
+    activities.flatMap((activity) =>
+      activity.events.filter((event) => event.action !== "read").flatMap((event) => (event.blocks[0] === undefined ? [] : [`${event.action}|${event.blocks[0]}`])),
+    ),
+  );
+  const shown = items.filter((item) => reached.has(`${item.kind}|${item.blockId}`));
+  return {
+    ...proposals,
+    unanswered: shown.length,
+    groups: proposals.groups.map((group) => ({ ...group, items: shown.filter((item) => item.groupId === group.groupId) })),
+  };
+}
+
+/** The block a replay types into, with the words typed so far as its only
+ * run; every other block as it stands. Pure. BO_0340_008 */
+export function typedInto<T extends { readonly blockId: string }>(blocks: readonly T[], blockId: string, words: string, typed: (block: T, words: string) => T): T[] {
+  const bare = blockId.replace(/^node:/u, "");
+  return blocks.map((block) => (block.blockId === bare ? typed(block, words) : block));
+}

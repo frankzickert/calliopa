@@ -6,6 +6,8 @@ import type { CitingDocument } from "~/extensions/documents/server/cited-by";
 import { describeOutcome, readOutcome } from "~/extensions/documents/views/documents-client";
 import { EditorSurfaceContext } from "~/extensions/documents/views/editor-surface";
 
+import type { Capability } from "~/lib/capabilities";
+
 import type { FetchAnswer } from "../server/fetch";
 import type { WorkView } from "../server/works";
 import { ReferenceList } from "./references";
@@ -47,7 +49,31 @@ export const SourceProvider = component$<DocumentDecorationProps>(({ documentId 
     busy: boolean;
     notice: string;
     candidates: Candidates | null;
-  }>({ source: null, open: false, input: "", busy: false, notice: "", candidates: null });
+    /** Why a fetch cannot be made here and now, or null when it can. BO_0319_043 */
+    unready: string | null;
+  }>({ source: null, open: false, input: "", busy: false, notice: "", candidates: null, unready: null });
+
+  // Fetching a record needs the network; its capability says whether it is
+  // there, read again whenever the browser says the network came or went.
+  // BO_0319_043
+  // eslint-disable-next-line qwik/no-use-visible-task -- the network is the browser's to report
+  useVisibleTask$(({ cleanup }) => {
+    const read = async () => {
+      const response = await fetch("/api/capabilities").catch(() => null);
+      const answer = response?.ok ? ((await response.json()) as { capabilities?: readonly Capability[] }) : null;
+      const capability = answer?.capabilities?.find((candidate) => candidate.id === "fetch:record");
+      state.unready = capability === undefined || capability.state === "ready" ? null : capability.reason;
+    };
+    void read();
+    // A page without a window — a suite's render — has no network to follow.
+    if (typeof window === "undefined") return;
+    window.addEventListener("online", read);
+    window.addEventListener("offline", read);
+    cleanup(() => {
+      window.removeEventListener("online", read);
+      window.removeEventListener("offline", read);
+    });
+  });
 
   // eslint-disable-next-line qwik/no-use-visible-task -- read in the browser with the person's session
   useVisibleTask$(async ({ track }) => {
@@ -66,6 +92,7 @@ export const SourceProvider = component$<DocumentDecorationProps>(({ documentId 
   // groups to it (BO_0289_019), so this provider replaces its group alone.
   useTask$(({ track, cleanup }) => {
     const source = track(() => state.source);
+    const unready = track(() => state.unready);
     const others = bridge.decorationBar.groups.filter((group) => group.id !== GROUP);
     bridge.decorationBar.groups =
       source === null
@@ -75,7 +102,16 @@ export const SourceProvider = component$<DocumentDecorationProps>(({ documentId 
             {
               id: GROUP,
               label: "Source",
-              actions: [{ kind: "button", id: "fill", label: "Fill from identifier", icon: "download-simple", run$: toggle$ }],
+              actions: [
+                {
+                  kind: "button",
+                  id: "fill",
+                  label: "Fill from identifier",
+                  icon: "download-simple",
+                  ...(unready === null ? {} : { disabled: true, name: `Fill from identifier — ${unready}` }),
+                  run$: toggle$,
+                },
+              ],
             },
           ];
     cleanup(() => {

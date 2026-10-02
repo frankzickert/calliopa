@@ -12,9 +12,9 @@
   "category": "bundled",
   "dependencies": {
     "bibliography": "\u003e=0.1.0",
-    "doc-block-roles": "\u003e=0.1.0",
     "documents": "\u003e=0.1.0",
     "keywords": "\u003e=0.1.0",
+    "structures": "\u003e=0.1.0",
     "ui.shell": "\u003e=0.1.0"
   },
   "entrypoint": "contributions",

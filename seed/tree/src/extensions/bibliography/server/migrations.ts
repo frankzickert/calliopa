@@ -12,7 +12,7 @@ import { mintSourceIds, sourceStatements, type SourceIds } from "./works";
  * writes the statement answered as one truth change set under the owner,
  * once per instance — the dogfood instance and every install taking the
  * release (`BO_0312_Q7`). It runs after *Source*'s release fields stand
- * (`doc-block-roles`' `source-fields`).
+ * (`structures`' `source-fields`).
  */
 
 /** What a migration route answers: one script and its parameters, or an

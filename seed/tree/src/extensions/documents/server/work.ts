@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
 
+import { port } from "~/server/port";
 import { normalizeRuns, type Run } from "~/lib/runs";
 import { query, type ReadNode, type ReadResult } from "~/server/ccgw/client";
 import type { GraphOutcome } from "~/server/outcome";
@@ -183,7 +183,7 @@ export function relationScript(
   parameters: Record<string, unknown>,
   established: boolean,
 ): { readonly relationId: string; readonly statements: readonly string[] } {
-  const relationId = randomUUID();
+  const relationId = port.uuid();
   parameters[`${alias}_id`] = relationId;
   parameters[`${alias}_kind`] = relation.kind;
   parameters[`${alias}_reason`] = normalizeRuns([...relation.reason]);

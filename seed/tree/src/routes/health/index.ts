@@ -1,7 +1,7 @@
 import type { RequestHandler } from "@builder.io/qwik-city";
 
-import { graphEnv } from "~/server/ccgw/env";
-import { healthResponse, probe, reachUrl } from "~/server/health";
+import { healthResponse, probe, reach } from "~/server/health";
+import { port } from "~/server/port";
 
 /**
  * The operational readiness probe: the one graph and the kernel, reached
@@ -11,8 +11,8 @@ export const onGet: RequestHandler = async ({ cacheControl, json }) => {
   cacheControl({ noCache: true, public: false });
 
   const [ccgw, kernel] = await Promise.all([
-    probe(() => reachUrl(`${graphEnv().ccgwUrl}/healthz`)),
-    probe(() => reachUrl(`${graphEnv().kernelUrl}/__kernel/agent/health`)),
+    probe(() => reach(port.gateway, "/healthz")),
+    probe(() => reach(port.kernel, "/__kernel/agent/health")),
   ]);
 
   const response = healthResponse(ccgw, kernel);

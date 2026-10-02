@@ -255,6 +255,9 @@ export const contributions = declare({
       id: "honcho",
       kind: "service",
       credential: "apiKey",
+      // The agent's memory runs beside the agent container, which only an
+      // instance has. BO_0319_047
+      where: "instance",
       label: "Honcho",
       purpose: "OpenAI API key for the agent's memory",
       fields: [],
@@ -298,6 +301,7 @@ export const contributions = declare({
       id: "hermes",
       kind: "service",
       credential: "status",
+      where: "instance",
       label: "Hermes",
       purpose: "The agent Calliopa hands goals to",
       fields: [],
@@ -317,6 +321,75 @@ export const contributions = declare({
       label: "Claude Code",
       purpose: "Writes code for the agent, on your Claude subscription",
       fields: [],
+    },
+    // The keys a device's runs and services use, each proven by the cheapest
+    // call that needs it and changes nothing; on an instance none is shown.
+    // BO_0319_047
+    {
+      id: "anthropic",
+      kind: "service",
+      credential: "apiKey",
+      where: "device",
+      label: "Anthropic",
+      purpose: "Anthropic API key for agent runs with Claude",
+      fields: [],
+      probe: {
+        authorization: { header: "x-api-key", scheme: "", secretField: "apiKey" },
+        test: { method: "GET", url: "https://api.anthropic.com/v1/models", expectStatus: 200, headers: { "anthropic-version": "2023-06-01" } },
+      },
+    },
+    {
+      id: "openai",
+      kind: "service",
+      credential: "apiKey",
+      where: "device",
+      label: "OpenAI",
+      purpose: "OpenAI API key for agent runs with OpenAI's models",
+      fields: [],
+      probe: {
+        authorization: { secretField: "apiKey" },
+        test: { method: "GET", url: "https://api.openai.com/v1/models", expectStatus: 200 },
+      },
+    },
+    {
+      id: "openrouter",
+      kind: "service",
+      credential: "apiKey",
+      where: "device",
+      label: "OpenRouter",
+      purpose: "OpenRouter API key for agent runs with the models it routes to",
+      fields: [],
+      // The models list answers without a key; the key's own record does not.
+      probe: {
+        authorization: { secretField: "apiKey" },
+        test: { method: "GET", url: "https://openrouter.ai/api/v1/key", expectStatus: 200 },
+      },
+    },
+    {
+      id: "search",
+      kind: "service",
+      credential: "apiKey",
+      where: "device",
+      label: "Search",
+      purpose: "Brave Search API key for searching the web",
+      fields: [],
+      probe: {
+        authorization: { header: "X-Subscription-Token", scheme: "", secretField: "apiKey" },
+        test: { method: "GET", url: "https://api.search.brave.com/res/v1/web/search?q=calliopa&count=1", expectStatus: 200 },
+      },
+    },
+    {
+      id: "embeddings",
+      kind: "service",
+      credential: "apiKey",
+      where: "device",
+      label: "Embeddings",
+      purpose: "OpenRouter API key for finding related blocks by meaning",
+      fields: [],
+      probe: {
+        authorization: { secretField: "apiKey" },
+        test: { method: "GET", url: "https://openrouter.ai/api/v1/key", expectStatus: 200 },
+      },
     },
   ],
 });

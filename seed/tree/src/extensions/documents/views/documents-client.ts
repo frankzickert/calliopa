@@ -4,6 +4,7 @@ import { withBranch, withBranchBody } from "../lib/branch-scope";
 import type {
   ChangeSummary,
   DocumentProposals,
+  ReplayDocument,
 } from "../server/documents";
 import type { DocumentView, BlockView } from "../server/assemble";
 import type { WorkingMode } from "../lib/working-mode";
@@ -104,6 +105,12 @@ export const fetchDocument = async (
   id: string,
 ): Promise<GraphOutcome<DocumentView>> =>
   readOutcome<DocumentView>(await fetch(withBranch(`/api/x/documents/d/${id}`, id)));
+
+/** A finished run's document as it stood at the run's pin, and what the run
+ * staged as it was staged, for a replay; read as truth, never a branch.
+ * BO_0340_008 */
+export const fetchReplay = async (id: string, runId: string): Promise<GraphOutcome<ReplayDocument>> =>
+  readOutcome<ReplayDocument>(await fetch(`/api/x/documents/d/${id}/replay?run=${encodeURIComponent(runId)}`));
 
 export const fetchRetired = async (
   id: string,

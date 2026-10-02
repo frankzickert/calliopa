@@ -105,7 +105,10 @@ export const SettingsView = component$<ViewProps>(() => {
     error: null,
     errorParty: null,
   });
-  const entered = useSignal("");
+  // Each service row's own typed key, by party, as each channel's is: one
+  // shared value showed a key pasted into one row in every row, and Save on
+  // any of them sent it. BO_0319_047
+  const serviceKey = useStore<Record<string, string>>({});
   /**
    * What the reader has typed into a channel's fields, keyed by party and
    * field. A key absent means untouched, so the stored value is what shows —
@@ -501,6 +504,7 @@ export const SettingsView = component$<ViewProps>(() => {
                   key={row.party}
                   data-connection={row.party}
                   data-state={row.state}
+                  data-unavailable={row.unavailable === undefined || row.unavailable === null ? undefined : "true"}
                 >
                   <div class="connection__identity">
                     <h3 class="connection__name">
@@ -641,7 +645,28 @@ export const SettingsView = component$<ViewProps>(() => {
                       )}
                     </div>
                   )}
-                  {row.kind === "status" ? (
+                  {row.unavailable !== undefined && row.unavailable !== null ? (
+                    // A party this place cannot use: said in words, with the
+                    // connection that stands in for it. BO_0319_049
+                    <div class="connection__controls" data-unavailable-controls>
+                      <p class="connection__reported" data-unavailable-reason>
+                        {row.unavailable.reason}
+                      </p>
+                      <button
+                        type="button"
+                        class="connection__action"
+                        data-key-instead={row.unavailable.instead}
+                        onClick$={() => {
+                          const instead = row.unavailable?.instead ?? "";
+                          const target = document.querySelector<HTMLElement>(`[data-connection="${instead}"]`);
+                          target?.scrollIntoView({ block: "center" });
+                          target?.querySelector<HTMLInputElement>("input")?.focus();
+                        }}
+                      >
+                        {`Enter the ${state.rows.find((other) => other.party === row.unavailable?.instead)?.label ?? row.unavailable.instead} key`}
+                      </button>
+                    </div>
+                  ) : row.kind === "status" ? (
                     <div class="connection__controls" data-status-controls>
                       {row.status !== null && (
                         <p
@@ -836,20 +861,20 @@ export const SettingsView = component$<ViewProps>(() => {
                           type="password"
                           class="connection__input"
                           autoComplete="off"
-                          value={entered.value}
+                          value={serviceKey[row.party] ?? ""}
                           placeholder={
                             row.keySet ? "Enter a new key" : "Enter key"
                           }
                           aria-label={`${row.label || row.party} key`}
                           onInput$={(_, element) =>
-                            (entered.value = element.value)
+                            (serviceKey[row.party] = element.value)
                           }
                         />
                       </label>
                       <button
                         type="button"
                         class="connection__action"
-                        disabled={busy || serviceSave(entered.value, row.fields, typedFieldsOf(row.party), row.configuration) === null}
+                        disabled={busy || serviceSave(serviceKey[row.party] ?? "", row.fields, typedFieldsOf(row.party), row.configuration) === null}
                         onClick$={async () => {
                           await request$(
                             row.party,
@@ -858,11 +883,11 @@ export const SettingsView = component$<ViewProps>(() => {
                               method: "PUT",
                               headers: { "content-type": "application/json" },
                               body: JSON.stringify(
-                                serviceSave(entered.value, row.fields, typedFieldsOf(row.party), row.configuration),
+                                serviceSave(serviceKey[row.party] ?? "", row.fields, typedFieldsOf(row.party), row.configuration),
                               ),
                             },
                           );
-                          entered.value = "";
+                          serviceKey[row.party] = "";
                         }}
                       >
                         Save

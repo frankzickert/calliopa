@@ -8,7 +8,7 @@ sessions are opened in them, closed and interrupted; an execution streams its
 output as server-sent events until it is done; the files a document carries go
 in as a tar and the files an execution wrote come out as one. Standard library
 for the server, the Docker SDK and jupyter_client behind it.
-A profile tool's call runs once in a throwaway container and is answered
+An instruction tool's call runs once in a throwaway container and is answered
 whole (`POST /v1/calls`, BO_0311_001).
 `docs/system/code-service.md`. BO_0289_001 BO_0289_002 BO_0289_003 BO_0289_004
 """
@@ -327,7 +327,7 @@ def make_handler(bearer: str, service: Service):
         # -- calls -----------------------------------------------------------
 
         def call(self) -> None:
-            """One profile tool's code, run once off the person's runtime and answered whole.
+            """One instruction tool's code, run once off the person's runtime and answered whole.
 
             The kernel decides the network and the environment; this answers
             what the execution produced, as an execution's events, and keeps

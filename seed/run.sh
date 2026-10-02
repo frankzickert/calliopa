@@ -94,6 +94,17 @@ for dir in "$tmp"/src/extensions/*/; do
   [ -d "$dir" ] || continue
   seen_before="$seen_before $(basename "$dir") "
 done
+# An extension the release moves to a new id has been seen here under a former
+# one: its manifest's formerIds name it, and the owner's switch goes with it
+# (BO_0338_001).
+for manifest in "$here"/tree/src/extensions/*/manifest.json; do
+  [ -f "$manifest" ] || continue
+  for former in $(node -e 'const m=require(process.argv[1]);for(const f of (Array.isArray(m.formerIds)?m.formerIds:[])) console.log(f)' "$manifest"); do
+    case "$seen_before" in
+      *" $former "*) seen_before="$seen_before $(basename "$(dirname "$manifest")") " ;;
+    esac
+  done
+done
 
 # Make the release authoritative for what it ships, so a file or an extension
 # it stopped carrying reaches this install as a deletion instead of lingering

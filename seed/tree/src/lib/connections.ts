@@ -147,6 +147,13 @@ export interface ConnectionRecord {
    * Only the `codex` and `claude-code` rows carry it. BO_0316_006
    */
   readonly signOutBlocked?: string | null;
+  /**
+   * Why a party cannot be used where the shell runs, in words, and the
+   * connection that takes its place: on a device, the subscription runtimes,
+   * whose sign-in is an instance's. Absent where the party can be used.
+   * BO_0319_049
+   */
+  readonly unavailable?: { readonly reason: string; readonly instead: string } | null;
 }
 
 /** The runs in flight by agent, as the kernel's agent health counts them across every person. BO_0316_004 */

@@ -34,6 +34,8 @@ import {
   readDocument,
   readDocumentChanges,
   readDocumentProposals,
+  readReplayDocument,
+  type ReplayDocument,
   reopenProposal,
   renameDocument,
   readRetiredBlocks,
@@ -243,7 +245,7 @@ function readNewBlock(
       if (child === null || child["kind"] !== "text") return { failure: "An admonition contains ordered text blocks." };
       const runs = readRuns(child["runs"]);
       if ("failure" in runs) return runs;
-      const role = readRole(child["role"]);
+      const role = readStructure(child["role"]);
       if ("failure" in role) return role;
       children.push({ kind: "text", runs: runs.runs, ...(role.role === undefined ? {} : { role: role.role }) });
     }
@@ -260,7 +262,7 @@ function readNewBlock(
   if (kind !== "text") {
     return { failure: `A new block is text, a divider, an image, a table, an equation or code, not ${String(kind)}.` };
   }
-  const role = readRole(input["role"]);
+  const role = readStructure(input["role"]);
   if ("failure" in role) return role;
   const runs =
     input["runs"] === undefined ? { runs: [] } : readRuns(input["runs"]);
@@ -274,7 +276,7 @@ function readNewBlock(
   };
 }
 
-function readRole(
+function readStructure(
   value: unknown,
 ): { readonly role: TextRole | undefined } | { readonly failure: string } {
   if (value === undefined) return { role: undefined };
@@ -540,7 +542,7 @@ export function parseDocumentCommand(
       }
       const runs = readRuns(input["runs"]);
       if ("failure" in runs) return runs;
-      const role = readRole(input["role"]);
+      const role = readStructure(input["role"]);
       if ("failure" in role) return role;
       return {
         command: {
@@ -660,7 +662,7 @@ export function parseDocumentCommand(
     }
     case "turnImageIntoText": {
       if (blockId === null || baseRevisionId === null) return { failure: "Turning an image into text names the block and its base revision." };
-      const role = readRole(input["role"]);
+      const role = readStructure(input["role"]);
       if ("failure" in role || role.role === undefined) return { failure: "Turning an image into text names a text role." };
       return { command: { command: "turnImageIntoText", blockId, baseRevisionId, role: role.role } };
     }
@@ -728,7 +730,7 @@ export function parseDocumentCommand(
       // these, and the head is written once. DO_0015_001
       const runs = input["runs"] === undefined ? { runs: undefined } : readRuns(input["runs"]);
       if ("failure" in runs) return runs;
-      const role = readRole(input["role"]);
+      const role = readStructure(input["role"]);
       if ("failure" in role) return role;
       const words = {
         ...(runs.runs === undefined ? {} : { runs: runs.runs }),
@@ -987,7 +989,7 @@ function readProposalItem(
   }
   const runs = readRuns(input["runs"]);
   if ("failure" in runs) return runs;
-  const role = readRole(input["role"]);
+  const role = readStructure(input["role"]);
   if ("failure" in role) return role;
   return {
     item: {
@@ -1252,6 +1254,12 @@ export async function handleProposalsRead(
   rejected = false,
 ): Promise<OutcomeResponse<DocumentProposals>> {
   return respond(await readDocumentProposals(documentId, { rejected }));
+}
+
+/** A finished run's document as it stood when the run started, and what the
+ * run staged as it was staged, for a replay. BO_0340_007 */
+export async function handleReplayRead(documentId: string, runId: string): Promise<OutcomeResponse<ReplayDocument>> {
+  return respond(await readReplayDocument(documentId, runId));
 }
 
 /** The signed-in person's working mode on a document: read as the document

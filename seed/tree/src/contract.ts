@@ -238,6 +238,13 @@ export interface PartyDescriptor {
     readonly tokenUrl: string;
     readonly scopes: readonly string[];
   };
+  /**
+   * Where the party exists: `instance` for one only an instance has — the
+   * agent container, its memory — and `device` for one only the apps have —
+   * the API keys a device's runs and services use. Absent is both.
+   * BO_0319_047
+   */
+  readonly where?: "instance" | "device";
   /** The path prefixes on the address's host a brokered request may use; absent means the address's own path. BO_0252_006 */
   readonly paths?: readonly string[];
   /**
@@ -318,6 +325,36 @@ export interface ServerContributions {
    * contributing none opens no focused work. CA_0065_001
    */
   readonly focusedWork?: Readonly<Record<string, FocusedWorkContribution>>;
+  /**
+   * What a field may suggest (`calliopa-bootstrap`'s `BO_0336_052`): a role's
+   * field names a source as `<extension>:<name>`, and the extension owning
+   * what the values mean answers it, so the extension drawing the field knows
+   * nothing of them. A suggestion never limits what may be typed.
+   */
+  readonly suggestionSources?: readonly SuggestionSource[];
+}
+
+/** One source of suggestions a field may name. BO_0336_052 */
+export interface SuggestionSource {
+  /** The bare name, which the registry qualifies with the extension. */
+  readonly name: string;
+  /** What a person picking a source for their own field reads. */
+  readonly label: string;
+  /** The suggestions for a subject holding these values, or why there are
+   * none in words (`note`): nothing signed in, a vendor not answering. */
+  readonly answer: (values: Readonly<Record<string, string>>) => Promise<SuggestionAnswer>;
+}
+
+/** A value a field may be given, and what it is called when that differs. */
+export interface Suggestion {
+  readonly value: string;
+  readonly label?: string;
+}
+
+/** What a source answers. BO_0336_052 */
+export interface SuggestionAnswer {
+  readonly suggestions: readonly Suggestion[];
+  readonly note?: string;
 }
 
 /** One thing a run proposed into, as the run detail lists it: what to open,
@@ -431,8 +468,18 @@ export interface BlockDecorationProps {
    * one set is not sent, and remembering one across commands is the
    * contributing extension's. `profile` is the first the kernel reads
    * (`calliopa-bootstrap`'s `BO_0311_002`). BO_0311_030
+   *
+   * `once` marks an option for one send: the shell clears it once the
+   * command is sent, so the next send goes without it — `media`'s variation
+   * returns to the format (`calliopa-bootstrap`'s `BO_0336_051`).
    */
-  readonly setOption$?: QRL<(name: string, value: string | null) => void>;
+  readonly setOption$?: QRL<(name: string, value: string | null, once?: boolean) => void>;
+  /**
+   * In the `command` place alone: the options set on the command the place
+   * is drawn in, by any place — so one control follows another's choice, as
+   * `media`'s variation follows the profile the chip chose. BO_0336_051
+   */
+  readonly commandOptions?: Readonly<Record<string, string>>;
 }
 
 /** What a provider is handed: the document its decorations draw on. */

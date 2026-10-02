@@ -1,4 +1,4 @@
-import { graphEnv } from "./ccgw/env";
+import { port } from "./port";
 import { licenceWarning } from "~/lib/licence";
 
 /**
@@ -9,7 +9,7 @@ import { licenceWarning } from "~/lib/licence";
  */
 export async function readLicenceWarning(now: Date = new Date()): Promise<string | null> {
   try {
-    const response = await fetch(`${graphEnv().ccgwUrl}/v1/head`);
+    const response = await port.gateway("/v1/head");
     if (!response.ok) return null;
     const head = (await response.json()) as { licenceExpiresAt?: unknown };
     return licenceWarning(typeof head.licenceExpiresAt === "string" ? head.licenceExpiresAt : null, now);

@@ -42,10 +42,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-calliopa}
       POSTGRES_USER: ${POSTGRES_USER:-calliopa}
       POSTGRES_PASSWORD_FILE: /run/secrets/calliopa/postgres_password
-    # Local to this machine whatever CALLIOPA_HOST_BIND says: nothing on
-    # another machine needs the database. BO_0240_002
-    ports:
-      - "127.0.0.1:5432:5432"
+    # No host port: the services reach it on the compose network, and nothing
+    # on this machine or another needs it. BO_0240_002 BO_0337_002
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - calliopa-secrets:/run/secrets/calliopa:ro
@@ -136,10 +134,8 @@ services:
     configs:
       - source: garage_toml
         target: /etc/garage.toml
-    # Local to this machine whatever CALLIOPA_HOST_BIND says: blob content
-    # reaches browsers only through CCGW's routes. BO_0240_002
-    ports:
-      - "127.0.0.1:3900:3900"
+    # No host port: blob content reaches browsers only through CCGW's routes,
+    # and the services reach it on the compose network. BO_0240_002 BO_0337_002
     volumes:
       - garage-data:/var/lib/garage
       - calliopa-secrets:/run/secrets/calliopa:ro
@@ -248,7 +244,7 @@ services:
       CALLIOPA_MEDIA_CONFIG_DIR: /var/lib/calliopa/media-config
       CALLIOPA_MEDIA_BEARER_FILE: /run/secrets/calliopa/media_bearer
       CALLIOPA_MEDIA_PORT: "8095"
-      CALLIOPA_MEDIA_CALLBACK_PORT: "8765"
+      CALLIOPA_MEDIA_CALLBACK_PORT: "${CALLIOPA_MEDIA_CALLBACK_PORT:-8093}"
       CALLIOPA_CODEX_IMAGE_URL: http://hermes:8644/v1/image
     # The callback port is published on the loopback address, and on the
     # literal one rather than CALLIOPA_HOST_BIND: a vendor login's redirect
@@ -256,8 +252,11 @@ services:
     # and binding it wider would expose it wherever that points without
     # helping anyone. An install whose browser is elsewhere pastes the code
     # instead. BO_0273_028
+    # The port is the last of the install's row (CALLIOPA_PORT + 3, derived by
+    # install.sh) and the same number on both sides, since the CLI inside
+    # tells the vendor to redirect to the port it listens on. BO_0337_002
     ports:
-      - "127.0.0.1:${CALLIOPA_MEDIA_CALLBACK_PORT:-8765}:8765"
+      - "127.0.0.1:${CALLIOPA_MEDIA_CALLBACK_PORT:-8093}:${CALLIOPA_MEDIA_CALLBACK_PORT:-8093}"
     volumes:
       - media-data:/var/lib/calliopa/media
       - media-config:/var/lib/calliopa/media-config

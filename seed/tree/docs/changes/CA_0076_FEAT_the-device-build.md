@@ -1,6 +1,6 @@
 # CA_0076_FEAT_the-device-build
 
-Status: ready
+Status: wip
 
 Requested: 2026-10-01, by the user: scaffold the two apps of `BO_0319` (`calliopa-bootstrap`) as
 changes that can be processed concurrently. This change is the shell's device build. The same
@@ -67,3 +67,11 @@ in `calliopa-bootstrap`'s shared app track (`BO_0335`).
 ## Release Notes
 
 - None. Nothing an installer or a user sees changes.
+
+## Progress
+
+- Implemented 2026-10-02 in `calliopa-bootstrap`'s shared app track (`BO_0335`): the device
+  adapter (`CA_0076_001`) and `build:device` with the in-page server (`CA_0076_002`), verified in
+  Chromium over a real device cell through the desktop harness. Open: the port's cases and the
+  behaviour suites run against the device build (`CA_0076_001`, `CA_0076_003`), and the Fixed
+  Stack's device line (`CA_0076_004`) with them.

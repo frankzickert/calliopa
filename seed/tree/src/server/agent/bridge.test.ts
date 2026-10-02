@@ -228,6 +228,14 @@ describe("starting a run aimed at a document", () => {
     expect(bodies[1]).toEqual({ goal: "g", context: "", agent: "codex" });
   });
 
+  it("Given an instruction and a variation, Then both travel with the run, and none is sent when none was chosen (BO_0336_050)", async () => {
+    const bodies = sentBodies();
+    await startBridgeRun({ goal: "g", agent: "codex", instruction: "prof-1", variation: "var-1" });
+    await startBridgeRun({ goal: "g", agent: "codex", instruction: "prof-1" });
+    expect(bodies[0]).toEqual({ goal: "g", instruction: "prof-1", variation: "var-1", context: "", agent: "codex" });
+    expect(bodies[1]).toEqual({ goal: "g", instruction: "prof-1", context: "", agent: "codex" });
+  });
+
   it("Given a target, Then the artifact, the delivery and the references travel in mark order", async () => {
     const bodies = sentBodies();
     await startBridgeRun({

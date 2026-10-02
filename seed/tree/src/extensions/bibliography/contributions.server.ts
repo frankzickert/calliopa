@@ -12,7 +12,7 @@ import { isStyleId } from "./lib/styles";
 import { TOOLS, ToolRefusal, type ToolCall } from "./server/tools";
 import { askOf, fetchRecord, type FetchAsk } from "./server/fetch";
 import { MIGRATIONS } from "./server/migrations";
-import { listWorks, readWork } from "./server/works";
+import { listWorks, readWork, sourceAnswer } from "./server/works";
 
 /**
  * The server half of `bibliography` (`BO_0291_016`–`BO_0291_019`, reshaped by
@@ -52,7 +52,7 @@ const routes: readonly ApiRoute[] = [
     handle: async (event, params) => {
       const id = params["id"] ?? "";
       if (!isRecordId(id)) throw new HttpError(404, "no such source");
-      const { status, body } = respond(await readWork(id));
+      const { status, body } = sourceAnswer(await readWork(id));
       event.json(status, body);
     },
   },
@@ -66,8 +66,8 @@ const routes: readonly ApiRoute[] = [
       if (!isRecordId(id)) throw new HttpError(404, "no such source");
       const source = await readWork(id);
       if (source.outcome !== "success") {
-        const { status, body } = respond(source);
-        event.json(status === 200 ? 404 : status, body);
+        const { status, body } = sourceAnswer(source);
+        event.json(status, body);
         return;
       }
       const { status, body } = respond(await documentsCiting(id));

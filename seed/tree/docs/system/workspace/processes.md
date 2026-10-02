@@ -109,14 +109,14 @@ Short requests and long-running processes are different primitives.
   generation takes the better part of a minute, so the box stands empty that long before the
   fill; the entry's state is what says when to expect the picture.
 
-## The Run Used A Profile
+## The Run Used An Instruction
 
 - Under `calliopa-bootstrap`'s `BO_0298`
-  ([Block Document Model](../../../src/extensions/documents/docs/system/documents/block-document-model.md#profiles)
-  in `documents`): a run whose command was sent with a profile chosen in its chip is guided by
+  ([Block Document Model](../../../src/extensions/documents/docs/system/documents/block-document-model.md#instructions)
+  in `documents`): a run whose command was sent with an instruction chosen in its chip is guided by
   it, and the record says so (`calliopa-bootstrap`'s `ui-kernel.md` `BO_0298_002`, `BO_0311_002`). The person sees it in the
   run's detail and nowhere else; the chip stays as it is. User decision, 2026-09-25 (`BO_0298_Q10`).
-- The process detail names the profile (`BO_0298_031`, landed 2026-09-25): `GET /api/processes/:id/profile` reads the run through `runForProcess` and `readBridgeRun` and answers the record's `profile` — `{id, title}` — or `null` for a run with none and for a process that is not a run; the shell reads it beside the proposals and the attachments when the selection changes (`ProposedRead.profile`), and the detail draws one line under the step, *Profile: «title»* (`data-process-profile`), whose press (`data-process-profile-open`) opens the profile document in the document tab as `data-process-item` opens what a run proposes into. `BridgeRun` carries the field. Proven in `process-selection.test.ts` through the inspector host: the line with its title for a run guided by one, and nothing for a run with none.
+- The process detail names the instruction (`BO_0298_031`, landed 2026-09-25): `GET /api/processes/:id/instruction` reads the run through `runForProcess` and `readBridgeRun` and answers the record's `instruction` — `{id, title}` — or `null` for a run with none and for a process that is not a run; the shell reads it beside the proposals and the attachments when the selection changes (`ProposedRead.profile`), and the detail draws one line under the step, *Instruction: «title»* (`data-process-instruction`), whose press (`data-process-instruction-open`) opens the instruction document in the document tab as `data-process-item` opens what a run proposes into. `BridgeRun` carries the field. Proven in `process-selection.test.ts` through the inspector host: the line with its title for a run guided by one, and nothing for a run with none.
 
 ## What The Run Was Told At Its Start
 
@@ -133,3 +133,80 @@ Short requests and long-running processes are different primitives.
   capital. `BridgeRun` carries `context`. Proven in `process-selection.test.ts` through the
   inspector host: the keywords sent and a failure named for one run, and nothing for a run told
   nothing.
+
+## Replaying A Run
+
+Under `calliopa-bootstrap`'s `BO_0340`, set to draft by the user on 2026-10-02 and transferred
+here the same day: a finished run can be replayed. The replay types its command into the block it
+was sent from and plays the run back until it ends as it did. The editor's half is `documents`'
+[The Agent At Work](../../../src/extensions/documents/docs/system/documents/agent-at-work.md),
+*A Replayed Run*. The kernel has no half: the bridge's run record already holds the words the
+kernel read, the document and the block they were sent from (`artifact`, `source`), the pin, the
+group, and every event with its time in milliseconds (`at`), and it is persisted under the kernel's
+data volume with nothing pruning it.
+
+* A replay is playback of the recorded run, never a second execution: no model is called, no tool
+  runs, nothing is written to the graph and no proposal group is opened. User decision,
+  2026-10-02 (`BO_0340_Q1`).
+* It is hidden: a keyboard shortcut on a finished run selected in the *Execution* section, named
+  in no menu, button, tooltip or hint. Anyone who can see the run may replay it. User decision,
+  2026-10-02 (`BO_0340_Q2`).
+* It plays compressed: the events in their order and at their recorded spacing, each wait longer
+  than a cap shortened to the cap, and the command typed at a natural human pace. User decision,
+  2026-10-02 (`BO_0340_Q3`).
+* It plays in the live workspace and looks like a real run there: a tab showing the document as it
+  stood when the run started, read-only, and an entry of its own in the *Execution* list. Closing
+  the tab ends the replay, and the entry goes with it; nothing about a replay is stored, the
+  workspace record included. User decision, 2026-10-02 (`BO_0340_Q4`).
+* It ends as the original run ended — its outcome, its reason, and its proposal as it was staged —
+  whatever has happened to that proposal since. A run the instance holds no record or no events of
+  cannot be replayed, and the shortcut says so in words beside the detail and plays nothing. User
+  decision, 2026-10-02 (`BO_0340_Q5`).
+* Nothing is hidden or altered for a replay: the run id, the times and the controls show as they
+  did. User decision, 2026-10-02 (`BO_0340_Q6`).
+- The shortcut is `Ctrl+Alt+R` (`Cmd+Alt+R` on a Mac), the pattern `Cmd+Alt+C` set; it acts only
+  while a run's detail is open in the *Execution* section and the run has ended, and does nothing
+  while it runs. A wait is capped at 3 seconds. The command is typed at 60 ms a character.
+
+- The replay read (`BO_0340_001`). `GET /api/runs/:id/replay` (`src/routes/api/runs/[id]/replay/index.ts`) answers
+  `readReplay` (`src/server/agent/replay.ts`): it reads the run through `readBridgeRun`, whose
+  `BridgeRun` now carries the record's `events`, and `replayOf` answers a `ReplayRun`
+  (`src/lib/replay.ts`) — the words, the document and source block, the pin, the group, the agent,
+  how the run ended and why, and every event through `recordedEvents` in the contract's shape with
+  its recorded `at`. It refuses in words, each with its own status: a run still going (`409`), one
+  sent from no block of a document (`409`), one whose record holds no events (`410`), one the
+  bridge holds no record of (`404`, *This run can no longer be replayed: …*), and a kernel that
+  could not be reached, which keeps the bridge's status and says the run could not be read.
+- The schedule (`BO_0340_002`). `replaySchedule` types the words by code point at
+  `REPLAY_TYPE_MS` (60 ms) a character, sends after `REPLAY_SEND_PAUSE_MS` (400 ms), then plays
+  each event at its recorded spacing from the one before, a wait over `REPLAY_WAIT_CAP_MS` (3 s)
+  shortened to it and a clock that went backwards read as no wait, and ends at the last event.
+  `playedOf` says what a number of steps has shown, and `replayState` the entry's state: queued
+  while typing, running once sent, the original's once ended.
+- The shortcut (`BO_0340_003`). `useOnDocument("keydown")` in `shell.tsx` answers
+  `isReplayShortcut` — `KeyR` with `Alt` and exactly one of `Ctrl` and `Cmd`, read by the key's
+  place since `Alt` changes the character a Mac types — when the active tab's selected process is
+  a run that has ended, and does nothing for one still going. A refusal stands in that process's
+  detail (`InspectorPanel`'s `refusal`, `data-replay-refusal`). Nothing in the shell draws or names
+  the replay.
+- The replay in the workspace (`BO_0340_004`). `startReplay$` reads the replay, closes a replay
+  already playing, and opens a tab beside the active one on the run's document in its own tab's
+  kind and view, carrying `replay` (`Tab.replay`, id `replayTabId`), which `openTab` never matches
+  to the document's own tab. The view bridge's `replay` (`ViewReplay`) hands the view the tab, the
+  run, its block, the words typed so far and the run as it unfolds (`replayActivity`, a live run's
+  shape); `src/lib/replay-player.ts` holds the step timers by tab. The tab's *Execution* section
+  lists the replay's entry alone (`replayExecutionRun`, naming no group, so it offers no answers),
+  and its caret opens `replayProcess`, a transient process merged into what the inspector and the
+  list read and never into the registry: titled as the original, running while it plays, its
+  events arriving in its detail, ending in the original's state and reason. Its view reports its
+  chips under `replayChipsKey` and `chipsFor` reads them there for its tab. `save$` stores
+  `withoutReplays` of the tabs, so the workspace record never holds a replay's tab; closing the tab
+  stops the timers and drops the replay, and a reload leaves neither.
+- Verified on the tree (`BO_0340_005`), 2026-10-02, from a checkout at dataRevision 4074:
+  `tsc --noEmit` clean and both production bundles built. `src/lib/replay.test.ts` (the typing, the
+  send, the spacing and the cap, a clock going backwards, a character outside the basic plane, the
+  entry's states, the view's activity, the transient process and its reason, the shortcut's keys),
+  `src/server/agent/replay.test.ts` (the record read and each refusal), `src/lib/tabs.test.ts`
+  (*a replay's tab*), `src/lib/run-chips.test.ts` and `process-selection.test.ts` through the
+  inspector host (the refusal in its run's detail alone, and no control naming a replay) pass.
+- Walked on the served build at pin 4092 on 2026-10-02 by the user, who said it works (`BO_0340_010`): a finished command run replayed from its detail with `Ctrl+Alt+R`. The first attempt met the served app rebuilding for the new pin, which answers `503` until the build is done; replayed after a reload.

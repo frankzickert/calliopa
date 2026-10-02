@@ -5,6 +5,7 @@ import type {
   FocusedWorkContribution,
   LibraryGlyph,
   LibraryItem,
+  SuggestionAnswer,
 } from "~/contract";
 import { HOST_KINDS } from "~/lib/tabs";
 import { matchRoute, qualify, type RegisteredParty, type RegisteredSection } from "~/registry";
@@ -108,6 +109,31 @@ export async function glyphsFor(kind: string): Promise<Readonly<Record<string, L
  */
 export function focusedWorkFor(kind: string): FocusedWorkContribution | undefined {
   return SERVER_REGISTRY.focusedWork[kind];
+}
+
+/** The suggestion sources a field may name, as a person picks one for their
+ * own field: the qualified name and its label. BO_0336_052 */
+export function suggestionSources(): readonly { readonly source: string; readonly label: string }[] {
+  return Object.entries(SERVER_REGISTRY.suggestionSources).map(([source, { label }]) => ({ source, label }));
+}
+
+/**
+ * What one source suggests for a subject holding these values, or `undefined`
+ * for a source nothing in the build answers — an extension switched off. A
+ * source that throws answers no suggestions and says so, since a field that
+ * suggests nothing stays typeable. BO_0336_052
+ */
+export async function suggest(
+  source: string,
+  values: Readonly<Record<string, string>>,
+): Promise<SuggestionAnswer | undefined> {
+  const answering = SERVER_REGISTRY.suggestionSources[source];
+  if (answering === undefined) return undefined;
+  try {
+    return await answering.answer(values);
+  } catch {
+    return { suggestions: [], note: "No suggestions could be read just now." };
+  }
 }
 
 /** One section re-read, or `undefined` for a section nothing contributes. */

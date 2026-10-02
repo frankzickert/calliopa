@@ -5,7 +5,7 @@ import { CONTAINS } from "./assemble";
 import { DOCUMENT_TYPE, SOURCE_RECORD } from "./vocabulary";
 
 /** The `roleFields` relation from a role's values to what holds them —
- * `doc-block-roles`' vocabulary, named here only to find a proposed source's
+ * `structures`' vocabulary, named here only to find a proposed source's
  * values among its group's staged relations. */
 const FIELDS_OF = "fieldsOf";
 

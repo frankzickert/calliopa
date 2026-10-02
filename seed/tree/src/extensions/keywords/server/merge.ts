@@ -1,16 +1,16 @@
-import { readCatalogue } from "~/extensions/doc-block-roles/server/roles";
+import { readCatalogue } from "~/extensions/structures/server/structures";
 import {
-  ALIAS_ROLE,
-  DEFINITION_ROLE,
+  ALIAS_STRUCTURE,
+  DEFINITION_STRUCTURE,
   FIELDS_FOR,
   FIELDS_OF,
-  HAS_BLOCK_ROLE,
-  KEYWORD_ROLE,
+  HAS_BLOCK_STRUCTURE,
+  KEYWORD_STRUCTURE,
   OFFERS,
-  ROLE_FIELDS_TYPE,
+  STRUCTURE_FIELDS_TYPE,
   type FieldDeclaration,
-  type RoleView,
-} from "~/extensions/doc-block-roles/lib/roles";
+  type StructureView,
+} from "~/extensions/structures/lib/structures";
 import { query } from "~/server/ccgw/client";
 import { bareId, nodeRef } from "~/server/ccgw/nodes";
 import type { GraphOutcome } from "~/server/outcome";
@@ -77,8 +77,8 @@ export interface Holding {
 
 /** One chosen role and the built-in it becomes. */
 export interface MergePair {
-  readonly from: RoleView;
-  readonly into: RoleView;
+  readonly from: StructureView;
+  readonly into: StructureView;
   readonly held: Holding;
   readonly intoHeld: Holding;
 }
@@ -137,7 +137,7 @@ export function mergeStatement(pairs: readonly MergePair[]): MigrationStatement 
       takesInto.add(assignment.subject);
       parameters[`${alias}s`] = nodeRef(assignment.subject);
       parameters[`${alias}r`] = nodeRef(into.id);
-      statements.push(`RELATE ${alias}s -[${alias}n:${HAS_BLOCK_ROLE}]-> ${alias}r`);
+      statements.push(`RELATE ${alias}s -[${alias}n:${HAS_BLOCK_STRUCTURE}]-> ${alias}r`);
     });
     // Values: a subject's node moves to the built-in, rekeyed; a subject that
     // already holds the built-in's values takes the chosen role's beside
@@ -176,7 +176,7 @@ export function mergeStatement(pairs: readonly MergePair[]): MigrationStatement 
 async function readHolding(roleId: string): Promise<GraphOutcome<Holding>> {
   const role = nodeRef(roleId);
   const taken = await query({
-    statement: `MATCH (s)-[h:${HAS_BLOCK_ROLE}]->(r) RETURN GRAPH s, h, r ROOT r`,
+    statement: `MATCH (s)-[h:${HAS_BLOCK_STRUCTURE}]->(r) RETURN GRAPH s, h, r ROOT r`,
     roots: [role],
     unbounded: true,
     metadataOnly: true,
@@ -184,7 +184,7 @@ async function readHolding(roleId: string): Promise<GraphOutcome<Holding>> {
   });
   if (taken.outcome !== "success" && taken.outcome !== "noResult") return taken as GraphOutcome<never>;
   const assignments: Assignment[] = (taken.outcome === "success" ? taken.result.relations : [])
-    .filter((relation) => relation.type === HAS_BLOCK_ROLE && relation.validity.status === "active" && relation.to.nodeId === role)
+    .filter((relation) => relation.type === HAS_BLOCK_STRUCTURE && relation.validity.status === "active" && relation.to.nodeId === role)
     .map((relation) => ({ subject: bareId(relation.fromNodeId), relationId: relation.id }));
   const stored = await query({
     statement: `MATCH (f)-[x:${FIELDS_FOR}]->(r) RETURN GRAPH f, x, r ROOT r`,
@@ -199,7 +199,7 @@ async function readHolding(roleId: string): Promise<GraphOutcome<Holding>> {
       .filter((relation) => relation.type === FIELDS_FOR && relation.validity.status === "active" && relation.to.nodeId === role)
       .map((relation) => [relation.fromNodeId, relation.id] as const),
   );
-  const fieldNodes = nodes.filter((node) => node.revision.status === "established" && (node.revision.content ?? {})["_type"] === ROLE_FIELDS_TYPE && forRelations.has(node.id));
+  const fieldNodes = nodes.filter((node) => node.revision.status === "established" && (node.revision.content ?? {})["_type"] === STRUCTURE_FIELDS_TYPE && forRelations.has(node.id));
   if (fieldNodes.length === 0) return { outcome: "success", result: { assignments, values: [] } };
   const subjects = await query({
     statement: `MATCH (f)-[o:${FIELDS_OF}]->(s) RETURN GRAPH f, o, s ROOT f`,
@@ -234,9 +234,9 @@ async function readHolding(roleId: string): Promise<GraphOutcome<Holding>> {
 export async function mergeKeywordRoles(settings: unknown): Promise<GraphOutcome<MigrationStatement>> {
   const chosen = chosenFrom(settings);
   const wanted: readonly (readonly [string | null, string])[] = [
-    [chosen.keywordRole, KEYWORD_ROLE],
-    [chosen.definitionRole, DEFINITION_ROLE],
-    [chosen.aliasRole, ALIAS_ROLE],
+    [chosen.keywordRole, KEYWORD_STRUCTURE],
+    [chosen.definitionRole, DEFINITION_STRUCTURE],
+    [chosen.aliasRole, ALIAS_STRUCTURE],
   ];
   if (wanted.every(([from]) => from === null)) return { outcome: "success", result: { statement: "", parameters: {} } };
   const catalogue = await readCatalogue();

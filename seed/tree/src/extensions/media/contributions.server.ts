@@ -1,9 +1,10 @@
 import { serverContributions as declare, type ApiRoute } from "~/contract";
 import { HttpError } from "~/server/http-error";
 
-import { remakeGeneration } from "./server/make";
+import { promptOf, remakeGeneration } from "./server/make";
+import { choicesFor } from "./server/format";
 import { sourceOf } from "./server/source";
-import { captureAxes, offeredRoster, readOffered, writeOffered } from "./server/offered";
+import { SUGGESTION_SOURCES } from "./server/suggestions";
 import { TOOLS, ToolRefusal, answerTool, type ToolCall } from "./server/tools";
 import { proposeGeneration } from "./server/propose";
 import {
@@ -25,13 +26,14 @@ const routes: readonly ApiRoute[] = [
     // through the kernel, which holds the service's bearer.
     method: "GET",
     path: "services",
-    // `?offered=1` is what the dropdown asks for: the owner's own set. Settings
-    // asks for the whole roster, because that is what it offers a choice from.
-    // BO_0273_029
-    handle: async (event) =>
-      event.json(200, {
-        services: event.url.searchParams.get("offered") === "1" ? await offeredRoster() : await roster(),
-      }),
+    handle: async (event) => event.json(200, { services: await roster() }),
+  },
+  {
+    // What the choice beside Send offers under an instruction: the format it
+    // names and that format's variations. BO_0336_023
+    method: "GET",
+    path: "variations",
+    handle: async (event) => event.json(200, await choicesFor(event.url.searchParams.get("instruction") ?? "", promptOf)),
   },
   {
     // Proposes a picture that is not made yet: a pending block staged into a
@@ -56,37 +58,6 @@ const routes: readonly ApiRoute[] = [
         return;
       }
       event.json(202, { group: proposed.group, blockId: proposed.blockId });
-    },
-  },
-  {
-    // Which models the dropdown offers. Read by anyone signed in; written by
-    // the owner alone, which the kernel enforces on the record. BO_0273_029
-    method: "GET",
-    path: "offered",
-    handle: async (event) => event.json(200, await readOffered()),
-  },
-  {
-    method: "PUT",
-    path: "offered",
-    handle: async (event) => {
-      const body = (await event.request.json()) as Record<string, unknown>;
-      const list = (name: string): string[] =>
-        Array.isArray(body[name]) ? (body[name] as unknown[]).filter((one): one is string => typeof one === "string") : [];
-      const map = (name: string): Record<string, unknown> =>
-        body[name] !== null && typeof body[name] === "object" && !Array.isArray(body[name])
-          ? (body[name] as Record<string, unknown>)
-          : {};
-      // The names and the icons travel with the set. They were written by the
-      // section and dropped here, so an owner who renamed a model or gave it an
-      // icon lost both on the next read. BO_0273_037
-      const held = await readOffered();
-      event.json(200, await writeOffered({
-        models: list("models"),
-        named: list("named"),
-        names: map("names"),
-        icons: map("icons"),
-        axes: held.axes ?? {},
-      }));
     },
   },
   {
@@ -135,19 +106,6 @@ const routes: readonly ApiRoute[] = [
       }
       const id = await requestSignIn(body.service);
       event.json(202, { service: body.service, id });
-    },
-  },
-  {
-    // Asks the vendor what each offered model takes and keeps it. Free, and
-    // never on the path of a press: the section runs it when it opens and
-    // after a save, and a row's *Ask again* runs it for one model.
-    // BO_0279_011 BO_0279_015
-    method: "POST",
-    path: "offered/axes",
-    handle: async (event) => {
-      const body = (await event.request.json().catch(() => ({}))) as { model?: unknown };
-      const only = typeof body.model === "string" && body.model !== "" ? body.model : undefined;
-      event.json(200, await captureAxes(only));
     },
   },
   {
@@ -238,6 +196,9 @@ const kernelRoutes: readonly ApiRoute[] = [
 
 export const contributions = declare({
   routes: [...routes, ...kernelRoutes],
+  // What a format's provider, model, ratio and quality suggest
+  // (`calliopa-bootstrap`'s `BO_0336_020`), answered through the frame.
+  suggestionSources: SUGGESTION_SOURCES,
   // No parties. A `credential: "status"` party is an *agent runtime* to the
   // settings extension: `withStatus` looks it up in what the agent reported
   // (`adapters.json`, which the hermes broker writes for codex and claude-code

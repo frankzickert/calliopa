@@ -35,12 +35,25 @@ const Opinion = component$<BlockDecorationProps>(({ setOption$ }) =>
   jsx("span", {
     children: [
       jsx("button", { type: "button", "data-fixture-option": "", onClick$: async () => {
-        await setOption$?.("profile", "prof-9");
+        await setOption$?.("instruction", "prof-9");
         await setOption$?.("tone", "dry");
       }, children: "Choose" }),
       jsx("button", { type: "button", "data-fixture-clear": "", onClick$: async () => {
         await setOption$?.("tone", null);
       }, children: "Clear" }),
+    ],
+  }),
+);
+
+/** A control following another's choice: it shows the instruction option the
+ * chip set, and sets a variation for one send. BO_0336_051 */
+const Follower = component$<BlockDecorationProps>(({ commandOptions, setOption$ }) =>
+  jsx("span", {
+    children: [
+      jsx("span", { "data-fixture-sees": commandOptions?.["instruction"] ?? "", "data-fixture-variation": commandOptions?.["variation"] ?? "" }),
+      jsx("button", { type: "button", "data-fixture-vary": "", onClick$: async () => {
+        await setOption$?.("variation", "var-1", true);
+      }, children: "Vary" }),
     ],
   }),
 );
@@ -122,12 +135,35 @@ describe("a contributed control in the command chip", () => {
   });
 
   it("hands the command place setOption, and Send carries what was set and nothing cleared", async () => {
-    const view = await mountWith([{ extension: "profiles", places: { command: Opinion } }]);
+    const view = await mountWith([{ extension: "instructions", places: { command: Opinion } }]);
     await view.userEvent("[data-fixture-option]", "click");
     await view.userEvent("[data-fixture-clear]", "click");
     await view.userEvent('[data-block-command="blk-a"] [data-block-send]', "click");
     await view.settle(() => (view.record.commands?.length ?? 0) === 1);
-    expect(view.record.commands?.[0]?.options).toEqual({ profile: "prof-9" });
+    expect(view.record.commands?.[0]?.options).toEqual({ instruction: "prof-9" });
+  });
+
+  it("hands a command place the options another place set", async () => {
+    const view = await mountWith([
+      { extension: "instructions", places: { command: Opinion } },
+      { extension: "media", places: { command: Follower } },
+    ]);
+    await view.userEvent("[data-fixture-option]", "click");
+    await view.settle(() => view.root.querySelector('[data-fixture-sees="prof-9"]') !== null);
+    expect(view.root.querySelector('[data-fixture-sees="prof-9"]') ?? null).not.toBeNull();
+  });
+
+  it("sends an option set for one send beside the others", async () => {
+    const view = await mountWith([
+      { extension: "instructions", places: { command: Opinion } },
+      { extension: "media", places: { command: Follower } },
+    ]);
+    await view.userEvent("[data-fixture-option]", "click");
+    await view.userEvent("[data-fixture-vary]", "click");
+    await view.userEvent('[data-block-command="blk-a"] [data-block-send]', "click");
+    await view.settle(() => (view.record.commands?.length ?? 0) === 1);
+    // Clearing it after the send is `afterSend`'s, proven in view-bridge.test.ts.
+    expect(view.record.commands?.[0]?.options).toEqual({ instruction: "prof-9", tone: "dry", variation: "var-1" });
   });
 
   it("sends no options for a command nothing set one on", async () => {

@@ -9,6 +9,7 @@
   "scripts": {
     "prebuild": "node scripts/gen-registry.mjs",
     "build": "vite build && vite build -c adapters/node-server/vite.config.ts",
+    "build:device": "node adapters/device/build.mjs",
     "dev": "node scripts/serve.mjs --dev",
     "serve": "node scripts/serve.mjs",
     "pretypecheck": "node scripts/gen-registry.mjs",

@@ -164,12 +164,12 @@ Under `DO_0025` (`docs/changes/completed/DO_0025_FEAT_the-command-line-carries-t
 
 ## A Chip Beside The Command Chip
 
-- Under `doc-block-roles`' `RO_0002`, set to draft by the user on 2026-10-01 and transferred here
+- Under `structures`' `RO_0002`, set to draft by the user on 2026-10-01 and transferred here
   the same day: a second chip stands beside the command chip and holds what extensions contribute to
   `ui.shell`'s `underCommand` place
   ([Contribution Contract](../../../../../../docs/system/workspace/contribution-contract.md#a-chip-beside-the-command-chip),
   `RO_0002_001`); the block's roles are its first contribution
-  ([Roles](../../../../doc-block-roles/docs/system/system.md#the-roles-chip)).
+  ([Structures](../../../../structures/docs/system/system.md#the-structures-chip)).
 * The second chip stands in the command chip's row, aligned right, when the row has room for both,
   and wraps to the next row, still at the right, when it has not. User decision from the walk,
   2026-10-01, replacing `RO_0002_Q4`'s left edge below.

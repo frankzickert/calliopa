@@ -1,13 +1,13 @@
-import { randomUUID } from "node:crypto";
 
+import { port } from "~/server/port";
 import {
-  BLOCK_ROLE_TYPE,
+  BLOCK_STRUCTURE_TYPE,
   FIELDS_FOR,
   FIELDS_OF,
-  HAS_BLOCK_ROLE,
-  ROLE_FIELDS_TYPE,
+  HAS_BLOCK_STRUCTURE,
+  STRUCTURE_FIELDS_TYPE,
   type FieldDeclaration,
-} from "~/extensions/doc-block-roles/lib/roles";
+} from "~/extensions/structures/lib/structures";
 import { query, type ReadNode } from "~/server/ccgw/client";
 import { bareId, nodeRef } from "~/server/ccgw/nodes";
 import type { GraphOutcome } from "~/server/outcome";
@@ -93,7 +93,7 @@ export function formatsStatement(
   manuscripts: readonly string[],
   fronts: readonly HeldFront[],
   paperOrder: number,
-  mint: () => string = randomUUID,
+  mint: () => string = () => port.uuid(),
 ): MigrationStatement {
   const statements: string[] = [];
   const parameters: Record<string, unknown> = {};
@@ -110,7 +110,7 @@ export function formatsStatement(
     parameters["p_fields"] = PAPER_FIELDS;
     parameters["pref"] = nodeRef(paper);
     statements.push(
-      `CREATE (p:${BLOCK_ROLE_TYPE} {id: $p_id, name: $p_name, description: $p_description, order: $p_order, fields: $p_fields, status: "established"})`,
+      `CREATE (p:${BLOCK_STRUCTURE_TYPE} {id: $p_id, name: $p_name, description: $p_description, order: $p_order, fields: $p_fields, status: "established"})`,
     );
     // Sets precede relates: a relation anchors at the document's revision,
     // and a SET after it would stage a second one. BO_0118_001
@@ -126,8 +126,8 @@ export function formatsStatement(
       parameters[`v${index}ref`] = nodeRef(values);
       parameters[`d${index}ref`] = nodeRef(front.documentId);
       statements.push(
-        `RELATE d${index}ref -[h${index}:${HAS_BLOCK_ROLE}]-> pref`,
-        `CREATE (v${index}:${ROLE_FIELDS_TYPE} {id: $v${index}_id, role: $v${index}_role, values: $v${index}_values, status: "established"})`,
+        `RELATE d${index}ref -[h${index}:${HAS_BLOCK_STRUCTURE}]-> pref`,
+        `CREATE (v${index}:${STRUCTURE_FIELDS_TYPE} {id: $v${index}_id, role: $v${index}_role, values: $v${index}_values, status: "established"})`,
         `RELATE v${index}ref -[o${index}:${FIELDS_OF}]-> d${index}ref`,
         `RELATE v${index}ref -[f${index}:${FIELDS_FOR}]-> pref`,
       );
@@ -156,7 +156,7 @@ export async function readFormats(): Promise<
     .map(heldFront)
     .filter((front): front is HeldFront => front !== null)
     .sort((left, right) => (left.documentId < right.documentId ? -1 : 1));
-  const roles = await query({ statement: `MATCH (r:${BLOCK_ROLE_TYPE}) RETURN GRAPH r`, unbounded: true, purpose: "migration: the roles' order" });
+  const roles = await query({ statement: `MATCH (r:${BLOCK_STRUCTURE_TYPE}) RETURN GRAPH r`, unbounded: true, purpose: "migration: the roles' order" });
   if (roles.outcome !== "success" && roles.outcome !== "noResult") return roles as GraphOutcome<never>;
   const highest = (roles.outcome === "success" ? roles.result.nodes : []).reduce((top, node) => {
     const order = (node.revision.content ?? {})["order"];

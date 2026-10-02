@@ -27,9 +27,12 @@ import {
   type ViewAcross,
   type ViewDrop,
   type ViewActivity,
+  type ViewReplay,
+  NO_REPLAY,
   type ViewAnswerAll,
   type ViewToggleRun,
   type ViewCommandOptions,
+  afterSend,
   commandKey,
   withOption,
   type RunChip,
@@ -41,7 +44,7 @@ import type { Pointing, RevealTarget, WorkingMode } from "~/lib/command-target";
 import type { Standing } from "../../lib/disposition";
 import type { FocusedWork } from "~/server/focused-work";
 import type { BlockView, DocumentView, TextBlockView } from "../../server/assemble";
-import type { DocumentProposals, ProposedChange } from "../../server/documents";
+import type { DocumentProposals, ProposedChange, ReplayDocument } from "../../server/documents";
 import { orderBetween } from "~/lib/order";
 import { runsText, splitRuns, type Run } from "~/lib/runs";
 import { BlockEditorView } from "../block-editor";
@@ -141,6 +144,14 @@ export interface BridgeRecord {
   /** The pinches sent, in order. BO_0322_010 */
   pinches?: ViewPinch[];
   sendAnswer?: ViewSent;
+  /** The replay the view mounts under, as the shell holds it: the store
+   * itself once mounted, so a test plays the steps the shell would.
+   * BO_0340_008 */
+  replay?: ViewReplay;
+  /** What the next press on `[data-harness-replay]` hands the view as the
+   * replay's next step: the words typed so far and the run as it has
+   * unfolded, as the shell's schedule does. BO_0340_008 */
+  replayStep?: { readonly words?: string | null; readonly run?: { readonly running: boolean; readonly events: readonly DocumentActivity[] } | null };
   /** What the next press on `[data-harness-compose]` asks the view to write
    * into a new block, as the shell hands over `composeCommand$` on a
    * document tab. BO_0267_018 */
@@ -196,6 +207,9 @@ export function documentsApi(
     /** Refuses the first `times` of a command as the kernel's per-node floor
      * does, `write_too_frequent`, and lands the ones after. DO_0015_002 */
     readonly refuseByFloor?: { readonly command: string; readonly times: number };
+    /** What `GET d/[id]/replay` answers for a run, or nothing for none.
+     * BO_0340_008 */
+    readonly replay?: ReplayDocument;
     /** Every read of the document itself, recorded. CA_0045_003 */
     readonly reads?: string[];
     /** How long a read of the document takes to answer. CA_0045_003 */
@@ -579,6 +593,11 @@ export function documentsApi(
       return answer(query.get("rejected") === "1" ? { ...asBegun, rejected } : asBegun);
     }
     if (url === `${base}/retired`) return answer(retired);
+    if (url === `${base}/replay`) {
+      return options.replay === undefined
+        ? new Response(JSON.stringify({ outcome: "validationFailure", failures: [{ operation: null, rule: "unknownRun", detail: "This run can no longer be replayed: the instance holds no record of it." }] }), { status: 422, headers: { "content-type": "application/json" } })
+        : answer(options.replay);
+    }
     if (url === "/api/workspaces/harness-workspace/processes") {
       // The workspace's processes, where a run's conclusion lands. BO_0258_006c
       return new Response(JSON.stringify(options.processes?.() ?? []), { headers: { "content-type": "application/json" } });
@@ -667,6 +686,8 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
     record.session = pointing;
     record.across = across;
     const activity = useStore<ViewActivity>({ runs: [], seq: 0 });
+    const replay = useStore<ViewReplay>(record.replay ?? { ...NO_REPLAY });
+    record.replay = replay;
     const answerAll = useStore<ViewAnswerAll>({ itemId: null, group: null, answer: null, seq: 0 });
     const toggleRun = useStore<ViewToggleRun>({ itemId: null, key: null, seq: 0 });
     const focus = useStore<ViewFocus>(
@@ -687,6 +708,7 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
       pointing,
       across,
       activity,
+      replay,
       answerAll,
       toggleRun,
       setRunChips$: $((_itemId: string, chips: readonly RunChip[]) => {
@@ -727,9 +749,14 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
         agents.agent = agent;
       }),
       commandOptions,
-      setCommandOption$: $((itemId: string, blockId: string, name: string, value: string | null) => {
+      setCommandOption$: $((itemId: string, blockId: string, name: string, value: string | null, once?: boolean) => {
         const key = commandKey(itemId, blockId);
         commandOptions.byCommand = { ...commandOptions.byCommand, [key]: withOption(commandOptions.byCommand[key] ?? {}, name, value) };
+        const held = (commandOptions.onceByCommand?.[key] ?? []).filter((candidate) => candidate !== name);
+        commandOptions.onceByCommand = {
+          ...commandOptions.onceByCommand,
+          [key]: once === true && value !== null && value !== "" ? [...held, name] : held,
+        };
       }),
       chooseSpeed$: $((speed: "fast" | "thorough") => {
         agents.speed = speed;
@@ -737,7 +764,14 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
       refreshAgents$: $(async () => agents.runtimes),
       sendCommand$: $(async (command: ViewCommand): Promise<ViewSent> => {
         (record.commands ??= []).push(command);
-        return record.sendAnswer ?? { ok: true, runId: `arun-${record.commands.length}` };
+        const answer = record.sendAnswer ?? { ok: true as const, runId: `arun-${record.commands.length}` };
+        // As the shell does: what was set for one send goes with it. BO_0336_051
+        if (answer.ok) {
+          const sent = afterSend(commandOptions, command.itemId, command.source.block);
+          commandOptions.byCommand = sent.byCommand;
+          commandOptions.onceByCommand = sent.onceByCommand ?? {};
+        }
+        return answer;
       }),
       // A gesture the harness records like a command, so a view's gestures
       // can be pressed and read back. BO_0258_006
@@ -858,6 +892,24 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
             (drag as { overId: string | null }).overId = record.over ?? null;
           }),
           children: "over",
+        }),
+        // A replay's next step, as the shell's schedule plays it. BO_0340_008
+        jsx("button", {
+          type: "button",
+          "data-harness-replay": "",
+          onClick$: $(() => {
+            const next = record.replayStep;
+            if (next === undefined || tab.itemId === null) return;
+            if (next.words !== undefined) replay.words = next.words;
+            if (next.run !== undefined) {
+              replay.run =
+                next.run === null
+                  ? null
+                  : { itemId: tab.itemId, runId: `replay:${replay.runId ?? ""}`, agent: "claude-code", running: next.run.running, events: next.run.events };
+            }
+            replay.seq += 1;
+          }),
+          children: "replay",
         }),
         // The reader's run, as the shell's poll hands it over. BO_0265_012
         jsx("button", {
@@ -996,6 +1048,8 @@ export async function mountEditor(
     /** What shows the editor has drawn the document: a block row, or for a
      * document with no blocks its blank page. CA_0072 */
     readonly drawn?: string;
+    /** Mounts the view as a replay's tab, playing this run. BO_0340_008 */
+    readonly replay?: { readonly runId: string; readonly block: string };
   } = {},
 ) {
   // The editor's counts and proposals are read by a visible task, after the
@@ -1023,6 +1077,9 @@ export async function mountEditor(
     focusedChildren: [],
     ...(options.focusOn === undefined ? {} : { focusOn: options.focusOn }),
     ...(options.session === undefined ? {} : { session: options.session }),
+    ...(options.replay === undefined
+      ? {}
+      : { replay: { ...NO_REPLAY, tabId: tabFor(document).id, itemId: document.documentId, runId: options.replay.runId, block: options.replay.block } }),
   };
   const dom = await createDOM();
   queueFrames();

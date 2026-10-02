@@ -39,7 +39,7 @@ export const CitePopover = component$<{
       }
       const answer = (await response.json()) as { works?: { workId: string; record: Record<string, unknown> }[] };
       state.works = (answer.works ?? []).map((work) => ({ workId: work.workId, label: workLine(work.record) }));
-      if (state.works.length === 0) state.refusal = "No sources yet: add one under Roles, Source.";
+      if (state.works.length === 0) state.refusal = "No sources yet: add one under Structures, Source.";
     } catch {
       state.refusal = "The sources could not be read: the server did not answer.";
     } finally {

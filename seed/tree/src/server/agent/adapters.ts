@@ -28,7 +28,7 @@ import { port } from "../port";
  * its own and prove what an instance reports without depending on what the
  * machine's own agent happens to have written. CA_0074_002
  */
-const files = port.agentConfig;
+const files = port.config("agent");
 
 export type LoginRuntime = "codex" | "claude-code";
 

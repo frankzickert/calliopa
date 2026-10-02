@@ -1,0 +1,533 @@
+/* Structures (BO_0299, one structure type since BO_0309): the structure page, the pills a
+ * structured block carries, and the structure control in a chip. Colours are the
+ * theme's tokens only. */
+
+.structure-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 48rem;
+  padding: 1rem;
+}
+
+.structure-page__head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.structure-page__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.structure-page__label,
+.structure-page__heading {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.structure-page__heading {
+  margin: 0.5rem 0 0;
+}
+
+.structure-page__name {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.structure-page__name,
+.structure-page__description,
+.structure-page__block-structure-name,
+.structure-page__block-structure-description,
+.structure-page__add-name {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  padding: 0.35rem 0.5rem;
+}
+
+.structure-page__standing,
+.structure-page__empty {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.structure-page__notice {
+  margin: 0;
+  color: var(--error);
+}
+
+.structure-page__fields,
+.structure-page__offers {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0 0 0 1.5rem;
+}
+
+.structure-page__field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.structure-page__field-name,
+.structure-page__field-type,
+.structure-page__field-options,
+.structure-page__field-default {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  padding: 0.35rem 0.5rem;
+}
+
+.structure-page__field-name {
+  flex: 1 1 10rem;
+}
+
+.structure-page__field-options,
+.structure-page__field-default {
+  flex: 1 1 8rem;
+}
+
+.structure-page__required {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.structure-page__field-controls {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.structure-page__offer {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.structure-page__button,
+.structure-page__icon-button {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+}
+
+.structure-page__icon-button {
+  display: inline-flex;
+  padding: 0.25rem;
+}
+
+.structure-page__button:disabled,
+.structure-page__icon-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.structure-page__add {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+/* The pills at a structured block: the register word's idiom — small, quiet,
+ * words rather than a glyph so a screen reader hears them. One per structure. */
+.block-structures {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-block-end: 0.1rem;
+}
+
+.block-structure {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.block-structure[data-structure-state] {
+  color: var(--text-muted);
+}
+
+.block-structure__missing {
+  color: var(--error);
+}
+
+.block-structure__state {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.block-structure__state::before {
+  content: "· ";
+}
+
+.structures-row {
+  display: flex;
+  align-items: center;
+}
+
+.structures-row .library-entry {
+  flex: 1 1 auto;
+}
+
+.structures-row__builtin,
+.structure-control__builtin {
+  margin-inline-start: 0.5rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.structures-row__documents {
+  padding-inline-start: 1.5rem;
+}
+
+/* The structure control: the structures taken as pills and a `+`, and a popover
+ * beside it, over what follows. */
+.structure-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* The structures chip beside the command chip (RO_0002_004): the block's structures as
+   the pills they are while reading, each 24px tall like the command chip's
+   controls, then a round `+`. What is open is marked by its underline. */
+.structure-control[data-structure-form="pills"] {
+  flex-wrap: wrap;
+  gap: 0.1rem;
+}
+
+.structure-control__chip-structure {
+  box-sizing: border-box;
+  height: 24px;
+  padding: 0 0.45rem;
+  border-radius: 12px;
+}
+
+.structure-control__chip-structure:hover,
+.structure-control__chip-structure:focus-visible,
+.structure-control__add:hover,
+.structure-control__add:focus-visible {
+  background: var(--panel);
+  outline: none;
+}
+
+.structure-control__chip-structure[aria-expanded="true"] .block-structure__name {
+  text-decoration: underline;
+}
+
+.structure-control__add {
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.structure-control__add[aria-expanded="true"] {
+  color: var(--accent);
+}
+
+/* Above the phone width the popover is fixed where the control measured it
+   (RO_0004_001): below or above its chip, its height capped to the room on
+   that side, kept inside the visible view. Fixed, it takes no room in the
+   page, so opening it never lengthens or widens the document. Hidden until
+   the control has placed it. */
+.structure-control__popover {
+  position: fixed;
+  top: var(--structures-top, auto);
+  right: auto;
+  bottom: var(--structures-bottom, auto);
+  left: var(--structures-left, 0px);
+  /* A popover in the top layer is centred by the browser's own margins. */
+  margin: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  box-sizing: border-box;
+  width: var(--structures-width, min(22rem, calc(100vw - 2rem)));
+  max-height: var(--structures-room, 60vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--text) 22%, transparent);
+}
+
+.structure-control__taken,
+.structure-control__matches {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.structure-control__pill {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.structure-control__expand,
+.structure-control__clear,
+.structure-control__match,
+.structure-control__suggestion {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  cursor: pointer;
+}
+
+.structure-control__expand {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+}
+
+.structure-control__clear {
+  padding: 0.15rem;
+}
+
+.structure-control__match {
+  width: 100%;
+  justify-content: flex-start;
+  border-radius: 0.25rem;
+  border-color: transparent;
+}
+
+.structure-control__match:hover,
+.structure-control__match:focus-visible {
+  border-color: var(--border);
+}
+
+.structure-control__missing,
+.structure-control__refusal {
+  color: var(--error);
+}
+
+.structure-control__note,
+.structure-control__empty,
+.structure-control__heading {
+  color: var(--text-muted);
+}
+
+.structure-control__heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+}
+
+.structure-control__suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.structure-control__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.4rem 0 0.2rem 1.5rem;
+}
+
+.structure-control__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.structure-control__field-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.structure-control__input,
+.structure-control__query {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  padding: 0.25rem 0.4rem;
+}
+
+.structure-control__input[data-missing="true"] {
+  border-color: var(--error);
+}
+
+.structure-control__input[type="checkbox"] {
+  align-self: flex-start;
+}
+
+.structure-control__query {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.structure-control__empty,
+.structure-control__refusal {
+  margin: 0;
+}
+
+/* The document header's rows (DO_0030_004, DO_0030_005): the structures line —
+   the structures from above, muted, then the document's own pills and the `+`,
+   always drawn — and the values line under it, quiet. In the compact header
+   the pills alone, on one line, the rest counted. */
+.title-structures[data-title-structures="full"] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--document-header-gap, 0.35rem);
+}
+
+.title-structures__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.title-values {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.title-values__structure {
+  font-weight: 600;
+}
+
+.title-structures--compact {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.title-structures--compact .block-structure {
+  flex: none;
+  cursor: inherit;
+}
+
+/* Until the control has measured where it stands. */
+.structure-control:not([data-structures-side]) .structure-control__popover {
+  visibility: hidden;
+}
+
+/* On a phone the structure popover is a sheet from the bottom of the screen, over
+   a dimmed page (RO_0002, after the walk): the block's chip and the title's
+   tag alike. A tap on the dimmed page closes it, and so does its handle
+   swiped down; it rides above the keyboard, the control setting its bottom
+   and its room from the part of the page the keyboard leaves visible. Both
+   stand in the top layer, so the dimmed page covers the shell's bars as well
+   (the walk of RO_0004_005). Wider screens keep the popover beside its chip
+   (RO_0004_001). */
+.structure-control__backdrop,
+.structure-control__handle {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .structure-control__backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    /* In the top layer the browser sizes a popover to its content. */
+    width: auto;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    z-index: 59;
+    background: color-mix(in srgb, var(--text) 28%, transparent);
+    touch-action: none;
+  }
+
+  .structure-control .structure-control__popover,
+  .structure-control:not([data-structures-side]) .structure-control__popover {
+    position: fixed;
+    visibility: visible;
+    inset-inline: 0;
+    inset-block-start: auto;
+    bottom: var(--structures-sheet-bottom, 0px);
+    z-index: 60;
+    box-sizing: border-box;
+    width: auto;
+    max-height: min(75vh, calc(var(--structures-sheet-room, 100vh) - 1.5rem));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-block-end: max(0.75rem, env(safe-area-inset-bottom));
+    border-radius: 14px 14px 0 0;
+    transform: translateY(var(--structures-sheet-drag, 0px));
+    transition: transform 160ms ease;
+  }
+
+  .structure-control__popover[data-dragging] {
+    transition: none;
+  }
+
+  .structure-control__handle {
+    display: block;
+    flex: none;
+    align-self: stretch;
+    height: 1.5rem;
+    margin: -0.25rem 0 0;
+    touch-action: none;
+    cursor: grab;
+    background: linear-gradient(var(--border), var(--border)) center / 2.5rem 4px no-repeat;
+    border-radius: 2px;
+  }
+}

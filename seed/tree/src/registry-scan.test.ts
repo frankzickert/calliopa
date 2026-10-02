@@ -297,3 +297,17 @@ describe("the range grammar the scan and the kernel share", () => {
     }
   });
 });
+
+describe("an extension that moved to a new id", () => {
+  it("Given its former id among its manifest's formerIds, Then it keeps the place the former id gave it (calliopa-bootstrap's BO_0338)", () => {
+    const root = tree({
+      documents: { manifest: manifest("documents") },
+      keywords: { manifest: manifest("keywords") },
+      structures: { manifest: manifest("structures", { formerIds: ["doc-block-roles"] }) },
+      media: { manifest: manifest("media") },
+      instructions: { manifest: manifest("instructions", { formerIds: ["profiles"] }) },
+      relations: { manifest: manifest("relations") },
+    });
+    expect(scanExtensions(root).map((entry) => entry.id)).toEqual(["structures", "documents", "keywords", "media", "instructions", "relations"]);
+  });
+});

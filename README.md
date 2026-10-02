@@ -30,17 +30,22 @@ That one command downloads this repository into `~/calliopa`, generates every
 secret the stack needs, seeds the bundled core into your graph, and starts
 Calliopa at <http://127.0.0.1:8090> — or on the port you chose: the installer asks
 *Which port should Calliopa listen on?* on its first run, and enter keeps 8090.
-To change the port later, edit `CALLIOPA_PORT` in `.env` and run `./install.sh`
-again; the confirmation origin follows on the next port, which the installer
-derives, so never move the port with `docker compose up -d` alone.
+Calliopa takes that port and the next three, in a row, and the installer names
+them when it asks and checks that all four are free: the port itself, the
+confirmation origin, the candidate origin where a proposed change can be tried,
+and the sign-in callback of the generators (Higgsfield), which listens on
+`127.0.0.1` only — 8090 to 8093 by default. To change the port later, edit
+`CALLIOPA_PORT` in `.env` and run `./install.sh` again; the installer derives
+the other three on every run, so never move the port with `docker compose up -d`
+alone.
 
 Other machines reach Calliopa too: it listens on every network adapter of
 the machine, so a laptop on the same LAN, Tailscale, WireGuard or any other
 VPN opens it at this machine's address there, on the same port. To limit
 that, set `CALLIOPA_HOST_BIND` in `.env` to one adapter's address (its
 Tailscale address, say) or to `127.0.0.1` for this machine only, and run
-`./install.sh` again. The database and the object store only ever listen on
-`127.0.0.1`. Two things to know before you rely on it:
+`./install.sh` again. The database and the object store publish no port at
+all. Two things to know before you rely on it:
 
 - On Linux, Docker's published ports bypass host firewalls such as `ufw`. On
   a machine with a public IP address, bind to your VPN adapter's address or
@@ -157,15 +162,10 @@ is not rolled back by it.
 
 ## The bundled core
 
-A fresh install seeds four extensions into your graph, whole — code,
+A fresh install seeds the bundled extensions into your graph, whole — code,
 vocabulary, skills, and declarations. Their source ships in `seed/`, and
-anything you change in them is yours to keep.
-
-- **`ui.shell`** — the application itself: writing in typed blocks,
-  developing extensions, and working with the agent.
-- **`settings`** — where you sign the agent in and store your connections.
-- **`calliopa-extension`** — how new extensions are made.
-- **`calliopa-base`** — the conventions every agent run starts from.
+anything you change in them is yours to keep. Which extensions a release
+carries, and what each one does: <https://www.calliopa.com/docs/bundled-extensions>
 
 ## Your own extensions
 

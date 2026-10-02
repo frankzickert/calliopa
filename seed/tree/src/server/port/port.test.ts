@@ -51,7 +51,14 @@ describe("the server port on an instance", () => {
     await expect(port.gateway("/v1/head")).rejects.toThrow(/CALLIOPA_CCGW_URL/u);
   });
 
-  describe("the agent configuration files", () => {
+  it("draws random bytes of the size asked for", () => {
+    const bytes = port.randomBytes(16);
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(bytes.length).toBe(16);
+    expect(port.randomBytes(16)).not.toEqual(bytes);
+  });
+
+  describe("the shared configuration files", () => {
     let dir = "";
     afterEach(async () => {
       if (dir !== "") await rm(dir, { recursive: true, force: true });
@@ -60,16 +67,27 @@ describe("the server port on an instance", () => {
     it("replaces a file whole, in a directory it makes, with the mode asked for", async () => {
       dir = await mkdtemp(join(tmpdir(), "calliopa-port-"));
       vi.stubEnv("CALLIOPA_AGENT_CONFIG_DIR", dir);
-      expect(await port.agentConfig.read("login/request.json")).toBeNull();
-      expect(await port.agentConfig.exists("login/request.json")).toBe(false);
+      const files = port.config("agent");
+      expect(await files.read("login/request.json")).toBeNull();
+      expect(await files.exists("login/request.json")).toBe(false);
 
-      await port.agentConfig.replace("login/request.json", '{"runtime":"codex"}', 0o600);
+      await files.replace("login/request.json", '{"runtime":"codex"}', 0o600);
 
       expect(await readFile(join(dir, "login", "request.json"), "utf8")).toBe('{"runtime":"codex"}');
       expect((await stat(join(dir, "login", "request.json"))).mode & 0o777).toBe(0o600);
       expect(await readdir(join(dir, "login"))).toEqual(["request.json"]);
-      expect(await port.agentConfig.read("login/request.json")).toBe('{"runtime":"codex"}');
-      expect(await port.agentConfig.exists("login/request.json")).toBe(true);
+      expect(await files.read("login/request.json")).toBe('{"runtime":"codex"}');
+      expect(await files.exists("login/request.json")).toBe(true);
+    });
+
+    it("keeps each directory where the instance mounts it", async () => {
+      dir = await mkdtemp(join(tmpdir(), "calliopa-port-"));
+      vi.stubEnv("CALLIOPA_AGENT_CONFIG_DIR", join(dir, "agent"));
+      vi.stubEnv("CALLIOPA_MEDIA_CONFIG_DIR", join(dir, "media"));
+      await port.config("media").replace("login/request.json", "{}", 0o600);
+      expect(await readdir(dir)).toEqual(["media"]);
+      expect(await port.config("agent").exists("login/request.json")).toBe(false);
+      expect(await port.config("media").read("login/request.json")).toBe("{}");
     });
   });
 });

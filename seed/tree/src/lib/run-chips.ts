@@ -1,6 +1,6 @@
 import { documentOf } from "~/lib/command-target";
 import type { Tab } from "~/lib/tabs";
-import type { RunChip } from "~/components/shell/view-bridge";
+import { replayChipsKey, type RunChip } from "~/components/shell/view-bridge";
 
 /**
  * The run chips of the active tab's target: the open run groups its view
@@ -13,5 +13,7 @@ export function chipsFor(
   tab: Tab | undefined,
 ): readonly RunChip[] {
   const itemId = documentOf(tab);
-  return itemId === null ? [] : (byItem[itemId] ?? []);
+  if (itemId === null || tab === undefined) return [];
+  // A replay's tab reports under its own key, never its document's. BO_0340_004
+  return (tab.replay === undefined ? byItem[itemId] : byItem[replayChipsKey(tab.id)]) ?? [];
 }
