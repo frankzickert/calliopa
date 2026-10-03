@@ -26,13 +26,25 @@ export const UNNAMED_INSTRUCTION = "Untitled instruction";
  * `instructions`' migration renames to `UNNAMED_INSTRUCTION`. */
 export const FORMER_UNNAMED_INSTRUCTION = "Untitled profile";
 
-export const isUnnamed = (title: string): boolean => title === UNNAMED_DOCUMENT || title === UNNAMED_INSTRUCTION;
+/** The name `structures` mints a structure's document with (`RO_0006_001`):
+ * the same rule, its own words, so a new structure is unnamed the way a new
+ * document is. */
+export const UNNAMED_STRUCTURE = "Untitled structure";
+
+export const isUnnamed = (title: string): boolean =>
+  title === UNNAMED_DOCUMENT || title === UNNAMED_INSTRUCTION || title === UNNAMED_STRUCTURE;
 
 /** The minted name a document of this record is given, and the placeholder
- * its headline paints while it is unnamed: an instruction's for an instruction, the
- * document's for everything else. */
-export const unnamedTitle = (document: { readonly record?: string | undefined } | null | undefined): string =>
-  document?.record === INSTRUCTION_RECORD ? UNNAMED_INSTRUCTION : UNNAMED_DOCUMENT;
+ * its headline paints while it is unnamed: the minted name it carries, else an
+ * instruction's for an instruction and the document's for everything else. */
+export const unnamedTitle = (
+  document: { readonly record?: string | undefined; readonly title?: string } | null | undefined,
+): string =>
+  document?.title !== undefined && isUnnamed(document.title)
+    ? document.title
+    : document?.record === INSTRUCTION_RECORD
+      ? UNNAMED_INSTRUCTION
+      : UNNAMED_DOCUMENT;
 
 /**
  * What the title field holds for a document: nothing at all while it carries

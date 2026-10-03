@@ -1,15 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { ALIAS_STRUCTURE, DEFINITION_STRUCTURE, KEYWORD_STRUCTURE, type DocumentStructuresView, type StructureView } from "~/extensions/structures/lib/structures";
-import { MIGRATIONS as ROLE_MIGRATIONS } from "~/extensions/structures/server/migrations";
-import { createStructure, readStructure, reviseStructure, structuresOf, setStructure, setValues } from "~/extensions/structures/server/structures";
+import { ALIAS_STRUCTURE, DEFINITION_STRUCTURE, KEYWORD_STRUCTURE, type DocumentStructuresView } from "~/extensions/structures/lib/structures";
+import { structuresAsDocuments } from "~/extensions/structures/tests/shape";
+import { reviseStructure, structuresOf, setStructure } from "~/extensions/structures/server/structures";
 import { createDocument, deleteDocument, insertBlock, readDocument, renameDocument, restoreBlock, retireBlock, reviseTextBlock } from "~/extensions/documents/server/documents";
-import { write } from "~/server/ccgw/client";
+import { asRun, withBranch } from "~/server/ccgw/branch-scope";
+import { decideGroup } from "~/server/ccgw/client";
 import { readGraphEnv } from "~/server/ccgw/env";
 
 import type { DocumentMentionsView, MentionedInView } from "../../lib/keywords";
 import { createKeyword, keywordsOf, mentionedIn, mentionsOf } from "../../server/keywords";
-import { mergeKeywordRoles } from "../../server/merge";
 import { promptKeywords, readKeywords, ToolRefusal } from "../../server/tools";
 
 /**
@@ -51,11 +51,6 @@ const retried = async <T extends { outcome: string } & Record<string, unknown>>(
   }
 };
 
-const migrate = async (statement: { statement: string; parameters: Record<string, unknown> }, why: string) => {
-  if (statement.statement !== "") ok(await retried(() => write(statement.statement, statement.parameters, why) as Promise<{ outcome: string } & Record<string, unknown>>));
-  await settle();
-};
-
 describe.skipIf(!configured)("keywords over CCGW", () => {
   let computing = "";
   let computingFirst = "";
@@ -69,8 +64,7 @@ describe.skipIf(!configured)("keywords over CCGW", () => {
 
   beforeAll(async () => {
     // The built-ins stand as every instance's do after its migrations.
-    await migrate(ok(await ROLE_MIGRATIONS["builtin-roles"]!()), "the built-in roles");
-    await migrate(ok(await ROLE_MIGRATIONS["keyword-builtins"]!()), "what Keyword offers and sends");
+    await structuresAsDocuments();
     // The definition goes with a prompt, as on a fresh install.
     ok(await retried(() => reviseStructure(KEYWORD_STRUCTURE, { command: "sendWithPrompt", entry: DEFINITION_STRUCTURE, on: true })));
     await settle();
@@ -182,43 +176,6 @@ describe.skipIf(!configured)("keywords over CCGW", () => {
     expect((await createKeyword("   ")).outcome).toBe("validationFailure");
   });
 
-  it("merges the roles a person chose before into the built-ins, and retires them", async () => {
-    let mine = ok<StructureView>(await createStructure({ name: "Keyword (mine)" }));
-    const meaning = ok<StructureView>(await createStructure({ name: "Meaning" }));
-    const names = ok<StructureView>(await createStructure({ name: "Other names" }));
-    const example = ok<StructureView>(await createStructure({ name: "Example" }));
-    await settle();
-    mine = ok<StructureView>(await reviseStructure(mine.id, { command: "addField", name: "Domain", type: "text" }));
-    await settle();
-    for (const offered of [meaning.id, names.id, example.id]) {
-      mine = ok<StructureView>(await reviseStructure(mine.id, { command: "offer", structure: offered }));
-      await settle();
-    }
-    const made = ok<{ documentId: string; blockId: string }>(await createDocument({ title: "Superposition" }));
-    created.push(made.documentId);
-    await settle();
-    ok(await setStructure({ documentId: made.documentId, structure: mine.id, taken: true }));
-    await settle();
-    ok(await setValues({ documentId: made.documentId, structure: mine.id, values: { [mine.fields[0]!.key]: "physics" } }));
-    ok(await setStructure({ documentId: made.documentId, blockId: made.blockId, structure: meaning.id, taken: true }));
-    await settle();
-
-    await migrate(ok(await mergeKeywordRoles({ id: "keywords", keywordRole: mine.id, definitionRole: { kind: "block", id: meaning.id }, aliasRole: names.id })), "the merge");
-    const keyword = ok<StructureView>(await readStructure(KEYWORD_STRUCTURE));
-    expect(keyword.fields.map((field) => field.name)).toContain("Domain");
-    expect(keyword.offers).toEqual(expect.arrayContaining([DEFINITION_STRUCTURE, ALIAS_STRUCTURE, example.id]));
-    expect(keyword.offers).not.toContain(meaning.id);
-    const roles = ok<DocumentStructuresView>(await structuresOf(made.documentId));
-    expect(roles.structures.map((role) => role.id)).toEqual([KEYWORD_STRUCTURE]);
-    expect(roles.structures[0]!.values[mine.fields[0]!.key]).toBe("physics");
-    expect(roles.blocks[0]!.structures.map((role) => role.id)).toEqual([DEFINITION_STRUCTURE]);
-    for (const id of [mine.id, meaning.id, names.id]) expect(ok<StructureView>(await readStructure(id)).retired).toBe(true);
-    expect(ok<readonly { id: string }[]>(await keywordsOf()).map((entry) => entry.id)).toContain(made.documentId);
-    // Nothing left to merge: every chosen role is retired.
-    expect(ok<{ statement: string }>(await mergeKeywordRoles({ keywordRole: mine.id, definitionRole: { kind: "block", id: meaning.id }, aliasRole: names.id })).statement).toBe("");
-    expect(ok<{ statement: string }>(await mergeKeywordRoles(null)).statement).toBe("");
-  });
-
   it("loses a mention with the block retired, and follows a rename at the next read", async () => {
     // Retired and restored at the start, where it stood. BO_0315_009
     ok(await retireBlock({ documentId: essay, blockId: essayFirst }));
@@ -245,5 +202,20 @@ describe.skipIf(!configured)("keywords over CCGW", () => {
     expect(answer.keywords.map((keyword) => keyword.title)).toContain("Quantum bit");
     expect(answer.note).toContain("definition");
     await expect(readKeywords({ input: { document: "00000000-0000-4000-8000-000000000000" }, run: { id: "run", group: "group", pin: 0 } })).rejects.toThrow(ToolRefusal);
+  });
+
+  it("reads a document the run started through the run's group, where truth holds none of its words (BO_0344_008)", async () => {
+    const group = `node:run-bo0344-keywords-${Date.now()}`;
+    const pin = ok<{ dataRevision?: number }>(await readDocument(essay)).dataRevision ?? 0;
+    const run = { id: "arun-bo0344", group, pin };
+    const started = ok<{ documentId: string }>(
+      await withBranch(group, () => createDocument({ title: "A run's draft", block: { kind: "text", runs: [{ text: "Quantum computing, in a run's words" }] } })),
+    );
+    await settle();
+    const titles = (answer: { result: unknown }) => (answer.result as { mentioned: { title: string }[] }).mentioned.map((keyword) => keyword.title);
+    expect(titles(await asRun({ pin, overlay: group }, () => readKeywords({ input: { document: started.documentId }, run })))).toContain("Quantum computing");
+    const outside = await readKeywords({ input: { document: started.documentId }, run }).catch(() => ({ result: { mentioned: [] } }));
+    expect(titles(outside)).not.toContain("Quantum computing");
+    ok(await decideGroup("reject", group, "the suite's run"));
   });
 });

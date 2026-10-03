@@ -6,11 +6,17 @@ import type { InstructionSummary } from "~/extensions/documents/lib/instruction"
  * graph or the kernel.
  */
 
-/** The built-in role every instruction takes (`structures`' built-ins). */
-export const INSTRUCTION_STRUCTURE = "builtin:profile";
+/** The built-in structure every instruction uses: `structures`' fixed id,
+ * named there once (`RO_0005`). */
+export { INSTRUCTION_STRUCTURE } from "~/extensions/structures/lib/structures";
 
 /** The option the chip sets on a command, which the kernel reads. */
 export const INSTRUCTION_OPTION = "instruction";
+
+/** The chip's mark that *No instruction* was chosen for a command, since the
+ * shell keeps no option set to nothing; the runs route does not read it
+ * (`PF_0001_001`). */
+export const NO_INSTRUCTION_OPTION = "no-instruction";
 
 /** An instruction as the chip offers it: grouped first when it carries a role the
  * block or its document takes. */

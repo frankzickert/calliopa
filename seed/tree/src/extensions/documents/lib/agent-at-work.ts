@@ -314,7 +314,17 @@ export function runChipsOf(
     .sort((left, right) => (right.run?.stagedAt ?? 0) - (left.run?.stagedAt ?? 0));
   const chips = staged
     .filter((group) => !live.has(group.groupId))
-    .map((group) => chip(group.groupId, group.groupId, group.proposer, summaryWords(group.items), true, group.items.length));
+    .map((group) => {
+      const ended = chip(group.groupId, group.groupId, group.proposer, summaryWords(group.items), true, group.items.length);
+      // What the run proposes outside this document, which the chip names
+      // and *Accept all* answers with the rest. DO_0034_002
+      const elsewhere = (group.elsewhere ?? []).map((document) => ({
+        title: document.title,
+        ...(document.kind === undefined ? {} : { kind: document.kind }),
+        open: { kind: "documents:document", itemId: document.documentId, title: document.title },
+      }));
+      return elsewhere.length === 0 ? ended : { ...ended, elsewhere };
+    });
   for (const activity of running) {
     const group = liveGroup(activity.events);
     const own = proposals?.groups.find((candidate) => candidate.groupId === group);

@@ -8,8 +8,9 @@ import { BlockControls } from "./block-controls";
  * The one bar the active row carries on its top border, right-aligned and in
  * one row (`BO_0315_013`): the shell's block controls — *Open as focused work*
  * — then ↑ and ↓, then *Remove* and *Fixate*, which reads *Unfixate* on a
- * fixated block. There is no *Keep* button. The bar says how wide it is on its
- * row (`--block-bar-width`).
+ * fixated block. There is no *Keep* button, save on a prompt, which carries
+ * *Keep as content* and *Fixate* instead (DO_0031_002). The bar says how wide
+ * it is on its row (`--block-bar-width`).
  *
  * It is drawn on the row turned to while reading, on the row being edited and
  * on a proposal turned to, and nowhere else, so a button that should not be
@@ -83,6 +84,33 @@ export const BlockBar = component$<{
               <button type="button" data-block-remove aria-label="Remove" title="Remove" onClick$={() => remove$(id)}>
                 <Icon name="x" size={14} />
               </button>
+            )}
+            {/* A prompt is set back from its own bar: *Keep as content*
+                returns it to keep and *Fixate* fixates it, the bar above the
+                document carrying no standing of its own. *Send* alone makes
+                one. DO_0031_002 */}
+            {fixate$ !== undefined && standing === "prompt" && (
+              <>
+                <button
+                  type="button"
+                  data-standing-option="keep"
+                  aria-label="Keep as content"
+                  title="Keep as content"
+                  onClick$={() => fixate$(id, "keep")}
+                >
+                  <span aria-hidden="true">{CONTROL_GLYPH.keep}</span>
+                </button>
+                <button
+                  type="button"
+                  data-standing-option="fixate"
+                  aria-label="Fixate"
+                  title="Fixate"
+                  aria-pressed="false"
+                  onClick$={() => fixate$(id, "fixate")}
+                >
+                  <span aria-hidden="true">{CONTROL_GLYPH.fixate}</span>
+                </button>
+              </>
             )}
             {fixate$ !== undefined && standing !== null && standing !== "prompt" && (
               <button

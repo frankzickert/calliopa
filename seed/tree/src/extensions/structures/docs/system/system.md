@@ -43,13 +43,15 @@
   value is shown on the block and never blocks a write (`BO_0308_Q3`). A field may declare a
   default value, filled in when a block uses the structure, which the person can change; no structure is
   ever taken automatically (`BO_0318_Q8`).
-* Anyone who can edit documents creates and revises structures, written as truth at once with no
-  proposal (`BO_0299_Q2`). Taking a structure or entering a value directly is the person's deliberate
+* Anyone who can edit documents creates structures, from the `+` of *Structures*, and revises them in
+  their documents as any document is written: a person's writes are truth at once, a run's are
+  proposals the person accepts (`BO_0299_Q2`, `RO_0005_Q5`, `RO_0005_Q9`). Taking a structure or entering a value directly is the person's deliberate
   act, written as truth at once and shared. A run may propose structures and values, which land only
   when the person accepts them with the run's other proposals, through the run's chip; until then
   the pill says *proposed* (`BO_0308_Q4`, reversing `BO_0299_Q6`; `BO_0309_Q4`).
-* Structures are defined in the *Structures* category: their fields, what they allow, and their defaults. A
-  structure is never assigned there. Each built-in structure lists the documents using it
+* Structures are listed in the *Structures* category and defined in their own documents: a
+  structure's title, description, fields, what it allows and their defaults are its document's
+  (`RO_0005_Q1`). A structure is never assigned there. Each structure lists the documents using it
   (`BO_0308_Q11`, `BO_0318`).
 * A structure is assigned from the block. When a block is being edited, a chip of its own carries the
   block's roles: each structure used as a pill, which opens its fields when pressed, and a `+`, which
@@ -83,7 +85,9 @@
 * A structure used while an allowing structure stood above stays when that structure goes, and says it is not
   allowed; the person clears it or leaves it (`BO_0299_Q3`).
 * A structure is retired, never deleted: nothing allows it any more, its assignments stay and say so
-  (`BO_0299_Q4`).
+  (`BO_0299_Q4`). The one exception is the owner's clearing of the content, which deletes every
+  structure but the built-ins (`documents`' Clearing The Content). User decision, 2026-10-03
+  (`DO_0037`).
 * Every block in the reading order can use a structure that allows blocks (`BO_0299_Q8`). A structure says
   whether blocks may use it, one switch; the document may always use a structure, and no structure is
   allowed on blocks but not on the document. A structure a person creates allows blocks. User
@@ -102,25 +106,25 @@
   removed or moved. User decision, 2026-10-01 (`RO_0003_Q3`).
 * An allowing never overrides the setting: a document-only structure allowed by a structure above (*Hook* under
   *Story*) is never used by a block; a document under the allowing block — its focused work —
-  uses it in its own chip, and the structure page says so beside such an allowing. User decision,
+  uses it in its own chip, and the allowing structure's document says so beside such an allowing. User decision,
   2026-10-01 (`RO_0003_Q5`).
 
 - The word *role* is taken on a text block — `text.role` is the typographic role — so the type
   keeps the name `blockRole`, and a run's document read keeps answering the typographic one as
   `role`. The surfaces say *structure*.
 - The vocabulary (`BO_0309_010`, landed 2026-09-30, staged through `kernel commit --members`):
-  `blockRole` is the one structure type, a root node requiring `id`, `name` and `order` and permitting
-  `description`, `retired`, `builtin`, `fields` and `formerId`. `fields` is an ordered list of
-  `{key, name, type, required, options?, default?}`; `key` is minted once and never changes, so a
-  rename keeps every value. `offers` runs from any structure to any structure; `hasBlockRole` from the
-  `document` node or any block in its reading order to a structure, several per subject. Relations carry
-  no properties, so values live on a `roleFields` node, one per subject and structure, requiring `id`
-  and `role` (the structure's id, read in the same read as the values) and permitting `values`, keyed by
-  field `key`, and `files`, joined by `fieldsOf` to the subject and `fieldsFor` to the structure. A file
-  value names `{hash, filename, mediaType, size}` in `values`; its blob reference stands in the
-  top-level `files` list, since CCGW keeps a blob alive only from a top-level property
-  (`binary-content.md`). A reference value is a node id. An `ext.relationtype` fences neither end
-  and every block kind is `documents`' declaration, so any block and the document use structures
+  a structure is a `document` using the built-in *Structure* (`RO_0005`, *A Structure Is A
+  Document* below); `blockRole`, the type each structure was before, stays declared, read by the
+  migrations alone. `offers` stays declared, written by nothing: what a structure allows is a value.
+  `hasBlockRole` runs from the `document` node or any block in its reading order to a structure's
+  document, several per subject. Relations carry no properties, so values live on a `roleFields`
+  node, one per subject and structure, requiring `id` and `role` (the structure's id, read in the
+  same read as the values) and permitting `values`, keyed by field `key`, and `files`, joined by
+  `fieldsOf` to the subject and `fieldsFor` to the structure. A file value names `{hash, filename,
+  mediaType, size}` in `values`; its blob reference stands in the top-level `files` list, since CCGW
+  keeps a blob alive only from a top-level property (`binary-content.md`). A reference value is a
+  node id, or a list of them for a reference holding several. An `ext.relationtype` fences neither
+  end and every block kind is `documents`' declaration, so any block and the document use structures
   under the one dependency. `documentRole` and `hasDocumentRole` stay declared, read by the
   migration alone. `lib/structures.ts` names the types and the shapes.
 - The migration (`BO_0309_011`, landed 2026-09-30; `server/migrations.ts`, the member
@@ -131,37 +135,40 @@
   its name, description and retired flag, placed after the structures already there, and `formerId`, the
   id it had; each `offers` from it and each document's `hasDocumentRole` to it are closed and
   related again from and to the new structure, and the old node is retired. Block structures keep their ids
-  and assignments. A reader still holding a former id — `keywords`' settings, a structure page open in a
-  tab — finds the structure by it through the catalogue. An instance with no document structure answers an
-  empty statement.
-- The built-ins (`BO_0309_014`, landed 2026-09-30; the member `migration-bo-0309-builtin-roles`,
-  route `kernel/migrations/builtin-roles`): the fixed ids `builtin:keyword`, `builtin:profile`,
-  `builtin:format` and `builtin:source`, with `builtin: true` and orders 0–3. The migration creates
-  those an instance does not hold and answers nothing when it holds them all. Measured against the
-  other path: as manifest members they would ship with the release, but the members sidecar writes
-  a member's release content over a person's revision, so fields a person added to a built-in
-  would be lost at the next update; a migration creates them once and never touches them again.
-  Rename, retire and restore on a built-in are refused in words (`builtinStructure`); description,
-  fields and allows are open.
-- The catalogue and the acts on a structure (`BO_0309_013`, landed 2026-09-30; `server/structures.ts`,
-  `contributions.server.ts`): `readCatalogue` reads the structures by type and, rooted at them, the
-  `offers` hop — the rooted hop being where a read answers relations — and answers each structure with
-  its fields, what it allows and what allows it, built-ins first, then the person's order.
-  `createStructure` mints one, placed last. `reviseStructure` takes one act — `rename`, `describe`,
-  `retire`, `restore`, `offer`, `unoffer`, `addField`, `reviseField` (name, type, required, a
-  choice's options, a default of the field's type, a changed type dropping a default that no
-  longer fits), `removeField`, `moveField` — each one truth write outside any branch, and answers
-  the structure as it stands. A field removed keeps its stored values, unread. `GET
-  /api/x/doc-block-structures/structures` is the catalogue (also `readers.structures`, the section's), `POST
-  …/structures` creates, `GET …/structures/[id]` reads one, `POST …/structures/[id]` posts an act, parsed by
-  `parseStructureCommand` and refused in words when it is not one, and `GET …/roles/[id]/documents`
-  answers the documents using a structure as their own (`documentsCarrying`). A structure's id in a route
-  is a record id or a built-in's.
+  and assignments. A reader still holding a former id — `keywords`' settings, a tab — finds the
+  structure by it through the catalogue. An instance with no document structure answers an empty
+  statement. What it makes is moved to a document by `structures-as-documents`, which runs after it.
+- The built-ins (`BO_0309_014`, documents since `RO_0005_002`): each a document under the fixed id
+  `lib/structures.ts` names (`BUILTIN_STRUCTURES`), made from the release by
+  `structures-as-documents` where an instance holds none; the ids they had as nodes
+  (`builtin:keyword` and the rest) are their `formerId`s. Measured against the other path: as
+  manifest members they would ship with the release, but the members sidecar writes a member's
+  release content over a person's revision, so fields a person added to a built-in would be lost at
+  the next update; a migration makes them once and never touches them again. The members
+  `migration-bo-0309-builtin-roles`, `-0310-keyword-builtins`, `-0312-format-fields`,
+  `-0313-source-fields`, `-0336-variation`, `-0336-generation-fields` and `-0338-builtin-names`
+  wrote them as nodes; their routes answer nothing now, and the members stay so no instance runs
+  them twice. Retiring and restoring a built-in are refused in words (`builtinStructure`), and its
+  title by `documents`' guard; its description and the fields a person adds are open.
+- The catalogue and the acts on a structure (`BO_0309_013`, read from documents since
+  `RO_0005_001`; `server/structures.ts`, `contributions.server.ts`): `readCatalogue` reads the
+  documents using *Structure*, their blocks, the blocks using *Field* and the values of both — four
+  reads, rooted where a read answers relations — and answers each structure with its fields, what
+  it allows and what allows it, built-ins first, then the person's order. A structure's name,
+  description and fields are written in its document; `createStructure` makes one, placed last, and
+  `reviseStructure` takes the acts that stay acts — `retire`, `restore` and *Keyword*'s
+  `sendWithPrompt` — each one truth write outside any branch, answering the structure as it stands.
+  `GET /api/x/structures/structures` is the catalogue (also `readers.structures`, the section's),
+  `POST …/structures` creates, `GET …/structures/[id]` reads one, `POST …/structures/[id]` posts an
+  act, parsed by `parseStructureCommand` and refused in words when it is not one, and `GET
+  …/structures/[id]/documents` answers the documents using a structure as their own
+  (`documentsCarrying`). A structure's id in a route is a record id or a former built-in's.
 - Taking and values (`BO_0309_012`, `BO_0309_013`, landed 2026-09-30): `structuresOf(documentId,
   {branch?, dataRevision?})` answers the `DocumentStructuresView` — the document's own `structures` and
   `takeable`, and per block in reading order, a callout's children after the callout with their
-  `parentId`, its `roles` and `takeable`. A used structure is `{id, name, description, retired,
-  builtin, allowed, fields, values, missing, proposed?}`. What a subject may use is every
+  `parentId`, its `structures` and `takeable`. A used structure is `{id, name, description, text?,
+  retired, builtin, offered, fields, values, missing, proposed?}`, its `fields` those its values
+  are read against (`declaredFor`). What a subject may use is every
   unretired structure no structure allows, plus every unretired structure allowed by a structure used above it: on the
   callout it stands in, on the document, or above the document when it is a block's focused work.
   A structure on a block is never allowed to that block itself. Found in the walk, 2026-10-01: the first
@@ -206,18 +213,16 @@
   structure or value the person set is rewritten only on the person's word. The skill reaches every run,
   since a run reads the skills of every active extension that allows it a tool
   (`calliopa-bootstrap`'s `BO_0299_003`).
-- The Structures category and the structure page (`BO_0309_015`, landed 2026-09-30; `views/section.tsx`,
-  `views/structure-page.tsx`): a section under *Structures*, Phosphor `tag`, listing the unretired structures,
-  the built-ins first and marked *built in*, each opening as the kind
-  `structures:documentRole` — the name the kind had before one structure type, kept because a
-  workspace's open tabs are stored under it — with its own `+` (`data-new-structure`) creating *Untitled
-  structure* and opening it. A built-in's row unfolds (`data-unfold-structure`) to the documents using it,
-  each opening as itself. The page edits the name (not a built-in's), which renames the tab and the
-  library entry, and the description; retires and restores (not a built-in); lists the fields, each
-  renamed, retyped, marked required, given a choice's options and a default, moved and removed,
-  and adds one by name and type; and lists what the structure allows, each taken back by its ×, with a
-  choice allowing any other unretired structure, and says what allows it. Every act posts as it is made
-  and the page shows what the route answered; a refusal is shown on the page in the route's words.
+- The Structures category (`BO_0309_015`, its rows opening documents since `RO_0005_004`;
+  `views/section.tsx`): a section under *Structures*, Phosphor `tag`, listing the unretired
+  structures, the built-ins first and marked *built in*, each opening as its document
+  (`documents:document`), the section re-read as that kind's tabs change (`opens`), with its own
+  `+` (`data-new-structure`) creating *Untitled structure* and opening it, its title field empty under those words as
+  placeholder: `documents`' minted name `UNNAMED_STRUCTURE`, which `lib/structures.ts` takes from `documents`' `lib/naming.ts`,
+  so a structure nobody has named is unnamed as a document is (`RO_0006_001`, user request 2026-10-03). A built-in's row unfolds
+  (`data-unfold-structure`) to the documents using it, each opening as itself. A tab still stored
+  under the kind `structures:documentRole`, the page a structure had before, opens the structure's
+  document, found by the id the tab holds (`views/former-page.tsx`).
 - The structure control (`BO_0309_021`, landed 2026-09-30; `views/control.tsx`, `BlockStructureControl` and
   `TitleStructureControl`): for a block, the `underCommand` block decoration, drawn in the structures chip
   `documents` stands in the command chip's row (`RO_0002_004`, landed 2026-10-01); for the document,
@@ -330,32 +335,22 @@
   ([Instructions](../../../instructions/docs/system/system.md#the-instruction-in-the-chip-with-tools)). A
   instruction's *Hook* block reaches a run as the rest of its words do, since the run's instruction
   section (`ui-kernel.md` `BO_0298_001`) carries the instruction's blocks.
-- The built-ins *Definition* (`builtin:definition`) and *Alias* (`builtin:alias`) (`calliopa-bootstrap`'s
-  `BO_0310_030`, landed 2026-09-30; `lib/structures.ts`, `BUILTIN_STRUCTURES`, `BUILTIN_OFFERS`): two more
-  built-ins after the four, allowed by *Keyword* through `offers` edges a release makes, which
-  `unoffer` refuses by the rule `builtinOffer` and the structure page draws marked *built in* with no ×.
-  They are refused a rename, retire and restore as every built-in is. They reach an instance by the
-  executable migration `migration-bo-0310-keyword-builtins`, route `kernel/migrations/keyword-builtins`,
-  after `migration-bo-0309-builtin-roles`, which creates them with it on a fresh install:
-  `keywordBuiltinsStatement` relates the allows that do not stand and nothing else, so it is
-  idempotent. What they mean is `keywords`' ([Keywords](../../../keywords/docs/system/system.md)).
-- *Send with prompt* (`BO_0310_031`, landed 2026-09-30): `blockRole` permits `sendWithPrompt`, a
-  list of *Keyword*'s field keys and allowed-structure ids, read into the catalogue's `StructureView` and a
-  used structure's `TakenStructure` on `builtin:keyword` alone, so `structuresOf` answers it. The act
-  `{command: "sendWithPrompt", entry, on}` on `POST /api/x/structures/roles/[id]` switches one
-  entry, one truth write, refused by the rule `sendWithPrompt` on any other structure and for an entry
-  that is neither a field nor an allowed structure of *Keyword*. *Keyword*'s page draws a *Send with
-  prompt* heading with one switch per field and per allowed structure (`data-send-with-prompt-entry`),
-  in that order. The same migration sets `sendWithPrompt` to `["builtin:definition"]` where
-  `builtin:keyword` holds none, so a fresh install sends the definition and an upgrade never resets
-  what a person switched. What is sent is `keywords`' (`BO_0310_025`).
-- Verified 2026-09-30 (`BO_0310_030`, `BO_0310_031`): `views/views.test.ts` for *Keyword*'s page —
-  a switch per field and allowed structure, the definition on, a flip posting the act and showing the
-  answer, no × on a built-in allowing, no switches on another structure; `tests/behavior/structures.test.ts`
-  over CCGW — the six built-ins created once; the keyword built-ins migration relating the allows,
-  setting the default once and answering nothing after; the built-in allowing and a built-in's rename
-  refused; a switch on and off; the refusals on another structure and for an entry *Keyword* does not
-  hold.
+- The built-ins *Definition* and *Alias* (`calliopa-bootstrap`'s `BO_0310_030`; `lib/structures.ts`,
+  `BUILTIN_STRUCTURES`, `BUILTIN_OFFERS`): allowed by *Keyword* by the release — in *Keyword*'s
+  *Allows*, which refuses dropping them by the rule `builtinOffer`, and read into the catalogue
+  whatever the value holds. They are refused retire and restore as every built-in is. What they
+  mean is `keywords`' ([Keywords](../../../keywords/docs/system/system.md)).
+- *Send with prompt* (`BO_0310_031`, kept on *Keyword*'s document since `RO_0005`): a list of
+  *Keyword*'s field keys and allowed-structure ids kept among its *Structure* values under
+  `sendWithPrompt`, never drawn as a field, read into the catalogue's `StructureView` and a used
+  structure's `TakenStructure` on *Keyword* alone, so `structuresOf` answers it. The act
+  `{command: "sendWithPrompt", entry, on}` on `POST /api/x/structures/structures/[id]` switches one
+  entry, one truth write, refused by the rule `sendWithPrompt` on any other structure and for an
+  entry that is neither a field nor an allowed structure of *Keyword*. *Keyword*'s document draws a
+  *Send with prompt* group beside its header's lines, one switch per field and per allowed
+  structure (`data-send-with-prompt-entry`), in that order. `structures-as-documents` makes
+  *Keyword* sending its definition where an instance held no setting and keeps the setting it held
+  otherwise. What is sent is `keywords`' (`BO_0310_025`).
 - *Source*'s release fields (`calliopa-bootstrap`'s `BO_0313_010`, landed 2026-10-01; `lib/structures.ts`
   `SOURCE_FIELDS`, `CSL_TYPES`): *Kind* (`kind`, a required choice of every CSL 1.0.2 type),
   *Authors* and *Editors* (`authors`, `editors`, long text), *Issued*, *Container*, *Volume*,
@@ -363,13 +358,9 @@
   text), *Tags* (text), *File* (file) and *Fetched* (text) — the CSL record of a source document,
   whose title is the document's. What they mean is `bibliography`'s ([Bibliography](../../../bibliography/docs/system/system.md#sources-beyond-papers)).
   A built-in's release fields are the `fields` its `BUILTIN_STRUCTURES` entry declares, read by
-  `releaseFieldsOf`: `removeField` refuses one by the rule `builtinField`, naming the structure, and a
-  person adds fields beside them. The executable migration `migration-bo-0313-source-fields`
-  (route `kernel/migrations/source-fields`, after `migration-bo-0309-builtin-roles`) answers
-  `releaseFieldsStatement`, the statement *Format*'s `format-fields` answers too: each release
-  field put by its key in place of what stands under it or after the fields there, every field a
-  person added kept, and nothing when they stand. A fresh install's `builtin-roles` creates
-  *Source* with them.
+  `releaseFieldsOf`, each a block of the built-in's document using *Field*: what it holds is the
+  release's (`builtinField`), the block never leaves the document (`documents`' guard), and a person
+  adds fields beside them (*A Structure Is A Document* below).
 - A built-in structure's row in *Structures* carries the create action of the extension owning its meaning
   (`calliopa-bootstrap`'s `BO_0313_011`, landed 2026-10-01; `lib/structures.ts` `BUILTIN_CREATES`,
   `contributions.server.ts` `withCreate`, `views/section.tsx`). The release names it by the
@@ -387,15 +378,9 @@
   they allow — *Hook* under *Story* — and nothing is used until the person uses it. Proven by
   `tests/behavior/structures.test.ts`'s focused-work case and `views/views.test.ts`'s *a block's
   focused work*.
-- *Format*'s built-in fields (`calliopa-bootstrap`'s `BO_0312_010`, landed 2026-10-01): `type`, a
-  required choice of text, table, image, video, PDF and structured, and `schema`, long text, read
-  for structured output — the `fields` *Format*'s `BUILTIN_STRUCTURES` entry declares, read by
-  `releaseFieldsOf` as *Source*'s are. A release field is refused a removal and a change of its type
-  or options, both by the rule `builtinField` (`isBuiltinField`); a person renames it, marks it
-  required and adds fields beside it. The structure page draws a release field with no × and its type
-  and options fixed (`data-builtin-field`). They reach an instance by the executable migration
-  `migration-bo-0312-format-fields` (route `kernel/migrations/format-fields`, after
-  `migration-bo-0309-builtin-roles`), which answers `releaseFieldsStatement` as *Source*'s does.
+- *Format*'s built-in fields (`calliopa-bootstrap`'s `BO_0312_010`): `type`, a required choice of
+  text, table, image, video, PDF and structured, and `schema`, long text, read for structured
+  output — release fields as *Source*'s are.
 - A field's key is minted from the name it is first given (`mintFieldKey`, `calliopa-bootstrap`'s
   `BO_0312`, 2026-10-01): its words in camel case, ASCII letters and digits, numbered when the structure
   holds it already — *Citation style* is `citationStyle` — and a rename keeps it. Before, a key
@@ -536,14 +521,14 @@
   ([Manuscripts](../../../manuscripts/docs/system/system.md#formats-per-document), `BO_0332_030`–`BO_0332_033`),
   and `make_manuscript`'s input the kernel's (`calliopa-bootstrap`'s `ui-kernel.md`, *Document Structures
   And Block Structures*, `BO_0332_001`).
-- The setting (`BO_0332_010`, landed 2026-10-01; `lib/structures.ts` `blocksAllowed`, `server/structures.ts`):
-  `blockRole` permits `blocks`, written `true` or `false` by the act and read as allowed when
-  absent, so no structure made before needs a write. A built-in's is read from its `BUILTIN_STRUCTURES`
-  entry, never from the node, as its name is: `blocks: false` on *Keyword*, *Instruction*, *Format* and
-  *Source*, nothing on *Definition* and *Alias*. The catalogue's `StructureView` and a used structure's
-  `TakenStructure` carry `blocks`. The act `{command: "blocks", allowed}` on `POST …/roles/[id]`
-  (`parseStructureCommand`) is one truth write, refused in words on a built-in by the rule
-  `builtinBlocks`.
+- The setting (`BO_0332_010`, a value of *Structure* since `RO_0005`; `lib/structures.ts`
+  `blocksAllowed`, `server/structures.ts`): *Blocks may use* (`blocks`) among a structure's
+  *Structure* values, set from its header's popover, read as allowed when absent, so no structure
+  made before needs a write. A built-in's is read from its `BUILTIN_STRUCTURES` entry, never from
+  the document, as its name is: `blocks: false` on *Keyword*, *Instruction*, *Format*, *Source* and
+  *Structure*, nothing on *Definition*, *Alias*, *Variation* and *Field*; a write of it on a
+  built-in is refused in words by the rule `builtinBlocks`. The catalogue's `StructureView` and a
+  used structure's `TakenStructure` carry `blocks`.
 - Taking (`BO_0332_011`, landed 2026-10-01): `takeableFrom(roles, above, onBlock)` leaves a structure
   blocks may not use out of every block's `takeable`, allowed or not, and keeps it in the
   document's — a focused work's document included, so a document-only structure allowed from above
@@ -555,12 +540,9 @@
   `documentRolesOnTheDocument`, to propose a document structure on the document and leave a kept one
   unless the person asks. `blockRole`'s declaration permits `blocks`, its semantics saying the
   document always may use a structure.
-- The structure page (`BO_0332_012`, landed 2026-10-01; `views/structure-page.tsx`): a switch *Blocks may use
-  this structure* (`data-role-blocks`) under the description, on for a new structure, drawn fixed on a
-  built-in with the release's word in its title; with it off the label adds *used by documents
-  alone*, and *Offers* says a structure nobody allows can be used by any document. Beside an allowing of
-  a structure blocks may not use, the page says *used by the document under a block using* the
-  structure, *never by its blocks* (`data-offer-document-only`).
+- Beside an allowing of a structure blocks may not use, the allowing structure's document says it
+  is *used by the document under a block using* the structure, *never by its blocks*
+  (`data-offer-document-only`, `views/structure-acts.tsx`, `BO_0332_012`).
 - The pills and the suggestions (`BO_0332_013`, landed 2026-10-01): `structureState` answers *not
   allowed on a block* for a kept structure, after *retired* and before *not allowed*, so the reading
   pill, its title and the structures chip's pill say it as they say *not allowed*. The suggestions are
@@ -569,8 +551,7 @@
   `blocksAllowed` for the built-ins and a person's structure, and the usable sets on a block and on
   the document, with a document-only structure allowed from above; `lib/suggest.test.ts` — a structure whose
   words match never suggested to a block and suggested to the document; `views/views.test.ts` —
-  the pill's *not allowed on a block*, the switch posting `{command: "blocks", allowed: false}`
-  and the note beside an allowed document-only structure, and a built-in's switch fixed;
+  the pill's *not allowed on a block*;
   `tests/behavior/structures.test.ts` over CCGW under the kernel harness — a structure switched to documents
   alone leaving every block's `takeable` and staying on the document's, a block keeping it and
   saying `notOnBlock`, the refusals by the route and by `propose_structures`, the tool's
@@ -628,7 +609,7 @@
   every field type, the long text, nothing filled, a reference naming nothing; `server/api.test.ts`
   for `titleOfNode`. Mutations — a structure with no value given an entry, the compact form drawn full —
   each failed a test. `referenceTitles`' read over CCGW, the observer and the *+N* count on a live
-  page are the walk's (`DO_0030_009`).
+  page were walked (`DO_0030_009`).
 
 ## Formats Carry Generation
 
@@ -660,41 +641,32 @@ extension's.
   provider empty is asked for its format's.
 - A reference limited to a structure (`BO_0336_011`, landed 2026-10-02; `views/control.tsx`
   `CarryingReference`): a reference field may carry `carrying`, a structure id. Focused, it lists the
-  documents using that structure by title (`GET /api/x/structures/roles/<role>/documents`),
+  documents using that structure by title (`GET /api/x/structures/structures/<id>/documents`),
   narrowed by what is typed; a press stores the document's id, and clearing the words clears the
   value. A value naming a document that does not use the structure is refused by the rule
   `notCarrying` in words. The field shows the value's title from the view's `referenceTitles`.
-- A person's own fields (`BO_0336_012`, landed 2026-10-02; `views/structure-page.tsx`): a text field's
-  row carries a source picked from those the frame lists (`GET /api/suggestions`) or none, and a
-  list of words; a reference field's row a structure from the catalogue whose documents it uses, or any
-  node by id. `reviseField` takes `suggest` (a source or `null`), `suggestions` and `carrying` (a
-  structure id or `null`, an unknown structure refused `unknownStructure`); a change of type drops what no longer
-  fits it. On a release field all three are the release's: refused by `builtinField`, drawn fixed.
-- *Format*'s, *Instruction*'s and *Variation*'s release fields (`BO_0336_013`, `BO_0336_014`, landed
-  2026-10-02; `lib/structures.ts` `GENERATION_FIELDS`, `BUILTIN_STRUCTURES`, `BUILTIN_OFFERS`):
-  *Format* carries `provider`, `model`, `ratio` and `quality` after `type` and `schema`, text, not
-  required, suggesting from `media:provider`, `media:model`, `media:ratio` and `media:quality`;
-  *Instruction* carries `format`, a reference carrying `builtin:format`, not required; the built-in
-  *Variation* (`builtin:variation`) allows blocks, carries the same four, and is allowed by
-  *Format* through a release's allowing. They reach an instance by two executable migrations: the
-  member `migration-bo-0336-variation` (route `kernel/migrations/builtin-roles`, after
-  `migration-bo-0313-source-fields` and `migration-bo-0310-keyword-builtins`), whose script
-  creates the built-ins an instance does not hold, *Variation* here; and
-  `migration-bo-0336-generation-fields` (route `kernel/migrations/generation-fields`, after it and
-  `migration-bo-0312-format-fields`), `generationFieldsStatement`: the allowing where it does not
-  stand and the three structures' release fields by key, every field a person added kept, nothing when
-  all stand. A fresh install's `builtin-roles` creates all three with them.
+- A person's own fields (`BO_0336_012`, values of *Field* since `RO_0005`): a text field's *Suggests*
+  picks a source from those the frame lists, answered by this extension's own source
+  `structures:sources`, and its *Suggestions* are words, one per line; a reference field's *Limited
+  to* names a structure whose documents it takes, or nothing for any node by id. A change of *Type*
+  drops what no longer fits it as the field is read. On a release field all three are the
+  release's, refused by `builtinField`.
+- *Format*'s, *Instruction*'s and *Variation*'s release fields (`BO_0336_013`, `BO_0336_014`;
+  `lib/structures.ts` `GENERATION_FIELDS`, `BUILTIN_STRUCTURES`, `BUILTIN_OFFERS`): *Format* carries
+  `provider`, `model`, `ratio` and `quality` after `type` and `schema`, text, not required,
+  suggesting from `media:provider`, `media:model`, `media:ratio` and `media:quality`;
+  *Instruction* carries `format`, a reference limited to *Format*, not required; the built-in
+  *Variation* allows blocks, carries the same four, and is allowed by *Format* by the release. Every
+  built-in and its release fields reach an instance by `structures-as-documents` (*A Structure Is A
+  Document* below).
 - Verified 2026-10-02 (`BO_0336_015`): `lib/structures.test.ts` — the generation fields and their
   sources on *Format* and *Variation*, *Instruction*'s `format`, the allowing, and `fieldOf` keeping a
   source, words and a structure only where they fit; `views/views.test.ts` — a *Variation* block's model
   suggestions asked with its format's values and one filled in with a press, a value typed outside
   them posted as typed, a source nothing answers said, a reference chosen by title among the
-  documents using its structure, a person's text field given a source and a reference a structure on the
-  structure page, and a release field's fixed; `tests/behavior/structures.test.ts` under the kernel harness
-  — the migration adding the allowing and the fields once and nothing after, *Variation* a block's
-  structure allowed by *Format*, a release field's source refused a change, an instruction's format refused a
-  document not using *Format* and taken one that does, a value typed kept, a *Variation* block,
-  and a person's field given a source, words and a structure, a retype dropping the source.
+  documents using its structure; `tests/behavior/structures.test.ts` under the kernel harness —
+  *Variation* allowed by *Format*, an instruction's format refused a document not using *Format*
+  and taken one that does, a value typed kept.
 
 ## Roles Become Structures
 
@@ -732,15 +704,12 @@ vocabulary — is `calliopa-bootstrap`'s `extension-model.md` (`BO_0338_001`) an
   `dependencies`. The registry orders an extension by its first former id (`placeOf` in
   `scripts/registry.mjs`), so *Structures*' rows and controls keep their places (user decision,
   2026-10-02). The change prefix stays `RO`.
-- *Instruction* is the built-in's name (`BO_0338_022`, 2026-10-02): `BUILTIN_ROLES` names
-  `builtin:profile` *Instruction*, its id kept, and `INSTRUCTION_ROLE` names the id in code. The
-  executable migration `migration-bo-0338-builtin-names` (route `kernel/migrations/builtin-names`,
-  after `migration-bo-0309-builtin-roles`; `builtinNamesFor`) sets every built-in's stored name and
-  description to the release's where they differ, on the same node, and answers nothing after. A
-  document using it writes `documents`' `record: instruction`
+- *Instruction* is the built-in's name (`BO_0338_022`, 2026-10-02): `BUILTIN_STRUCTURES` names it
+  *Instruction*, and `INSTRUCTION_STRUCTURE` its id; the id it had as a node, `builtin:profile`,
+  is its former id. A document using it writes `documents`' `record: instruction`
   ([Block Document Model](../../../documents/docs/system/documents/block-document-model.md#structures-and-instructions)).
-  Verified by `server/builtin-names.test.ts`: a stored *Profile* named *Instruction* on its node,
-  and an empty script once every built-in reads as the release says.
+  The member `migration-bo-0338-builtin-names` renamed the node; it answers nothing now that the
+  built-ins are documents named by the release.
 - What a run is told says structure (`BO_0338_021`, `BO_0338_023`, 2026-10-02): the tools are
   `propose_structures` (input `use`, `clear`, `values`) and `read_document_structures` (answering
   `usable` per block), routes `kernel/tools/propose_structures` and
@@ -750,13 +719,13 @@ vocabulary — is `calliopa-bootstrap`'s `extension-model.md` (`BO_0338_001`) an
   same over their stored names, and the kernel's harness copy follows. Refusals and answers say
   structure, use and allow.
 - What a person sees says structure (`BO_0338_024`, 2026-10-02): the category and section
-  *Structures* (*No structures yet*, *New structure*), the structure page (*Allows*, *Allow a
-  structure*, *Stop allowing …*, *Blocks may use this structure — used by documents alone*), the
-  pills (*not allowed here*, *not allowed on a block*), the chip, its suggestions and refusals,
+  *Structures* (*No structures yet*, *New structure*), a structure's document (*Allows*, *Blocks may
+  use*, *Used by*), the pills (*not allowed here*, *not allowed on a block*), the chip, its
+  suggestions and refusals,
   and the `data-*-structure` attributes and `structure-*` classes. The tab kind `documentRole`
   and the view id `document-role` keep their names, since open tabs are saved by them.
 - The code says it (`BO_0338_025`, 2026-10-02): `lib/structures.ts`, `server/structures.ts`,
-  `views/structure-page.tsx`, `views/structures.css` and every symbol named for structures
+  `views/structures.css` and every symbol named for structures
   (`structuresOf`, `setStructure`, `StructureView`, `KEYWORD_STRUCTURE` and the like), the routes
   `/api/x/structures/structures/…` and `/api/library/structures/structures`, and every reader in
   another extension calling the new names. The constants naming stored types and ids keep their
@@ -786,7 +755,8 @@ and the docs that change renames. `documents`' half is its
 [A Structure Is A Document](../../../documents/docs/system/documents/block-document-model.md#a-structure-is-a-document);
 `keywords`, `instructions`, `bibliography`, `media` and `manuscripts` follow the new ids in their
 own docs. No fixed-layer work arises: no declaration changes, so the kernel harness's vocabulary
-copy stays as it is.
+copy stays as it is, and a run's removal is guarded as it is accepted rather than as the kernel
+stages it.
 
 * A structure is a document. Its name is the document's title, its description the document's
   ordinary blocks, and it uses the built-in *Structure*. Requested by the user, 2026-10-02
@@ -816,7 +786,8 @@ copy stays as it is.
 * A person cannot extend *Structure* or *Field* with fields of their own. User decision,
   2026-10-02 (`RO_0005_Q6`).
 * Retiring and restoring a structure stay acts beside its header, never a value; a structure is
-  still retired, never deleted. User decision, 2026-10-02 (`RO_0005_Q7`).
+  still retired, never deleted, but by the owner's clearing of the content. User decision,
+  2026-10-02 (`RO_0005_Q7`); the exception 2026-10-03 (`DO_0037`).
 * Where a structure's description is read, its document's blocks stand in: the first block's text
   in a pill's title, the typeahead and the suggestions, the whole text to an agent. User decision,
   2026-10-02 (`RO_0005_Q8`).
@@ -825,78 +796,237 @@ copy stays as it is.
   person renames it, marks it required, describes the built-in and adds fields beside the release's,
   as today. *Structure* and *Field* take no field a person adds.
 
-- Ids (technical decision at transfer): CCGW never changes a node's type and a built-in's id is
-  held by its `blockRole`, so every structure gets a new `document` node. A built-in's document
-  takes the fixed id `structure:<name>` — `structure:structure`, `structure:field`,
-  `structure:keyword`, `structure:instruction` (where `builtin:profile` stood),
-  `structure:format`, `structure:source`, `structure:definition`, `structure:alias`,
-  `structure:variation` — and a release field's block `structure:<name>:<key>`; the `structure:`
-  prefix is what `documents` reads as the release's (`RO_0005_020`). A person's structure takes a
-  minted document id. The code names each id once (`lib/roles.ts`), and readers in other extensions
-  import the names, never the strings.
-- Storage (technical decision at transfer): a structure's document carries `documents`'
-  `record: structure` and uses *Structure* through `hasBlockRole`, its *Blocks may use* and *Allows*
-  in its `roleFields` for *Structure*; a field's declaration is the `roleFields` its block holds for
-  *Field*. Three keys are kept in those values and never drawn as fields: `key` on a *Field* block,
-  minted once as today (`mintFieldKey`) and kept through a rename, so every stored value and every
-  reader by key (`manuscripts`) finds its field; and `formerId` and `retired` on a structure's
-  *Structure* values. `blockRole` and `offers` stay declared and are no longer written, so no
-  declaration changes. A reference holding a list is the reference type with `many: true`, its value
-  a list of node ids.
+- Ids (technical decision, 2026-10-02): CCGW never changes a node's type and a built-in's id is
+  held by its `blockRole`, so every structure has a new `document` node. `documents`' routes, block
+  ids and reference values take UUIDs alone, so each built-in's document takes a fixed UUID the code
+  names once (`STRUCTURE_STRUCTURE`, `FIELD_STRUCTURE`, `KEYWORD_STRUCTURE`,
+  `INSTRUCTION_STRUCTURE`, `FORMAT_STRUCTURE`, `SOURCE_STRUCTURE`, `DEFINITION_STRUCTURE`,
+  `ALIAS_STRUCTURE`, `VARIATION_STRUCTURE` in `lib/structures.ts`), the same on every instance, and
+  readers in other extensions import the names, never the strings. A person's structure and every
+  field's block take minted ids; a release field's block is found by its key.
+- Storage (technical decision, 2026-10-02): a structure's document uses *Structure* through
+  `hasBlockRole`, its *Blocks may use* and *Allows* in its `roleFields` for *Structure*; a field's
+  declaration is the `roleFields` its block holds for *Field*, its *Type* stored as the type's label.
+  It carries no `record`, so `documents` lists it as any document. Kept in those values and never
+  drawn as fields: `key` on a *Field* block, minted from the block's words as it takes *Field*
+  (`mintFieldKey`) and kept through a rename, so every stored value and every reader by key
+  (`manuscripts`) finds its field; and `order`, `retired`, `formerIds` and, on *Keyword*,
+  `sendWithPrompt` on a structure's *Structure* values. A person writing one of them is refused as
+  for any key the structure does not declare (`unknownField`). `blockRole` and `offers` stay
+  declared and are no longer written, so no declaration changes. A reference holding several is the
+  reference type with `many: true`, its value a list of node ids.
+- What the release fixes is enforced through `documents`' guards
+  ([A Structure Is A Document](../../../documents/docs/system/documents/block-document-model.md#a-structure-is-a-document)):
+  this extension registers `guardOf` as its server module loads, answering for a document using
+  *Structure* that it is never deleted, and for a built-in's, its title and its release fields'
+  blocks; a document using no *Structure* is read no further than its own uses.
+- The model (`RO_0005_001`, landed 2026-10-02; `lib/structures.ts`, `server/structures.ts`):
+  *Structure* and *Field* are built-ins with their release fields (`STRUCTURE_FIELDS`,
+  `FIELD_FIELDS`), and the release has *Structure* allow *Field*. `readCatalogue` reads the
+  documents using *Structure* and answers the `StructureView` it answered before — its name the
+  title (a built-in's the release's), `description` the first block not using *Field*, `text` every
+  such block's words, its fields the blocks using *Field* in reading order (`fieldFromBlock`), a
+  built-in's release fields as the release declares them under the name and *Required* its block
+  gives (`withReleaseFields`), what it allows its *Allows* with a built-in's release allows — and
+  maps every former id to the structure, so a reader holding `builtin:keyword` or a `blockRole`'s id
+  finds it. *Default* is read against the *Type* its block names (`declaredFor`), a file or a
+  reference having none. A list reference is read, checked node by node, limited by `carrying` and
+  refused in words like a single one. *Structure* is in no subject's `takeable`.
+- The acts (`RO_0005_003`, landed 2026-10-02): `createStructure` makes, in one truth write, a
+  document titled as named with one block — the description when given — using *Structure* with
+  `blocks: true` and the next order. Taking *Structure* by hand is refused by the rule
+  `structureFromStructures` and clearing it likewise; *Field* is refused on the blocks of
+  *Structure*'s and *Field*'s documents (`builtinField`); a block taking *Field* gets its key; a
+  person's field leaves with its block or its *Field*, its stored values kept unread. On a built-in's
+  document *Blocks may use* is refused (`builtinBlocks`), dropping a release allow from *Allows*
+  (`builtinOffer`), and on a release field's block anything but *Required* and *Default* is refused,
+  as is clearing its *Field* (`builtinField`). A structure never allows itself (`offersItself`).
+  `parseStructureCommand` answers the acts that stay acts and refuses the others in words, saying
+  they are written in the structure's document.
+- What a person sees (`RO_0005_004`, landed 2026-10-02; `views/section.tsx`, `views/control.tsx`,
+  `views/structure-acts.tsx`, `views/former-page.tsx`): *Structures*' rows open the structure's
+  document and its `+` makes one and opens it; a tab of the former page kind opens the document. On
+  a structure's document the title place draws, after the values line, `StructureActs`: what the
+  document is, *Retire* or *Restore* on a person's structure, *Used by* unfolding to the documents
+  using it, the note beside a document-only structure it allows, and on *Keyword* the *Send with
+  prompt* switches. *Structure*'s pill has no ×; *Field* ranks first in a block's suggestions where
+  it may be used (`lib/suggest.ts`); a list reference draws its chosen documents as pills, each with
+  its ×, and a typeahead by title adding one (`CarryingReferences`). Reference titles are answered
+  for the blocks' values too, so a field's *Limited to* shows a name.
+- A run (`RO_0005_005`, landed 2026-10-02; `server/tools.ts`, the skill member
+  `doc-block-roles.roles`): `read_document_structures` answers each structure's description as its
+  whole text and says of a structure's document what it is; `propose_structures` may give a
+  document *Structure* — the one place it is taken outside *Structures*' `+`, refused on a block —
+  and its fields as blocks given *Field* with their values; the skill's convention
+  `aStructureIsADocument` says how. It stands once the person accepts it.
+- The migration (`RO_0005_002`, landed 2026-10-02; `server/migrations.ts`, the member
+  `migration-ro-0005-structures-as-documents`, route `kernel/migrations/structures-as-documents`):
+  `readStructureNodes` reads every established `blockRole` with what it allowed, what uses it and
+  the values held for it; `structuresAsDocumentsStatement` makes each a document — every document
+  first in the script, so whatever relates to one finds it — the built-ins from the release under
+  their fixed ids with the description, fields and allows a person gave them kept, a person's
+  structure under a minted id with its name, description, fields by key, *Blocks may use*,
+  *Allows*, order, retired flag and `formerIds` — and moves every use and every values node to the
+  document. A structure already moved and a built-in already standing are left, so a second run
+  answers nothing. The member names this extension's own migrations in `after`, so it runs after
+  every one that writes structures as nodes (`one-role-type` and the members listed under the
+  built-ins above). The kernel runs every migration of an extension before those of the extensions
+  depending on it (`calliopa-bootstrap`'s `BO_0312_003`, `OrderMigrations`), so `keywords`',
+  `instructions`', `manuscripts`' and `bibliography`'s run after it; naming them in `after` as
+  well made a cycle the kernel refused at pin 4105, 2026-10-03, and ran nothing. On the path the
+  release is verified on — a fresh install, or the update from the previous published release —
+  those have run on the release carrying them or have nothing to write: `manuscripts`' `formats`
+  makes *Paper* as a node only where front matter from before `BO_0312` stands.
+- Verified 2026-10-02 (`RO_0005_006`, the unit and harness parts): `server/api.test.ts` — the acts
+  parsed and the others refused, *Structure* never usable, a field read from its block, *Default*
+  by *Type*, a list reference, and the migration's script, documents first, values by key, uses and
+  values moved, nothing on a second run; `lib/suggest.test.ts` — *Field* first;
+  `views/views.test.ts` — rows opening documents, *Keyword*'s switches, *Retire* and *Used by*, the
+  document-only note, *Structure*'s pill with no ×, the list reference's pills, × and typeahead;
+  `tests/behavior/structures.test.ts` over CCGW under the kernel harness — the built-ins standing
+  as documents under their ids and found by their former ones, `blockRole`s from before moved with
+  fields by key, allows, uses and values, the migration answering nothing after; a structure shaped
+  in its document — renamed by its title, fields keyed from their words, *Default* by *Type*,
+  *Allows* limited to structures and never itself, *Blocks may use*, retire and restore by act; the
+  refusals of *Structure*, *Field* and the release; `documents`' guards refusing a structure's
+  deletion, a built-in's title, a release field block's retirement, merge, turn into code and a
+  run's removal at acceptance, and letting a person's field block go; and every case that held
+  before. `keywords`', `manuscripts`', `instructions`' and `bibliography`'s suites over the
+  documents; the harness's other failures stand at head as before. The unit project green (1825),
+  `tsc --noEmit` clean.
+- Served on the dev instance (`RO_0005_006`, 2026-10-03): pin 4105 served the code while the kernel
+  refused the migrations, their order a cycle (*Migration* above); with the member corrected, pin
+  4115 ran `structures-as-documents` once, at data revision 4117. Read as the owner after it: 18
+  structure documents — the nine built-ins and nine of before, among them *Story* used by four
+  documents and allowing two structures, and the roles `BO_0310` merged standing retired — 44
+  blocks using *Field*, *Keyword* used by five documents, *Instruction* by nine, *Source* by six and
+  *Format* by five, and none of the 16 `blockRole` nodes used or holding values. Walked by the user
+  the same day on pin 4115, "works": the structures listed and opened as documents, one made,
+  described, given fields by *Field* and *Allows* and *Blocks may use* in its header, used on a
+  block with a value, retired and restored; *Keyword*'s title and release fields refused and its
+  *Send with prompt* switched; a run asked for *Hook* and *Closing* staging two structure documents
+  listed under *Structures* once accepted.
+- A command asking for structures makes them (`calliopa-bootstrap`'s `BO_0343_020`). On `0.5.0` a
+  run could not create a structure but said it had (reported by the user, 2026-10-03). Since
+  `RO_0005` a run proposes a structure as a document using *Structure*, and since `BO_0343_030`
+  the base skill's `reportWhatStaged` holds its closing words to what it staged. Walked by the
+  user on the dev instance at pin 4296, 2026-10-03, "worked": "create the structures Hook and
+  Closing" staged two structure documents, and accepting the run listed both under
+  *Structures*.
+- Closed 2026-10-03 (`RO_0005_008`): the release line under *Changed* is `calliopa-bootstrap`'s
+  `docs/release-notes/unreleased.md`, and this change's document stands in `docs/changes/completed/`
+  at `completed`.
 
-- [ ] RO_0005_001 The model: *Structure* and *Field* in `BUILTIN_ROLES` with their release fields
-      and the release allow *Structure* → *Field*; the ids above for every built-in and release
-      field; `many` on a reference field, read, checked and refused in words like a single one;
-      *Default* read against *Type*; `readCatalogue`, `readRole`, `listRoles` and
-      `documentsCarrying` read the documents using *Structure*, their *Field* blocks in reading
-      order and their values, answering the shapes they answer today with the new ids — the
-      contract readers hold is unchanged but for the ids — and the description as the first block's
-      text, the whole text where a run reads it.
-- [ ] RO_0005_002 The migration: an executable `ext.migration` creating every built-in's document,
-      its release field blocks and their values where an instance does not hold them, and moving
-      each `blockRole` a person made into a document — its name the title, its description a
-      paragraph, each field a *Field* block carrying its key and declaration, *Blocks may use* and
-      *Allows* from its `blocks` and its `offers`, `formerId` its old id, `retired` kept. Every
-      `hasBlockRole` is closed and related again to the structure's document, every `roleFields`
-      takes the new id in `role` and `fieldsFor`, a field's `carrying` and *Keyword*'s
-      `sendWithPrompt` entries are rewritten to the new ids, and each old node is retired. Once
-      moved it answers nothing. A fresh install's built-ins are created as documents from the start.
-- [ ] RO_0005_003 The acts: *Structures*' `+` creates a document using *Structure*, *Untitled
-      structure*, and opens it; *Structure* is refused on any other document and its clearing
-      refused, by the route and by `propose_structures`, in words; giving a block *Field* adds a
-      field, clearing it or removing the block takes the field away with its stored values kept
-      unread; *Blocks may use* and *Allows* are values posted from the header's popover, *Allows*
-      limited to structures as a reference limited to a structure is; retire and restore are acts,
-      refused on a built-in as today. The command route's acts that the document now carries
-      (`rename`, `describe`, `allow`, `addField`, `reviseField`, `removeField`, `moveField`,
-      `blocks`) go.
-- [ ] RO_0005_004 What a person sees: *Structures*' rows open the structure's document as any
-      document opens, and a tab still open on the former page kind opens it too; `role-page.tsx`
-      goes. On a structure's document the title place draws, beside the header's lines, the
-      *Retire* or *Restore* act and *used by* — the documents using it, as a built-in's row
-      unfolds today; *Keyword*'s document draws its *Send with prompt* switches there.
-      *Structure*'s pill has no ×, *Structure* is never in a `+`'s typeahead or suggestions,
-      *Field* is suggested first on a block of a structure's document, and a release field's
-      values are drawn fixed. The list reference draws as pills with a typeahead by title.
-- [ ] RO_0005_005 A run: `read_document_structures` answers a structure's description as its whole
-      text; a run proposes a structure by starting a document through `documents`' tools with
-      `propose_structures` giving it *Structure* — the one place *Structure* is taken outside the
-      `+` of *Structures*, staged and standing only when the person accepts it — and its fields as
-      *Field* blocks with their values; the skill says so, and that a structure's fields are its
-      *Field* blocks.
-- [ ] RO_0005_006 Verified: unit and view tests for the model, the list reference, *Default* by
-      type, the acts and their refusals, the fixed built-ins and the page's controls; behaviour over
-      CCGW under the kernel harness for the catalogue read from documents, the migration — a graph
-      holding a person's structures with fields, values, allows, a retired one and the built-ins —
-      moving every one, keeping every assignment and value by key, and answering nothing after; a
-      run's proposed structure standing only after acceptance. The migration run on a throwaway
-      stack holding a copy of a real instance's structures, never the live instance.
-- [ ] RO_0005_007 This document says what is true after the move: the fixed lines under *What
-      This Extension Holds* that name the *Roles* category as where structures are defined, the
-      *no proposal* of `BO_0299_Q2` and the page's description reworded to this section's decisions
-      without changing anything else they fix; the sections describing `role-page.tsx`, the
-      command route's acts and the built-ins' nodes rewritten to the documents, and the walk by the
-      user on the dev instance recorded.
-- [ ] RO_0005_008 This change document stands here at every status `RO_0005` takes, the release
-      note under *Changed* in `calliopa-bootstrap`'s `docs/release-notes/unreleased.md` at closure,
-      and the graph exported there.
+## A Run Proposes A Structure It Starts
+
+- Under `BO_0344` (`calliopa-bootstrap`'s `docs/changes/completed/BO_0344_FIX_extension-tools-read-the-runs-own-proposals.md`),
+  transferred 2026-10-03: a run asked to make a structure starts its document as
+  `aStructureIsADocument` says; `propose_structures` reads outside the run's group, where the
+  document stands without the blocks the run gave it, and the *Structure* it proposes is refused at
+  staging (`BO_0344_011`); accepting the run then makes a plain document and no structure.
+  The shell's read scope (`ui.shell`'s *A Run's Callback Reads What The Run Proposed*,
+  `BO_0344_004`) is the fix; this extension's half follows. It replaces the idea `RO_0006`.
+* `propose_structures` and `read_document_structures` read as the kernel's own tools do: at the
+  run's pin with the run's own group laid over truth, so a document, a block or a structure the
+  same run proposed earlier stands for them. User decision, 2026-10-03.
+* A refused `propose_structures` proposed nothing, and the run says so to the person rather than
+  reporting the structure made. The run's chip lists no refusals. User decision, 2026-10-03.
+- The tools read in the shell's scope (`BO_0344_005`, landed 2026-10-03; `server/tools.ts`,
+  `server/structures.ts`): `read_document_structures` drops its own `dataRevision: call.run.pin`,
+  and `propose_structures`' reads answer inside the scope unchanged. Inside a run `structuresOf`
+  marks no other group's proposals as *proposed* — the run reads its own through its group — so a
+  structure the run proposed counts as taken and is not proposed twice.
+- A run's statements stage candidates (`BO_0344_011`, found 2026-10-03 while proving
+  `BO_0344_007`): `takeStatement` and `valuesStatement` wrote the `roleFields` node they create with
+  `status: "established"` for a run too, which the core refuses in a proposal (*proposal-scoped
+  mutations stage candidates; explicit status …*). Every *Structure* a run proposed carries
+  defaults and so creates one, so no run could ever propose a structure, and a value on a subject
+  holding none was refused alike. The kernel answered the run the refusal as text, and the run
+  reported the structure made. A run's statements now leave the status to the core
+  (`establishedUnless`); a person's acts write truth as before.
+- The skill says what a refusal means (`BO_0344_006`, landed 2026-10-03): `aStructureIsADocument` in
+  `doc-block-roles.roles` adds that a refused `propose_structures`, or a staging the kernel
+  answers as refused, proposed nothing, and the run tells the person what was refused and why
+  rather than that the structure stands.
+- Proven (`BO_0344_007`, 2026-10-03) in `tests/behavior/structures.test.ts` under the kernel
+  harness: a run's group starts a document with a block; outside the group the block is not there,
+  as the tools read it before; inside the run's scope `propose_structures` gives the document
+  *Structure* and stages without a refusal, `read_document_structures` then answers *Structure* on
+  the document and *Field* usable on the block, and *Field* is staged on it; *Structures* lists
+  nothing new; after the person accepts the group's members the structure is listed under the
+  document's title with its field.
+
+## A Structure Is Named On The Chip
+
+- Under `documents`' `DO_0034` (`docs/changes/completed/DO_0034_FIX_accept-all-answers-the-whole-run.md` in
+  `documents`), transferred 2026-10-03: a run chip names what the run proposes outside the document
+  it stands in, and a structure is named as one.
+- Named a structure (`DO_0034_008`, landed 2026-10-03): `structureKindOf` (`server/structures.ts`)
+  answers *structure* for a document using *Structure* — read through the group when one is given,
+  so a structure a run only proposed is named too — and nothing otherwise, and
+  `contributions.server.ts` registers it with `nameDocuments` beside its guard. Proven in
+  `tests/behavior/structures.test.ts` under the kernel harness: a run in one document starts *Beat*
+  and proposes *Structure* on it; the other document's read names it `{ title: "Beat", kind:
+  "structure" }`; *Accept all* there says *Beat is now a structure* and the catalogue lists it.
+
+## A Format Says What It Takes
+
+Under `media`'s `ME_0002` (`docs/changes/completed/ME_0002_FEAT_a-format-says-what-it-takes.md` in `media`),
+set to draft by the user on 2026-10-03 and transferred here the same day: a format's inputs are
+blocks of its document using a new built-in *Input*. `media` owns the change and reads the inputs
+([A Format Says What It Takes](../../../media/docs/system/system.md#a-format-says-what-it-takes));
+this extension holds the structure.
+
+* *Input* is built in, allowed by *Format* by the release and allowing blocks, as *Variation* is.
+  A block using it is one input of its format: the block's words say what the input is for, in the
+  person's own terms, and its release fields what it is — *Kind* (start frame, end frame, reference
+  image, reference video, reference audio), *Name* (the alias the vendor's prompt names it by) and
+  *Required*. User decision, 2026-10-03 (`ME_0002_Q1`).
+
+- *Input* in the release (`ME_0002_001`, landed 2026-10-03; `lib/structures.ts`): `INPUT_STRUCTURE`
+  the fixed id, last among `BUILTIN_STRUCTURES` so no built-in made before it changes its order;
+  `INPUT_FIELDS` — `kind` (choice, required, the five `INPUT_KINDS` labels, each with the role
+  `media` sends it as), `name` (text, required, suggesting from `media:inputName`) and `required`
+  (true/false); blocks may use it; `[FORMAT_STRUCTURE, INPUT_STRUCTURE]` in `BUILTIN_OFFERS`, which
+  the catalogue reads as *Format*'s release allows, so no value is written for it.
+  `lib/structures.test.ts` proves the fields, the source, the allowing and that blocks may use it.
+- *Input* reaches an instance whose structures are documents (`ME_0002_002`, landed 2026-10-03):
+  the member `migration-me-0002-input-structure`, after `structures-as-documents`, routes to
+  `input-structure` (`server/migrations.ts`), which answers `structuresAsDocumentsStatement` over
+  no old nodes — the built-ins the instance does not hold, made from the release. A fresh instance
+  makes *Input* with the others and the route answers nothing. `server/api.test.ts` proves that an
+  instance holding every built-in but *Input* is given its document alone, with its three fields;
+  `tests/behavior/structures.test.ts` under the kernel harness that *Format* allows it, a block of
+  a format document takes it with its kind and name, its title is fixed, and its migration answers
+  nothing once it stands.
+
+## Clearing The Content
+
+Under `documents`' `DO_0037` (`docs/changes/DO_0037_FEAT_clear-the-content.md` in `documents`), set to
+draft by the user on 2026-10-03: the owner empties the library, the built-ins standing in the
+release's shape. What is cleared and how is `documents`' (Clearing The Content in its block document
+model); this extension says what stays and returns the built-ins to the release.
+
+* The built-ins survive the clearing in the release's shape: their documents stay, and the fields,
+  allowed structures, blocks and values a person added to one go. User decision, 2026-10-03
+  (`DO_0037_Q5`).
+* The legacy `blockRole` nodes not marked `builtin` are retired with the person's structures. User
+  decision, 2026-10-03 (`DO_0037_Q7`).
+
+- [ ] DO_0037_020 The built-ins are kept: `structures` registers with `documents`' clearing the
+  documents it keeps — the ten `BUILTIN_STRUCTURES` ids, nothing else — so every other structure's
+  document is deleted with the rest. The guard (`guardOf`) is not asked by the clearing and keeps
+  refusing every other deletion.
+- [ ] DO_0037_021 The built-ins return to the release's shape in the clearing's write: on each
+  built-in's document every block that is not a release field's (`isBuiltinField`) is retired, and the
+  values on its *Structure* `structureFields` node a person set — `allows`, `blocks`, `formerIds`
+  past the release's, *Keyword*'s `sendWithPrompt` — return to the release's (`BUILTIN_OFFERS`,
+  `releaseFieldsOf`). A built-in missing from the instance is not made here; the migration that
+  makes it runs at the next serve as before.
+- [ ] DO_0037_022 The legacy `blockRole` nodes not marked `builtin` are retired in the same write
+  (`readStructureNodes`' read); the seven marked `builtin` stay.
+- [ ] DO_0037_023 Verified under the kernel harness (`tests/behavior/structures.test.ts`): after a
+  clearing, the ten built-ins listed first and alone in *Structures*, a field and an allowed
+  structure a person added to *Keyword* gone, its release fields and their blocks standing, a
+  person's structure and a legacy `blockRole` gone from every read, and the guard still refusing an
+  ordinary deletion of a built-in.

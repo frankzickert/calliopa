@@ -27,12 +27,8 @@ const DECLARED: readonly Declared[] = [
   { id: "agent:anthropic", label: "Claude (Anthropic)", key: "anthropic", onDevice: RUNS_LATER },
   { id: "agent:openai", label: "OpenAI", key: "openai", onDevice: RUNS_LATER },
   { id: "agent:openrouter", label: "OpenRouter", key: "openrouter", onDevice: RUNS_LATER },
-  {
-    id: "media:higgsfield",
-    label: "Higgsfield",
-    key: null,
-    onDevice: "Higgsfield generates on a Calliopa instance; the app reaches its API in a later version.",
-  },
+  // Higgsfield's HTTP API with the person's key (calliopa-bootstrap's BO_0319_025).
+  { id: "media:higgsfield", label: "Higgsfield", key: "higgsfield", onDevice: null },
   {
     id: "media:openart",
     label: "OpenArt",

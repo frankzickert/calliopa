@@ -294,15 +294,34 @@ describe("the agent at work in the document", () => {
     ]);
   });
 
-  it("Given a run chip's Reject all, Then every unanswered item of its group is rejected, one at a time, and no other group's", { timeout: 10000 }, async () => {
+  it("Given a run chip's Reject all, Then its group is rejected in one request, and no other group's", { timeout: 10000 }, async () => {
     const view = await mount();
     view.record.answerAll = { group: "node:run-live", answer: "rejected" };
     await view.userEvent("[data-harness-answer-all]", "click");
-    await view.waitFor(() => view.commands("answerProposal").length === 2);
-    expect(view.commands("answerProposal").map((command) => command.body)).toEqual([
-      { command: "answerProposal", itemId: liveRewrite, answer: "rejected" },
-      { command: "answerProposal", itemId: liveInsert, answer: "rejected" },
+    await view.waitFor(() => view.commands("answerGroup").length === 1);
+    // BO_0343_012: one request for the group, never one per item.
+    expect(view.commands("answerGroup").map((command) => command.body)).toEqual([
+      { command: "answerGroup", groupId: "node:run-live", answer: "rejected" },
     ]);
+    expect(view.commands("answerProposal")).toEqual([]);
     await view.settle();
+    expect(view.proposal(liveRewrite)).toBeNull();
+    expect(view.proposal(liveInsert)).toBeNull();
+    // Nothing elsewhere: the library's sections are not read again.
+    expect(view.record.targetsChanged).toBeUndefined();
+  });
+
+  it("Given a run that made a structure elsewhere, When its chip's Accept all lands, Then the shell reads the library's sections again (DO_0034_009)", { timeout: 10000 }, async () => {
+    const view = await mount({
+      ...proposals,
+      groups: proposals.groups.map((group) =>
+        group.groupId === "node:run-live" ? { ...group, elsewhere: [{ documentId: "doc-beat", title: "Beat", kind: "structure" }] } : group,
+      ),
+    });
+    view.record.answerAll = { group: "node:run-live", answer: "accepted" };
+    await view.userEvent("[data-harness-answer-all]", "click");
+    await view.waitFor(() => view.commands("answerGroup").length === 1);
+    await view.settle();
+    expect(view.record.targetsChanged).toBe(1);
   });
 });

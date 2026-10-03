@@ -42,9 +42,13 @@ describe("mathematics the read never set", () => {
 
     // Painted first with no markup — nothing has set it — and then again once
     // the surface has, which is the second paint the task asks for.
-    await view.settle(
-      () => (view.root.querySelector("[data-block-editor] [data-math]")?.innerHTML ?? "").includes("<svg"),
-    );
+    // Typesetting loads MathJax, which takes longer than a settle under a full
+    // run's load, so the wait is bounded by time rather than by ticks. CA_0079_001
+    const typeset = () => (view.root.querySelector("[data-block-editor] [data-math]")?.innerHTML ?? "").includes("<svg");
+    for (let tick = 0; tick < 250 && !typeset(); tick++) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      await view.settle(() => true);
+    }
     const atom = view.root.querySelector("[data-block-editor] [data-math]") as HTMLElement;
     expect(atom.getAttribute("data-math-unset") ?? null).toBeNull();
     expect(atom.innerHTML).toContain("<svg");

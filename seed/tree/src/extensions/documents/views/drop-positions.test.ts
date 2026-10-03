@@ -82,6 +82,8 @@ describe("every drawn row has a place", () => {
       `block:proposal:${newBlock}`,
       "block:blk-c",
       "block:end",
+      // The rest of the surface below it lands a block last too. DO_0028_001
+      "block:end",
     ]);
     // Each carries the mark that lights while a drag is over it.
     for (const id of ["blk-r", `proposal:${newBlock}`, "blk-c"]) {

@@ -59,3 +59,10 @@ Under `BO_0223` (the repository's change, 2026-09-09), transferred as `BO_0223_0
   Technical decision at implementation, 2026-10-01.
 - *Instruction Tools* (`BO_0338_060`, 2026-10-02): the section is contributed by `instructions`, granting
   through `/__kernel/instructions/<id>/grant`, and this document says instruction.
+
+## Clearing The Content
+
+- *Clear the content*, the owner's on an instance that opts in, is `documents`' contributed
+  section, marked `owner: true`, which this tab draws for the owner alone as it draws *Instruction
+  tools*; the tab knows nothing of it ([Clearing The Content](../../../documents/docs/system/documents/block-document-model.md#clearing-the-content),
+  `documents`' `DO_0037`).

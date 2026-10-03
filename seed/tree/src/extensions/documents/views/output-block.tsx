@@ -98,6 +98,17 @@ export const OutputBlock = component$<{
           {block.elapsed !== undefined ? ` in ${block.elapsed.toFixed(block.elapsed < 10 ? 2 : 0)} s` : ""}
           {block.executionCount !== undefined ? ` · [${block.executionCount}]` : ""}
         </span>
+        {/* An output that read the network may come out otherwise next time:
+            it says so, with what it read. calliopa-bootstrap's BO_0319_046 */}
+        {block.reproducible === false && (
+          <span
+            class="output-block__unreproducible"
+            data-output-not-reproducible
+            title={`It read ${(block.fetched ?? []).join(", ") || "the network"}, which may answer otherwise next time.`}
+          >
+            Not reproducible: it read {(block.fetched ?? []).join(", ") || "the network"}
+          </span>
+        )}
       </div>
       {block.items.map(item)}
       {block.files.length > 0 && (

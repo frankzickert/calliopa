@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { BlockView, DocumentView, EquationBlockView } from "../server/assemble";
+import type { BlockView, DocumentView } from "../server/assemble";
 import { activateBlock, documentsApi, mountEditor } from "./testing/editor-harness";
 
 /**
- * Referring to a numbered equation, and editing one that stands in a sentence
- * (`BO_0290_025`). Both are offered only where they mean something: a
- * reference needs a number to name, and the popover needs an equation to open
- * on.
+ * Editing an equation that stands in a sentence (`BO_0290_025`), offered only
+ * where it means something: the popover needs an equation to open on. A
+ * numbered equation is referred to from `#` in the sentence, as every block
+ * is (`BO_0300_006`), which `references.test.ts` proves. CA_0079_006
  */
 const SET = '<mjx-container class="MathJax" jax="SVG"><svg><path d="M1 1"></path></svg></mjx-container>';
 
@@ -28,20 +28,6 @@ const sentence = (
   ...(mathSvg === undefined ? {} : { mathSvg }),
 });
 
-const equation = (
-  blockId: string,
-  order: string,
-  rest: Omit<EquationBlockView, "blockId" | "revisionId" | "containmentId" | "order" | "kind" | "standing">,
-): BlockView => ({
-  kind: "equation",
-  blockId,
-  revisionId: `rev-${blockId}`,
-  containmentId: `c-${blockId}`,
-  order,
-  standing: "keep",
-  ...rest,
-});
-
 async function mount(blocks: readonly BlockView[], equationNumbers?: Record<string, number>) {
   const document: DocumentView = {
     documentId: "doc-1",
@@ -54,41 +40,8 @@ async function mount(blocks: readonly BlockView[], equationNumbers?: Record<stri
   return mountEditor(document);
 }
 
-const bar = (root: HTMLElement, id: string) =>
-  root.querySelector(`[data-bar-action="${id}"]`) as HTMLElement | null;
-
 afterEach(() => {
   vi.unstubAllGlobals();
-});
-
-describe("referring to a numbered equation", () => {
-  it("offers the document's numbered equations, by number, with a glimpse of each", async () => {
-    const view = await mount(
-      [
-        sentence("blk-a", "a", [{ text: "Draft." }]),
-        equation("blk-e", "b", { tex: "e^{i\\pi} + 1 = 0", svg: SET, numbered: true, number: 1 }),
-      ],
-      { "blk-e": 1 },
-    );
-    await activateBlock(view, "blk-a");
-    await view.settle(() => bar(view.root, "block-reference-equation") != null);
-
-    const control = bar(view.root, "block-reference-equation") as HTMLElement;
-    expect(control).toBeTruthy();
-    expect(control.textContent ?? "").toContain("(1)");
-    expect(control.textContent ?? "").toContain("e^{i\\pi}");
-    await view.idle();
-  });
-
-  it("is not offered when the document has no number to name", async () => {
-    const view = await mount([
-      sentence("blk-a", "a", [{ text: "Draft." }]),
-      equation("blk-e", "b", { tex: "x", svg: SET }),
-    ]);
-    await activateBlock(view, "blk-a");
-    expect(bar(view.root, "block-reference-equation") ?? null).toBeNull();
-    await view.idle();
-  });
 });
 
 describe("editing an equation that stands in a sentence", () => {

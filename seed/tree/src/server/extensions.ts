@@ -44,6 +44,12 @@ export type ExtensionListing =
        * import; set by the reader, never cached with the snapshot. BO_0224_011
        */
       readonly owner?: boolean;
+      /**
+       * Why nothing in the section changes, in the kernel's words, on a
+       * device, which reads the extensions its app carries and changes none;
+       * set by the reader, absent on an instance. BO_0319_052
+       */
+      readonly readOnly?: string;
     }
   | {
       readonly reachable: false;

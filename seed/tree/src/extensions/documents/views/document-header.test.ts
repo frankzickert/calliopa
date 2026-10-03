@@ -120,6 +120,25 @@ describe("the header's stylesheet", () => {
     expect(css).toMatch(/\n\.document-header-compact\s*\{[^}]*position:\s*absolute;/u);
   });
 
+  it("stacks the compact line over every layer of the document and under the shell's panels on a phone", () => {
+    // BO_0343_010: at the drawer's own level the line was drawn over the
+    // drawer and the inspector, whichever came later in the page.
+    const level = (source: string, selector: string): number => {
+      const rule = new RegExp(`\\n\\s*${selector.replace(".", "\\.")}\\s*\\{[^}]*z-index:\\s*(\\d+);`, "u").exec(source);
+      expect(rule, selector).not.toBeNull();
+      return Number(rule?.[1]);
+    };
+    const shell = readFileSync(new URL("../../../components/shell/shell.css", import.meta.url), "utf8");
+    const line = level(css, ".document-header-anchor");
+    const inside = css
+      .split(/\n(?=[^\s}])/u)
+      .filter((rule) => !rule.startsWith(".document-header-anchor") && !/position:\s*fixed/u.test(rule))
+      .flatMap((rule) => [...rule.matchAll(/z-index:\s*(\d+);/gu)].map((match) => Number(match[1])));
+    expect(Math.max(...inside)).toBeLessThan(line);
+    expect(line).toBeLessThan(level(shell, ".drawer"));
+    expect(line).toBeLessThan(level(shell, ".sheet-handle"));
+  });
+
   it("puts the header's left edge on the blocks' gutter, its other lines on the text inside it", () => {
     expect(css).toMatch(/\n\.document-header\s*\{[^}]*padding-inline:\s*var\(--block-grip-gutter\)/u);
     expect(css).toMatch(/\.document-header > \.document-title-place\s*\{[^}]*padding-inline-start:\s*var\(--document-header-text\)/u);

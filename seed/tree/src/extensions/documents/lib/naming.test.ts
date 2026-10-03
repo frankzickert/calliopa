@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isUnnamed, UNNAMED_DOCUMENT, UNNAMED_INSTRUCTION, unnamedTitle } from "./naming";
+import { isUnnamed, UNNAMED_DOCUMENT, UNNAMED_INSTRUCTION, UNNAMED_STRUCTURE, unnamedTitle } from "./naming";
 
 /** What counts as a document nobody has named. DO_0012_001 */
 describe("the name a document is minted with", () => {
@@ -34,3 +34,13 @@ describe("the name an instruction is minted with", () => {
   });
 });
 
+
+/** A structure is minted under its own name, unnamed by the same rule. RO_0006_001 */
+describe("the name a structure is minted with", () => {
+  it("Given the minted name, Then the structure is unnamed, and its placeholder is that name", () => {
+    expect(isUnnamed(UNNAMED_STRUCTURE)).toBe(true);
+    expect(unnamedTitle({ title: UNNAMED_STRUCTURE })).toBe(UNNAMED_STRUCTURE);
+    expect(unnamedTitle({ title: "Hook" })).toBe(UNNAMED_DOCUMENT);
+    expect(isUnnamed("Untitled structure 2")).toBe(false);
+  });
+});

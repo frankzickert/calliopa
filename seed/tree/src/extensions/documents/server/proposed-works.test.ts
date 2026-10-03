@@ -15,7 +15,7 @@ describe("proposedWorksCited", () => {
     node("blk-s", { _type: "text", _proposal: group, runs: [{ text: "See " }, { text: "", cite: { work: "wrk-new" } }, { text: " and " }, { text: "", cite: { work: "wrk-held" } }, { text: "", cite: { work: "wrk-new" } }] }),
     node("wrk-new", { _type: "document", record: "source", _proposal: group, title: "New" }),
     node("blk-notes", { _type: "text", _proposal: group, runs: [] }),
-    node("fld-new", { _type: "roleFields", _proposal: group, role: "builtin:source" }),
+    node("fld-new", { _type: "roleFields", _proposal: group, role: "source-structure" }),
     node("wrk-other", { _type: "document", record: "source", _proposal: group, title: "Cited by nothing here" }),
     node("doc-plain", { _type: "document", _proposal: group, title: "No source" }),
     node("wrk-elsewhere", { _type: "document", record: "source", _proposal: "node:run-2", title: "Another group's" }),

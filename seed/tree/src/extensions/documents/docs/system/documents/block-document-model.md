@@ -103,6 +103,63 @@
 - Recovery is real in the store and absent from the model. Nothing brings a deleted document back until a change adds an operation for it.
 - Deleting is the one operation over a document that no undo covers. What that costs the reader, and the confirmation that guards it, belong to [Block Editor View](./document-panel.md).
 
+## Clearing The Content
+
+Under `DO_0037` (`docs/changes/DO_0037_FEAT_clear-the-content.md`), set to draft by the user on
+2026-10-03: the owner empties the library in one act, on an instance that opted in, and the built-in
+structures stand afterwards in the release's shape. The section is this extension's, contributed to
+Settings as `instructions` contributes *Instruction tools*. What stays among the structures is
+`structures`' ([Clearing The Content](../../../../structures/docs/system/system.md#clearing-the-content));
+the workspace sweep is the shell's ([Workspace Record](../../../../../../docs/system/workspace/tabs.md#workspace-record)).
+
+* Clearing the content deletes every document but those an extension keeps — the built-in
+  structures — including instruction and source documents, focused work and the person's structures.
+  A deleted document is a deletion as above: archived, its history kept, nothing bringing it back.
+  User decisions, 2026-10-03 (`DO_0037_Q1`).
+* The owner alone clears, and only on an instance that opted in; the switch is the owner's in the
+  same section, off until set, kept in the kernel's state record for `settings`-scoped working state
+  (`/__kernel/state/settings/<id>`), never in the graph. User decisions, 2026-10-03 (`DO_0037_Q2`,
+  `DO_0037_Q3`).
+* One confirmation guards it: how many documents and structures go and that nothing brings them
+  back, *Cancel* and the clearing. User decision, 2026-10-03 (`DO_0037_Q4`).
+* Open proposals that stage documents or blocks are rejected with the clearing; a proposal of an
+  extension's code is not touched. User decision, 2026-10-03 (`DO_0037_Q6`).
+* Tabs on a removed document close in every workspace, and the owner's own remembered instruction
+  choices naming a removed document are set to none; another person's remembered choices are left,
+  since a run refuses an instruction that is no document. User decisions, 2026-10-03 (`DO_0037_Q8`).
+
+- [ ] DO_0037_001 The switch (`server/clearing.ts`, a record in the `settings` state collection beside
+  `settings`' lock): read by anyone signed in, written by the owner alone, which the kernel enforces;
+  absent reads as off.
+- [ ] DO_0037_002 What would go (`GET /api/x/documents/clearing`): the switch, and while it is on the
+  counts — documents, structures among them, open proposals to reject — read at head with the kept
+  set every registered keeper names (`keepOnClearing(name, keeper)`, registered like
+  `guardDocuments`). Refused `forbidden` unless `readSession()` answers the owner.
+- [ ] DO_0037_003 The clearing (`POST /api/x/documents/clearing`, owner alone, refused
+  `clearing_off` while the switch is off): every open group reaching a removed document or its
+  blocks (`reachingGroups`), and every run group whose started document the listing shows, is
+  rejected (`decideGroup("reject")`), a group that touches an extension's manifest or members
+  skipped; then one write retires every document node not kept and closes its `focuses` edge,
+  aliased as `retireBlocks` aliases, with each registered keeper's statements (`structures`'
+  `DO_0037_021`, `DO_0037_022`) in the same script, past the guards, which only this path skips.
+  It answers the counts it removed. A refused write leaves everything as it stood; groups already
+  rejected stay rejected, and the answer says so.
+- [ ] DO_0037_004 The section (`documents`' contributed `settingsSections` entry, `owner: true`):
+  the switch, and while it is on the counts and *Clear the content*, which raises one message through
+  `raiseMessage$` — the counts, *Nothing brings them back*, *Cancel* and a destructive *Clear* — and
+  after the clearing says what went, closes the reader's tabs on removed documents (`targetGone$`)
+  and sets the owner's remembered instruction choices naming one to none.
+- [ ] DO_0037_005 Verified under the kernel harness (`tests/behavior/clearing.test.ts`): a second
+  person refused `forbidden` on both routes; the clearing refused `clearing_off` with nothing
+  changed; with the switch on, every document gone from the listing but the ten built-ins, a run's
+  proposal into a removed document and a branch rejected, an extension's open group still open, a
+  tab on a removed document gone from another workspace, and the counts matching what went.
+- [ ] DO_0037_006 The release note: under *Added* in the repository's
+  `docs/release-notes/unreleased.md`, the owner's *Clear the content* in Settings on an instance that
+  opts in, and that nothing brings the content back.
+- [ ] DO_0037_007 Walked by the user on the dev instance: the switch, the counts, the confirmation,
+  the library empty but the built-ins, and *Structures* listing the ten in the release's shape.
+
 ## What A Document's Change Count Counts
 
 * A change to a document is one graph data revision that touched it, counted once however many records that revision wrote.
@@ -217,6 +274,13 @@ Under `calliopa-bootstrap`'s `BO_0288`, promoted to ready by the user on 2026-09
   reaches it, read from the group's staged relations, their relations travelling with them. A
   source another group proposes is that group's to answer, and rejecting a sentence leaves its
   sources proposed. Proven in `server/proposed-works.test.ts`.
+- `server/proposed-works.test.ts` imports nothing from `structures` (`DO_0035_001`, landed
+  2026-10-03): the `roleFields` fixture's `role` is a value of the test's own, since
+  `proposedWorksCited` never reads it. `documents` ships while an owner switches `structures` off,
+  so none of its files, a test included, imports from it; the release's absence check refused
+  `0.5.1` at pin 4440 on that import (`TS2307`). Verified (`DO_0035_002`): the test passes, and
+  `kernel toolchain absence` on a head checkout carrying the fix builds every combination of
+  switched-off extensions.
 - A document may name its own citation style (`BO_0291_037`, landed 2026-09-24): `document`
   permits `citationStyle`, one of the bibliography's shipped styles' ids, absent meaning the
   instance's default — a widening staged as a member revision through `kernel commit --members`,
@@ -352,6 +416,16 @@ Under `calliopa-bootstrap`'s `BO_0288`, promoted to ready by the user on 2026-09
   recognition), `outcome` (`ok`, `error`, `interrupted`, `timed out`, `output cap`), `elapsed`,
   `executionCount`, the service's `execution` id and `of`, the code block's id. HTML in a bundle
   is kept as text.
+- On a device (`calliopa-bootstrap`'s `BO_0319_046`), `sourcecode` also permits `permissions`, the
+  block's grant — `{attachments, hosts}`, whether it reads the document's material and the hosts it
+  may fetch from, written by the kernel as the person's own edit (`code`'s system topic) — and
+  `output` permits `network` (`none`, or `hosts`), `reproducible` and `fetches` (each `{url,
+  status, sha256, bytes}`), what the network gave the execution, written by the kernel only when
+  the code service said so; a runtime's execution carries none. The assembler reads them as
+  `network`, `reproducible` and `fetched`, the addresses, and an output that is not reproducible
+  draws *Not reproducible: it read <addresses>* beside how it ended (`views/output-block.tsx`).
+  Verified 2026-10-03 by `views/output-block.test.ts` (the mark with what was read; none on a
+  runtime's output or a reproducible one).
 - A code block is written like any other (`server/documents.ts`): `NewCodeBlock` joins
   `NewBlock`, `blockContentFor` writes `source` and, when it is not empty, `language`, and
   `reviseCode` sets both on the block's base revision, an empty language clearing it; `validateCode`
@@ -972,13 +1046,37 @@ listed as any document and guarded where the release fixes it.
   decision, 2026-10-02 (`RO_0005_Q2`).
 * A structure is retired, never deleted, and a built-in's title and release fields are the
   release's.
-- [ ] RO_0005_020 The guards: a document carrying `record: structure` is never deleted — the route
-      refuses it in words and the document panel draws no *Delete* — and a node whose id begins
-      `structure:` is the release's: such a document's title is refused a change and drawn fixed,
-      and such a block is refused a removal, a merge into another and a move out of its document,
-      its words staying editable. The same rules hold for a run's proposal and at its acceptance.
-- [ ] RO_0005_021 The record: `record: structure` is named beside `instruction` (`lib/`), a
-      document carrying it is listed in the Documents category and found by search like any other,
-      and it is never told apart as an instruction is.
-- [ ] RO_0005_022 Verified: `tests/behavior/documents.test.ts` over the kernel harness for the
-      refusals and the listing; this section's tasks become truth once they land.
+
+- A structure's document carries no `record`: it is listed and found as any document is, and
+  nothing here tells it apart. What makes it a structure is `structures`' to read.
+- The guards (`RO_0005_020`, landed 2026-10-02; `server/guards.ts`, `lib/fixed.ts`): an extension
+  depending on this one registers a guard with `guardDocuments(name, guard)` when its server module
+  loads; a guard answers, for one document, `Fixed` — why it is never deleted (`undeletable`), why
+  its title is not changed (`title`), and per block why it stays (`blocks`). `fixedOf` asks every
+  guard and merges their answers, the first reason for each winning (`mergeFixed`); a guard that
+  cannot answer fails the act rather than letting it through unasked, and with no guard registered
+  nothing is read. This extension knows no meaning behind what a guard fixes.
+- Every act that would delete a document, change its title or take a block out of it asks first and
+  is refused in the guard's words: `deleteDocument` by the rule `documentFixed`, `renameDocument` by
+  `titleFixed`, and `retireBlock`, `retireBlocks`, `mergeTextBlocks` and `mergeAdmonitionChildren`
+  for the block absorbed, `turnIntoAdmonition`, `turnIntoImage`, `turnImageIntoText`,
+  `turnIntoCode` and `moveBlockIn` for the block leaving its document, by `blockFixed`
+  (`keptBlock`). A kept block's words stay editable, and a split keeps its id.
+- A run's removals and gathers are staged by the kernel's own tools (`agenttools`), which never ask
+  this extension, so the guard is asked as they are accepted: `answerDocumentProposal` refuses
+  accepting a `remove` whose retirement takes out a kept block, or a `gather` moving one under the
+  focused work, by `blockFixed` (`keptAtAcceptance`). Measured at implementation: guarding the
+  staging itself would be fixed-layer work, and nothing a run stages stands until it is accepted.
+- The document read answers what is fixed (`handleDocumentRead`): `DocumentView.fixed`, present only
+  when something is. The editor draws a fixed title with `contenteditable="false"`,
+  `data-title-fixed` and the guard's words as its title, and the document's bar offers no *Delete*
+  on a document a guard keeps. A refused act is said as the editor says any refusal.
+- Verified 2026-10-02 (`RO_0005_020`): `lib/fixed.test.ts` for the merge and the first kept block;
+  `views/bar.test.ts` for a kept document's bar without *Delete* and its title drawn fixed; the
+  `documents` unit suites green (836). With no guard registered every act reads as before; the refusals over CCGW are proven with
+  `structures`' guard (`RO_0005_022`).
+- Verified over CCGW under the kernel harness with `structures`' guard registered (`RO_0005_022`,
+  2026-10-02, `structures`' `tests/behavior/structures.test.ts`): a structure's document refused a
+  deletion (`documentFixed`), a built-in's title refused a change (`titleFixed`), a release field's
+  block refused a retirement, a merge and a turn into code (`blockFixed`), and a removal staged
+  against it refused as it was accepted; a person's own field block retired freely.

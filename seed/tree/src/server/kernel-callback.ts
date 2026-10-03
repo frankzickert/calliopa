@@ -1,3 +1,4 @@
+import type { RunScope } from "./ccgw/branch-scope";
 import { port } from "./port";
 
 /**
@@ -16,4 +17,20 @@ export function kernelCallbackRefusal(presented: string | null, secret: string |
   if (presented === null || presented === "") return "only the kernel calls this route";
   if (!port.sameSecret(presented, secret)) return "only the kernel calls this route";
   return null;
+}
+
+/** The run a callback is made for, as the kernel names it (`calliopa-bootstrap`'s `BO_0344_001`). */
+export const RUN_PIN_HEADER = "x-calliopa-run-pin";
+export const RUN_OVERLAY_HEADER = "x-calliopa-run-overlay";
+
+/**
+ * The read scope a kernel callback carries: the run's pin, and its group once
+ * it has staged; undefined for a callback no run makes. Read only after the
+ * secret is checked, so no browser sets it. Pure. BO_0344_004
+ */
+export function runScopeOf(headers: Headers): RunScope | undefined {
+  const pin = Number(headers.get(RUN_PIN_HEADER) ?? "");
+  if (!Number.isSafeInteger(pin) || pin <= 0) return undefined;
+  const overlay = (headers.get(RUN_OVERLAY_HEADER) ?? "").trim();
+  return overlay === "" ? { pin } : { pin, overlay };
 }

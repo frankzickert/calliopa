@@ -7,11 +7,13 @@ import type { ListedDocumentEntry } from "~/extensions/documents/lib/library-ite
 import {
   decide,
   decideGroup,
+  decideMembers,
   query,
   reachingGroups,
   stage,
   touchedSet,
   write,
+  type MemberOutcome,
   type ReadNode,
   type ReadResult,
   type TouchedSet,
@@ -45,6 +47,7 @@ import { FORMER_INSTRUCTION_RECORD, INSTRUCTION_RECORD, type InstructionSummary 
 import { FORMER_UNNAMED_INSTRUCTION, UNNAMED_INSTRUCTION } from "../lib/naming";
 import { DOCUMENT_TARGET_KIND } from "./focus";
 import { FOCUSES, gatherOf, reachesDocument } from "./reach";
+import { firstFixed, fixedOf, kindOfDocument } from "./guards";
 import {
   DOCUMENT_TYPE,
   normalizeRuns,
@@ -250,6 +253,18 @@ function refuse<T>(rule: string, detail: string): GraphOutcome<T> {
     outcome: "validationFailure",
     failures: [{ operation: null, rule, detail }],
   };
+}
+
+/**
+ * A refusal when a guard another extension registered keeps one of these
+ * blocks in the document — a structure's release field (`structures`'
+ * `RO_0005_020`) — in the guard's words; null when none is kept.
+ */
+async function keptBlock(documentId: string, blockIds: Iterable<string>): Promise<GraphOutcome<never> | null> {
+  const fixed = await fixedOf(documentId);
+  if (fixed.outcome !== "success") return fixed as GraphOutcome<never>;
+  const kept = firstFixed(fixed.result, blockIds);
+  return kept === null ? null : refuse("blockFixed", kept.reason);
 }
 
 function conflict<T>(nodeId: string, expected: string, current: string | null): GraphOutcome<T> {
@@ -890,6 +905,10 @@ export async function renameDocument(input: {
   readonly baseRevisionId: string;
   readonly title: string;
 }): Promise<GraphOutcome<WrittenDocument>> {
+  // A title a guard keeps is the release's. RO_0005_020
+  const fixed = await fixedOf(input.documentId);
+  if (fixed.outcome !== "success") return fixed as GraphOutcome<never>;
+  if (fixed.result.title !== undefined) return refuse("titleFixed", fixed.result.title);
   let loaded = await loadDocument(input.documentId);
   // Retitling a started document takes it, and the title is written on top,
   // as typing into any proposal accepts it. BO_0251_009
@@ -1078,6 +1097,8 @@ export async function turnIntoAdmonition(input: { readonly documentId: string; r
   const located = locate(loaded.document, input.blockId, input.baseRevisionId);
   if ("failure" in located) return located.failure;
   if (located.block.kind !== "text") return refuse("blockKind", `Block ${input.blockId} is not a text block.`);
+  const keptAdmonition = await keptBlock(input.documentId, [input.blockId]);
+  if (keptAdmonition !== null) return keptAdmonition;
   const { listAdmonitionPatterns } = await import("./admonitions");
   const patterns = await listAdmonitionPatterns();
   if (patterns.outcome !== "success") return patterns as GraphOutcome<never>;
@@ -1148,6 +1169,8 @@ export async function mergeAdmonitionChildren(input: {
   }
   if (into.revisionId !== input.intoBaseRevisionId) return conflict(into.blockId, input.intoBaseRevisionId, into.revisionId);
   if (from.revisionId !== input.baseRevisionId) return conflict(from.blockId, input.baseRevisionId, from.revisionId);
+  const keptChild = await keptBlock(input.documentId, [from.blockId]);
+  if (keptChild !== null) return keptChild;
 
   const earlier = intoAt < fromAt ? into : from;
   const later = intoAt < fromAt ? from : into;
@@ -1296,6 +1319,8 @@ export async function turnIntoImage(input: { readonly documentId: string; readon
   const located = locate(loaded.document, input.blockId, input.baseRevisionId);
   if ("failure" in located) return located.failure;
   if (located.block.kind !== "text") return refuse("blockKind", `Block ${input.blockId} is not a text block.`);
+  const keptImage = await keptBlock(input.documentId, [input.blockId]);
+  if (keptImage !== null) return keptImage;
   const captionRuns = normalizeRuns(located.block.runs.map(({ text, link, marks: _marks, ...rest }) => ({ text, ...(link === undefined ? {} : { link }), ...rest })));
   const blockId = port.uuid();
   const parameters: Record<string, unknown> = { dref: nodeRef(input.documentId), bref: nodeRef(blockId), cRelationId: located.block.containmentId, dref2: nodeRef(input.documentId), oref: nodeRef(input.blockId) };
@@ -1313,6 +1338,8 @@ export async function turnImageIntoText(input: { readonly documentId: string; re
   const located = locate(loaded.document, input.blockId, input.baseRevisionId);
   if ("failure" in located) return located.failure;
   if (located.block.kind !== "image") return refuse("blockKind", `Block ${input.blockId} is not an image block.`);
+  const keptText = await keptBlock(input.documentId, [input.blockId]);
+  if (keptText !== null) return keptText;
   const runs = normalizeRuns(located.block.captionRuns ?? (located.block.caption === undefined ? [] : [{ text: located.block.caption }]));
   const blockId = port.uuid();
   const parameters: Record<string, unknown> = { dref: nodeRef(input.documentId), bref: nodeRef(blockId), cRelationId: located.block.containmentId, dref2: nodeRef(input.documentId), oref: nodeRef(input.blockId) };
@@ -1336,6 +1363,8 @@ export async function turnIntoCode(input: {
   if (located.block.kind !== "text") {
     return refuse("blockKind", `Block ${input.blockId} is a ${located.block.kind} block; only a text block turns into code.`);
   }
+  const keptCode = await keptBlock(input.documentId, [input.blockId]);
+  if (keptCode !== null) return keptCode;
   const source = located.block.runs.map((run) => run.text).join("");
   const blockId = port.uuid();
   const parameters: Record<string, unknown> = {
@@ -1834,6 +1863,8 @@ export async function mergeTextBlocks(input: {
   if (into.revisionId !== input.intoBaseRevisionId) {
     return conflict(into.blockId, input.intoBaseRevisionId, into.revisionId);
   }
+  const keptMerged = await keptBlock(input.documentId, [from.blockId]);
+  if (keptMerged !== null) return keptMerged;
 
   const parameters: Record<string, unknown> = {
     iNodeId: nodeRef(input.intoBlockId),
@@ -1914,6 +1945,8 @@ export async function moveBlockIn(input: {
   if (!source.ok) return source.outcome;
   const located = locate(source.document, input.blockId);
   if ("failure" in located) return located.failure;
+  const keptOut = await keptBlock(input.fromDocumentId, [input.blockId]);
+  if (keptOut !== null) return keptOut;
   const target = await loadDocument(input.documentId);
   if (!target.ok) return target.outcome;
   const inside = await withinFocusedWorkOf(input.blockId, input.documentId);
@@ -2042,6 +2075,8 @@ export async function retireBlock(input: {
   if (!loaded.ok) return loaded.outcome;
   const located = locate(loaded.document, input.blockId);
   if ("failure" in located) return located.failure;
+  const kept = await keptBlock(input.documentId, [input.blockId]);
+  if (kept !== null) return kept;
   // A block with focused work stays until the child is deleted: nothing
   // cascades, and the child is named so the reader knows what stands in the
   // way. CA_0047_002
@@ -2092,6 +2127,8 @@ export async function retireBlocks(input: {
     if ("failure" in found) return found.failure;
     located.push(found.block);
   }
+  const keptMarked = await keptBlock(input.documentId, located.map((block) => block.blockId));
+  if (keptMarked !== null) return keptMarked;
   // A block with focused work stays until the child is deleted, as a single
   // retirement's does; the first one standing in the way is named. CA_0047_002
   const children = await childrenOf(DOCUMENT_TARGET_KIND, located.map((block) => block.blockId));
@@ -2207,6 +2244,9 @@ export async function deleteDocument(input: {
   if (loaded.document.revisionId !== input.baseRevisionId) {
     return conflict(input.documentId, input.baseRevisionId, loaded.document.revisionId);
   }
+  const fixed = await fixedOf(input.documentId);
+  if (fixed.outcome !== "success") return fixed as GraphOutcome<never>;
+  if (fixed.result.undeletable !== undefined) return refuse("documentFixed", fixed.result.undeletable);
 
   // Focused work closes its `focuses` edge in the same script, so a block
   // never points at a document that answers nothing. CA_0047_002
@@ -2636,7 +2676,36 @@ export interface DocumentProposals {
     /** The run that staged it, when an `agent.run` node says so, and when it
      * recorded itself — what the run chips are ordered by. BO_0265_014 */
     readonly run?: { readonly runId: string; readonly stagedAt: number };
+    /** The documents the group started outside this one, which its run
+     * chip names and *Accept all* answers with the rest. DO_0034_002 */
+    readonly elsewhere?: readonly ElsewhereDocument[];
   }[];
+}
+
+/** A document a group started outside the one being read: its id, its title
+ * and what an extension names it (`kindOfDocument`). DO_0034_002 */
+export interface ElsewhereDocument {
+  readonly documentId: string;
+  readonly title: string;
+  readonly kind?: string;
+}
+
+/**
+ * The documents a group started outside the one being read — a candidate
+ * document node of the group's own — each named by an extension where one
+ * does, read through the group (`DO_0034_002`). A document the group only
+ * changes is read where it stands and shows its proposals itself.
+ */
+async function elsewhereOf(groupId: string, staged: ReadonlyMap<string, ReadNode>, documentNode: string): Promise<ElsewhereDocument[]> {
+  const started = [...staged.values()].filter((node) => node.id !== documentNode && typeOf(node) === DOCUMENT_TYPE);
+  return Promise.all(
+    started.map(async (node) => {
+      const documentId = bareId(node.id);
+      const title = node.revision.content?.["title"];
+      const kind = await kindOfDocument(documentId, groupId);
+      return { documentId, title: typeof title === "string" ? title : "", ...(kind === undefined ? {} : { kind }) };
+    }),
+  );
 }
 
 /** The open proposal groups of the graph, by id. */
@@ -2673,7 +2742,7 @@ async function readDocumentProposalsAgainstTruth(
   const loaded = { document: read.ok ? read.document : (started as { readonly result: DocumentView }).result };
   const documentNode = nodeRef(documentId);
   const established = new Map(loaded.document.blocks.map((block) => [nodeRef(block.blockId), block]));
-  const groups: { groupId: string; items: ProposedChange[]; stagedBy: string[]; proposer: Proposer; run?: { runId: string; stagedAt: number } }[] = [];
+  const groups: { groupId: string; items: ProposedChange[]; stagedBy: string[]; proposer: Proposer; run?: { runId: string; stagedAt: number }; elsewhere?: ElsewhereDocument[] }[] = [];
   let unanswered = 0;
 
   // Only a group that reaches this document is read: the core answers the
@@ -2853,6 +2922,7 @@ async function readDocumentProposalsAgainstTruth(
       const notes = notesOf(run?.revision.content?.["notes"]);
       const noted = notes.size === 0 ? items : items.map((item) => withNote(item, notes));
       const runId = run?.revision.content?.["id"];
+      const elsewhere = await elsewhereOf(groupId, staged, documentNode);
       // A person's branch is a group named after the document and the person:
       // its proposer is that person, whatever the stamps say. BO_0250_016
       return {
@@ -2865,6 +2935,7 @@ async function readDocumentProposalsAgainstTruth(
           ...(run !== undefined && typeof runId === "string"
             ? { run: { runId: runId.replace(/^run:/u, ""), stagedAt: run.revision.createdAt } }
             : {}),
+          ...(elsewhere.length === 0 ? {} : { elsewhere }),
         },
       };
   };
@@ -3452,6 +3523,12 @@ export async function answerDocumentProposal(input: {
     return refuse("itemShape", `${input.itemId} does not name a proposed change.`);
   }
   const decision = input.answer === "accepted" ? "accept" : "reject";
+  // The kernel stages a run's removals and gathers without asking this
+  // extension, so a guard is asked as they are accepted. RO_0005_020
+  if (decision === "accept" && input.documentId !== undefined) {
+    const kept = await keptAtAcceptance(input.documentId, parsed.groupId, parsed.kind, parsed.members);
+    if (kept !== null) return kept as GraphOutcome<AnsweredItem>;
+  }
   // A gather is answered as its group, whole: the summary, the focused work
   // and every move land or leave together. BO_0322_013
   if (parsed.kind === "gather") {
@@ -3597,6 +3674,259 @@ export async function answerDocumentProposal(input: {
       groupState: open ? "open" : "closed",
     },
   };
+}
+
+export interface AnsweredGroup {
+  readonly groupId: string;
+  readonly answer: ProposalAnswer;
+  /** The items answered, so the view drops them without reading. */
+  readonly answered: readonly string[];
+  /** The items left standing, each with why, said to the reader. */
+  readonly notice?: string;
+}
+
+/**
+ * Answers every item of a group on a document at once — *Accept all* and
+ * *Reject all* (`BO_0343_012`). The group is read once and its items' members
+ * go to the kernel as one batch (`decideMembers`, `BO_0343_002`), in the
+ * items' order and each item's members in theirs, so the outcome per item is
+ * what answering it alone gives: an item whose first member the batch could
+ * not decide — drifted, refused or kept behind the confirmation — is then
+ * answered on its own (`answerDocumentProposal`), which accepts over a
+ * standing set since or says why not; an item stopped after its first member
+ * stays as answering it alone leaves it. What follows an acceptance — the
+ * started document first, the sources a sentence cites, the code formatted,
+ * the withdrawn items rejected — is done once for the group.
+ */
+export async function answerDocumentGroup(input: {
+  readonly documentId: string;
+  readonly groupId: string;
+  readonly answer: ProposalAnswer;
+}): Promise<GraphOutcome<AnsweredGroup>> {
+  const { documentId, groupId, answer } = input;
+  const decision = answer === "accepted" ? "accept" : "reject";
+  const read = await readDocumentProposalsAgainstTruth(documentId);
+  if (read.outcome !== "success") return read as GraphOutcome<never>;
+  const items = read.result.groups.find((group) => group.groupId === groupId)?.items ?? [];
+  if (items.length === 0) return refuse("unknownGroup", `${groupId} proposes nothing on this document.`);
+  const parsed = items.map((item) => ({ item, parsed: parseItemId(item.itemId) }));
+  // A gather is its group, answered whole. BO_0322_013
+  if (parsed.some(({ parsed: one }) => one === null || one.kind === "gather")) {
+    for (const { item } of parsed) {
+      const one = await answerDocumentProposal({ documentId, itemId: item.itemId, answer });
+      if (one.outcome !== "success") return one as GraphOutcome<never>;
+    }
+    return { outcome: "success", result: { groupId, answer, answered: items.map((item) => item.itemId) } };
+  }
+  const named = parsed as readonly { item: ProposedChange; parsed: NonNullable<ReturnType<typeof parseItemId>> }[];
+  if (decision === "accept") {
+    for (const { parsed: one } of named) {
+      const kept = await keptAtAcceptance(documentId, groupId, one.kind, one.members);
+      if (kept !== null) return kept;
+    }
+  }
+  const started = await startedIn(documentId);
+  if (decision === "accept" && started === groupId) {
+    const taken = await decide("accept", groupId, nodeRef(documentId), `take document ${documentId} with its items`);
+    if (taken.outcome !== "success") return taken as GraphOutcome<never>;
+  }
+  // The sources the group's sentences cite go first, so no citation lands
+  // pointing at a proposal. BO_0291_036 BO_0313_030
+  const members = named.flatMap(({ parsed: one }) => one.members);
+  if (decision === "accept") {
+    const carried = await query({
+      statement: "MATCH (n) WHERE n._proposal = $g RETURN GRAPH n ROOT n INCLUDE CANDIDATES",
+      parameters: { g: groupId },
+      proposalOverlay: groupId,
+      unbounded: true,
+      purpose: "works the group's citations carry",
+    });
+    if (carried.outcome === "storageError") return carried as GraphOutcome<never>;
+    const touchedEdges = carried.outcome === "success" ? await touchedSet(groupId) : null;
+    const works =
+      carried.outcome === "success"
+        ? proposedWorksCited(carried.result.nodes, members, groupId, touchedEdges?.outcome === "success" ? touchedEdges.result.stagedRelations : [])
+        : [];
+    if (works.length > 0) {
+      const taken = await decideMembers("accept", groupId, works, "sources the group cites");
+      if (taken.outcome !== "success") return taken as GraphOutcome<never>;
+      const failed = taken.result.find((outcome) => outcome.status !== "success");
+      if (failed !== undefined) return refuse("sourceNotAccepted", `A source this proposal cites could not be accepted first: ${failed.detail ?? failed.status}`);
+    }
+  }
+  const batch = await decideMembers(decision, groupId, members, decision === "accept" ? "accept all" : "reject all");
+  if (batch.outcome !== "success") return batch as GraphOutcome<never>;
+  const outcomeOf = new Map(batch.result.map((outcome) => [outcome.member, outcome]));
+  const answered: string[] = [];
+  const accepted: string[] = [];
+  const notices: string[] = [];
+  for (const { item, parsed: one } of named) {
+    const outcomes = one.members.map((member) => outcomeOf.get(member));
+    if (outcomes.every((outcome) => outcome?.status === "success")) {
+      answered.push(item.itemId);
+      accepted.push(...one.members);
+      continue;
+    }
+    if (outcomes[0]?.status !== "success") {
+      // Nothing of it was decided: answered alone, as its own press would.
+      const alone = await answerDocumentProposal({ documentId, itemId: item.itemId, answer });
+      if (alone.outcome === "success") {
+        answered.push(item.itemId);
+        if (alone.result.notice !== undefined) notices.push(alone.result.notice);
+      } else notices.push(describeOutcomeWords(alone));
+      continue;
+    }
+    const failed = outcomes.find((outcome) => outcome?.status !== "success");
+    notices.push(`A proposal was answered only in part: ${failed?.detail ?? failed?.status ?? "refused"}`);
+  }
+  if (decision === "accept") {
+    await formatAccepted(documentId, accepted);
+    // Accepting a successor rejects the items withdrawn in its favour.
+    // BO_0286_009
+    const answeredSet = new Set(answered);
+    const superseded = read.result.groups.flatMap((group) => group.items).filter((item) => item.withdrawal?.successor !== undefined && answeredSet.has(item.withdrawal.successor));
+    const byGroup = new Map<string, string[]>();
+    for (const item of superseded) byGroup.set(item.groupId, [...(byGroup.get(item.groupId) ?? []), ...(parseItemId(item.itemId)?.members ?? [])]);
+    for (const [group, withdrawn] of byGroup) {
+      const rejected = await decideMembers("reject", group, withdrawn, "withdrawn in favour of an accepted proposal");
+      const failed = rejected.outcome === "success" ? rejected.result.find((outcome) => outcome.status !== "success") : undefined;
+      if (rejected.outcome !== "success" || failed !== undefined) {
+        notices.push(`A proposal withdrawn in favour of an accepted one could not be rejected and still stands: ${failed?.detail ?? rejected.outcome}`);
+      }
+    }
+  }
+  // Rejecting every item of a started document rejects the document too.
+  // BO_0251_009
+  if (decision === "reject" && started === groupId && answered.length === items.length) {
+    const dropped = await decide("reject", groupId, nodeRef(documentId), `drop document ${documentId}, every item rejected`);
+    if (dropped.outcome !== "success") return dropped as GraphOutcome<never>;
+  }
+  // The run's work elsewhere, answered with the rest. DO_0034_001
+  const elsewhere = await answerElsewhere(decision, groupId, documentId, new Set(members));
+  if (elsewhere.outcome !== "success") return elsewhere as GraphOutcome<never>;
+  notices.push(...elsewhere.result);
+  return { outcome: "success", result: { groupId, answer, answered, ...(notices.length === 0 ? {} : { notice: notices.join(" ") }) } };
+}
+
+/**
+ * *Accept all* and *Reject all* answer the run (`DO_0034_001`): after the
+ * items of the document they are pressed in, every member the group still
+ * stages outside them — a started document's node before the nodes it holds,
+ * then the relations the group still stages or closes — in one batch each.
+ * This document's own members and relations are left as its items left them,
+ * and the run's `agent.run` record goes as it always has. Answers the
+ * notice's sentences: what landed or was discarded elsewhere, by title, and
+ * any member the kernel would not decide.
+ */
+async function answerElsewhere(
+  decision: "accept" | "reject",
+  groupId: string,
+  documentId: string,
+  decided: ReadonlySet<string>,
+): Promise<GraphOutcome<string[]>> {
+  const documentNode = nodeRef(documentId);
+  const touched = await touchedSet(groupId);
+  if (touched.outcome !== "success" || touched.result.status !== "open") return { outcome: "success", result: [] };
+  const carried = await query({
+    statement: "MATCH (n) WHERE n._proposal = $g RETURN GRAPH n ROOT n INCLUDE CANDIDATES",
+    parameters: { g: groupId },
+    proposalOverlay: groupId,
+    unbounded: true,
+    purpose: "the run's work elsewhere",
+  });
+  if (carried.outcome === "storageError") return carried as GraphOutcome<never>;
+  const candidates = new Map(
+    (carried.outcome === "success" ? carried.result.nodes : [])
+      .filter((node) => node.revision.status === "candidate" && node.revision.content?.["_proposal"] === groupId)
+      .map((node) => [node.id, node] as const),
+  );
+  // What this document holds is its items' to answer: its own node, and the
+  // nodes a staged relation from it places.
+  const here = new Set<string>([documentNode, ...decided]);
+  for (const relation of touched.result.stagedRelations) if (relation.fromNodeId === documentNode) here.add(relation.toId);
+  const carryForward = new Set(touched.result.carryForwardNodes ?? []);
+  const nodes = touched.result.touchedNodes.filter((node) => {
+    const candidate = candidates.get(node);
+    return candidate !== undefined && !here.has(node) && !carryForward.has(node) && typeOf(candidate) !== "agent.run";
+  });
+  const startedDocuments = nodes.filter((node) => typeOf(candidates.get(node) as ReadNode) === DOCUMENT_TYPE);
+  const notices: string[] = [];
+  const undecided = (outcomes: readonly MemberOutcome[]) => {
+    for (const outcome of outcomes) {
+      if (outcome.status !== "success") notices.push(`Part of the run's work elsewhere still stands: ${outcome.detail ?? outcome.status}`);
+    }
+  };
+  if (nodes.length > 0) {
+    const ordered = [...startedDocuments, ...nodes.filter((node) => !startedDocuments.includes(node))];
+    const batch = await decideMembers(decision, groupId, ordered, decision === "accept" ? "accept all: the run's work elsewhere" : "reject all: the run's work elsewhere");
+    if (batch.outcome !== "success") return batch as GraphOutcome<never>;
+    undecided(batch.result);
+  }
+  // A node's decision takes its relations with it; what the group still
+  // stages or closes after it is decided on its own.
+  const left = await touchedSet(groupId);
+  if (left.outcome === "success" && left.result.status === "open") {
+    const relations = [...left.result.stagedRelations, ...(left.result.closedRelations ?? [])]
+      .filter((relation) => !here.has(relation.fromNodeId) && !here.has(relation.toId) && !decided.has(relation.id))
+      .map((relation) => relation.id);
+    if (relations.length > 0) {
+      const batch = await decideMembers(decision, groupId, relations, decision === "accept" ? "accept all: the run's work elsewhere" : "reject all: the run's work elsewhere");
+      if (batch.outcome !== "success") return batch as GraphOutcome<never>;
+      undecided(batch.result);
+    }
+  }
+  for (const node of startedDocuments) {
+    const title = candidates.get(node)?.revision.content?.["title"];
+    const named = typeof title === "string" && title !== "" ? title : "A document the run started";
+    if (decision === "reject") {
+      notices.push(`${named} was discarded.`);
+      continue;
+    }
+    const kind = await kindOfDocument(bareId(node));
+    notices.push(kind === undefined ? `${named} now stands as a document.` : `${named} is now a ${kind}.`);
+  }
+  return { outcome: "success", result: notices };
+}
+
+/** An outcome that is not success, in the words a notice says. */
+const describeOutcomeWords = (outcome: GraphOutcome<unknown>): string =>
+  outcome.outcome === "refused" || outcome.outcome === "storageError" || outcome.outcome === "noResult"
+    ? outcome.detail
+    : outcome.outcome === "validationFailure"
+      ? (outcome.failures[0]?.detail ?? "refused")
+      : outcome.outcome === "conflict"
+        ? "This proposed change was made against an older version of the block. Reject it, or ask for it again."
+        : outcome.outcome;
+
+/**
+ * A refusal when accepting a removal or a gather would take out of the
+ * document a block a guard keeps (`RO_0005_020`); null otherwise. A removal
+ * is named by its block or by its retirement relation, a gather by the
+ * blocks its group moves under the focused work.
+ */
+async function keptAtAcceptance(
+  documentId: string,
+  groupId: string,
+  kind: string,
+  members: readonly string[],
+): Promise<GraphOutcome<never> | null> {
+  if (kind !== "remove" && kind !== "gather") return null;
+  const loaded = await loadDocument(documentId);
+  if (!loaded.ok) return null;
+  const touched = await touchedSet(groupId);
+  if (touched.outcome !== "success") return touched as GraphOutcome<never>;
+  const documentNode = nodeRef(documentId);
+  const leaving = new Set<string>();
+  if (kind === "gather") {
+    const established = new Map(loaded.document.blocks.map((block) => [nodeRef(block.blockId), block]));
+    for (const moved of gatherOf(touched.result, documentNode, established)?.moved ?? []) leaving.add(bareId(moved));
+  } else {
+    const named = new Set(members.map(bareId));
+    for (const relation of touched.result.stagedRelations)
+      if (relation.type === RETIRED && relation.fromNodeId === documentNode && (named.has(bareId(relation.id)) || named.has(bareId(relation.toId))))
+        leaving.add(bareId(relation.toId));
+  }
+  return keptBlock(documentId, leaving);
 }
 
 /**

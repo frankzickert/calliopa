@@ -1,4 +1,4 @@
-import { FORMAT_STRUCTURE, INSTRUCTION_STRUCTURE, VARIATION_STRUCTURE, type FieldValue, type TakenStructure } from "~/extensions/structures/lib/structures";
+import { FORMAT_STRUCTURE, INPUT_KINDS, INPUT_STRUCTURE, INSTRUCTION_STRUCTURE, VARIATION_STRUCTURE, type FieldValue, type TakenStructure } from "~/extensions/structures/lib/structures";
 import { structuresOf } from "~/extensions/structures/server/structures";
 
 import type { FormatChoices } from "../lib/variations";
@@ -12,6 +12,26 @@ import type { FormatChoices } from "../lib/variations";
  * (`ui-kernel.md` `BO_0336_001`), as it hands `make_manuscript`'s roles.
  */
 
+/** What an input is, as the media service takes it (`calliopa-bootstrap`'s `BO_0346`). */
+export type InputRole = (typeof INPUT_KINDS)[number]["role"];
+
+/**
+ * One input a format takes (`ME_0002_010`): a block of the format using
+ * *Input*, its name the alias the vendor's prompt names it by. A video format
+ * declaring none takes one, the picture above the block as its start frame,
+ * which stands in no block.
+ */
+export interface FormatInput {
+  readonly name: string;
+  readonly role: InputRole;
+  readonly required: boolean;
+  /** The block of the format declaring it; absent for a video's start frame by default. */
+  readonly block?: string;
+}
+
+/** The start frame a video format declaring no input takes: the picture above. */
+export const START_BY_DEFAULT: FormatInput = { name: "start", role: "start", required: true };
+
 export interface GenerationFormat {
   readonly id: string;
   readonly title: string;
@@ -22,6 +42,8 @@ export interface GenerationFormat {
   readonly quality: string;
   /** The variation chosen beside Send, when one was. */
   readonly variation?: string;
+  /** What it takes, in reading order (`ME_0002_010`). */
+  readonly inputs: readonly FormatInput[];
 }
 
 export type FormatRead = { readonly ok: true; readonly format: GenerationFormat } | { readonly ok: false; readonly refusal: string };
@@ -63,18 +85,60 @@ export async function readFormat(run: { readonly pin: number; readonly instructi
       if (own !== "") values[key] = own;
     }
   }
+  // Its inputs, each a block using Input; a video declaring none opens on
+  // the picture above (ME_0002_010).
+  const inputs: FormatInput[] = [];
+  for (const block of format.result.blocks) {
+    const input = valuesOf(block.structures, INPUT_STRUCTURE);
+    if (input === null) continue;
+    const kind = INPUT_KINDS.find((one) => one.label === words(input["kind"]));
+    const name = words(input["name"]).replace(/^@/u, "");
+    if (kind === undefined) return { ok: false, refusal: `An input of ${title} names no kind: choose one in the format.` };
+    if (!/^[A-Za-z0-9_-]+$/u.test(name)) return { ok: false, refusal: `An input of ${title} needs a name of letters, digits, - or _: give it one in the format.` };
+    if (inputs.some((one) => one.name === name)) return { ok: false, refusal: `${title} names two inputs ${name}: give each its own name in the format.` };
+    inputs.push({ name, role: kind.role, required: input["required"] === true, block: block.blockId });
+  }
+  const type = words(held["type"]);
+  if (inputs.length === 0 && type === "video") inputs.push(START_BY_DEFAULT);
   return {
     ok: true,
     format: {
       id: formatId,
       title,
-      type: words(held["type"]),
+      type,
       provider: values["provider"] ?? "",
       model: values["model"] ?? "",
       ratio: values["ratio"] ?? "",
       quality: values["quality"] ?? "",
       ...(variationId === "" ? {} : { variation: variationId }),
+      inputs,
     },
+  };
+}
+
+/**
+ * What the format says of itself (`ME_0002_011`): its document's text blocks
+ * using neither *Input* nor *Variation*, and each input's words, for a run to
+ * read as instructions for using it. Read where the run's document is read,
+ * at head.
+ */
+export async function guideOf(
+  format: GenerationFormat,
+  blocksOf: (documentId: string) => Promise<readonly { readonly blockId: string; readonly words: string }[]>,
+): Promise<{ readonly words: string; readonly inputs: Readonly<Record<string, string>> }> {
+  const read = await structuresOf(format.id);
+  const set = new Set(
+    read.outcome === "success"
+      ? read.result.blocks
+          .filter((block) => valuesOf(block.structures, INPUT_STRUCTURE) !== null || valuesOf(block.structures, VARIATION_STRUCTURE) !== null)
+          .map((block) => block.blockId)
+      : [],
+  );
+  const blocks = await blocksOf(format.id);
+  const said = (blockId: string): string => blocks.find((block) => block.blockId === blockId)?.words ?? "";
+  return {
+    words: blocks.filter((block) => !set.has(block.blockId) && block.words !== "").map((block) => block.words).join("\n\n"),
+    inputs: Object.fromEntries(format.inputs.map((input) => [input.name, input.block === undefined ? "The picture above the block, the clip's first frame." : said(input.block)])),
   };
 }
 

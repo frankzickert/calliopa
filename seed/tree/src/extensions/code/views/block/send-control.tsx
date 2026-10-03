@@ -1,9 +1,10 @@
-import { $, component$, useContext, useSignal, useStore } from "@builder.io/qwik";
+import { $, component$, useContext, useSignal, useStore, useVisibleTask$ } from "@builder.io/qwik";
 
 import type { BlockDecorationProps } from "~/contract";
 import { branchOf } from "~/extensions/documents/lib/branch-scope";
 import { tracebackSegments } from "~/extensions/documents/lib/traceback";
 import { liveLine, type LiveLine } from "../../lib/live-lines";
+import type { Permissions } from "../../lib/types";
 
 import { SessionContext } from "../session/context";
 
@@ -31,6 +32,130 @@ interface Live {
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** What a grant lets a block reach, in words. BO_0319_046 */
+export function grantWords(grant: Permissions): string {
+  const reach: string[] = [];
+  if (grant.attachments) reach.push("reads the document's files");
+  if (grant.hosts.length > 0) reach.push(`fetches from ${grant.hosts.join(", ")}`);
+  return reach.length === 0
+    ? "Runs in this device's sandbox and reaches nothing beyond compute."
+    : `Runs in this device's sandbox and ${reach.join(" and ")}.`;
+}
+
+/**
+ * A code block's grant on a device (`calliopa-bootstrap`'s BO_0319_046): what
+ * it may reach beyond compute — the document's files, and the hosts the
+ * person names — shown under the block and granted or withdrawn there, each
+ * change written on the block at once. Drawn when the document is connected
+ * to the device's sandbox; a runtime's network is the code service's.
+ */
+const BlockPermissions = component$<{ documentId: string; blockId: string }>(({ documentId, blockId }) => {
+  const grant = useStore<{ loaded: boolean; attachments: boolean; hosts: string[]; host: string; busy: boolean; refusal: string }>({
+    loaded: false,
+    attachments: false,
+    hosts: [],
+    host: "",
+    busy: false,
+    refusal: "",
+  });
+
+  // eslint-disable-next-line qwik/no-use-visible-task -- the grant is the kernel's, read in the browser with the person's session
+  useVisibleTask$(async () => {
+    const answer = await fetch(
+      `/api/x/code/permissions?artifact=${encodeURIComponent(documentId)}&block=${encodeURIComponent(blockId)}`,
+    ).catch(() => null);
+    if (answer?.ok) {
+      const { permissions } = (await answer.json()) as { permissions: Permissions };
+      grant.attachments = permissions.attachments;
+      grant.hosts = [...permissions.hosts];
+    }
+    grant.loaded = true;
+  });
+
+  const write$ = $(async (next: Permissions) => {
+    grant.busy = true;
+    grant.refusal = "";
+    try {
+      const answer = await fetch("/api/x/code/permissions", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ artifact: documentId, block: blockId, ...next }),
+      });
+      const body = (await answer.json().catch(() => ({}))) as { permissions?: Permissions; error?: string; message?: string };
+      if (!answer.ok || body.permissions === undefined) {
+        grant.refusal = body.message ?? body.error ?? `The grant could not be written (${answer.status}).`;
+        return;
+      }
+      grant.attachments = body.permissions.attachments;
+      grant.hosts = [...body.permissions.hosts];
+      grant.host = "";
+    } finally {
+      grant.busy = false;
+    }
+  });
+
+  if (!grant.loaded) return null;
+  return (
+    <div class="code-grant" data-code-grant={blockId}>
+      <p class="code-run__hint" data-code-grant-words>
+        {grantWords({ attachments: grant.attachments, hosts: grant.hosts })}
+      </p>
+      <label class="code-grant__item">
+        <input
+          type="checkbox"
+          data-code-grant-attachments
+          checked={grant.attachments}
+          disabled={grant.busy}
+          onChange$={(_, element) => write$({ attachments: element.checked, hosts: grant.hosts })}
+        />
+        <span>Read the document's files</span>
+      </label>
+      <ul class="code-grant__hosts" data-code-grant-hosts>
+        {grant.hosts.map((host) => (
+          <li key={host} data-code-grant-host={host}>
+            <span>{host}</span>
+            <button
+              type="button"
+              class="code-run__button"
+              aria-label={`Withdraw ${host}`}
+              disabled={grant.busy}
+              onClick$={() => write$({ attachments: grant.attachments, hosts: grant.hosts.filter((held) => held !== host) })}
+            >
+              ×
+            </button>
+          </li>
+        ))}
+      </ul>
+      <form
+        class="code-grant__add"
+        preventdefault:submit
+        onSubmit$={() => {
+          const host = grant.host.trim().toLowerCase();
+          if (host !== "") void write$({ attachments: grant.attachments, hosts: [...grant.hosts, host] });
+        }}
+      >
+        <input
+          type="text"
+          placeholder="example.org"
+          aria-label="A host this block may fetch from"
+          data-code-grant-host-input
+          value={grant.host}
+          disabled={grant.busy}
+          onInput$={(_, element) => (grant.host = element.value)}
+        />
+        <button type="submit" class="code-run__button" data-code-grant-add disabled={grant.busy || grant.host.trim() === ""}>
+          Allow host
+        </button>
+      </form>
+      {grant.refusal !== "" && (
+        <p class="code-run__note" role="alert" data-code-grant-refusal>
+          {grant.refusal}
+        </p>
+      )}
+    </div>
+  );
+});
 
 export const SendControl = component$<BlockDecorationProps>(({ documentId, blockId }) => {
   const session = useContext(SessionContext);
@@ -145,6 +270,9 @@ export const SendControl = component$<BlockDecorationProps>(({ documentId, block
 
   if (!session.reachable) return null;
   const connected = session.runtime !== null;
+  // On a device the block runs in the sandbox under its own grant, and a run
+  // held to its deadline has nothing to stop. BO_0319_046
+  const sandboxed = session.runtimes.find((record) => record.id === session.runtime)?.sandbox === true;
   const busy = live.phase === "waiting" || live.phase === "running";
   return (
     <div ref={root} class="code-run" data-code-run={blockId} data-code-run-phase={live.phase}>
@@ -159,7 +287,7 @@ export const SendControl = component$<BlockDecorationProps>(({ documentId, block
         >
           Run
         </button>
-        {busy && (
+        {busy && !sandboxed && (
           <button type="button" class="code-run__button" data-code-run-stop onClick$={stop$}>
             Stop
           </button>
@@ -175,6 +303,7 @@ export const SendControl = component$<BlockDecorationProps>(({ documentId, block
           </span>
         )}
       </div>
+      {sandboxed && <BlockPermissions documentId={documentId} blockId={blockId} />}
       {/* What streamed stays until the next run, so a reader who missed
           it while it ran still sees it beside the proposal below. */}
       {live.lines.length > 0 && (

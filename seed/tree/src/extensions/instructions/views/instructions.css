@@ -1,5 +1,6 @@
-/* The instruction in a command chip: an icon the size of the chip's others, and a
- * popover hanging under it, over what follows. BO_0311_011 */
+/* The instruction in a command chip: an icon the size of the chip's others, 24px
+ * on every pointer with no touch minimum, and a popover hanging under it, over
+ * what follows. BO_0311_011 PF_0002_001 */
 .instruction-chip {
   position: relative;
   display: inline-flex;
@@ -98,13 +99,6 @@
 
 .instruction-tool[data-tool-state="granted"] .instruction-tool__state {
   color: var(--accent);
-}
-
-@media (pointer: coarse) {
-  .instruction-chip__toggle {
-    min-width: 44px;
-    height: 44px;
-  }
 }
 
 /* The owner's Instruction tools in Settings. BO_0311_040 */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { BUILTIN_OFFERS, fieldOf, FORMAT_STRUCTURE, isBuiltinField, mintFieldKey, INSTRUCTION_STRUCTURE, releaseFieldsOf, VARIATION_STRUCTURE } from "./structures";
+import { KEYWORD_STRUCTURE, SOURCE_STRUCTURE, BUILTIN_OFFERS, fieldOf, FORMAT_STRUCTURE, isBuiltinField, mintFieldKey, INSTRUCTION_STRUCTURE, releaseFieldsOf, VARIATION_STRUCTURE, INPUT_STRUCTURE, INPUT_KINDS, blocksAllowed } from "./structures";
 
 // A field's key is minted once from the name it is first given (`BO_0309_010`,
 // `calliopa-bootstrap`'s `BO_0312`): what a reader such as `manuscripts` looks
@@ -36,9 +36,9 @@ describe("isBuiltinField", () => {
     ]);
     expect(isBuiltinField(FORMAT_STRUCTURE, "type")).toBe(true);
     expect(isBuiltinField(FORMAT_STRUCTURE, "mine")).toBe(false);
-    expect(isBuiltinField("builtin:keyword", "type")).toBe(false);
+    expect(isBuiltinField(KEYWORD_STRUCTURE, "type")).toBe(false);
     // Source's CSL fields are a release's too (BO_0313).
-    expect(isBuiltinField("builtin:source", releaseFieldsOf("builtin:source")[0]?.key ?? "")).toBe(true);
+    expect(isBuiltinField(SOURCE_STRUCTURE, releaseFieldsOf(SOURCE_STRUCTURE)[0]?.key ?? "")).toBe(true);
   });
 });
 
@@ -62,8 +62,9 @@ describe("the generation fields", () => {
     expect(releaseFieldsOf(INSTRUCTION_STRUCTURE)).toEqual([{ key: "format", name: "Format", type: "reference", required: false, carrying: FORMAT_STRUCTURE }]);
   });
 
-  it("Given the release's offers, Then Format offers Variation", () => {
+  it("Given the release's offers, Then Format offers Variation and Input", () => {
     expect(BUILTIN_OFFERS).toContainEqual([FORMAT_STRUCTURE, VARIATION_STRUCTURE]);
+    expect(BUILTIN_OFFERS).toContainEqual([FORMAT_STRUCTURE, INPUT_STRUCTURE]);
   });
 });
 
@@ -77,12 +78,28 @@ describe("fieldOf", () => {
       suggest: "media:provider",
       suggestions: ["a", "b"],
     });
-    expect(fieldOf({ key: "f", name: "F", type: "reference", carrying: "builtin:format" })?.carrying).toBe("builtin:format");
+    expect(fieldOf({ key: "f", name: "F", type: "reference", carrying: FORMAT_STRUCTURE })?.carrying).toBe(FORMAT_STRUCTURE);
   });
 
   it("Given a source not named extension:name, a structure that is no id, or a shape on the wrong type, Then none of it", () => {
     expect(fieldOf({ key: "s", name: "S", type: "text", suggest: "provider" })?.suggest).toBeUndefined();
     expect(fieldOf({ key: "f", name: "F", type: "reference", carrying: "Format" })?.carrying).toBeUndefined();
-    expect(fieldOf({ key: "n", name: "N", type: "number", suggest: "media:provider", carrying: "builtin:format" })).toEqual({ key: "n", name: "N", type: "number", required: false });
+    expect(fieldOf({ key: "n", name: "N", type: "number", suggest: "media:provider", carrying: FORMAT_STRUCTURE })).toEqual({ key: "n", name: "N", type: "number", required: false });
+  });
+});
+
+// ME_0002_001: a format's input is a block using Input — its kind one of
+// five, its name suggested from media's source, whether it is required.
+describe("Input", () => {
+  it("Given Input's release fields, Then Kind offers the five kinds, Name suggests from media and Required is true/false", () => {
+    const fields = releaseFieldsOf(INPUT_STRUCTURE).map((field) => fieldOf(field));
+    expect(fields.map((field) => [field?.key, field?.type, field?.required])).toEqual([["kind", "choice", true], ["name", "text", true], ["required", "boolean", false]]);
+    expect(fields[0]?.options).toEqual(["Start frame", "End frame", "Reference image", "Reference video", "Reference audio"]);
+    expect(INPUT_KINDS.map((kind) => kind.role)).toEqual(["start", "end", "image", "video", "audio"]);
+    expect(fields[1]?.suggest).toBe("media:inputName");
+  });
+
+  it("Given Input, Then blocks may use it", () => {
+    expect(blocksAllowed(INPUT_STRUCTURE, undefined)).toBe(true);
   });
 });

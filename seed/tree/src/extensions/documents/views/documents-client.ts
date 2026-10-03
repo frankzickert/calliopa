@@ -255,6 +255,21 @@ export const answerProposal = async (
     }),
   );
 
+/** Answers every item of one group at once, *Accept all* or *Reject all*;
+ * answers the items it answered and what stays standing. BO_0343_012 */
+export const answerGroup = async (
+  id: string,
+  groupId: string,
+  answer: "accepted" | "rejected",
+): Promise<GraphOutcome<{ readonly answered: readonly string[]; readonly notice?: string }>> =>
+  readOutcome<{ readonly answered: readonly string[]; readonly notice?: string }>(
+    await fetch(`/api/x/documents/d/${id}/commands`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(withBranchBody({ command: "answerGroup", groupId, answer }, id)),
+    }),
+  );
+
 /** The person's branch on the document and whether it is open. BO_0250_010 */
 export const fetchBranch = async (id: string): Promise<GraphOutcome<BranchRead>> =>
   readOutcome<BranchRead>(await fetch(`/api/x/documents/d/${id}/branch?account=me`));

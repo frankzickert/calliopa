@@ -111,7 +111,8 @@ export const RuntimesSection = component$<SectionProps>(({ data }) => {
           {record.error}
         </div>
       )}
-      {state.listing.owner && (
+      {/* A device's language runs in its sandbox: nothing manages it. BO_0319_046 */}
+      {state.listing.owner && record.sandbox !== true && (
         <div class="code-runtime__controls">
           {record.state === "stopped" && (
             <button type="button" class="library-action library-action--body" data-code-runtime-start disabled={state.busy} onClick$={() => act$(`runtimes/${record.id}/start`, "POST")}>
@@ -140,9 +141,18 @@ export const RuntimesSection = component$<SectionProps>(({ data }) => {
       </p>
     );
   }
+  // On a device the runtimes are its languages, run in the sandbox, and none
+  // is made there. BO_0319_046
+  const sandboxed = state.listing.runtimes.some((record) => record.sandbox === true);
   return (
     <div class="code-runtimes" data-code-runtimes>
-      {state.listing.owner && (
+      {sandboxed && (
+        <p class="library-empty" data-code-runtimes-sandbox>
+          On this device code runs in its sandbox, in Python or JavaScript, each block fresh: nothing here is made,
+          started or stopped.
+        </p>
+      )}
+      {state.listing.owner && !sandboxed && (
         <div class="library-section-actions">
           <button type="button" class="library-action library-action--body" data-code-runtime-new onClick$={() => (state.formOpen = !state.formOpen)}>
             {state.formOpen ? "Cancel" : "New runtime"}

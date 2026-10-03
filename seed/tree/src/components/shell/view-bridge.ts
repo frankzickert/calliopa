@@ -349,6 +349,15 @@ export type RunChipFace =
  * doing or did, and — once it has ended — *Reject all* and *Accept all*.
  * BO_0265_008
  */
+/** A document a run proposes outside the one its chip stands in, as the chip
+ * names it: *the structure video-beat*. DO_0034_007 */
+export interface RunChipElsewhere {
+  readonly title: string;
+  /** What the document is, where an extension says so: *structure*. */
+  readonly kind?: string;
+  readonly open: { readonly kind: TabKind; readonly itemId: string; readonly title: string };
+}
+
 export interface RunChip {
   /** The group, or the run while it has staged nothing yet. */
   readonly key: string;
@@ -365,6 +374,9 @@ export interface RunChip {
    * staged nothing has none. CA_0061_002 */
   readonly count?: number;
   readonly ended: boolean;
+  /** What an ended run proposes outside this document, which *Accept all*
+   * and *Reject all* answer with the rest. DO_0034_007 */
+  readonly elsewhere?: readonly RunChipElsewhere[];
   /** The number the chip's proposal is marked whole under, while a mark
    * stands, which the view reports. BO_0321_011 */
   readonly reference?: number;

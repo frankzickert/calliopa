@@ -267,12 +267,27 @@ identifier and route, and `doc-block-roles` and `profiles` become `structures` a
 
 ## A Structure Is A Document
 
-Under `structures`' `RO_0005` (2026-10-02): every structure becomes a document and *Keyword*'s id
-becomes `structure:keyword`
+Under `structures`' `RO_0005` (2026-10-02): every structure becomes a document and *Keyword* takes a
+fixed id `structures` names
 ([A Structure Is A Document](../../../structures/docs/system/system.md#a-structure-is-a-document)).
 
-- [ ] RO_0005_030 Keywords follow: the merge into *Keyword* (`server/merge.ts`) moves a person's
-      structure's *Field* blocks, allows, assignments and values into *Keyword*'s document and
-      retires the merged structure; the settings and the tools read *Keyword* and its
-      *Send with prompt* entries by the new ids, a former id found through the catalogue; the
-      suites green over the documents.
+- Keywords follow (`RO_0005_030`, landed 2026-10-02): *Keyword*, *Definition* and *Alias* are
+  read by the fixed ids `structures` names, a former id found through the catalogue, and *Send with
+  prompt* as *Keyword*'s document keeps it. The migration `merge-keyword-roles` (`BO_0310_021`)
+  merged the roles a person chose before `BO_0310` into the built-ins on every instance an update
+  reaches; a structure being a document, the merge of roles as nodes has nothing left to reach, so
+  its route answers nothing and its member stays, never run twice (`server/merge.ts`). The suite
+  over CCGW makes the built-ins with `structures-as-documents`.
+
+## A Run's Tools Read What The Run Proposed
+
+- Under `BO_0344` (`calliopa-bootstrap`'s `docs/changes/completed/BO_0344_FIX_extension-tools-read-the-runs-own-proposals.md`),
+  transferred 2026-10-03: this extension's tools read at the run's pin outside its group, so a
+  keyword proposed into a document the same run started is refused. The shell's read scope
+  (`ui.shell`'s *A Run's Callback Reads What The Run Proposed*, `BO_0344_004`) is the fix.
+* The tools read as the kernel's own tools do: at the run's pin with the run's own group laid over
+  truth. User decision, 2026-10-03.
+- The tools read in the shell's scope (`BO_0344_008`, landed 2026-10-03; `server/tools.ts`):
+  `read_keywords` and the run-start tool drop their own pin, so a document the run started is read
+  with its words. Proven in `tests/behavior/keywords.test.ts` under the kernel harness: a document
+  started in a run's group mentions *Quantum computing* to the run, and to nothing outside it.

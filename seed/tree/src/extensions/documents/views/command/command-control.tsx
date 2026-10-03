@@ -243,72 +243,6 @@ export const CommandControl = component$<{
     // Its presses are its own: a press here reaching the row would read as a
     // press on the block — marking it, or ending pointing from it.
     <div class="block-command" data-block-command={blockId} role="group" aria-label="Command" stoppropagation:click>
-      {(matches.length > 0 || blockMatches.length > 0) && (
-        // One list: the prompt's marks by number first, then the blocks of
-        // the document it may refer to or mark. BO_0300_005 BO_0304_016
-        <ul class="block-command__references composer__references" aria-label={isPrompt ? "Name a reference" : "Refer to a block"} data-block-reference-list>
-          {matches.map((reference) => (
-            <li key={`mark-${reference.number}`}>
-              <button
-                type="button"
-                data-reference-option={reference.number}
-                // The block keeps its caret: a press here must not take the
-                // focus, or leaving the block would end the edit first.
-                preventdefault:mousedown
-                onClick$={() => choose$(reference.number)}
-              >
-                <span class="composer__number">#{reference.number}</span>
-                <q>{reference.words}</q>
-                {(reference.kind === "document" || reference.document !== undefined) && (
-                  <span class="chip__meta">{reference.documentTitle ?? reference.document}</span>
-                )}
-              </button>
-            </li>
-          ))}
-          {blockMatches.map((choice) => (
-            <li key={choice.blockId}>
-              <button
-                type="button"
-                data-block-reference-option={choice.blockId}
-                // The block keeps its caret, as a mark's option does.
-                preventdefault:mousedown
-                onClick$={() => (isPrompt ? chooseBlockAsMark$(choice.blockId) : chooseBlock$(choice.blockId))}
-              >
-                <Icon name={choice.icon} />
-                <span class="composer__number">{choice.label}</span>
-                {choice.glimpse !== "" && <q>{choice.glimpse}</q>}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {pendingInline !== null && inlineTrigger !== undefined && (inlineMatches.length > 0 || inlineCreate) && (
-        // An extension's list, drawn as the `#` list is. BO_0310_011
-        <ul class="block-command__references composer__references" aria-label={`Choose after ${pendingInline.character}`} data-inline-trigger-list={pendingInline.character}>
-          {inlineMatches.map((entry) => (
-            <li key={entry.id}>
-              <button
-                type="button"
-                data-inline-trigger-option={entry.id}
-                // The block keeps its caret, as a reference's option does.
-                preventdefault:mousedown
-                onClick$={() => chooseTrigger$(pendingInline.character, entry)}
-              >
-                <span class="composer__number">{entry.label}</span>
-                {entry.detail !== undefined && entry.detail !== "" && <q>{entry.detail}</q>}
-              </button>
-            </li>
-          ))}
-          {inlineCreate && (
-            <li key="create">
-              <button type="button" data-inline-trigger-create preventdefault:mousedown onClick$={() => createTrigger$(pendingInline.character, pendingInline.typed)}>
-                <Icon name="plus" />
-                <span class="composer__number">{`${inlineTrigger.createLabel} “${pendingInline.typed.trim()}”`}</span>
-              </button>
-            </li>
-          )}
-        </ul>
-      )}
       <div class="block-command__row" data-block-command-row>
         <div class="block-command__line" data-block-command-controls>
           {/* One chip holds the whole line: the agent, its speed, the mode,
@@ -447,6 +381,73 @@ export const CommandControl = component$<{
           </div>
         )}
       </div>
+      {(matches.length > 0 || blockMatches.length > 0) && (
+        // One list: the prompt's marks by number first, then the blocks of
+        // the document it may refer to or mark. Below the row, so it covers
+        // neither the block nor its words. BO_0300_005 BO_0304_016 DO_0033_002
+        <ul class="block-command__references composer__references" aria-label={isPrompt ? "Name a reference" : "Refer to a block"} data-block-reference-list>
+          {matches.map((reference) => (
+            <li key={`mark-${reference.number}`}>
+              <button
+                type="button"
+                data-reference-option={reference.number}
+                // The block keeps its caret: a press here must not take the
+                // focus, or leaving the block would end the edit first.
+                preventdefault:mousedown
+                onClick$={() => choose$(reference.number)}
+              >
+                <span class="composer__number">#{reference.number}</span>
+                <q>{reference.words}</q>
+                {(reference.kind === "document" || reference.document !== undefined) && (
+                  <span class="chip__meta">{reference.documentTitle ?? reference.document}</span>
+                )}
+              </button>
+            </li>
+          ))}
+          {blockMatches.map((choice) => (
+            <li key={choice.blockId}>
+              <button
+                type="button"
+                data-block-reference-option={choice.blockId}
+                // The block keeps its caret, as a mark's option does.
+                preventdefault:mousedown
+                onClick$={() => (isPrompt ? chooseBlockAsMark$(choice.blockId) : chooseBlock$(choice.blockId))}
+              >
+                <Icon name={choice.icon} />
+                <span class="composer__number">{choice.label}</span>
+                {choice.glimpse !== "" && <q>{choice.glimpse}</q>}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {pendingInline !== null && inlineTrigger !== undefined && (inlineMatches.length > 0 || inlineCreate) && (
+        // An extension's list, drawn as the `#` list is. BO_0310_011
+        <ul class="block-command__references composer__references" aria-label={`Choose after ${pendingInline.character}`} data-inline-trigger-list={pendingInline.character}>
+          {inlineMatches.map((entry) => (
+            <li key={entry.id}>
+              <button
+                type="button"
+                data-inline-trigger-option={entry.id}
+                // The block keeps its caret, as a reference's option does.
+                preventdefault:mousedown
+                onClick$={() => chooseTrigger$(pendingInline.character, entry)}
+              >
+                <span class="composer__number">{entry.label}</span>
+                {entry.detail !== undefined && entry.detail !== "" && <q>{entry.detail}</q>}
+              </button>
+            </li>
+          ))}
+          {inlineCreate && (
+            <li key="create">
+              <button type="button" data-inline-trigger-create preventdefault:mousedown onClick$={() => createTrigger$(pendingInline.character, pendingInline.typed)}>
+                <Icon name="plus" />
+                <span class="composer__number">{`${inlineTrigger.createLabel} “${pendingInline.typed.trim()}”`}</span>
+              </button>
+            </li>
+          )}
+        </ul>
+      )}
       {files.attachNotice !== null && (
         <p class="block-command__notice" role="status" data-attach-refusal>
           {files.attachNotice}

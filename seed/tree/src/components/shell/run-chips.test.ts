@@ -41,6 +41,18 @@ describe("the run chips under the view bar", () => {
     expect(ended?.querySelector(".run-chip__answer:last-child")?.getAttribute("aria-label")).toBe("Accept all of an agent's proposals");
   });
 
+  it("Given a run that proposes a structure elsewhere, Then its chip names it and the name opens it, and a chip without any names nothing (DO_0034_007)", async () => {
+    const open = { kind: "documents:document", itemId: "doc-beat", title: "video-beat" };
+    const { find, read, userEvent } = await mount([
+      { ...(HOST_CHIPS[0] as RunChip) },
+      { ...(HOST_CHIPS[1] as RunChip), elsewhere: [{ title: "video-beat", kind: "structure", open }, { title: "Notes", open: { ...open, itemId: "doc-notes", title: "Notes" } }] },
+    ]);
+    expect(find('[data-run-chip="node:run-old"] .run-chip__elsewhere')?.textContent).toBe("also creates the structure video-beat, the document Notes");
+    expect(find('[data-run-chip="arun-live"] .run-chip__elsewhere')).toBeNull();
+    await userEvent('[data-run-chip-elsewhere-open="doc-beat"]', "click");
+    expect(read("[data-opened]")).toEqual(open);
+  });
+
   it("When a chip itself is pressed, Then it asks the view to show or hide its change, and its answers ask for nothing of the kind", async () => {
     const { read, userEvent } = await mount();
     await userEvent('[data-run-chip-toggle="node:run-old"]', "click");

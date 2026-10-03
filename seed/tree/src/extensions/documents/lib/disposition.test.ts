@@ -6,7 +6,6 @@ import {
   GLYPH,
   LABEL,
   MARK,
-  MEANING,
   readStanding,
   SCALE,
   step,
@@ -38,11 +37,10 @@ describe("the disposition scale", () => {
     expect(storedValue("fixate")).toBe("fixate");
   });
 
-  it("Given every standing, Then each has one label, one verb and one meaning, and only an acted-on one a mark", () => {
+  it("Given every standing, Then each has one label and one verb, and only an acted-on one a mark", () => {
     for (const standing of SCALE) {
       expect(LABEL[standing]).not.toBe("");
       expect(DONE[standing]).not.toBe("");
-      expect(MEANING[standing]).not.toBe("");
       expect(CONTROL_GLYPH[standing]).not.toBe("");
     }
     expect(SCALE).toEqual(["keep", "fixate"]);

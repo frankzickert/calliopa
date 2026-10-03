@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BlockView, DocumentView } from "../server/assemble";
 import type { DocumentProposals } from "../server/documents";
-import { documentsApi, mountEditor, type SentCommand } from "./testing/editor-harness";
+import { activateBlock, documentsApi, mountEditor, type SentCommand } from "./testing/editor-harness";
 
 /**
  * A new block lands below (`DO_0016_006`): a click below the lowest drawn row
@@ -70,11 +70,11 @@ afterEach(async () => {
 });
 
 // Each test its own document: the editor keeps its in-flight writes by tab.
-async function mount(documentId: string, blocks: readonly BlockView[], withProposal = true) {
+async function mount(documentId: string, blocks: readonly BlockView[], withProposal = true, drawn?: string) {
   const document: DocumentView = { documentId, revisionId: "rev-doc", title: "Below", blocks: [...blocks] };
   const sent: SentCommand[] = [];
   vi.stubGlobal("fetch", documentsApi(document, sent, withProposal ? { proposals: proposals(documentId) } : {}));
-  const view = await mountEditor(document);
+  const view = await mountEditor(document, drawn === undefined ? {} : { drawn });
   last = view;
   return { ...view, sent };
 }
@@ -123,6 +123,42 @@ describe("a click below the lowest row", () => {
     const view = await mount("doc-below-4", [text("blk-a", "a", "Opening."), text("blk-b", "b", "Closing.")]);
     await clickBelow(view);
     expect(inserted(view)).toMatchObject({ placement: { between: ["b", "c"] } });
+  });
+});
+
+/**
+ * The whole rest of the surface (`DO_0028_001`): below the blank page and
+ * below the area under the last block, down to the surface's bottom edge, a
+ * press means what those two mean. The two stay the keyboard's way in.
+ */
+describe("a click in the rest of the surface", () => {
+  const clickRest = async (view: Mounted, done: () => boolean) => {
+    await view.userEvent("[data-document-rest]", "click");
+    await view.settle(done);
+  };
+
+  it("Given a document with a last drawn row, Then the rest below it is a drop target out of tab order, And a click there opens a paragraph directly below that row", async () => {
+    const view = await mount("doc-rest-1", [text("blk-a", "a", "Opening."), text("blk-b", "b", "Closing.")], false);
+    const rest = view.root.querySelector("[data-document-rest]");
+    expect(rest?.getAttribute("data-drop-target")).toBe("block:end");
+    expect(rest?.getAttribute("tabindex")).toBe("-1");
+    expect(rest?.getAttribute("aria-hidden")).toBe("true");
+    await clickRest(view, () => inserted(view) !== undefined);
+    expect(inserted(view)).toMatchObject({ block: { kind: "text" }, placement: { between: ["b", null] } });
+  });
+
+  it("Given a new document holding its one empty block, When the rest below the blank page is clicked, Then the empty block is what opens", async () => {
+    const view = await mount("doc-rest-2", [text("blk-a", "a", "")], false, "[data-document-empty]");
+    await clickRest(view, () => view.root.querySelector('[data-block-id="blk-a"] [data-block-editor]') != null);
+    expect(view.root.querySelector('[data-block-id="blk-a"] .block-text--active') ?? null).not.toBeNull();
+    expect(inserted(view)).toBeUndefined();
+  });
+
+  it("Given a block being edited, When the rest of the surface is pressed, Then the edit ends and nothing is inserted", async () => {
+    const view = await mount("doc-rest-3", [text("blk-a", "a", "Opening."), text("blk-b", "b", "Closing.")], false);
+    await activateBlock(view, "blk-a");
+    await clickRest(view, () => view.root.querySelector(".block-text--active") == null);
+    expect(inserted(view)).toBeUndefined();
   });
 });
 

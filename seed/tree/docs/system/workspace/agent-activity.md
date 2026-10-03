@@ -83,3 +83,19 @@
 - Under `calliopa-bootstrap`'s `BO_0321`, set to draft by the user on 2026-09-30 and transferred here the same day, a press on a chip of the line marks that chip's whole proposal while the view is pointing ([Command Mode](../../../src/extensions/documents/docs/system/documents/command-mode.md#a-whole-proposal-marked), `documents`).
 * While pointing, a press on a chip's face marks or unmarks the chip's whole proposal instead of showing or hiding its changes; a session chip's face does the same for the reader's own branch. The chip shows the reference's number while it is marked. User decision, 2026-09-30 (`BO_0321_Q1`, `BO_0321_Q2`, `BO_0321_Q6`).
 - The press (`BO_0321_011`, landed 2026-10-01, `src/components/shell/run-chips.tsx`, `view-bridge.ts`). `RunChips` takes `pointing`, which `shell.tsx` sets while a pointing stands anywhere (`pointing.documentId`); a chip's toggle then writes `toggleRun` with `mark: true`, is named *Mark <name>'s proposal* (*Mark your proposal* on a session chip) or, marked, *Unmark …, reference n* (`markName`), and reads as pressed while marked rather than while shown. `RunChip` carries `reference`, the number the view reports, drawn beside the face (`.run-chip__reference`, `data-run-chip-reference`) in the reference badge's idiom. A running run's chip with a group and the session the tab works in are pressable while pointing; *Accept all*, *Reject all* and a session's pencil are unchanged. `run-chips.test.ts`, through `testing/run-chips-host.tsx`, proves the press writing `mark` while pointing and not otherwise, the name, the pressed state and the number, and a running chip and a working session marked; the mark, the pressed state and the number were each shown to bite.
+
+## A Run's Work Elsewhere
+
+- Under `documents`' `DO_0034` (its *Accept All Answers The Whole Run* in
+  [Proposed Changes](../../../src/extensions/documents/docs/system/documents/proposed-changes.md)),
+  transferred 2026-10-03: a run chip's *Accept all* and *Reject all* answer the whole run, and the
+  chip names what the run proposes outside the document it stands in.
+* The chip names what the run proposes outside this document — *also creates the structure
+  video-beat* — each name opening that document. User decision, 2026-10-03.
+- The chip draws it (`DO_0034_007`, landed 2026-10-03). `RunChip` (`view-bridge.ts`) carries
+  `elsewhere` — `RunChipElsewhere`: a title, a kind where an extension names one, and the target
+  that opens it — and `RunChips` (`run-chips.tsx`) draws an ended chip's after its toggle: *also
+  creates the structure video-beat, the document Notes* (`elsewhereWords`), each name a button that
+  opens its document through `open$`, which `shell.tsx` answers with `openTarget$`. A minimized
+  chip in a line of several hides it as it hides its words, and keeps its count. Proven in
+  `run-chips.test.ts`: the words, the press opening the document, and nothing on a chip without.

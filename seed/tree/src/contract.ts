@@ -6,6 +6,7 @@ import type { ViewProps } from "~/components/shell/view-host";
 import type { PartyAuthorization, PartyTest } from "~/server/kernel/client";
 import type { Run } from "~/lib/runs";
 import type { GraphOutcome } from "~/server/outcome";
+import type { Captured } from "~/server/port/port";
 
 /**
  * What an extension present in the tree may contribute to the shell, as typed
@@ -153,12 +154,29 @@ export interface LibraryIcon {
   readonly name: IconName;
 }
 
+/**
+ * What an extension does with something shared into the app on a device
+ * (`calliopa-bootstrap`'s BO_0319_050): handed the items and the target the
+ * reader has open, it takes them or leaves them for the next extension, and
+ * names a target the shell opens when it placed them somewhere new. The
+ * shell asks each receiver in extension order until one takes them.
+ */
+export interface ShareAnswer {
+  readonly taken: boolean;
+  readonly open?: OpenTarget;
+}
+export type ShareReceiver = QRL<
+  (items: readonly Captured[], at: { readonly kind: string | null; readonly itemId: string | null }) => Promise<ShareAnswer>
+>;
+
 export interface ClientContributions {
   readonly sections?: readonly LibrarySection[];
   /** The default icon for sections without their own icon. CA_0056_008 */
   readonly icon?: LibraryIcon;
   /** Sections of the settings tab. BO_0264_016 */
   readonly settingsSections?: readonly SettingsSection[];
+  /** What is shared into the app, taken where it belongs. BO_0319_050 */
+  readonly share?: ShareReceiver;
   /**
    * Tab kinds by bare name, each carrying the view it opens with and that
    * view's component in one value, so a kind cannot enter the registry without

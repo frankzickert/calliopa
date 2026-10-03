@@ -75,3 +75,7 @@ in `calliopa-bootstrap`'s shared app track (`BO_0335`).
   Chromium over a real device cell through the desktop harness. Open: the port's cases and the
   behaviour suites run against the device build (`CA_0076_001`, `CA_0076_003`), and the Fixed
   Stack's device line (`CA_0076_004`) with them.
+- 2026-10-02: the page runs the extensions' migrations at each start, before the shell is
+  rendered, answering their routes in the page with a per-load callback secret
+  (`docs/system/foundation/device.md`, `calliopa-bootstrap`'s `BO_0319_053`); verified in the
+  desktop harness, where adding a source no longer fails for want of the built-in roles.

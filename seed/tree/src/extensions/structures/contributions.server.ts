@@ -3,17 +3,21 @@ import { HttpError } from "~/server/http-error";
 import { refusal, respond } from "~/server/outcome";
 import { isRecordId } from "~/server/uuid";
 
-import { BUILTIN_CREATES, isFieldType, isStructureId, isSourceName, UNNAMED_STRUCTURE, type StructuresListing, type StructureView } from "./lib/structures";
+import { guardDocuments, nameDocuments } from "~/extensions/documents/server/guards";
+
+import { BUILTIN_CREATES, isStructureId, SOURCES_SOURCE, UNNAMED_STRUCTURE, type StructuresListing, type StructureView } from "./lib/structures";
 import { MIGRATIONS } from "./server/migrations";
 import {
   createStructure,
   documentsCarrying,
+  guardOf,
   listStructures,
   readStructure,
   reviseStructure,
   structuresOf,
   setStructure,
   setValues,
+  structureKindOf,
   type StructureCommand,
   type Subject,
 } from "./server/structures";
@@ -28,6 +32,13 @@ import { TOOLS, ToolRefusal, type ToolCall } from "./server/tools";
  * this module; a dependent extension imports `server/structures.ts` directly
  * (`BO_0299_016`).
  */
+
+// What documents asks before a deletion, a retitling or a block leaving a
+// document: a structure's document is never deleted, a built-in's title and
+// release fields stay (RO_0005_020).
+guardDocuments("structures", guardOf);
+// A run chip names a document using *Structure* a structure. DO_0034_008
+nameDocuments("structures", structureKindOf);
 
 const record = (value: unknown): Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -79,114 +90,28 @@ async function bodyOf(event: {
   return record(await event.request.json().catch(() => ({})));
 }
 
-const optionsOf = (value: unknown): string[] | null | undefined => {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value) || !value.every((option) => typeof option === "string")) return null;
-  return value as string[];
-};
-
-/** One act on a structure, as the page posts it, or why it is not one. */
+/** One act on a structure, as a structure's document posts it, or why it
+ * is not one (`RO_0005_003`): its name, description, fields and what it
+ * allows are written in the document itself. */
 export function parseStructureCommand(
   body: unknown,
 ): { command: StructureCommand } | { failure: string } {
   const value = record(body);
   const command = text(value["command"]);
-  const name = text(value["name"]);
-  const description = text(value["description"]);
-  const key = text(value["key"]);
-  const structure = text(value["structure"]);
   switch (command) {
-    case "rename":
-      return name === null ? { failure: "rename carries a name" } : { command: { command, name } };
-    case "describe":
-      return description === null
-        ? { failure: "describe carries a description" }
-        : { command: { command, description } };
     case "retire":
     case "restore":
       return { command: { command } };
-    case "offer":
-    case "unoffer":
-      return structure === null || !isStructureId(structure)
-        ? { failure: `${command} names the structure by its id` }
-        : { command: { command, structure } };
-    case "addField": {
-      const type = value["type"];
-      if (!isFieldType(type)) return { failure: "addField carries a type: text, longText, number, date, boolean, choice, reference or file" };
-      const options = optionsOf(value["options"]);
-      if (options === null) return { failure: "a choice's options are a list of words" };
-      const required = value["required"];
-      if (required !== undefined && typeof required !== "boolean") return { failure: "required is true or false" };
-      return {
-        command: {
-          command,
-          name: name ?? "",
-          type,
-          ...(required === undefined ? {} : { required }),
-          ...(options === undefined ? {} : { options }),
-        },
-      };
-    }
-    case "reviseField": {
-      if (key === null || key === "") return { failure: "reviseField names the field by its key" };
-      const type = value["type"];
-      if (type !== undefined && !isFieldType(type)) return { failure: `${String(type)} is not a field type` };
-      const options = optionsOf(value["options"]);
-      if (options === null) return { failure: "a choice's options are a list of words" };
-      const required = value["required"];
-      if (required !== undefined && typeof required !== "boolean") return { failure: "required is true or false" };
-      // What a text field suggests and the structure a reference carries
-      // (`calliopa-bootstrap`'s `BO_0336_012`).
-      const suggest = value["suggest"];
-      if (suggest !== undefined && suggest !== null && !isSourceName(suggest))
-        return { failure: "suggest names a source as extension:name, or null" };
-      const suggestions = optionsOf(value["suggestions"]);
-      if (suggestions === null) return { failure: "suggestions are a list of words" };
-      const carrying = value["carrying"];
-      if (carrying !== undefined && carrying !== null && (typeof carrying !== "string" || !isStructureId(carrying)))
-        return { failure: "carrying names a structure by its id, or null" };
-      return {
-        command: {
-          command,
-          key,
-          ...(suggest === undefined ? {} : { suggest: suggest as string | null }),
-          ...(suggestions === undefined ? {} : { suggestions }),
-          ...(carrying === undefined ? {} : { carrying: carrying as string | null }),
-          ...(name === null ? {} : { name }),
-          ...(type === undefined ? {} : { type }),
-          ...(required === undefined ? {} : { required }),
-          ...(options === undefined ? {} : { options }),
-          ...("default" in value ? { default: value["default"] } : {}),
-        },
-      };
-    }
-    case "removeField":
-      return key === null || key === ""
-        ? { failure: "removeField names the field by its key" }
-        : { command: { command, key } };
-    case "moveField": {
-      const by = value["by"];
-      if (key === null || key === "") return { failure: "moveField names the field by its key" };
-      return by === -1 || by === 1
-        ? { command: { command, key, by } }
-        : { failure: "moveField moves by -1 or 1" };
-    }
     case "sendWithPrompt": {
       const entry = text(value["entry"]);
       const on = value["on"];
-      if (entry === null || entry === "") return { failure: "sendWithPrompt names a field's key or an offered structure's id" };
+      if (entry === null || entry === "") return { failure: "sendWithPrompt names a field's key or an allowed structure's id" };
       return typeof on === "boolean"
         ? { command: { command, entry, on } }
         : { failure: "sendWithPrompt is on or off" };
     }
-    case "blocks": {
-      const allowed = value["allowed"];
-      return typeof allowed === "boolean"
-        ? { command: { command, allowed } }
-        : { failure: "blocks is allowed: true or false" };
-    }
     default:
-      return { failure: `${String(command)} is not an act on a structure` };
+      return { failure: `${String(command)} is not an act on a structure: a structure's name, description, fields and what it allows are written in its document` };
   }
 }
 
@@ -345,4 +270,24 @@ const routes: readonly ApiRoute[] = [
   },
 ];
 
-export const contributions = declare({ readers, routes });
+/**
+ * The sources a field may suggest from, which *Field*'s *Suggests* picks
+ * among (`RO_0005`): every source the build holds but this one, by name.
+ */
+const suggestionSources = [
+  {
+    name: SOURCES_SOURCE.split(":")[1] ?? "sources",
+    label: "Suggestion sources",
+    answer: async () => {
+      // Imported when read: the registry imports this module.
+      const { suggestionSources: sources } = await import("~/server/registry");
+      return {
+        suggestions: sources()
+          .filter((one) => one.source !== SOURCES_SOURCE)
+          .map((one) => ({ value: one.source, label: one.label })),
+      };
+    },
+  },
+];
+
+export const contributions = declare({ readers, routes, suggestionSources });

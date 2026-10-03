@@ -1,152 +1,6 @@
-/* Structures (BO_0299, one structure type since BO_0309): the structure page, the pills a
+/* Structures (BO_0299, one structure type since BO_0309, documents since RO_0005): a structure's acts, the pills a
  * structured block carries, and the structure control in a chip. Colours are the
  * theme's tokens only. */
-
-.structure-page {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  max-width: 48rem;
-  padding: 1rem;
-}
-
-.structure-page__head {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.structure-page__field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.structure-page__label,
-.structure-page__heading {
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.structure-page__heading {
-  margin: 0.5rem 0 0;
-}
-
-.structure-page__name {
-  font-size: 1.5rem;
-  font-weight: 600;
-}
-
-.structure-page__name,
-.structure-page__description,
-.structure-page__block-structure-name,
-.structure-page__block-structure-description,
-.structure-page__add-name {
-  font: inherit;
-  color: inherit;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 0.25rem;
-  padding: 0.35rem 0.5rem;
-}
-
-.structure-page__standing,
-.structure-page__empty {
-  margin: 0;
-  color: var(--text-muted);
-}
-
-.structure-page__notice {
-  margin: 0;
-  color: var(--error);
-}
-
-.structure-page__fields,
-.structure-page__offers {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin: 0;
-  padding: 0 0 0 1.5rem;
-}
-
-.structure-page__field-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.structure-page__field-name,
-.structure-page__field-type,
-.structure-page__field-options,
-.structure-page__field-default {
-  font: inherit;
-  color: inherit;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 0.25rem;
-  padding: 0.35rem 0.5rem;
-}
-
-.structure-page__field-name {
-  flex: 1 1 10rem;
-}
-
-.structure-page__field-options,
-.structure-page__field-default {
-  flex: 1 1 8rem;
-}
-
-.structure-page__required {
-  display: inline-flex;
-  gap: 0.25rem;
-  align-items: center;
-  color: var(--text-muted);
-}
-
-.structure-page__field-controls {
-  display: inline-flex;
-  gap: 0.25rem;
-  align-items: center;
-}
-
-.structure-page__offer {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.structure-page__button,
-.structure-page__icon-button {
-  font: inherit;
-  color: inherit;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 0.25rem;
-  padding: 0.25rem 0.5rem;
-  cursor: pointer;
-}
-
-.structure-page__icon-button {
-  display: inline-flex;
-  padding: 0.25rem;
-}
-
-.structure-page__button:disabled,
-.structure-page__icon-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.structure-page__add {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-}
 
 /* The pills at a structured block: the register word's idiom — small, quiet,
  * words rather than a glyph so a screen reader hears them. One per structure. */
@@ -531,3 +385,100 @@
     border-radius: 2px;
   }
 }
+
+/* A structure's acts on its document (RO_0005_004): beside the header's lines,
+ * quiet, in the line's own size. */
+.structure-acts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.structure-acts__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.structure-acts__standing {
+  margin: 0;
+}
+
+.structure-acts__act,
+.structure-acts__document {
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.5rem;
+  cursor: pointer;
+}
+
+.structure-acts__act:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.structure-acts__using {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.structure-acts__empty {
+  color: var(--text-muted);
+}
+
+.structure-acts__send {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.structure-acts__heading {
+  padding: 0;
+  font-weight: 600;
+}
+
+.structure-acts__refusal {
+  margin: 0;
+  color: var(--error);
+}
+
+/* A reference holding several (RO_0005_Q3): the chosen ones as small pills
+ * above the field that adds one. */
+.structure-control__chosen {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.structure-control__chosen-one {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0 0.15rem 0 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.structure-control__unchoose {
+  display: inline-flex;
+  padding: 0.1rem;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+

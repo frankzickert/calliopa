@@ -57,18 +57,6 @@ export const DONE: Readonly<Record<Standing, string>> = {
 };
 
 /**
- * What each state means, in the words the info control reads. The reader's
- * wording and the run's say the same thing of each state. BO_0272_009
- */
-export const MEANING: Readonly<Record<Standing, string>> = {
-  keep: "Where a block stands unless you say otherwise. Nothing is marked and nothing is hidden.",
-  fixate:
-    "Left standing, and sent with every command you give in this document.",
-  prompt:
-    "A command you sent from this block. It leaves the page and stays in the document; Show prompts brings it back.",
-};
-
-/**
  * What a drawn row can be marked as: the standings that carry a mark, and a
  * removed row — a retired block or a rejected proposal, out of the document's
  * flow rather than anywhere on the scale, but drawn as a card and so needing

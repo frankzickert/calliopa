@@ -119,21 +119,19 @@ choose_owner_name() {
 # creates .env, in the owner prompt's shape — CALLIOPA_PORT in the
 # environment answers silently, the terminal is asked otherwise, no terminal
 # or an empty answer keeps 8090. Every port the install publishes stands in a
-# row from this one (BO_0337): the port itself, the confirmation origin, the
-# candidate origin and the media service's login callback. So it is an integer
-# from 1024 to 65532, and a row with a port that already has a listener is
-# named and the question asked again. The other three are never asked: they
-# are derived below on every run, so changing CALLIOPA_PORT in .env and
-# re-running this script is the whole change.
-# 8092 is the one number refused inside the range: its callback, 8095, is the
-# port the media service answers on inside its own container.
-row_size=4
-port_rule="the port is a number from 1024 to 65532, not 8092 (the next three are used too)"
+# row from this one (BO_0337): the port itself, the confirmation origin and
+# the candidate origin. So it is an integer from 1024 to 65533, and a row with
+# a port that already has a listener is named and the question asked again.
+# The other two are never asked: they are derived below on every run, so
+# changing CALLIOPA_PORT in .env and re-running this script is the whole
+# change. The media service publishes no port: a generator's sign-in is
+# pasted back (BO_0342_003).
+row_size=3
+port_rule="the port is a number from 1024 to 65533 (the next two are used too)"
 port_valid() {
-  printf '%s' "$1" | grep -Eq '^[0-9]+$' && [ "$1" -ge 1024 ] && [ "$1" -le $(( 65535 - row_size + 1 )) ] \
-    && [ "$(( $1 + 3 ))" -ne 8095 ]
+  printf '%s' "$1" | grep -Eq '^[0-9]+$' && [ "$1" -ge 1024 ] && [ "$1" -le $(( 65535 - row_size + 1 )) ]
 }
-# The row as a person reads it: "8090–8093".
+# The row as a person reads it: "8090–8092".
 port_row() {
   printf '%s–%s' "$1" "$(( $1 + row_size - 1 ))"
 }
@@ -172,7 +170,7 @@ choose_port() {
     return
   fi
   while :; do
-    printf 'Which port should Calliopa listen on? Calliopa uses this port and the next three (%s) [8090]: ' "$(port_row 8090)" > /dev/tty
+    printf 'Which port should Calliopa listen on? Calliopa uses this port and the next two (%s) [8090]: ' "$(port_row 8090)" > /dev/tty
     IFS= read -r answer < /dev/tty || answer=""
     [ -z "$answer" ] && answer=8090
     if ! port_valid "$answer"; then
@@ -247,15 +245,10 @@ if grep -q '^CALLIOPA_CANDIDATE_PORT=' .env; then
 else
   printf 'CALLIOPA_CANDIDATE_PORT=%s\n' "$candidate_port" >> .env
 fi
-# The media service's login callback, the row's last port: a vendor's login
-# redirects the browser to 127.0.0.1 on it, and the service's CLI listens on
-# the same number inside its container. BO_0337_001
-callback_port=$(( port + 3 ))
-if grep -q '^CALLIOPA_MEDIA_CALLBACK_PORT=' .env; then
-  sed -i "s|^CALLIOPA_MEDIA_CALLBACK_PORT=.*|CALLIOPA_MEDIA_CALLBACK_PORT=${callback_port}|" .env
-else
-  printf 'CALLIOPA_MEDIA_CALLBACK_PORT=%s\n' "$callback_port" >> .env
-fi
+# The media service's login callback left the row: a generator's sign-in is
+# pasted back, and the service publishes no port. An install from 0.5.0
+# carries the key; it goes, so the update gives up the port. BO_0342_003
+sed -i '/^CALLIOPA_MEDIA_CALLBACK_PORT=/d' .env
 
 # Install is zero-secret: agent credentials are configured at first start
 # through the UI (or a subscription CLI login), never here. BO_0089_002
@@ -396,7 +389,7 @@ case "${bind:-0.0.0.0}" in
     ;;
 esac
 echo "It uses the ports $(port_row "$port"): ${port} Calliopa, $(( port + 1 )) confirmations,"
-echo "$(( port + 2 )) proposed changes, $(( port + 3 )) generator sign-ins (this machine only)."
+echo "$(( port + 2 )) proposed changes."
 echo "${updater_note}"
 echo
 echo "If you have not chosen the owner's password yet, open Calliopa now and"

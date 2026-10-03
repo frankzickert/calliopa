@@ -1,6 +1,6 @@
 # CA_0079_FIX_the-check-suite-passes-at-head
 
-Status: ready
+Status: completed
 
 Requested: 2026-10-02, by the user, after `CA_0078`: `pnpm check` at head fails tests that the
 change did not touch, so a regression like `CA_0078`'s can land among them unnoticed.
@@ -56,3 +56,25 @@ Found on head 4066 and again on 4077, on the dev instance's tree with a frozen i
 - Nothing here changes what a person sees, unless a timeout turns out to be a real regression. In
   that case the regression is named here and fixed on its own, and it adds a `Fixed` release-note
   line.
+
+## Outcome
+
+- Completed 2026-10-02. `pnpm check` passes at head in one run: three full runs in a row, 1807
+  tests, about 36 seconds each, with no unhandled error.
+- The memory: no leak ran in the editor. A read that outlived its test (`blank-drop.test.ts`'s
+  proposals, `typed-math.test.ts`'s paused save) met the unstubbed `fetch`, and vitest's main
+  process exhausted its heap formatting that one unhandled rejection. Those tests now wait for
+  their reads and writes. Two visible tasks no longer call `addEventListener` on the harness's
+  stand-in window. The suite runs on half the cores with a twenty-second timeout, since
+  contention made a different timing scenario fail each run (`CA_0079_001`).
+- The three timeouts were one cause in the harness: a press that landed while Qwik finished a
+  frame left its task staged for a draw that had already ended. The instruction chip's read set
+  that timing. The harness now draws any queued frame before an event, and the editor did not
+  change (`CA_0079_004`, `_005`). The equation reference test pressed a control that
+  `BO_0300_006` removed (`_006`). The vocabulary and bar tests now expect the admonitions as
+  built (`_003`), and an admonition without a colour takes `--text-muted` (`_002`).
+- Left open in `documents`' `block-editor.md`: the callout's tint mixes with an undefined
+  `--surface`, so it leans white in the dark theme.
+- No release-note line: nothing a person installs, runs or uses changes. The only difference
+  on screen is a callout whose pattern names no colour, which is now the theme's muted grey
+  rather than a fixed blue-grey.

@@ -6,6 +6,7 @@ import { refusal, respond, type OutcomeResponse } from "~/server/outcome";
 import { blobReference, isBlobReference, objectIdOfHash, putBlob, type BlobReference } from "~/server/ccgw/blobs";
 import { checkTable, readColumns, readRows, type TableColumn, type TableRow } from "~/extensions/documents/lib/table";
 import {
+  answerDocumentGroup,
   answerDocumentProposal,
   placeProposedItem,
   createDocument,
@@ -47,6 +48,7 @@ import {
   reviseTextBlock,
   setBlockDisposition,
   splitTextBlock,
+  type AnsweredGroup,
   type AnsweredItem,
   type PlacedItem,
   type ChangeSummary,
@@ -76,6 +78,7 @@ import {
   type RelationInput,
 } from "./work";
 import { readMode, writeMode } from "./working-mode";
+import { fixedOf } from "./guards";
 import type { WorkingMode } from "../lib/working-mode";
 import { branchOf, documentPolicy, readStanding, signedInAccount, type BranchOfDocument, type BranchStanding, type DocumentPolicy } from "./branch";
 import { withBranch } from "~/server/ccgw/branch-scope";
@@ -410,6 +413,8 @@ export type DocumentCommand =
       /** An edit's acceptance, over what the block did since. CA_0042_002 */
       readonly edited?: boolean;
     }
+  /** Every item of one group answered at once: *Accept all*, *Reject all*. BO_0343_012 */
+  | { readonly command: "answerGroup"; readonly groupId: string; readonly answer: ProposalAnswer }
   | {
       readonly command: "placeProposal";
       readonly itemId: string;
@@ -861,6 +866,13 @@ export function parseDocumentCommand(
       }
       return { command: { command: "answerProposal", itemId, answer, ...(edited === true ? { edited } : {}) } };
     }
+    case "answerGroup": {
+      const groupId = input["groupId"];
+      const answer = input["answer"];
+      if (typeof groupId !== "string" || groupId === "") return { failure: "An answer to a whole proposal names its group." };
+      if (answer !== "accepted" && answer !== "rejected") return { failure: "A proposal is accepted or rejected." };
+      return { command: { command: "answerGroup", groupId, answer } };
+    }
     case "placeProposal": {
       const itemId = input["itemId"];
       if (typeof itemId !== "string") {
@@ -1012,6 +1024,7 @@ export function runDocumentCommand(
     | SplitBlocks
     | WrittenDocument
     | AnsweredItem
+    | AnsweredGroup
     | StagedProposal
     | PlacedItem
     | WrittenRelation
@@ -1171,6 +1184,8 @@ export function runDocumentCommand(
         answer: command.answer,
         edited: command.edited === true,
       });
+    case "answerGroup":
+      return answerDocumentGroup({ documentId, groupId: command.groupId, answer: command.answer });
     case "placeProposal":
       return placeProposedItem({
         documentId,
@@ -1230,7 +1245,14 @@ export async function handleDocumentList(
 export async function handleDocumentRead(
   documentId: string,
 ): Promise<OutcomeResponse<DocumentView>> {
-  return respond(await readDocument(documentId));
+  const read = await readDocument(documentId);
+  if (read.outcome !== "success") return respond(read);
+  // What a guard fixes is drawn by the editor: a title fixed, no Delete.
+  // RO_0005_020
+  const fixed = await fixedOf(documentId);
+  if (fixed.outcome !== "success") return respond(fixed as GraphOutcome<never>);
+  const held = fixed.result.undeletable !== undefined || fixed.result.title !== undefined || Object.keys(fixed.result.blocks).length > 0;
+  return respond({ outcome: "success", result: held ? { ...read.result, fixed: fixed.result } : read.result });
 }
 
 /**

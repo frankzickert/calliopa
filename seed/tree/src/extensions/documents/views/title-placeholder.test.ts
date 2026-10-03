@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { DocumentView } from "../server/assemble";
-import { UNNAMED_DOCUMENT, UNNAMED_INSTRUCTION } from "../lib/naming";
+import { UNNAMED_DOCUMENT, UNNAMED_INSTRUCTION, UNNAMED_STRUCTURE } from "../lib/naming";
 import { documentsApi, mountEditor, type SentCommand } from "./testing/editor-harness";
 
 /**
@@ -47,6 +47,19 @@ describe("the title of an instruction nobody has named", () => {
     expect(view.title.getAttribute("data-placeholder")).toBe(UNNAMED_INSTRUCTION);
     expect(view.root.querySelector("h2.document-title")?.textContent).toContain(UNNAMED_INSTRUCTION);
     await view.idle();
+  });
+});
+
+describe("the title of a structure nobody has named (RO_0006_001)", () => {
+  it("Given a new structure, Then the field is empty under the structure's minted name as its placeholder, and typing names it", async () => {
+    const view = await mount({ ...unnamed, documentId: "structure-new", title: UNNAMED_STRUCTURE });
+    expect(view.title.textContent).toBe("");
+    expect(view.title.getAttribute("data-unnamed")).toBe("true");
+    expect(view.title.getAttribute("data-placeholder")).toBe(UNNAMED_STRUCTURE);
+    expect(view.root.querySelector("h2.document-title")?.textContent).toContain(UNNAMED_STRUCTURE);
+    await view.type("Hook");
+    expect(view.renames()[0]?.body["title"]).toBe("Hook");
+    expect(view.title.getAttribute("data-unnamed")).toBe("false");
   });
 });
 

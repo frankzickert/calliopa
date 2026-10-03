@@ -2,7 +2,6 @@
 import { port } from "~/server/port";
 import { readDocument } from "~/extensions/documents/server/documents";
 import { isBlobReference } from "~/server/ccgw/blobs";
-import { atDataRevision } from "~/server/ccgw/branch-scope";
 import { isRecordId } from "~/server/uuid";
 
 import { isOutcome, isRenditionType, type Outcome, type RenditionType } from "../lib/rendition";
@@ -87,8 +86,6 @@ const reasonOf = (outcome: { outcome: string } & Record<string, unknown>): strin
     ? (outcome["failures"] as readonly { detail: string }[]).map((failure) => failure.detail).join(" ")
     : `the document could not be read: ${outcome.outcome}`;
 
-const pinned = <T>(pin: number, read: () => Promise<T>): Promise<T> => (pin > 0 ? atDataRevision(pin, read) : read());
-
 /**
  * The document carrying *Format* projected whole at the run's pin
  * (`BO_0332_030`), with the venue and the front matter of the roles the call
@@ -97,7 +94,8 @@ const pinned = <T>(pin: number, read: () => Promise<T>): Promise<T> => (pin > 0 
  */
 export async function projectForKernel(call: ToolCall): Promise<Projected> {
   const documentId = documentOfInput(call.input);
-  const read = await pinned(call.run.pin, () => readDocument(documentId));
+  // At the run's pin through its group, as the shell's scope reads. BO_0344_010
+  const read = await readDocument(documentId);
   if (read.outcome !== "success") throw new ToolRefusal(reasonOf(read));
   const document = read.result;
   const revision = document.dataRevision ?? call.run.pin;
@@ -107,7 +105,6 @@ export async function projectForKernel(call: ToolCall): Promise<Projected> {
       documentId,
       ...(structureOfInput(call.input, "venueStructure") === undefined ? {} : { venueStructure: structureOfInput(call.input, "venueStructure") as string }),
       ...(structureOfInput(call.input, "paperStructure") === undefined ? {} : { paperStructure: structureOfInput(call.input, "paperStructure") as string }),
-      ...(call.run.pin > 0 ? { dataRevision: call.run.pin } : {}),
     });
   } catch (error) {
     if (error instanceof MakingRefusal) throw new ToolRefusal(error.message);

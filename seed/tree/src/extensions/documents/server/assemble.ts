@@ -1,6 +1,7 @@
 import { readStanding, type Standing } from "~/extensions/documents/lib/disposition";
 import type { CitationStyles } from "~/contract";
 import type { Proposer } from "~/extensions/documents/lib/proposals";
+import type { Fixed } from "~/extensions/documents/lib/fixed";
 import { byOrder, isOrderKey } from "~/lib/order";
 import { runsText } from "~/lib/runs";
 import type { ReadNode, ReadResult } from "~/server/ccgw/client";
@@ -234,6 +235,13 @@ export interface OutputBlockView extends BlockCommon {
   readonly files: readonly OutputObject[];
   readonly elapsed?: number;
   readonly executionCount?: number;
+  /** What the network gave the execution on a device (`calliopa-bootstrap`'s
+   * `BO_0319_046`): `none`, or `hosts` for a block granted named hosts; false
+   * reproducibility once it fetched anything, with each fetch's address.
+   * Absent from a runtime's execution. */
+  readonly network?: string;
+  readonly reproducible?: boolean;
+  readonly fetched?: readonly string[];
   /** Set by a person after accepting the output (`BO_0295_006`): its first
    * picture is then a figure, counted with the images. */
   readonly caption?: string;
@@ -263,6 +271,10 @@ export interface DocumentView {
    * minted name the document was given (`BO_0298_014`). */
   readonly record?: string;
   readonly blocks: readonly BlockView[];
+  /** What a guard another extension registered fixes on the document — its
+   * deletion, its title, blocks that stay — answered by the read the editor
+   * draws from, absent when nothing is fixed (`RO_0005_020`). */
+  readonly fixed?: Fixed;
   /** The number each numbered equation carries, by block identity, for the
    * whole document: what a reference run is drawn as. Derived on every read
    * and stored nowhere, so it can never be stale (`BO_0290_011`). */
@@ -485,6 +497,15 @@ export function toBlock(node: ReadNode, containmentId: string): BlockView {
     const of = content["of"];
     const elapsed = content["elapsed"];
     const executionCount = content["executionCount"];
+    const network = content["network"];
+    const reproducible = content["reproducible"];
+    const fetched = Array.isArray(content["fetches"])
+      ? (content["fetches"] as readonly unknown[]).flatMap((fetch) =>
+          typeof fetch === "object" && fetch !== null && typeof (fetch as { url?: unknown }).url === "string"
+            ? [(fetch as { url: string }).url]
+            : [],
+        )
+      : [];
     return {
       ...common,
       kind: "output",
@@ -495,6 +516,9 @@ export function toBlock(node: ReadNode, containmentId: string): BlockView {
       files,
       ...(typeof elapsed === "number" ? { elapsed } : {}),
       ...(typeof executionCount === "number" ? { executionCount } : {}),
+      ...(typeof network === "string" ? { network } : {}),
+      ...(typeof reproducible === "boolean" ? { reproducible } : {}),
+      ...(fetched.length > 0 ? { fetched } : {}),
       ...captionedOf(content),
     };
   }

@@ -76,13 +76,15 @@ controls (`ui.shell`, `BO_0273_007`, `BO_0273_009`) and `BO_0273_017` needs the 
   answers; `POST /api/x/media/workspace` takes the one picked, and the row shows the choice
   unselected until the owner makes it. The login request carries no workspace any more, so there is
   one way to choose one.
-- The redirect is a paste for OpenArt and usually invisible for Higgsfield, and the difference is
-  the vendors' (`BO_0273_033`, found by the user on 2026-09-21). Higgsfield's login takes `--port`,
-  so the broker fixes it at the one the service publishes on `127.0.0.1` and a browser on this host
-  follows the redirect straight in. **OpenArt takes no port and picks a fresh ephemeral one for
-  every flow** — observed choosing `37167` — so it can be neither published nor guessed, and a
-  browser outside the container reaches its own loopback rather than the service's. Its login can
-  only ever be finished by pasting back the `code` and `state`.
+- Every sign-in is finished by pasting back the `code` and `state` from the address the browser
+  landed on: the vendor's redirect goes to a loopback port inside the media service's container,
+  which no browser reaches, and the service publishes no port (`BO_0342`, user decision
+  2026-10-02). **OpenArt picks a fresh ephemeral port for every flow** — observed choosing
+  `37167` — and **Higgsfield's sign-in server accepts only `localhost:8765` through `8774`**, the
+  ports its own CLI picks, so neither could be published for a browser to follow (`BO_0273_033`,
+  found by the user on 2026-09-21). The page the browser lands on does not load, or shows
+  whatever else on the person's machine answers on that port; either way its address is what is
+  pasted.
 - So the broker reads the loopback out of the authorize URL the CLI printed (`redirect_uri`, which
   both vendors carry) rather than assuming its own, waits in `awaiting_redirect` for every vendor
   rather than Higgsfield alone, and hands the redirect to whatever port the CLI chose. Before this
@@ -379,7 +381,8 @@ kernel's `calliopa-bootstrap`'s `ui-kernel.md`, *Generation Settings Live In The
   picture made with the variation's values.
 - The walk closes on the image and the variation (`BO_0336_025`, user decision 2026-10-02). The
   video was refused by the vendor for a start frame its prompt did not name, which `ME_0001`
-  captured; how a format takes a video's inputs is `ME_0002`'s, whose acceptance walks the video.
+  captured; how a format takes a video's inputs is `ME_0002`'s, whose walk takes the video
+  (A Format Says What It Takes).
 
 ## Profiles Become Instructions
 
@@ -402,8 +405,94 @@ identifier and route, and `doc-block-roles` and `profiles` become `structures` a
 ## A Structure Is A Document
 
 Under `structures`' `RO_0005` (2026-10-02): every structure becomes a document and *Format* and
-*Variation* take the ids `structure:format` and `structure:variation`
+*Variation* take fixed ids `structures` names
 ([A Structure Is A Document](../../../structures/docs/system/system.md#a-structure-is-a-document)).
 
-- [ ] RO_0005_060 Generation reads a format and its variations by the ids `structures` names, its
-      fields by key as before; the suites green over the documents.
+- Generation reads a format and its variations by `FORMAT_STRUCTURE` and `VARIATION_STRUCTURE`,
+  `structures`' names for their fixed ids, its fields by key as before (`RO_0005_060`, landed
+  2026-10-02); the unit suite's views name them so.
+
+## A Format Says What It Takes
+
+Under `ME_0002` (`docs/changes/completed/ME_0002_FEAT_a-format-says-what-it-takes.md`), set to draft by the
+user on 2026-10-03 and transferred here the same day: a format says which inputs it takes and how
+it is used, and the agent fills the inputs from the command. *Input* is `structures`'
+([A Format Says What It Takes](../../../structures/docs/system/system.md#a-format-says-what-it-takes)).
+Every kind reaches the vendor by `calliopa-bootstrap`'s `BO_0346` (completed 2026-10-03): the
+media service passes each input under its adapter's flag and refuses, in words and before anything
+is spent, a kind the model does not take. On a device the cell takes a start frame alone and
+refuses any other input in words ([On A Device](#on-a-device)).
+
+* A format's inputs are blocks of its document using *Input*, written, named and reordered as
+  blocks are. User decision, 2026-10-03 (`ME_0002_Q1`).
+* The format explains itself through its own words: its document's blocks using neither *Input*
+  nor *Variation*, and each input's words, are given to a run generating under an instruction
+  naming the format, as instructions for using it. User decision, 2026-10-03 (`ME_0002_Q2`).
+* The agent fills the inputs from the command — the blocks the person marked with `#`, and the
+  picture above the block when the words point at nothing — matched by what the format's words and
+  the command say, and says in its answer which picture it used for which input. A required input
+  with no picture it can tell is refused in words, with nothing spent; the agent does not ask. User
+  decision, 2026-10-03 (`ME_0002_Q3`).
+* The agent writes the vendor's prompt, naming each input as the model expects (`@start`);
+  `media.generate` refuses, before anything is spent, a call whose words do not name an input it
+  attaches, and never adds the name itself. User decision, 2026-10-03 (`ME_0002_Q4`).
+* A video format with no *Input* takes the picture above the block as its start frame, which the
+  agent names `@start`. User decision, 2026-10-03 (`ME_0002_Q6`).
+* An image format declares inputs only where its model takes references; none of today's image
+  models is wired for them, so this change delivers video. User decision, 2026-10-03
+  (`ME_0002_Q5`).
+
+- The format's words reach the run through a tool of this extension rather than the kernel:
+  `media.read_format`, which spends nothing, answers what the instruction's format is and how it
+  is used, and the skill reads it before it writes a prompt. Technical decision at transfer,
+  2026-10-03: the run's format is already read here (`server/format.ts`), so the kernel stays as
+  it is.
+
+- A format's inputs are read with the format at the run's pin (`ME_0002_010`, landed 2026-10-03;
+  `server/format.ts`): its blocks using *Input* (`structures`' `INPUT_STRUCTURE`) in reading order,
+  each as its *Name* — a leading `@` dropped, letters, digits, `-` and `_` alone — its *Kind* as
+  the service's role (`INPUT_KINDS`: `start`, `end`, `image`, `video`, `audio`) and whether it is
+  *Required*. An input with no kind, a name of anything else, or two inputs of one name refuse the
+  format in words, as a missing provider does. A video format declaring none takes
+  `START_BY_DEFAULT`, the start frame `start`, required, standing in no block. A variation varies
+  none of them. `guideOf` reads the format's words at head, where the run's document is read: its
+  text blocks using neither *Input* nor *Variation*, and each input's own words.
+- `media.read_format` (`ME_0002_011`, landed 2026-10-03; `server/tools.ts` `readFormatTool`, an
+  `ext.tool` member without `spends`): answers the format's title, type, provider, model, the
+  variation chosen, its words, and each input's name, kind in words, whether it is required and
+  what it is for — the default start frame saying it is the picture above unless the call names
+  another — or refuses as `generate` does for a missing instruction or format.
+- `media.generate` and `quote_generation` take `inputs`, each input's name to a block id, or
+  `<document id>/<block id>` for a block of another document a `#` reference points into
+  (`ME_0002_012`, landed 2026-10-03; `referencesFor`). Before anything is composed or spent they
+  refuse in words: a name the format does not declare (or any, on a format declaring none); a
+  required input not given; audio, which no block holds; a block that is not a picture for a
+  start frame, an end frame or a reference image, or not a video for a reference video; one not
+  made yet; and an attached input the words do not name as `@<name>`. A video format declaring
+  none takes the picture above the block as `start`, which the words must name too; a quote naming
+  no block is quoted without it. Each attachment is sent as its bytes under its name, its kind the
+  reference's `role` (`server/make.ts` `referenceBytes`, `madeBlock`). `server/tools.test.ts`
+  proves the format's words and inputs read, a video from the first marked picture to the second,
+  a picture read from another document, a reference video, a quote carrying what the call names,
+  each refusal with nothing composed or spent, and the picture above as `@start`; without the
+  naming check its refusals fail.
+- `media:inputName` (`ME_0002_013`, landed 2026-10-03; `server/suggestions.ts`) suggests an input's
+  name from its *Kind* — `start`, `end`, `image`, `video`, `audio` — asking no vendor, and says to
+  choose the kind first without one. `server/suggestions.test.ts` proves it.
+- The skill and the declarations (`ME_0002_014`, landed 2026-10-03, members through
+  `kernel commit --members`): `media.pictures` reads the format first and follows its words, fills
+  each input from the blocks the person marked with `#`, or the picture above when the words point
+  at nothing, writes the words naming every attached input as `@name`, says which picture went
+  where, and does not call `generate` when a required input has none; `media.read_format` is
+  declared; `media.generate` and `media.quote_generation` take `inputs`, the quote a `block` too.
+- Walked by the user on the dev instance at pin 4534, 2026-10-03 (`ME_0002_015`, "worked"), after
+  `migration-me-0002-input-structure` gave the instance *Input*: a video made through a format's
+  inputs, from a command that marked its picture with `#`. Beside the walk stand the unit suite
+  (`server/tools.test.ts`, `server/suggestions.test.ts`, `lib/structures.test.ts`,
+  `server/api.test.ts`) and `structures`' behavior suite under the kernel harness.
+
+## On A Device
+
+- On a device the generators are the cell's to answer (`calliopa-bootstrap`'s `docs/system/mobile.md`, `BO_0319_025`): Higgsfield through its HTTP API with the person's key, entered under Connections as `higgsfield`, and OpenArt, which offers no API key, unavailable with its reason. The roster (`server/media.ts`) asks the cell's `/__kernel/media/services` for Higgsfield once its capability is ready — the models its API names, read at runtime — and answers each generator that is not ready with its capability's reason and nothing to offer. Every other route — what a model takes, the quote, a generation, its state and its file — is the same `/__kernel/media/…` an instance answers, so nothing else here differs. `BO_0319_025`
+- A keyed generator (`ServiceView.byKey`) is entered rather than signed in to: the Generators section shows no *Sign in*, says *Ready: its key is set under Connections.* or why not, and notes that each picture is paid from the key's own Higgsfield balance and that asking what one would cost spends nothing (`views/settings/section.tsx`). `BO_0319_025`
+- Verified 2026-10-03 in the desktop harness on the device build at head 4301 with no key: the Generators section reading *This needs a key, entered in Settings.* with the keyed note and no *Sign in* for Higgsfield, and OpenArt unavailable with its reason; the cell answering six models from Higgsfield's own API description, `higgsfield-ai/soul/standard` the image default with its ten ratios and two resolutions. `BO_0319_025`

@@ -1,6 +1,6 @@
 # A Record Value Is Declared
 
-Status: idea
+Status: rejected
 
 A document's `record` property says what kind of record the document is — `investigation`, since
 `RF_0003` — and today nothing declares such a value: this extension defines `BlockKind` and

@@ -7,6 +7,7 @@ import {
 } from "~/server/extensions";
 import { HttpError } from "~/server/http-error";
 import { kernelExtensions } from "~/server/kernel/extensions";
+import { port } from "~/server/port";
 import { readSession } from "~/server/session";
 
 /**
@@ -17,7 +18,62 @@ import { readSession } from "~/server/session";
  * BO_0202_002 BO_0202_005 BO_0202_006 BO_0255_006
  */
 
+/** A capture's answer, or the host's refusal in its words. BO_0319_050 */
+async function captureAnswer(event: Parameters<ApiRoute["handle"]>[0], run: () => Promise<unknown>): Promise<void> {
+  try {
+    event.json(200, await run());
+  } catch (error) {
+    if (error instanceof HttpError) {
+      event.json(error.status, { code: error.code ?? "capture_refused", message: error.message });
+      return;
+    }
+    event.json(502, { code: "capture_failed", message: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+/** The device's capture plugin, or the refusal an instance answers. BO_0319_050 */
+const capture = () => {
+  if (port.device === undefined)
+    throw new HttpError(404, "An instance captures nothing through a host: its files are picked in the browser.", "device_only");
+  return port.device.capture;
+};
+
 const routes: readonly ApiRoute[] = [
+  {
+    /**
+     * What capture can reach where the shell runs: the camera and the host's
+     * file picker on a device, neither on an instance, whose *Files* is the
+     * browser's own. BO_0319_050
+     */
+    method: "GET",
+    path: "capture",
+    handle: async (event) => event.json(200, { camera: port.device !== undefined, hostFiles: port.device !== undefined }),
+  },
+  {
+    /** A photo through the device's camera; `item` null when the person cancelled. BO_0319_050 */
+    method: "POST",
+    path: "capture/photo",
+    handle: (event) =>
+      captureAnswer(event, async () => ({ item: await capture().photo() })),
+  },
+  {
+    /**
+     * What was shared into the app since the shell last asked — the shell
+     * asks at its start and whenever the device says something arrived —
+     * taken, so each share is handed over once. BO_0319_050
+     */
+    method: "POST",
+    path: "capture/shared",
+    handle: (event) =>
+      captureAnswer(event, async () => ({ items: await capture().takeShared() })),
+  },
+  {
+    /** Files through the device's picker. BO_0319_050 */
+    method: "POST",
+    path: "capture/files",
+    handle: (event) =>
+      captureAnswer(event, async () => ({ items: await capture().pickFiles(true) })),
+  },
   {
     /** The extensions the graph holds, as the library lists them. BO_0201_005 */
     method: "GET",
@@ -196,6 +252,7 @@ const routes: readonly ApiRoute[] = [
           servedPin: listing.servedPin ?? null,
           promotion: listing.promotion ?? null,
           canChange: listing.canChange,
+          readOnly: listing.readOnly ?? null,
           declaresVocabulary: vocabulary,
           elevated,
           health,
@@ -338,11 +395,21 @@ export const contributions = declare({
     // section's component renders either. BO_0201_005 The reader adds whether
     // the person is the owner, for the import control, outside the snapshot's
     // cache. BO_0224_011
+    // On a device the kernel's listing says why nothing changes there, and
+    // the section says it in those words; an instance reads nothing more.
+    // BO_0319_052
     extensions: async () => {
       const listing = await listExtensions();
       if (!listing.reachable) return listing;
-      const person = await readSession();
-      return { ...listing, owner: person?.owner === true };
+      const [person, kernel] = await Promise.all([
+        readSession(),
+        port.where === "device" ? kernelExtensions.list().catch(() => null) : null,
+      ]);
+      return {
+        ...listing,
+        owner: person?.owner === true,
+        ...(kernel?.readOnly === undefined ? {} : { readOnly: kernel.readOnly }),
+      };
     },
   },
   routes,

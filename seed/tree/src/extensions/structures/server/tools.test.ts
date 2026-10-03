@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { documentOfInput, proposalOfInput, ToolRefusal } from "./tools";
+import { KEYWORD_STRUCTURE } from "../lib/structures";
 
 /** What the tools refuse before they read (`BO_0309_017`). */
 const document = "2b0c1f3a-0f6a-4d1e-9a3c-1d2e3f4a5b6c";
@@ -17,8 +18,8 @@ describe("read_document_structures", () => {
 describe("propose_structures", () => {
   it("reads structures to take and clear and values by structure, on a block or the document", () => {
     expect(
-      proposalOfInput({ document, block, use: ["builtin:keyword"], values: { "builtin:keyword": { d: "2026-10-01" } } }),
-    ).toEqual({ documentId: document, blockId: block, take: ["builtin:keyword"], clear: [], values: { "builtin:keyword": { d: "2026-10-01" } } });
+      proposalOfInput({ document, block, use: [KEYWORD_STRUCTURE], values: { [KEYWORD_STRUCTURE]: { d: "2026-10-01" } } }),
+    ).toEqual({ documentId: document, blockId: block, take: [KEYWORD_STRUCTURE], clear: [], values: { [KEYWORD_STRUCTURE]: { d: "2026-10-01" } } });
     expect(proposalOfInput({ document, clear: [document] })).toEqual({ documentId: document, take: [], clear: [document], values: {} });
   });
 

@@ -53,25 +53,38 @@ export interface ServiceView {
    * vendor whose way in is an instance's — so nothing signs in to it; its
    * reason is why. BO_0319_043 */
   readonly unavailable?: boolean;
+  /** Made with a key the person entered under Connections, so nothing signs
+   * in to it: a device's Higgsfield (`calliopa-bootstrap`'s BO_0319_025). */
+  readonly byKey?: boolean;
 }
 
 /** The services the instance holds, with what each can make. */
 export async function roster(): Promise<readonly ServiceView[]> {
-  // On a device each generator is as its capability stands; there is no
-  // media service beside the cell to ask. BO_0319_043
+  // On a device the cell answers Higgsfield, through its API with the
+  // person's key, and each generator is as its capability stands: one that
+  // is not ready says why and offers nothing. BO_0319_043 BO_0319_025
   if (port.where === "device") {
-    const capabilities = await readCapabilities();
+    const [capabilities, answered] = await Promise.all([
+      readCapabilities(),
+      call("/__kernel/media/services", { method: "GET" })
+        .then(async (response) => (response.ok ? ((await response.json()) as { services?: readonly ServiceView[] }).services ?? [] : []))
+        .catch(() => [] as readonly ServiceView[]),
+    ]);
     return SERVICES.map((service) => {
       const capability = capabilities.find((candidate) => candidate.id === `media:${service}`);
       const ready = capability?.state === "ready";
+      const held = answered.find((candidate) => candidate.service === service);
+      if (ready && held !== undefined) return { ...held, byKey: true };
       return {
         service,
         signedIn: false,
-        reason: ready ? null : (capability?.reason ?? "This generator is not available here."),
+        reason: ready ? "The generator is not answering on this device." : (capability?.reason ?? "This generator is not available here."),
         models: [],
         openSet: {},
         workspaces: null,
-        unavailable: !ready,
+        unavailable: true,
+        // Higgsfield is made with a key on a device, set or not yet.
+        ...(service === "higgsfield" ? { byKey: true } : {}),
       };
     });
   }

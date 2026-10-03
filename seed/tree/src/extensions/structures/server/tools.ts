@@ -1,6 +1,6 @@
 import { isRecordId } from "~/server/uuid";
 
-import { isStructureId, shownValue, type DocumentStructuresView, type TakenStructure } from "../lib/structures";
+import { isStructureId, shownValue, STRUCTURE_STRUCTURE, type DocumentStructuresView, type TakenStructure } from "../lib/structures";
 import { proposeStructures, structuresOf, type Staged } from "./structures";
 
 /**
@@ -93,7 +93,8 @@ const refusalOf = (read: { outcome: string } & Record<string, unknown>): string 
 const forRun = (structure: TakenStructure) => ({
   id: structure.id,
   name: structure.name,
-  description: structure.description,
+  // A run reads a structure's whole text (RO_0005_Q8).
+  description: structure.text ?? structure.description,
   ...(structure.builtin ? { builtin: true } : {}),
   ...(structure.retired ? { retired: true } : {}),
   ...(structure.offered ? {} : { offered: false }),
@@ -117,7 +118,8 @@ const forRun = (structure: TakenStructure) => ({
  */
 export async function readDocumentStructures(call: ToolCall): Promise<ToolAnswer> {
   const document = documentOfInput(call.input);
-  const read = await structuresOf(document, call.run.pin > 0 ? { dataRevision: call.run.pin } : {});
+  // At the run's pin through its group, as the shell's scope reads. BO_0344_005
+  const read = await structuresOf(document);
   if (read.outcome !== "success") throw new ToolRefusal(refusalOf(read as never));
   const view: DocumentStructuresView = read.result;
   const named = view.structures.map((structure) => structure.name).join(", ");
@@ -146,6 +148,10 @@ export async function readDocumentStructures(call: ToolCall): Promise<ToolAnswer
             ? "Nothing here uses a structure; write it as you would any document."
             : "Nothing here uses a structure of its own yet. To give a block a structure, or a field a value, call propose_structures; it lands only when the person accepts it."
           : `${named === "" ? "Blocks here use structures" : `This document is a ${named}`}: write each block by its structures. To give a block or the document a structure, or a field a value, call propose_structures; it lands only when the person accepts it.`,
+        // A structure is itself a document (RO_0005_005).
+        view.structures.some((structure) => structure.id === STRUCTURE_STRUCTURE)
+          ? " This document is a structure: its title names it, its other blocks describe it, and each block using Field is one of its fields, declared by Field's values."
+          : "",
       ].join(""),
     },
   };

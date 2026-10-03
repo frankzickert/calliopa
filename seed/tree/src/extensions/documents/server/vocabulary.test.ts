@@ -19,9 +19,10 @@ const validateNode = (semanticType: string, content: unknown): string | null => 
 };
 
 describe("the committed block vocabulary", () => {
-  it("Given the vocabulary, Then it reads a document, a text block, a divider, a table, an equation, a picture and the code pair", () => {
-    expect(Object.keys(BLOCK_VALIDATORS).sort()).toEqual(["divider", "document", "equation", "image", "output", "sourcecode", "table", "text"]);
-    expect([...BLOCK_TYPES].sort()).toEqual(["divider", "text"]);
+  it("Given the vocabulary, Then it reads a document, a text block, a divider, a table, an equation, a picture, the code pair and an admonition", () => {
+    // The admonition callout arrived with CA_0070. CA_0079_003
+    expect(Object.keys(BLOCK_VALIDATORS).sort()).toEqual(["admonition", "divider", "document", "equation", "image", "output", "sourcecode", "table", "text"]);
+    expect([...BLOCK_TYPES].sort()).toEqual(["admonition", "divider", "text"]);
   });
 });
 

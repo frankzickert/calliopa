@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BlockView, DocumentView } from "../../server/assemble";
@@ -303,6 +305,10 @@ describe("pointing from a prompt block", () => {
     await view.settle(() => view.record.pointing?.references.length === 1);
     await view.userEvent("[data-pointing-from] [data-block-point]", "click");
     await view.settle(() => view.find('[data-block-command="blk-b"] [data-reference-option="1"]') !== null);
+    // The list follows the control's row, so it opens below the block and
+    // its words rather than over them. DO_0033_002
+    const row = view.find('[data-block-command="blk-b"] [data-block-command-row]');
+    expect(row?.nextElementSibling?.hasAttribute("data-block-reference-list")).toBe(true);
     await view.userEvent('[data-block-command="blk-b"] [data-reference-option="1"]', "click");
     await view.settle(() => view.find('[data-block-id="blk-b"] [data-block-editor]')?.textContent === "Tighten #1 ");
     await view.idle();
@@ -375,16 +381,42 @@ describe("Show prompts", () => {
     await view.idle();
   });
 
-  it("Given a prompt being edited, Then the bar's Standing lists Prompt beside the scale, and choosing Keep brings it back into the flow", async () => {
+  it("Given a revealed prompt turned to, Then its own block bar carries Keep as content and Fixate, the top bar no standing, and Keep as content is taken back", async () => {
     const view = await mount({ ...draft, blocks: [text("blk-a", "a", "Opening."), text("blk-p", "ab", "Write an intro.", "prompt")] });
     await view.userEvent('[data-bar-action="prompts"]', "click");
     await view.settle(() => view.find('[data-block-id="blk-p"]') !== null);
-    await activateBlock(view, "blk-p");
-    const standing = view.find('[data-bar-action="block-standing"]') as HTMLSelectElement | null;
-    expect(Array.from(standing?.querySelectorAll("option") ?? []).map((option) => option.getAttribute("value"))).toEqual([
-      "keep",
-      "fixate",
-      "prompt",
+    await view.userEvent('[data-block-id="blk-p"] [data-block-reading]', "focus");
+    await view.settle(() => view.find('[data-block-id="blk-p"] [data-block-bar]') !== null);
+    // The bar above the document carries no standing; the prompt's own bar
+    // sets it back. DO_0031_002
+    expect(view.find('[data-bar-action="block-standing"]')).toBeNull();
+    expect(
+      Array.from(view.find('[data-block-id="blk-p"] [data-block-bar]')?.querySelectorAll("[data-standing-option]") ?? []).map((control) =>
+        control.getAttribute("aria-label"),
+      ),
+    ).toEqual(["Keep as content", "Fixate"]);
+    await view.userEvent('[data-block-id="blk-p"] [data-standing-option="keep"]', "click");
+    await view.settle(() => view.writes("setDisposition").length === 1);
+    expect(view.writes("setDisposition")).toEqual([
+      { command: "setDisposition", blockId: "blk-p", baseRevisionId: "rev-blk-p", standing: "keep" },
+    ]);
+    await view.settle(() => view.find('[data-bar-action="take-back-standing"]')?.hasAttribute("disabled") === false);
+    await view.userEvent('[data-bar-action="take-back-standing"]', "click");
+    await view.settle(() => view.writes("setDisposition").length === 2);
+    expect(view.writes("setDisposition")[1]).toMatchObject({ blockId: "blk-p", standing: "prompt" });
+    await view.idle();
+  });
+
+  it("Given a revealed prompt turned to, When its Fixate is pressed, Then the prompt is fixated", async () => {
+    const view = await mount({ ...draft, blocks: [text("blk-a", "a", "Opening."), text("blk-p", "ab", "Write an intro.", "prompt")] });
+    await view.userEvent('[data-bar-action="prompts"]', "click");
+    await view.settle(() => view.find('[data-block-id="blk-p"]') !== null);
+    await view.userEvent('[data-block-id="blk-p"] [data-block-reading]', "focus");
+    await view.settle(() => view.find('[data-block-id="blk-p"] [data-standing-option="fixate"]') !== null);
+    await view.userEvent('[data-block-id="blk-p"] [data-standing-option="fixate"]', "click");
+    await view.settle(() => view.writes("setDisposition").length === 1);
+    expect(view.writes("setDisposition")).toEqual([
+      { command: "setDisposition", blockId: "blk-p", baseRevisionId: "rev-blk-p", standing: "fixate" },
     ]);
     await view.idle();
   });
@@ -498,5 +530,35 @@ describe("a block's command choices on the device (DO_0025_002)", () => {
     await again.settle(() => again.find('[data-block-command="blk-b"] [data-block-keep]')?.getAttribute("aria-pressed") === "true");
     expect(again.find('[data-block-command="blk-b"] [data-block-mode="work"]')?.getAttribute("data-block-mode-pole")).toBe("understand");
     await again.idle();
+  });
+});
+
+describe("the control hangs below its block (DO_0033)", () => {
+  const css = readFileSync(new URL("../block-editor.css", import.meta.url), "utf8");
+  const rule = (selector: string) => {
+    const at = css.indexOf(`\n${selector} {`);
+    expect(at).toBeGreaterThan(-1);
+    return css.slice(at, css.indexOf("}", at));
+  };
+
+  it("Given the control, Then it hangs from the block's lower edge and grows downward only, so a wrapped row never covers the block", () => {
+    const control = rule(".block-command");
+    expect(control).toMatch(/top:\s*calc\(100% \+ 1px\);/u);
+    expect(control).toMatch(/height:\s*0;/u);
+    expect(control).toMatch(/flex-direction:\s*column;/u);
+    expect(control).toMatch(/justify-content:\s*flex-start;/u);
+  });
+
+  it("Given the # list, Then it keeps its height in the zero-height column, below the row", () => {
+    const list = rule(".block-command__references");
+    expect(list).toMatch(/flex:\s*none;/u);
+    expect(list).toMatch(/max-height:\s*min\(14rem, 40vh\);/u);
+    expect(list).toMatch(/margin:\s*0\.375rem 0 0;/u);
+  });
+
+  it("Given a refusal, Then it is the next item down the column, not laid over the row", () => {
+    const notice = rule(".block-command__notice");
+    expect(notice).toMatch(/flex:\s*none;/u);
+    expect(notice).not.toMatch(/position:\s*absolute;/u);
   });
 });

@@ -43,6 +43,37 @@ export interface ConfigFiles {
   replace(path: string, text: string, mode: number): Promise<void>;
 }
 
+/**
+ * One thing captured on a device, as the host's capture plugin hands it: a
+ * shared text, a shared address, or a file — a photo, a picked or a shared
+ * one — its bytes in base64. BO_0319_050
+ */
+export type Captured =
+  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "address"; readonly address: string }
+  | { readonly kind: "file"; readonly name: string; readonly mimeType: string; readonly data: string };
+
+/**
+ * The device's own hardware, through the host's plugins (`calliopa-bootstrap`'s
+ * `mobile/host/src/`): what an instance has none of. BO_0319_048
+ */
+export interface DevicePlugins {
+  readonly lock: {
+    /** Whether biometrics or a passcode are enrolled to lock with; false when the host cannot say. */
+    availability(): Promise<boolean>;
+    /** Asks the person, giving the reason; false when they cancel or fail. */
+    authenticate(reason: string): Promise<boolean>;
+  };
+  readonly capture: {
+    /** A photo through the system camera; null when the person cancels. */
+    photo(): Promise<Captured | null>;
+    /** Files through the system's picker, in the order picked; none when cancelled. */
+    pickFiles(multiple: boolean): Promise<readonly Captured[]>;
+    /** What was shared into the app since it was last asked, in order; taking it clears it. BO_0319_050 */
+    takeShared(): Promise<readonly Captured[]>;
+  };
+}
+
 export interface Port {
   /**
    * Where the shell runs: on a Calliopa instance, or on a device in the apps'
@@ -85,4 +116,6 @@ export interface Port {
   kernel(path: string, init?: RequestInit): Promise<Response>;
   /** Outbound HTTP to anywhere else. */
   fetch(url: string, init?: RequestInit): Promise<Response>;
+  /** The device's hardware through the host's plugins; absent on an instance. BO_0319_048 */
+  readonly device?: DevicePlugins;
 }

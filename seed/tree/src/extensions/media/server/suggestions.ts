@@ -1,4 +1,5 @@
 import type { SuggestionAnswer, SuggestionSource } from "~/contract";
+import { INPUT_KINDS } from "~/extensions/structures/lib/structures";
 
 import { modelOptions, roster, SERVICES, type ModelAxis } from "./media";
 
@@ -104,9 +105,18 @@ const axis =
     };
   };
 
+/** An input's name from its kind (`ME_0002_013`): the alias a vendor's
+ * prompt names it by, `@start` for a start frame. */
+async function inputName(values: Readonly<Record<string, string>>): Promise<SuggestionAnswer> {
+  const kind = INPUT_KINDS.find((one) => one.label === text(values["kind"]));
+  if (kind === undefined) return { suggestions: [], note: "Choose the input's kind first." };
+  return { suggestions: [{ value: kind.role }] };
+}
+
 export const SUGGESTION_SOURCES: readonly SuggestionSource[] = [
   { name: "provider", label: "Generation services signed in", answer: providers },
   { name: "model", label: "The provider's models", answer: models },
   { name: "ratio", label: "The model's ratios", answer: axis(RATIO_AXES, "ratio") },
   { name: "quality", label: "The model's qualities", answer: axis(QUALITY_AXES, "quality") },
+  { name: "inputName", label: "An input's name, from its kind", answer: inputName },
 ];

@@ -244,19 +244,12 @@ services:
       CALLIOPA_MEDIA_CONFIG_DIR: /var/lib/calliopa/media-config
       CALLIOPA_MEDIA_BEARER_FILE: /run/secrets/calliopa/media_bearer
       CALLIOPA_MEDIA_PORT: "8095"
-      CALLIOPA_MEDIA_CALLBACK_PORT: "${CALLIOPA_MEDIA_CALLBACK_PORT:-8093}"
       CALLIOPA_CODEX_IMAGE_URL: http://hermes:8644/v1/image
-    # The callback port is published on the loopback address, and on the
-    # literal one rather than CALLIOPA_HOST_BIND: a vendor login's redirect
-    # goes to 127.0.0.1 by definition, so the browser must be on this host,
-    # and binding it wider would expose it wherever that points without
-    # helping anyone. An install whose browser is elsewhere pastes the code
-    # instead. BO_0273_028
-    # The port is the last of the install's row (CALLIOPA_PORT + 3, derived by
-    # install.sh) and the same number on both sides, since the CLI inside
-    # tells the vendor to redirect to the port it listens on. BO_0337_002
-    ports:
-      - "127.0.0.1:${CALLIOPA_MEDIA_CALLBACK_PORT:-8093}:${CALLIOPA_MEDIA_CALLBACK_PORT:-8093}"
+    # Nothing is published. A vendor's login redirects to a loopback port
+    # inside this container that no browser reaches, and the owner pastes the
+    # code and state from the address the browser landed on; the broker hands
+    # them to the CLI's listener. Higgsfield's server accepts only 8765-8774,
+    # the ports its CLI picks itself, so no install chooses this one. BO_0342_002
     volumes:
       - media-data:/var/lib/calliopa/media
       - media-config:/var/lib/calliopa/media-config

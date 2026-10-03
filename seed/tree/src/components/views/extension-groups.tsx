@@ -87,7 +87,15 @@ export function touchWords(members: Readonly<Record<string, number>> | undefined
   return parts.join(", ");
 }
 
-export const ExtensionGroups = component$<{ extension: string }>((props) => {
+/**
+ * On a device (`readOnly` set, in the kernel's words) a staged change is read
+ * and nothing more: it is accepted, rejected and tried on an instance, so
+ * none of those is offered. BO_0319_052
+ */
+export const ExtensionGroups = component$<{
+  extension: string;
+  readOnly?: string | null;
+}>((props) => {
   const state = useStore<GroupsState>({
     status: "loading",
     detail: "",
@@ -223,6 +231,11 @@ export const ExtensionGroups = component$<{ extension: string }>((props) => {
           .
         </p>
       )}
+      {props.readOnly != null && (
+        <p class="extension-groups-note" data-extension-groups-read-only>
+          {props.readOnly}
+        </p>
+      )}
       {state.groups.map((group) => (
         <article class="extension-group" key={group.group} data-group={group.group}>
           <h3 class="extension-group-title">
@@ -245,61 +258,63 @@ export const ExtensionGroups = component$<{ extension: string }>((props) => {
               {run.conclusion ?? run.goal ?? ""} — {gateWords(run)}
             </p>
           ))}
-          <div class="extension-group-actions">
-            <button
-              type="button"
-              class="extension-group-action"
-              disabled={state.busy !== ""}
-              onClick$={() => decide$(group.group, "accept")}
-            >
-              Accept
-            </button>
-            <button
-              type="button"
-              class="extension-group-action"
-              disabled={state.busy !== ""}
-              onClick$={() => decide$(group.group, "reject")}
-            >
-              Reject
-            </button>
-            {candidate !== null &&
-            candidate.group === group.group &&
-            (candidate.status === "building" || candidate.status === "serving") ? (
-              <>
-                <span class="extension-group-candidate" role="status">
-                  {candidate.status === "building"
-                    ? "Building it beside this instance…"
-                    : "Served beside this instance"}
-                </span>
-                {candidate.status === "serving" && candidate.address !== undefined && (
-                  <a
-                    class="extension-group-action"
-                    href={candidateHref(candidate.address)}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open it
-                  </a>
-                )}
-                <button
-                  type="button"
-                  class="extension-group-action"
-                  onClick$={() => candidate$({ stop: true })}
-                >
-                  Stop
-                </button>
-              </>
-            ) : (
+          {props.readOnly == null && (
+            <div class="extension-group-actions">
               <button
                 type="button"
                 class="extension-group-action"
-                disabled={state.running}
-                onClick$={() => candidate$({ group: group.group })}
+                disabled={state.busy !== ""}
+                onClick$={() => decide$(group.group, "accept")}
               >
-                Try it
+                Accept
               </button>
-            )}
-          </div>
+              <button
+                type="button"
+                class="extension-group-action"
+                disabled={state.busy !== ""}
+                onClick$={() => decide$(group.group, "reject")}
+              >
+                Reject
+              </button>
+              {candidate !== null &&
+              candidate.group === group.group &&
+              (candidate.status === "building" || candidate.status === "serving") ? (
+                <>
+                  <span class="extension-group-candidate" role="status">
+                    {candidate.status === "building"
+                      ? "Building it beside this instance…"
+                      : "Served beside this instance"}
+                  </span>
+                  {candidate.status === "serving" && candidate.address !== undefined && (
+                    <a
+                      class="extension-group-action"
+                      href={candidateHref(candidate.address)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open it
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    class="extension-group-action"
+                    onClick$={() => candidate$({ stop: true })}
+                  >
+                    Stop
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  class="extension-group-action"
+                  disabled={state.running}
+                  onClick$={() => candidate$({ group: group.group })}
+                >
+                  Try it
+                </button>
+              )}
+            </div>
+          )}
           {candidate !== null &&
             candidate.group === group.group &&
             candidate.status === "refused" && (

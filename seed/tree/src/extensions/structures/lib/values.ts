@@ -1,4 +1,4 @@
-import type { FieldDeclaration, FieldValue, TakenStructure } from "./structures";
+import { isFile, type FieldDeclaration, type FieldValue, type TakenStructure } from "./structures";
 
 /**
  * The values line in a document's header (`documents`' `DO_0030`,
@@ -49,10 +49,12 @@ export function valueWords(
       return first === "" ? null : cut(first, LONG_TEXT);
     }
     case "file":
-      return typeof value === "object" ? value.filename : null;
+      return isFile(value) ? value.filename : null;
     case "reference":
       // A reference by what it names; one naming nothing that reads is
-      // shown as the id it holds rather than hidden.
+      // shown as the id it holds rather than hidden. Several are joined in
+      // the order they were picked (RO_0005_Q3).
+      if (Array.isArray(value)) return value.length === 0 ? null : value.map((id) => titles[id] ?? id).join(", ");
       return typeof value === "string" ? (titles[value] ?? value) : null;
     default: {
       if (typeof value !== "string") return null;

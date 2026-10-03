@@ -3,7 +3,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MIGRATIONS as ROLE_MIGRATIONS } from "~/extensions/structures/server/migrations";
 import { documentsCarrying, structuresOf } from "~/extensions/structures/server/structures";
 import { createDocument, deleteDocument, insertBlock, listDocuments, readDocument } from "~/extensions/documents/server/documents";
-import { query, write } from "~/server/ccgw/client";
+import { decideGroup, query, stage, write } from "~/server/ccgw/client";
+import { asRun } from "~/server/ccgw/branch-scope";
+import { proposeWork, readWorks } from "../../server/tools";
 import { readGraphEnv } from "~/server/ccgw/env";
 import { nodeRef } from "~/server/ccgw/nodes";
 
@@ -186,5 +188,24 @@ describe.skipIf(!configured)("sources are documents", () => {
     // The work is retired, and a second run finds nothing to do.
     const gone = await query({ statement: "MATCH (w) RETURN GRAPH w ROOT w", roots: [nodeRef(workId)], purpose: "the retired work" });
     expect(gone.outcome === "noResult" || (gone.outcome === "success" && gone.result.nodes.every((node) => node.id !== nodeRef(workId)))).toBe(true);
+  });
+
+  it("Given a run that proposed a source, Then the run's next read finds it, and truth holds it only once accepted (BO_0344_009)", async () => {
+    const group = `node:run-bo0344-works-${stamp}`;
+    const anchor = ok<{ documentId: string }>(await createDocument({ title: `Where the run started ${stamp}` }));
+    made.push(anchor.documentId);
+    await settle();
+    const pin = ok<{ dataRevision?: number }>(await readDocument(anchor.documentId)).dataRevision ?? 0;
+    const run = { id: "arun-bo0344", group, pin };
+    const title = `A source a run proposed ${stamp}`;
+    const proposed = await asRun({ pin }, () =>
+      proposeWork({ input: { record: { title, kind: "webpage", URL: `https://example.org/proposed-${stamp}`, author: [{ literal: "River Trust" }] } }, run }),
+    );
+    for (const each of proposed.stage ?? []) ok(await stage(group, each.statement, each.parameters, each.rationale));
+    await settle();
+    const titles = (answer: { result: unknown }) => (answer.result as { works: { record: { title: string } }[] }).works.map((work) => work.record.title);
+    expect(titles(await asRun({ pin, overlay: group }, () => readWorks({ input: {}, run })))).toContain(title);
+    expect(titles(await readWorks({ input: {}, run }))).not.toContain(title);
+    ok(await decideGroup("reject", group, "the suite's run"));
   });
 });

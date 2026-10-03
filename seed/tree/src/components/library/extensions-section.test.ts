@@ -146,4 +146,16 @@ describe("the Extensions section's own controls", () => {
     expect((await mount(listing({ owner: true }))).html()).toContain("data-import-extension");
     expect((await mount(listing({ owner: false }))).html()).not.toContain("data-import-extension");
   });
+
+  it("Given a device's listing, Then the kernel's words say why and nothing offers a change (BO_0319_052)", async () => {
+    const words = "On a device extensions are read: they are previewed, promoted, imported and changed on a Calliopa instance.";
+    const html = (await mount(listing({ owner: true, readOnly: words }))).html();
+    expect(html).toContain(words);
+    expect(html).not.toMatch(/data-new-extension(?![-\w])/u);
+    expect(html).not.toContain("data-import-extension");
+    expect(html).toContain("data-refresh-extensions");
+    const instance = (await mount(listing({ owner: true }))).html();
+    expect(instance).not.toContain("data-extensions-read-only");
+    expect(instance).toMatch(/data-new-extension(?![-\w])/u);
+  });
 });

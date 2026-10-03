@@ -1,7 +1,7 @@
-import { $, component$, useSignal, useStore, useVisibleTask$ } from "@builder.io/qwik";
+import { $, component$, useSignal, useStore, useVisibleTask$, type QRL } from "@builder.io/qwik";
 import { moreBeyond } from "~/lib/scroll-edges";
 import { Icon } from "./icons";
-import type { RunChip, ViewAnswerAll, ViewToggleRun } from "./view-bridge";
+import type { RunChip, RunChipElsewhere, ViewAnswerAll, ViewToggleRun } from "./view-bridge";
 
 /** Whether the reader asked for stillness, asked at the moment something
  * would move; false where no page can say. CA_0062_004 */
@@ -43,10 +43,12 @@ export const RunChips = component$<{
   chips: readonly RunChip[];
   answerAll: ViewAnswerAll;
   toggleRun: ViewToggleRun;
+  /** Opens a document the run proposes elsewhere, in a tab. DO_0034_007 */
+  open$?: QRL<(target: RunChipElsewhere["open"]) => void>;
   /** Whether a pointing stands: a chip's press then marks its whole
    * proposal. BO_0321_011 */
   pointing?: boolean;
-}>(({ itemId, chips, answerAll, toggleRun, pointing = false }) => {
+}>(({ itemId, chips, answerAll, toggleRun, open$, pointing = false }) => {
   const line = useSignal<HTMLElement>();
   const more = useStore({ start: false, end: false });
   // What the line has shown, and the chip the reader last pressed: a chip that
@@ -198,6 +200,27 @@ export const RunChips = component$<{
               </span>
             )}
           </button>
+          {chip.elsewhere !== undefined && chip.elsewhere.length > 0 && (
+            // What the run proposes outside this document, which *Accept all*
+            // and *Reject all* answer with the rest, each opening its
+            // document. DO_0034_007
+            <span class="run-chip__elsewhere" data-run-chip-elsewhere={chip.key}>
+              also creates{" "}
+              {chip.elsewhere.map((document, index) => (
+                <span key={document.open.itemId}>
+                  {index > 0 && ", "}
+                  <button
+                    type="button"
+                    class="run-chip__elsewhere-link"
+                    data-run-chip-elsewhere-open={document.open.itemId}
+                    onClick$={() => open$?.(document.open)}
+                  >
+                    {elsewhereWords(document)}
+                  </button>
+                </span>
+              ))}
+            </span>
+          )}
           {chip.session === true && (
             <button
               type="button"
@@ -266,3 +289,8 @@ export function markName(chip: RunChip): string {
   const whose = chip.session === true ? "your proposal" : `${chip.name}'s proposal`;
   return chip.reference === undefined ? `Mark ${whose}` : `Unmark ${whose}, reference ${chip.reference}`;
 }
+
+/** A document elsewhere as the chip says it: *the structure video-beat*, or
+ * *the document video-beat* where no extension names it. DO_0034_007 */
+export const elsewhereWords = (document: RunChipElsewhere): string =>
+  `the ${document.kind ?? "document"} ${document.title === "" ? "without a title" : document.title}`;

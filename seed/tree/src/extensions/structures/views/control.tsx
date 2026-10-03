@@ -15,6 +15,8 @@ import type { BlockDecorationProps, DocumentPlaceProps } from "~/contract";
 
 import {
   FIELD_TYPE_LABELS,
+  STRUCTURE_STRUCTURE,
+  isFile,
   structureState,
   type FieldDeclaration,
   type FieldValue,
@@ -22,6 +24,7 @@ import {
   type StructureView,
   type TakenStructure,
 } from "../lib/structures";
+import { StructureActs } from "./structure-acts";
 import { placePopover, type Box } from "../lib/placement";
 import { offerDistance, suggestStructures } from "../lib/suggest";
 import { valuesLine } from "../lib/values";
@@ -369,6 +372,100 @@ const CarryingReference = component$<{
   );
 });
 
+/**
+ * A reference holding several (`RO_0005_Q3`): each chosen document a pill
+ * with its own ×, and the documents carrying the structure chosen by title,
+ * the ones chosen left out. Each change posts the whole list.
+ */
+const CarryingReferences = component$<{
+  field: FieldDeclaration & { readonly carrying: string };
+  value: readonly string[];
+  titles: Readonly<Record<string, string>>;
+  common: Record<string, unknown>;
+  onValue$: (value: FieldValue) => void;
+}>(({ field, value, titles, common, onValue$ }) => {
+  const local = useStore({ open: false, typed: "", carriers: [] as Carrier[], note: "" });
+  const open$ = $(async () => {
+    local.open = true;
+    const response = await fetch(`/api/x/structures/structures/${encodeURIComponent(field.carrying)}/documents`).catch(() => null);
+    const answer = (await response?.json().catch(() => ({})) ?? {}) as { outcome?: string; result?: readonly Carrier[] };
+    local.carriers = answer.outcome === "success" ? [...(answer.result ?? [])] : [];
+    local.note = response === null || answer.outcome !== "success" ? "The documents could not be read." : local.carriers.length === 0 ? "No document uses that structure yet." : "";
+  });
+  const named = (id: string): string => titles[id] ?? local.carriers.find((one) => one.id === id)?.title ?? id;
+  const words = local.typed.trim().toLowerCase();
+  const shown = local.carriers
+    .filter((one) => !value.includes(one.id) && (words === "" || one.title.toLowerCase().includes(words)))
+    .slice(0, 8);
+  return (
+    <span class="structure-control__suggesting structure-control__several" data-field-carrying={field.key} data-field-several>
+      {value.length > 0 && (
+        <span class="structure-control__chosen">
+          {value.map((id) => (
+            <span key={id} class="structure-control__chosen-one" data-field-chosen={id}>
+              {named(id)}
+              <button
+                type="button"
+                class="structure-control__unchoose"
+                aria-label={`Remove ${named(id)}`}
+                preventdefault:mousedown
+                disabled={common["disabled"] === true}
+                onClick$={() => onValue$(value.filter((one) => one !== id))}
+              >
+                <Icon name="x" />
+              </button>
+            </span>
+          ))}
+        </span>
+      )}
+      <input
+        {...common}
+        type="text"
+        autoComplete="off"
+        placeholder="Add by title"
+        value={local.typed}
+        aria-expanded={local.open ? "true" : "false"}
+        onFocus$={open$}
+        onInput$={(_, element) => {
+          local.typed = element.value;
+        }}
+        onBlur$={() => {
+          local.open = false;
+          local.typed = "";
+        }}
+        onKeyDown$={(event) => {
+          if (event.key === "Escape") local.open = false;
+        }}
+      />
+      {local.open && (
+        <ul class="structure-control__offered" data-field-choices={field.key}>
+          {shown.map((one) => (
+            <li key={one.id}>
+              <button
+                type="button"
+                class="structure-control__match"
+                data-choice={one.id}
+                preventdefault:mousedown
+                onClick$={async () => {
+                  local.typed = "";
+                  await onValue$([...value, one.id]);
+                }}
+              >
+                {one.title === "" ? "Untitled" : one.title}
+              </button>
+            </li>
+          ))}
+          {local.note !== "" && (
+            <li class="structure-control__empty" data-choices-note>
+              {local.note}
+            </li>
+          )}
+        </ul>
+      )}
+    </span>
+  );
+});
+
 /** One field's input, by its type; a value is posted on commit. */
 const FieldInput = component$<{
   field: FieldDeclaration;
@@ -380,9 +477,12 @@ const FieldInput = component$<{
   context?: Readonly<Record<string, string>>;
   /** What a reference value is called. BO_0336_011 */
   title?: string;
+  /** What every node a reference names is called, for a reference holding
+   * several (RO_0005_Q3). */
+  titles?: Readonly<Record<string, string>>;
   onValue$: (value: FieldValue) => void;
   onRefusal$: (refusal: string) => void;
-}>(({ field, value, missing, disabled, context, title, onValue$, onRefusal$ }) => {
+}>(({ field, value, missing, disabled, context, title, titles, onValue$, onRefusal$ }) => {
   const id = `structure-field-${field.key}`;
   const label = (
     <label class="structure-control__field-label" for={id}>
@@ -439,7 +539,15 @@ const FieldInput = component$<{
       );
       break;
     case "reference":
-      input = field.carrying !== undefined ? (
+      input = field.many === true && field.carrying !== undefined ? (
+        <CarryingReferences
+          field={{ ...field, carrying: field.carrying }}
+          value={Array.isArray(value) ? (value as readonly string[]) : []}
+          titles={titles ?? {}}
+          common={common}
+          onValue$={onValue$}
+        />
+      ) : field.carrying !== undefined ? (
         <CarryingReference field={{ ...field, carrying: field.carrying }} value={value} title={title ?? (typeof value === "string" ? value : "")} common={common} onValue$={onValue$} />
       ) : (
         <input
@@ -454,7 +562,7 @@ const FieldInput = component$<{
     case "file":
       input = (
         <span class="structure-control__file">
-          {typeof value === "object" && value !== null && <span data-structure-file>{value.filename}</span>}
+          {isFile(value) && <span data-structure-file>{value.filename}</span>}
           <input
             {...common}
             type="file"
@@ -793,7 +901,9 @@ export const StructureControl = component$<{ place: Place; editing: boolean }>((
                         {structure.missing.length > 0 && <span class="structure-control__missing" title="A required value is missing">!</span>}
                         {note !== null && <span class="structure-control__note">{note}</span>}
                       </button>
-                      {structure.proposed !== "structure" && (
+                      {/* A structure stays one: Structure carries no ×
+                          (RO_0005_Q9). */}
+                      {structure.proposed !== "structure" && structure.id !== STRUCTURE_STRUCTURE && (
                         <button
                           type="button"
                           class="structure-control__clear"
@@ -819,6 +929,7 @@ export const StructureControl = component$<{ place: Place; editing: boolean }>((
                             disabled={state.busy}
                             context={contextOf(structure, place.blockId === "" ? [] : offeringStructures(structure.id))}
                             {...(referenceTitle(structure.values[field.key]) === undefined ? {} : { title: referenceTitle(structure.values[field.key]) as string })}
+                            titles={state.view?.referenceTitles ?? {}}
                             onValue$={(value) => value$(structure.id, field.key, value)}
                             onRefusal$={refuse$}
                           />
@@ -1046,6 +1157,7 @@ export const TitleStructureControl = component$<DocumentPlaceProps>(({ documentI
 
   const inherited = state.view?.inherited ?? [];
   const own = state.view?.structures ?? [];
+  const thisStructure = state.catalogue.find((structure) => structure.id === documentId);
   if (form === "compact")
     return (
       <CompactStructures
@@ -1077,6 +1189,10 @@ export const TitleStructureControl = component$<DocumentPlaceProps>(({ documentI
         <StructureControl place={{ documentId, blockId: "" }} editing={true} />
       </div>
       <ValuesLine structures={own} titles={state.view?.referenceTitles ?? {}} />
+      {/* A structure's document carries its acts beside its lines (RO_0005_004). */}
+      {own.some((structure) => structure.id === STRUCTURE_STRUCTURE) && thisStructure !== undefined && (
+        <StructureActs structure={thisStructure} state={state} documentId={documentId} />
+      )}
     </div>
   );
 });

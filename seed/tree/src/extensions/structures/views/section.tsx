@@ -8,13 +8,14 @@ import { inOrder, UNNAMED_STRUCTURE, type StructuresListing, type StructureView 
 
 /**
  * The Structures section (`BO_0299_012`, `BO_0309_015`): the structures, the built-ins
- * first, retired ones left out, each opening its own page, where the structure is
- * defined — its fields, what it offers, its defaults — and never assigned
- * (`BO_0318`). A built-in's row unfolds to the documents carrying it, each
+ * first, retired ones left out, each opening its document, where the structure
+ * is defined — its title, its description, its blocks using *Field*, what it
+ * allows — and never assigned (`BO_0318`, `RO_0005`). A built-in's row unfolds to the documents carrying it, each
  * opening as itself (`BO_0308_Q11`), and carries the `+` its owner
  * contributes, opening the owner's form — *Add source* on *Source*
- * (`BO_0313_011`). The section's own `+` creates a structure through this
- * extension's route and opens it.
+ * (`BO_0313_011`). The section's own `+` creates a structure — a document using
+ * *Structure* — through this extension's route and opens it: the one way a
+ * structure is made (`RO_0005_Q9`).
  */
 
 const EMPTY: StructuresListing = { reachable: false, structures: [] };
@@ -49,8 +50,9 @@ export const StructuresSection = component$<SectionProps>(({ data, activeItemId 
     state.reads += 1;
   });
 
+  // A structure is its document (RO_0005): it opens as any document does.
   const open$ = $((structure: StructureView) =>
-    bridge.openTarget$({ kind: "structures:documentRole", itemId: structure.id, title: structure.name }),
+    bridge.openTarget$({ kind: "documents:document", itemId: structure.id, title: structure.name }),
   );
 
   const unfold$ = $(async (structure: StructureView) => {

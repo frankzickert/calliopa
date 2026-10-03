@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { FieldDeclaration, TakenStructure } from "./structures";
 import { valuesLine, valueWords } from "./values";
+import { FORMAT_STRUCTURE } from "./structures";
 
 // The values line in a document's header (`DO_0030_005`): what a person
 // reads of each filled value, by its field's type.
@@ -52,11 +53,11 @@ describe("valueWords", () => {
 describe("valuesLine", () => {
   it("Given structures with filled and empty values, Then one entry per structure with any filled, values in field order", () => {
     const blog = structure("r-blog", "Blog post", [field("date", "date"), field("tag", "text"), field("slug", "text")], { date: "2026-10-12", slug: "header" });
-    const format = structure("builtin:format", "Format", [field("type", "choice"), field("schema", "longText")], { type: "PDF" });
+    const format = structure(FORMAT_STRUCTURE, "Format", [field("type", "choice"), field("schema", "longText")], { type: "PDF" });
     const empty = structure("r-story", "Story", [field("hook", "text")], {});
     expect(valuesLine([blog, empty, format], {}, "en-GB")).toEqual([
       { structure: "r-blog", name: "Blog post", values: ["12 Oct 2026", "header"] },
-      { structure: "builtin:format", name: "Format", values: ["PDF"] },
+      { structure: FORMAT_STRUCTURE, name: "Format", values: ["PDF"] },
     ]);
   });
 

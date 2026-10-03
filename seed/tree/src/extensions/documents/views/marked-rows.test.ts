@@ -159,9 +159,11 @@ describe("a selection marking several blocks", () => {
     await view.settle(() => view.body().hasAttribute("data-marks-several"));
     // Removing is the keys' now, never the top bar's. BO_0315_012
     expect(view.bar("block-retire")).toBeNull();
-    for (const id of ["block-role", "block-add-paragraph", "block-add-image", "block-add-table", "block-add-equation", "block-add-code", "block-import-table", "block-standing"]) {
+    for (const id of ["block-role", "block-add-paragraph", "block-add-image", "block-add-table", "block-add-equation", "block-add-code", "block-import-table"]) {
       expect(view.bar(id)?.hasAttribute("disabled"), id).toBe(true);
     }
+    // The bar carries no standing, a selection's included. DO_0031_001
+    expect(view.bar("block-standing")).toBeNull();
     await view.idle();
   });
 

@@ -58,6 +58,25 @@ describe("an output in a document", () => {
     const file = block.querySelector("[data-output-file='out.csv']") as HTMLAnchorElement;
     expect(file.getAttribute("href")).toBe(`/api/blobs/${"b".repeat(64)}`);
     expect(file.getAttribute("download")).toBe("out.csv");
+    // A runtime's output names no network and carries no mark.
+    expect(block.querySelector("[data-output-not-reproducible]")).toBeFalsy();
+  });
+
+  it("marks an output that read the network as not reproducible, naming what it read (BO_0319_046)", async () => {
+    const fetched: BlockView = {
+      ...output("blk-n", "b"),
+      outcome: "ok",
+      network: "hosts",
+      reproducible: false,
+      fetched: ["https://api.open-meteo.com/v1/forecast"],
+    } as BlockView;
+    const pure: BlockView = { ...output("blk-p", "c"), outcome: "ok", network: "none", reproducible: true } as BlockView;
+    const document: DocumentView = { documentId: "doc-1", revisionId: "rev-doc", title: "Notebook", blocks: [fetched, pure] };
+    vi.stubGlobal("fetch", documentsApi(document, []));
+    const view = await mountEditor(document);
+    const mark = view.root.querySelector("[data-output-block='blk-n'] [data-output-not-reproducible]");
+    expect(mark?.textContent).toBe("Not reproducible: it read https://api.open-meteo.com/v1/forecast");
+    expect(view.root.querySelector("[data-output-block='blk-p'] [data-output-not-reproducible]")).toBeFalsy();
   });
 });
 

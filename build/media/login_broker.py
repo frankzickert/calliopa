@@ -40,7 +40,6 @@ STATE = LOGIN_DIR / "state.json"
 
 HIGGSFIELD_BIN = os.environ.get("HIGGSFIELD_BIN", "higgsfield")
 OPENART_BIN = os.environ.get("OPENART_BIN", "openart")
-CALLBACK_PORT = int(os.environ.get("CALLIOPA_MEDIA_CALLBACK_PORT", "8765"))
 LOGIN_TIMEOUT_SECONDS = float(os.environ.get("CALLIOPA_MEDIA_LOGIN_TIMEOUT", "900"))
 POLL_SECONDS = float(os.environ.get("CALLIOPA_MEDIA_POLL_SECONDS", "2"))
 
@@ -132,8 +131,15 @@ def callback_of(url: str) -> tuple[int, str] | None:
 
 
 def argv_for(service: str) -> list[str]:
+    """The vendor's own login, on the port the vendor chose.
+
+    Higgsfield's sign-in server accepts a redirect to `localhost:8765` through
+    `8774` and refuses every other port, so its CLI is given no `--port`: it
+    takes its default `8765` and falls back inside that range. The port is
+    never published — the owner pastes the redirect back. BO_0342
+    """
     if service == "higgsfield":
-        return [HIGGSFIELD_BIN, "auth", "login", "--port", str(CALLBACK_PORT)]
+        return [HIGGSFIELD_BIN, "auth", "login"]
     return [OPENART_BIN, "login"]
 
 

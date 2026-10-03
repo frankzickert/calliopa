@@ -36,7 +36,7 @@ const statusRow = (party: string): ConnectionRecord => ({
 describe("the connections a place lists", () => {
   it("Given a device, Then the five keys are there, the subscriptions too, and the agent container's parties are not", () => {
     const device = ids("device");
-    for (const party of ["anthropic", "openai", "openrouter", "search", "embeddings", "codex", "claude-code"]) {
+    for (const party of ["anthropic", "openai", "openrouter", "search", "embeddings", "higgsfield", "codex", "claude-code"]) {
       expect(device).toContain(party);
     }
     expect(device).not.toContain("hermes");
@@ -45,7 +45,7 @@ describe("the connections a place lists", () => {
 
   it("Given an instance, Then nothing of a device's is listed and everything it listed before still is", () => {
     const instance = ids("instance");
-    for (const party of ["anthropic", "openai", "openrouter", "search", "embeddings"]) {
+    for (const party of ["anthropic", "openai", "openrouter", "search", "embeddings", "higgsfield"]) {
       expect(instance).not.toContain(party);
     }
     for (const party of ["hermes", "honcho", "codex", "claude-code", "evaluation"]) {
@@ -60,6 +60,12 @@ describe("the connections a place lists", () => {
       expect(party.probe?.test.url).toMatch(/^https:\/\//u);
     }
     expect(roster.find((party) => party.id === "anthropic")?.probe?.test.headers).toEqual({ "anthropic-version": "2023-06-01" });
+    // Higgsfield's key is presented as `Key <id>:<secret>`, and proven by a
+    // read that spends nothing: a request nobody made is 404 to a valid key.
+    // BO_0319_025
+    const higgsfield = roster.find((party) => party.id === "higgsfield")?.probe;
+    expect(higgsfield?.authorization).toEqual({ header: "Authorization", scheme: "Key", secretField: "apiKey" });
+    expect(higgsfield?.test).toMatchObject({ method: "GET", expectStatus: 404 });
   });
 });
 

@@ -173,6 +173,7 @@
           "humanWritesCostAConfirmation": "Every human-class write from the shell parks at the kernel bridge and waits for a confirmation on the kernel's own origin — no human mutation travels from the app origin to CCGW. Budget one cross-origin confirmation per write. That is proportionate for occasional truth like creating a channel and disproportionate for continuous editing, so a surface that writes on every keystroke needs a different shape than one that writes on a button.",
           "oneOpenProposalPerBlock": "A block carries at most one open proposal: every block type declares singleOpenCandidate, so a candidate of a block another open group already holds a candidate of is refused by the core — there is no second candidate to stage beside the first. Work bearing on such a block builds on the candidate that stands, staged into that group as a refinement (the document tools' refines; conventions.openProposals of ui.shell.documents), rather than opening a competing one, so the person answers once. Nothing here answers a proposal: accepting and rejecting stay the person's (proofsAreNotProposals). (BO_0271)",
           "proofsAreNotProposals": "Never stage a proposal whose intended outcome is rejection. A proof-only group is indistinguishable from a real one at the review surface — the rationale is rendered as ordinary text — so after a run of proposals that all deserved acceptance, one that did not will be accepted by the same motion. Construct demonstrations so the refusal is the whole proof and stop there: a refused mutation stages nothing and opens no group. Acceptance is the one non-delegable human action in the architecture and its entire value is the attention behind it, so anything that produces frequent near-identical almost-always-correct proposals is spending that attention down.",
+          "reportWhatStaged": "Your closing words report only what this run staged. Name each thing as proposed — a proposal the person accepts or rejects — never as done, created or changed before they accept it. Before you write that you made, changed or removed something, check that a tool call in this run answered success for it. When the command asks for something no tool you hold can do, or a tool refused it, say so plainly: name that part of the command and the refusal's words, and do not describe it as done or imply it will appear. A command carried out in part names what was staged and what was not. Staging nothing is a legitimate outcome and is said as such (the output contract). (BO_0343)",
           "understand": "Working mode understand: read more than you write. Trace definitions and dependencies, tell established material from open proposals, and answer with a map of what follows from what — relations with their reasons, and short explanatory blocks placed where the command asks. Leave the document's own blocks alone unless the command referenced them: rewriting, removing or moving an unreferenced established block is judged as having strayed. (BO_0306)",
           "valuesTravelAsParameters": "How a statement says values, which the grammar will not let you guess:\n- Every value beyond a scalar travels beside the statement in the tool call's parameters field, which is one JSON object written as text — for example parameters: \"{\\\"bid\\\": \\\"art-x.b1\\\", \\\"runs\\\": [{\\\"text\\\": \\\"...\\\"}]}\". The statement writes $name where a value belongs; lists and objects have no literal form inside the statement itself, and runs: [{text: ...}] inline is a parse error every time.\n- Every $name in the statement must have a key in that JSON object. An empty parameters value beside a parameterized statement is always wrong, and resending a refused statement without filling it changes nothing.\n- A script is one or more statements separated by semicolons; CREATE ... RELATE ... in one breath is a parse error at RELATE. Aliases scope per statement but parameters are request-global, so one parameters object serves the whole script: the canonical block write is CREATE (n:Text {id: $bid, runs: $runs, order: $order}); RELATE childRef -[r:CONTAINS]-> parentRef, with bid, runs, order, childRef and parentRef all keys of the one JSON object.\n- RELATE endpoint refs resolve from parameters — <ref>NodeId first, then <ref> — and those values carry the node: prefix (childRef: \"node:art-x.b1\"), even though the id property inside CREATE content is bare. The ref names an existing node; the id property mints one.\n- When syntax is uncertain, calliopa_explain compiles a statement without executing it. Explain and correct rather than retrying a refusal unchanged — the diagnostics name what they want.",
           "whereRequirementsLive": "An extension's requirements and open work live in its own docs/ members (docs/system/**/*.md under the live-line protocol), read through calliopa_query like its code. An extension's changes are its own docs/changes/ members (BO_0254): docs/changes/<PREFIX>_NNNN_TYPE_<short-name>.md in its subtree, finished ones under docs/changes/completed/, each carrying its status in a Status: line from idea, draft, ready, wip, completed, rejected. They are written and revised the way every other docs member is — from a checkout, in the proposal that carries the code — and rendered read-only in the shell's Extensions section. A run working from the composer holds no checkout and so writes none. A run that changes an extension's behaviour also updates its docs in the same proposal group and keeps its change document's Status: line honest — wip when it claims ready work, completed when the work is done; only a person establishes draft or ready, and acceptance is what establishes any status. (BO_0201, BO_0254)",
@@ -589,7 +590,10 @@
           "executionCount",
           "elapsed",
           "caption",
-          "numbered"
+          "numbered",
+          "network",
+          "reproducible",
+          "fetches"
         ],
         "permittedChildTypes": [],
         "permittedValues": {},
@@ -598,14 +602,17 @@
           "elapsed": "seconds the execution took",
           "execution": "the execution's id in the service's record",
           "executionCount": "the kernel's count for the execution, when it gave one",
+          "fetches": "each fetch the execution made on a device: {url, status, sha256, bytes} — the record of what the network gave it (BO_0319_046)",
           "files": "every file the execution wrote, each the core's blob reference with its filename",
           "id": "the block's identity, a UUID the shell mints; the node id is node:<id>",
           "items": "what the execution streamed, in order: each {kind} stream (name, text), error (name, value, traceback), display or result (data, a MIME bundle whose picture entries name an index into pictures; executionCount), cut (reason), clear",
+          "network": "what the network gave the execution on a device: none, or hosts for a block granted named hosts (BO_0319_046); absent from a runtime's execution",
           "numbered": "the author's ask for a number: true asks, absent asks none. The number itself is the document's order — figures (pictures and numbered outputs) and tables counted apart, in reading order — derived on every read and never stored (BO_0295); set by a person after accepting the output, and its first picture is then the figure",
           "of": "the id of the code block the execution ran",
           "order": "the block's place among its siblings, the same key text carries",
           "outcome": "how the execution ended: ok, error, interrupted, timed out, output cap",
-          "pictures": "every picture the items show, each the core's blob reference, hoisted here so the references are live"
+          "pictures": "every picture the items show, each the core's blob reference, hoisted here so the references are live",
+          "reproducible": "false once the execution fetched anything, so the same code may give another output; true on a device when it fetched nothing (BO_0319_046)"
         },
         "requiredProperties": [
           "id",
@@ -632,7 +639,8 @@
           "language",
           "continues",
           "caption",
-          "numbered"
+          "numbered",
+          "permissions"
         ],
         "permittedChildTypes": [],
         "permittedValues": {},
@@ -643,6 +651,7 @@
           "language": "the language the code is written in, such as python; the runtime's kernel decides what it runs",
           "numbered": "whether the block is numbered as a listing: true asks for a number, absent means none; the number itself is the document's order — listings counted in reading order apart from figures, tables and equations — and is never stored (BO_0303_007)",
           "order": "the block's place among its siblings, the same key text carries",
+          "permissions": "what the block may reach beyond compute on a device, granted by a person on the block: {attachments, hosts} — whether it reads the document's material at /attachments, and the hosts it may fetch from at /net/<host>/<path> over HTTPS; absent or empty is nothing (calliopa-bootstrap's BO_0319_046). A runtime's network is the code service's and reads none of it",
           "source": "the code itself, as text"
         },
         "requiredProperties": [
@@ -1201,20 +1210,23 @@
       "content": {
         "conventions": {
           "cost": "Quote before you generate and say the amount in the vendor's own words. Do not ask for a second confirmation.",
+          "fillTheInputs": "Fill each input from the command: the blocks the person marked with # (#1, #2 in the words), matched to the inputs by what the command and the format's words say; the picture above the block when the words point at nothing. Pass them to generate in inputs by name. Say in your answer which picture you used for which input.",
           "followJob": "A running job is not a finished picture or video. Keep collecting its existing job; never start a second job to retry collection.",
           "formatDecides": "The format the instruction names decides what is made and with what — provider, model, ratio and quality — and the variation the person chose beside Send, when there is one. Never name a model, a provider or an option in tool arguments, and never ask the person to choose one in words: a different result needs a variation or another format.",
+          "nameEveryInput": "Write the words the vendor is sent yourself, naming every attached input as @name where the words mean it (from @start to @end). generate refuses an attached input the words do not name; it never adds the name for you.",
           "oneAtATime": "Generate at most one image or video in a Send. A second generation requires another Send.",
-          "theBlockIsThePrompt": "Use the prompt block’s words unless the person or task supplies replacement words.",
-          "videoNeedsAPicture": "A video opens on the picture above the block. Make the picture in an earlier Send under an instruction whose format makes images, then send the words for the motion under one whose format makes video."
+          "readTheFormat": "Call read_format first. The format's words are instructions for using it: follow them. Its inputs say what it takes, each under a name the words must use as @name.",
+          "theBlockIsThePrompt": "Start from the prompt block's words unless the person or task supplies replacement words; add the @names the inputs need.",
+          "videoNeedsAPicture": "A video format declaring no input opens on the picture above the block, named @start in the words. Without a picture there, make the picture in an earlier Send under an instruction whose format makes images, then send the words for the motion under one whose format makes video."
         },
         "goal": "Generate one image or one video as the format the person's selected instruction names, then leave it in the Send's review group.",
         "id": "media.pictures",
         "outputContract": "A conclusion naming the generated image or video and its cost status; the pending block and its completed blob staged in the Send's review group.",
-        "permittedOperations": "media.generate once in the Send, then media.collect_generation with the returned pending block and job id until it completes. The kernel admits at most one spending tool call per Send.",
+        "permittedOperations": "media.read_format, media.quote_generation, then media.generate once in the Send, then media.collect_generation with the returned pending block and job id until it completes. The kernel admits at most one spending tool call per Send.",
         "preconditions": [
           "The Send carries an instruction whose Format field names a format of type image or video. If it names none, tell the person to choose a format on the instruction and do not call generate.",
           "The format's provider is signed in. If it is not, tell the person to sign in to it in Settings and do not call generate.",
-          "A video animates the nearest picture above the block: if there is none, say so and do not call generate.",
+          "Every required input has a picture or video you can tell from the command, or the picture above for a video format declaring none. If one has none, say which input is missing and do not call generate.",
           "The person has not said they do not want an image or a video."
         ]
       }
@@ -1253,7 +1265,7 @@
       "nodeId": "node:media.generate",
       "type": "ext.tool",
       "content": {
-        "description": "Generate one image or one video under this Send's instruction, made as the format the instruction names: its type says image or video, and its provider, model, ratio and quality — or those of the variation the person chose beside Send — say what it is made with. Name no model and no option; the format decides them. Use the block's words unless words is supplied. A video animates the nearest picture above the block. This is the one paid generation available per Send. It stages a pending image or video after the block and returns a job id; call collect_generation with that job and block until it completes. With no format on the instruction it refuses, and you tell the person to choose a format on the instruction.",
+        "description": "Generate one image or one video under this Send's instruction, made as the format the instruction names: its type says image or video, and its provider, model, ratio and quality — or those of the variation the person chose beside Send — say what it is made with. Name no model and no option; the format decides them. Read the format with read_format first. Attach each input it takes in inputs, by name: the picture or video block the person marked with # for it, or the picture above the block when the command points at nothing. Write the words yourself, naming every attached input as @name where the words mean it (@start). A video format declaring no input takes the picture above the block as @start. It refuses, before anything is spent, an input the format does not declare, a block of the wrong kind, a required input not given and an attached input the words do not name. This is the one paid generation available per Send. It stages a pending image or video after the block and returns a job id; call collect_generation with that job and block until it completes. With no format on the instruction it refuses, and you tell the person to choose a format on the instruction.",
         "id": "media.generate",
         "inputSchema": {
           "additionalProperties": false,
@@ -1262,8 +1274,15 @@
               "description": "The text block whose words form the prompt; the image or video is placed after it.",
               "type": "string"
             },
+            "inputs": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Each input the format takes, by its name: the id of the picture or video block for it, or <document id>/<block id> for a block of another document a # reference points into.",
+              "type": "object"
+            },
             "words": {
-              "description": "Optional replacement prompt words.",
+              "description": "The words the vendor is sent, naming each attached input as @name. Without them the block's own words are sent.",
               "type": "string"
             }
           },
@@ -1282,13 +1301,24 @@
       "nodeId": "node:media.quote_generation",
       "type": "ext.tool",
       "content": {
-        "description": "What the picture or moving picture this Send's instruction would make costs, before anyone makes it: the format the instruction names, with the variation chosen beside Send, decides the service, the model and the options. Free: nothing is spent by asking. Use it before you generate, so the cost is in front of the person when they decide.",
+        "description": "What the picture or moving picture this Send's instruction would make costs, before anyone makes it: the format the instruction names, with the variation chosen beside Send, decides the service, the model and the options. Free: nothing is spent by asking. Use it before you generate, with the words, the block and the inputs you will generate with, so the cost is in front of the person when they decide.",
         "id": "media.quote_generation",
         "inputSchema": {
           "additionalProperties": false,
           "properties": {
+            "block": {
+              "description": "The prompt block, for a video format declaring no input, whose start frame is the picture above it.",
+              "type": "string"
+            },
+            "inputs": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Each input the format takes, by its name: the id of the picture or video block for it, or <document id>/<block id> for a block of another document a # reference points into.",
+              "type": "object"
+            },
             "prompt": {
-              "description": "The words the picture would be made from.",
+              "description": "The words the picture or video would be made from, naming each attached input as @name.",
               "type": "string"
             }
           },
@@ -1299,6 +1329,22 @@
         },
         "name": "quote_generation",
         "route": "kernel/tools/quote_generation"
+      }
+    },
+    {
+      "extension": "media",
+      "nodeId": "node:media.read_format",
+      "type": "ext.tool",
+      "content": {
+        "description": "What this Send's format is and how it is used, before you write the words a picture or video is made from. Free: nothing is spent. It answers the format's title, type, provider and model, the variation chosen beside Send, the format's own words — instructions for using it, which you follow — and each input it takes: its name (the @name the words must use), its kind (a start frame, an end frame, a reference image, video or audio), whether it is required, and what its words say it is for. A video format declaring no input takes the picture above the block as @start.",
+        "id": "media.read_format",
+        "inputSchema": {
+          "additionalProperties": false,
+          "properties": {},
+          "type": "object"
+        },
+        "name": "read_format",
+        "route": "kernel/tools/read_format"
       }
     },
     {
@@ -1595,6 +1641,50 @@
     },
     {
       "extension": "structures",
+      "nodeId": "node:migration-me-0002-input-structure",
+      "type": "ext.migration",
+      "content": {
+        "after": [
+          "migration-ro-0005-structures-as-documents"
+        ],
+        "id": "migration-me-0002-input-structure",
+        "migrates": [
+          "document",
+          "roleFields",
+          "text"
+        ],
+        "rationale": "ME_0002_002: the built-in Input — a format's input, allowed by Format by the release — reaches an instance whose structures are documents already. Its document is made from the release under its fixed id where the instance holds none, with its release fields Kind, Name and Required as blocks using Field; Format allows it by the release, which the catalogue reads. The route answers nothing where Input stands, as on an instance that took structures-as-documents with it. The kernel runs it once per instance when it serves the pin that carries it.",
+        "route": "kernel/migrations/input-structure"
+      }
+    },
+    {
+      "extension": "structures",
+      "nodeId": "node:migration-ro-0005-structures-as-documents",
+      "type": "ext.migration",
+      "content": {
+        "after": [
+          "migration-bo-0309-one-role-type",
+          "migration-bo-0309-builtin-roles",
+          "migration-bo-0310-keyword-builtins",
+          "migration-bo-0312-format-fields",
+          "migration-bo-0313-source-fields",
+          "migration-bo-0336-variation",
+          "migration-bo-0336-generation-fields",
+          "migration-bo-0338-builtin-names"
+        ],
+        "id": "migration-ro-0005-structures-as-documents",
+        "migrates": [
+          "blockRole",
+          "document",
+          "roleFields",
+          "text"
+        ],
+        "rationale": "RO_0005_002: a structure is a document. Every blockRole becomes a document using the built-in Structure: its name the title, its description the first block, each field a block using Field under the key it had, what it allowed and whether blocks may use it values of Structure, the ids it had kept; the built-ins are made from the release under their fixed ids where the instance holds none; every hasBlockRole to an old node is related again to its document and every roleFields for it names the document. The route answers one script, nothing once every structure is a document. It runs after this extension's own migrations that write structures as nodes; the extensions depending on structures run theirs after it. The kernel runs it once per instance when it serves the pin that carries it (BO_0312_003).",
+        "route": "kernel/migrations/structures-as-documents"
+      }
+    },
+    {
+      "extension": "structures",
       "nodeId": "node:fieldsFor",
       "type": "ext.relationtype",
       "content": {
@@ -1649,6 +1739,7 @@
       "type": "ext.skill",
       "content": {
         "conventions": {
+          "aStructureIsADocument": "A structure is itself a document using Structure (read_document_structures says so of it): its title names it, its other blocks describe it, and each block using Field is one of its fields, its words the field's name and Field's values its type, whether it is required, its options and its default. To propose a structure, start a document for it and propose Structure on that document with propose_structures; to propose a field, propose a block in a structure's document and give it Field with its values. Structure is never proposed on a block, and a built-in's fields are the release's. It stands only once the person accepts it. A propose_structures that is refused, or whose staging is answered as refused, proposed nothing: tell the person what was refused and why, and never that the structure stands.",
           "allowedFromAbove": "A structure allows other structures: a block can use a structure that a structure used above it allows, at any depth, and a structure no structure allows on any block.",
           "documentRolesOnTheDocument": "A structure marked documentOnly — Keyword, Instruction, Format and Source always — is used by the document alone: propose it on the document, never on a block, and propose_structures refuses it on a block. A block's structure marked notOnBlock was used before the structure became the document's alone; leave it unless the person asks you to clear it. A part that should use a document structure on its own is a block's focused work, whose document uses it.",
           "profileSaysHow": "An instruction may say how a structure is written; its own blocks can use the same structures. Where the instruction speaks to a structure, follow it; where it is silent, the structure's description, its fields and its name are the guide.",

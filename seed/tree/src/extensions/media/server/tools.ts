@@ -2,12 +2,13 @@ import { call } from "~/server/kernel/client";
 import { blobReference, putBlob } from "~/server/ccgw/blobs";
 import { withBranch } from "~/server/ccgw/branch-scope";
 import { withRunGrant } from "~/server/request-context";
-import { composeMediaFill, composeMediaInsert } from "~/extensions/documents/server/documents";
+import { composeMediaFill, composeMediaInsert, readDocument } from "~/extensions/documents/server/documents";
+import { runsText } from "~/lib/runs";
 
 import { anyGeneratorSignedIn } from "./source";
-import { pictureAbove, promptOf, startFrame, type ReferenceBytes } from "./make";
+import { madeBlock, pictureAbove, promptOf, referenceBytes, type ReferenceBytes } from "./make";
 import { roster, SERVICES } from "./media";
-import { readFormat, type GenerationFormat } from "./format";
+import { guideOf, readFormat, type FormatInput, type GenerationFormat } from "./format";
 import { qualityAxisOf, RATIO_AXES } from "./suggestions";
 
 /**
@@ -104,14 +105,147 @@ async function quoteGeneration(request: ToolCall): Promise<ToolAnswer> {
   const format = await formatToMake(request);
   const prompt = text(request.input["prompt"]);
   if (prompt === "") throw new ToolRefusal("Give the words the picture would be made from.");
+  // Quoted with what the generation would attach, so the amount is the
+  // request's (ME_0002_012).
+  const references = await referencesFor(request, format, prompt);
   const options = optionsOf(format);
   const answer = await call("/__kernel/media/quote", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ service: format.provider, kind: format.kind, model: format.model, prompt, ...(Object.keys(options).length === 0 ? {} : { options }) }),
+    body: JSON.stringify({
+      service: format.provider,
+      kind: format.kind,
+      model: format.model,
+      prompt,
+      ...(references.length === 0 ? {} : { references }),
+      ...(Object.keys(options).length === 0 ? {} : { options }),
+    }),
   });
   if (!answer.ok) throw new ToolRefusal(await refusalOf(answer, "The media service is not answering."));
   return { result: { format: format.title, service: format.provider, model: format.model, ...(await answer.json()) } };
+}
+
+/** An input the call names: a block of this Send's document, or of the one a
+ * `#` reference points into. */
+interface Named {
+  readonly block: string;
+  readonly document?: string;
+}
+
+const namedOf = (value: unknown): Named | null => {
+  const said = text(value);
+  if (said === "") return null;
+  const at = said.indexOf("/");
+  return at < 0 ? { block: said } : { document: said.slice(0, at), block: said.slice(at + 1) };
+};
+
+const KIND_WORDS: Readonly<Record<FormatInput["role"], string>> = {
+  start: "a start frame",
+  end: "an end frame",
+  image: "a reference image",
+  video: "a reference video",
+  audio: "a reference audio",
+};
+
+/**
+ * What a generation attaches (`ME_0002_012`): each input the call names in
+ * `inputs`, checked against the format, read as bytes under its name and its
+ * kind. A video format declaring no input takes the picture above the block
+ * as `start`, as it always has. Every refusal comes before anything is
+ * composed or spent: a name the format does not declare; a block that is not
+ * a made picture for a picture's kind or a made video for a video's; audio,
+ * which no block holds; a required input not given; and a given one the words
+ * do not name as `@<name>`. The name is never added to the words here: the
+ * run writes the words (`ME_0002_Q4`).
+ */
+async function referencesFor(request: ToolCall, format: GenerationFormat, prompt: string): Promise<readonly ReferenceBytes[]> {
+  const asked = request.input["inputs"];
+  const given = typeof asked === "object" && asked !== null ? (asked as Record<string, unknown>) : {};
+  const declared = format.inputs.map((input) => input.name);
+  for (const name of Object.keys(given)) {
+    if (!declared.includes(name)) {
+      throw new ToolRefusal(
+        declared.length === 0
+          ? `${format.title} takes no inputs, so ${name} cannot be attached.`
+          : `${format.title} takes no input ${name}; it takes ${declared.join(", ")}.`,
+      );
+    }
+  }
+  const documentId = request.run.document ?? "";
+  const references: ReferenceBytes[] = [];
+  for (const input of format.inputs) {
+    const named = namedOf(given[input.name]);
+    if (named === null && input.block === undefined) {
+      // A video declaring no input opens on the picture above (BO_0273_045);
+      // a quote naming no block is quoted without it.
+      const blockId = text(request.input["block"]);
+      if (blockId === "") continue;
+      const above = await pictureAbove(documentId, blockId);
+      if (above === null) throw new ToolRefusal("A video is made from a picture, and there is none above this block to animate. Make a picture first.");
+      if (!mentions(prompt, input.name)) throw new ToolRefusal(unnamed(input.name));
+      const bytes = await referenceBytes(input.name, input.role, above);
+      if (bytes === null) throw new ToolRefusal("The picture above this block could not be read.");
+      references.push(bytes);
+      continue;
+    }
+    if (named === null) {
+      if (input.required) throw new ToolRefusal(`${format.title} needs ${KIND_WORDS[input.role]}, ${input.name}, and the command points at none: mark one with # and send again.`);
+      continue;
+    }
+    if (input.role === "audio") throw new ToolRefusal(`${input.name} is ${KIND_WORDS.audio}, and no block holds audio to attach.`);
+    const made = await madeBlock(named.document ?? documentId, named.block);
+    const wants = input.role === "video" ? "video" : "image";
+    if (made === null || made.kind !== wants) {
+      throw new ToolRefusal(`${input.name} is ${KIND_WORDS[input.role]}, so it takes a ${wants === "image" ? "picture" : "video"}, and the block given for it is not one.`);
+    }
+    if (made.objectId === undefined) throw new ToolRefusal(`The ${wants === "image" ? "picture" : "video"} given for ${input.name} is not made yet.`);
+    if (!mentions(prompt, input.name)) throw new ToolRefusal(unnamed(input.name));
+    const bytes = await referenceBytes(input.name, input.role, { objectId: made.objectId, mediaType: made.mediaType });
+    if (bytes === null) throw new ToolRefusal(`The ${wants === "image" ? "picture" : "video"} given for ${input.name} could not be read.`);
+    references.push(bytes);
+  }
+  return references;
+}
+
+/** Whether the words name an input as the vendor's model reads it. */
+const mentions = (prompt: string, name: string): boolean => new RegExp(`@${name}(?![A-Za-z0-9_-])`, "u").test(prompt);
+
+const unnamed = (name: string): string =>
+  `The words do not name @${name}: write @${name} where the words mean that input, and call again.`;
+
+/**
+ * What the run's format is and how it is used (`ME_0002_011`), free: its
+ * type, provider and model, the variation chosen, its own words and each
+ * input's — its name, its kind, whether it is required and what its words
+ * say it is for. A run reads it before it writes the words a generation is
+ * made from.
+ */
+async function readFormatTool(request: ToolCall): Promise<ToolAnswer> {
+  const read = await readFormat(request.run);
+  if (!read.ok) throw new ToolRefusal(read.refusal);
+  const format = read.format;
+  const guide = await guideOf(format, async (documentId) => {
+    const document = await readDocument(documentId);
+    if (document.outcome !== "success") return [];
+    return document.result.blocks.map((block) => ({ blockId: block.blockId, words: block.kind === "text" ? runsText(block.runs).trim() : "" }));
+  });
+  return {
+    result: {
+      format: format.title,
+      type: format.type,
+      provider: format.provider,
+      model: format.model,
+      ...(format.variation === undefined ? {} : { variation: format.variation }),
+      words: guide.words,
+      inputs: format.inputs.map((input) => ({
+        name: input.name,
+        kind: KIND_WORDS[input.role],
+        required: input.required,
+        for: guide.inputs[input.name] ?? "",
+        ...(input.block === undefined ? { taken: "the picture above the block, unless the call names another" } : {}),
+      })),
+    },
+  };
 }
 
 /**
@@ -134,18 +268,10 @@ async function generate(request: ToolCall): Promise<ToolAnswer> {
   const prompt = text(request.input["words"]) || await promptOf(documentId, blockId);
   if (prompt === "") throw new ToolRefusal(`This block has no words to make ${kind === "video" ? "a video" : "an image"} from.`);
 
-  // A video opens on a picture: neither generator makes a clip from words
-  // alone. BO_0273_045
-  let references: readonly ReferenceBytes[] = [];
-  if (kind === "video") {
-    const picture = await pictureAbove(documentId, blockId);
-    if (picture === null) {
-      throw new ToolRefusal("A video is made from a picture, and there is none above this block to animate. Make a picture first.");
-    }
-    const bytes = await startFrame(picture);
-    if (bytes === null) throw new ToolRefusal("The picture above this block could not be read.");
-    references = [bytes];
-  }
+  // What the format takes, checked and read before anything is composed or
+  // spent: a video opens on a picture, since neither generator makes a clip
+  // from words alone. BO_0273_045 ME_0002_012
+  const references = await referencesFor(request, format, prompt);
 
   const service = format.provider;
   const { model } = format;
@@ -228,6 +354,7 @@ async function collectGeneration(request: ToolCall): Promise<ToolAnswer> {
 }
 
 export const TOOLS = {
+  read_format: readFormatTool,
   quote_generation: quoteGeneration,
   generate,
   collect_generation: collectGeneration,

@@ -109,7 +109,33 @@
    * the whole bar. Same expression as a block row's clearance, so the space
    * above the headline cannot drift from the space above a block. */
   padding: calc(var(--block-bar-height) + 0.5rem)
-    calc(var(--editor-region-inset, 0px) + 0.25rem) 2rem;
+    calc(var(--editor-region-inset, 0px) + 0.25rem) var(--block-surface-end);
+  /* The bottom padding, named because the rest of the surface reaches over
+   * it: the gap holds the document off the region's edge, not off the
+   * reader's press. */
+  --block-surface-end: 2rem;
+  /* A column so the rest below the document can take the height the
+   * document leaves. The document itself is one block flow inside it
+   * (`.document-flow`), so no margin that collapsed before stops collapsing.
+   * DO_0028_001 */
+  display: flex;
+  flex-direction: column;
+}
+
+.document-flow {
+  flex: none;
+}
+
+/* The rest of the surface below the document, down to its bottom edge,
+ * including the padding: a press there starts writing as the area below the
+ * last block does, and a drag lands there last. DO_0028_001 */
+.document-rest {
+  flex: 1 0 var(--block-surface-end);
+  margin: 0 0 calc(-1 * var(--block-surface-end));
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: text;
 }
 
 /* The document's header (DO_0030_002): the route, the title and the lines
@@ -418,21 +444,39 @@ blockquote.block-text {
 
 /* A document that says nothing yet: a blank page, not a row reporting that a
  * block is empty. The hint sits where the first line will be, so the caret
- * arrives where the reader was already looking. */
+ * arrives where the reader was already looking: the page holds the gutters a
+ * block row holds, and the hint the box a block's text has, so its words
+ * begin at the first block's text origin. A column with its content at the
+ * top, because a button otherwise centres what it holds. DO_0028_001 */
 .document-empty {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: stretch;
+  box-sizing: border-box;
   width: 100%;
   min-height: 12rem;
   margin: 0;
-  padding: 0.15rem 0.35rem;
-  border: 1px solid transparent;
+  padding-block: 0;
+  padding-inline: var(--block-grip-gutter) var(--block-trailing-gutter);
+  border: 0;
   background: transparent;
   font: inherit;
   text-align: left;
   cursor: text;
 }
 
+/* A row's own drop mark stands at its top with its margins collapsed away;
+ * the page's does the same, so the hint below it is placed as a row's text. */
+.document-empty > .drop-mark {
+  margin: 0;
+}
+
 .document-empty__hint {
+  display: block;
+  margin: 0.25rem 0;
+  padding: 0.15rem 0.35rem;
+  border: 1px solid transparent;
   color: var(--text-muted);
   font-family: var(--font-narrative);
   font-size: 1rem;
@@ -1629,26 +1673,27 @@ hr[data-block-divider] {
 }
 
 /* A block's command control, below its bottom border where proposals and the
- * agent's mark put their line: left-aligned, inset by the gutter, its middle
- * 0.9375rem (15px) under the edge so it covers little of the block being
- * edited, and out of the flow, so showing it moves no block. One compact line —
- * the agent, its speed, the two mode toggles, Point from this block, Attach
- * files, the chips of what the command carries, Keep as content and Send —
- * wrapping onto a second line where the row is too narrow, as on a phone.
- * Its middle is set without a transform: a zero-height column 0.9375rem under
- * the edge, whose content overflows it equally above and below. A transform
- * would make the control the box a fixed descendant is placed in, and the
- * roles sheet on a phone is fixed to the screen (RO_0002, after the walk).
- * BO_0267_012 DO_0025_005 */
+ * agent's mark put their line: left-aligned, inset by the gutter, hanging from
+ * the edge so it never covers the block being edited, and out of the flow, so
+ * showing it moves no block. One compact line — the agent, its speed, the two
+ * mode toggles, Point from this block, Attach files, the chips of what the
+ * command carries, Keep as content and Send — wrapping onto a second line
+ * where the row is too narrow, as on a phone. A zero-height column on the
+ * edge whose content overflows it downward only: one row stands where it
+ * always stood, its top 1px under the edge and its middle 15px under it, and
+ * every further row, and the `#` list, grows over the next block. No transform: it would make the control
+ * the box a fixed descendant is placed in, and the roles sheet on a phone is
+ * fixed to the screen (RO_0002, after the walk).
+ * BO_0267_012 DO_0025_005 DO_0033_001 */
 .block-command {
   position: absolute;
-  top: calc(100% + 0.9375rem);
+  top: calc(100% + 1px);
   left: var(--block-grip-gutter);
   right: var(--block-grip-gutter);
   height: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   z-index: 3;
   pointer-events: none;
 }
@@ -1686,12 +1731,15 @@ hr[data-block-divider] {
 }
 
 /* The list a `#` opens (BO_0300_005; restyled after the walk, 2026-09-25): a
-   raised panel above the command line, scrolling when the document has more
-   blocks than fit, each entry one row — its icon, the label the reference
-   will read as, and a glimpse of the block's words. */
+   raised panel below the command row, over the following blocks, so neither
+   the block nor the words being typed are covered; scrolling when the
+   document has more blocks than fit, each entry one row — its icon, the label
+   the reference will read as, and a glimpse of the block's words. It never
+   shrinks in the zero-height column it hangs in. DO_0033_002 */
 .block-command__references {
+  flex: none;
   list-style: none;
-  margin: 0 0 0.375rem;
+  margin: 0.375rem 0 0;
   padding: 0.25rem;
   min-width: min(24rem, 90vw);
   max-width: min(38rem, 95vw);
@@ -1861,14 +1909,13 @@ hr[data-block-divider] {
   white-space: nowrap;
 }
 
-/* A refusal floats under the line, over what follows, and moves nothing. */
+/* A refusal floats under the line, over what follows, and moves nothing: the
+   next item down the column the control hangs in. DO_0033_001 */
 .block-command__notice {
-  position: absolute;
-  top: calc(100% + 0.2rem);
-  inset-inline-start: 0;
-  z-index: 4;
+  flex: none;
+  align-self: flex-start;
   max-width: 100%;
-  margin: 0;
+  margin: 0.2rem 0 0;
   padding: 0.2rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: 0.4rem;
@@ -2446,6 +2493,12 @@ hr[data-block-divider] {
   color: var(--text-muted, inherit);
 }
 
+/* An output that read the network says so beside how it ended. BO_0319_046 */
+.output-block__unreproducible {
+  margin-inline-start: 0.5rem;
+  color: var(--warning, inherit);
+}
+
 .output-block__stream,
 .output-block__error,
 .output-block__text {
@@ -2702,7 +2755,9 @@ hr[data-block-divider] {
      padding is the bar's height and a row's clearance (`.block-surface`): the
      clearance taken back puts the line directly under the bar. Measured. */
   top: -0.5rem;
-  z-index: 20;
+  /* Over every layer of the document (4 at most) and under the shell's
+     panels, which open over the document on a phone from 10 up. BO_0343_010 */
+  z-index: 5;
   height: 0;
 }
 

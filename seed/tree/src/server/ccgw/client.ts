@@ -1,5 +1,5 @@
 import type { GraphOutcome } from "../outcome";
-import { currentBranch, currentDataRevision, outsideBranch } from "./branch-scope";
+import { currentBranch, currentDataRevision, currentRun, outsideBranch } from "./branch-scope";
 import { port } from "../port";
 import { forwardedHeaders } from "../request-context";
 
@@ -94,6 +94,8 @@ interface Envelope {
   readonly dataRevision?: number;
   readonly confirmUrl?: string;
   readonly pending?: string;
+  /** A batch of member decisions answers each member. BO_0343_002 */
+  readonly members?: readonly MemberOutcome[];
 }
 
 async function post(
@@ -139,14 +141,21 @@ export async function query(read: GraphRead): Promise<GraphOutcome<ReadResult>> 
   // of its own; a branch nobody has staged into yet has no group, and reads
   // as truth, which is what an empty branch is. BO_0250_011
   const branch = read.proposalOverlay === undefined ? currentBranch() : undefined;
-  const overlay = read.proposalOverlay ?? branch;
+  // A run's callback reads at the run's pin through its group, whether the
+  // read names the pin or none; a read at another revision reads truth
+  // there. BO_0344_004
+  const pinned = read.dataRevision ?? currentDataRevision();
+  const scope = currentRun();
+  const run = scope !== undefined && (pinned === undefined || pinned === scope.pin) ? scope : undefined;
+  const overlay = read.proposalOverlay ?? branch ?? run?.overlay;
+  const dataRevision = pinned ?? run?.pin;
   let answer;
   try {
     answer = await post(port.gateway, "/v1/cypher/query", {
       statement: read.statement,
       parameters: read.parameters ?? {},
       ...(read.roots === undefined ? {} : { roots: read.roots }),
-      ...((read.dataRevision ?? currentDataRevision()) === undefined ? {} : { dataRevision: read.dataRevision ?? currentDataRevision() }),
+      ...(dataRevision === undefined ? {} : { dataRevision }),
       ...(overlay === undefined ? {} : { proposalOverlay: overlay }),
       ...(read.proposalOverlayRejected === true ? { proposalOverlayRejected: true } : {}),
       ...(read.unbounded === true ? { unbounded: true } : {}),
@@ -396,6 +405,43 @@ export async function decideGroup(decision: Decision, proposal: string, rational
     return { outcome: "refused", detail: `this gather needs the kernel's confirmation: ${envelope.confirmUrl ?? ""}` };
   }
   if (status === 409 || status === 422) return { outcome: "refused", detail: describe(envelope, "the kernel refused the gather") };
+  return { outcome: "storageError", detail: describe(envelope, `the kernel answered ${status}`) };
+}
+
+/** One member's outcome in a batch: decided (`success`), left open as drifted
+ * or stale (`conflict`) or refused (`refused`), or left undecided because it
+ * keeps the kernel's confirmation (`confirm`). BO_0343_002 */
+export interface MemberOutcome {
+  readonly member: string;
+  readonly status: "success" | "conflict" | "refused" | "confirm";
+  readonly code?: string;
+  readonly detail?: string;
+}
+
+/**
+ * Member decisions on one group in one request to the bridge (`BO_0343_002`):
+ * the kernel decides each member in order as `decide` would, without stopping
+ * at one it cannot decide, and parks nothing. Answers each member's outcome.
+ */
+export async function decideMembers(
+  decision: Decision,
+  proposal: string,
+  members: readonly string[],
+  rationale: string,
+): Promise<GraphOutcome<readonly MemberOutcome[]>> {
+  let answer;
+  try {
+    answer = await post(port.kernel, `/__kernel/review/${decision}`, { proposal, members, rationale });
+  } catch (error) {
+    return { outcome: "storageError", detail: `the kernel is unreachable: ${String(error)}` };
+  }
+  const { status, envelope } = answer;
+  if (status === 200 && envelope.status === "success" && envelope.members !== undefined) {
+    return { outcome: "success", result: envelope.members };
+  }
+  if (status === 400 || status === 409 || status === 422) {
+    return { outcome: "refused", detail: describe(envelope, "the kernel refused the decisions") };
+  }
   return { outcome: "storageError", detail: describe(envelope, `the kernel answered ${status}`) };
 }
 

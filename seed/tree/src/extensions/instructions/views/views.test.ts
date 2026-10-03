@@ -1,9 +1,10 @@
 import { $, component$, jsx, useContextProvider, useStore, type JSXOutput } from "@builder.io/qwik";
 import { createDOM } from "@builder.io/qwik/testing";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ActionControl } from "~/components/shell/inspector";
-import { ViewBridgeContext, type ViewBar, type ViewBridge } from "~/components/shell/view-bridge";
+import { afterSend, optionsOf, ViewBridgeContext, type ViewBar, type ViewBridge } from "~/components/shell/view-bridge";
 
 import type { GrantView, InstructionChoices, InstructionGrants, InstructionTools } from "../lib/instructions";
 import { InstructionChip } from "./chip";
@@ -64,7 +65,8 @@ const setOption$ = $((name: string, value: string | null) => {
   options.push({ name, value });
 });
 
-const chip = () => jsx(InstructionChip, { documentId: "doc-1", blockId: "blk-1", revisionId: "rev-1", active: true, setOption$ });
+const chip = (commandOptions?: Readonly<Record<string, string>>) =>
+  jsx(InstructionChip, { documentId: "doc-1", blockId: "blk-1", revisionId: "rev-1", active: true, setOption$, ...(commandOptions === undefined ? {} : { commandOptions }) });
 
 afterEach(() => {
   options.length = 0;
@@ -82,9 +84,12 @@ describe("the instruction in the command chip", () => {
     const asked: string[] = [];
     vi.stubGlobal("fetch", answering({ reachable: true, isInstruction: false, instructions: [blog, exploration, archive], last: blog.id }, asked));
     const { root, settle, dom } = await mount(chip());
-    await settle(() => root.querySelector("[data-instruction-toggle]") !== null && options.length > 0);
+    await settle(() => root.querySelector("[data-instruction-toggle]") !== null && options.length > 1);
     expect(asked).toEqual(["/api/x/instructions/documents/doc-1/blocks/blk-1/choices"]);
-    expect(options).toEqual([{ name: "instruction", value: blog.id }]);
+    expect(options).toEqual([
+      { name: "instruction", value: blog.id },
+      { name: "no-instruction", value: null },
+    ]);
     expect(root.querySelector("[data-instruction-toggle]")?.getAttribute("title")).toBe("Instruction: Blog post");
 
     await dom.userEvent("[data-instruction-toggle]", "click");
@@ -95,15 +100,21 @@ describe("the instruction in the command chip", () => {
     expect(root.querySelector(`[data-instruction-option="${blog.id}"]`)?.getAttribute("aria-pressed")).toBe("true");
 
     await dom.userEvent(`[data-instruction-option="${exploration.id}"]`, "click");
-    await settle(() => options.length > 1);
-    expect(options[1]).toEqual({ name: "instruction", value: exploration.id });
+    await settle(() => options.length > 3);
+    expect(options.slice(2)).toEqual([
+      { name: "instruction", value: exploration.id },
+      { name: "no-instruction", value: null },
+    ]);
     expect(root.querySelector("[data-instruction-popover]")).toBeFalsy();
 
     await dom.userEvent("[data-instruction-toggle]", "click");
     await settle(() => root.querySelector("[data-instruction-popover]") !== null);
     await dom.userEvent('[data-instruction-option=""]', "click");
-    await settle(() => options.length > 2);
-    expect(options[2]).toEqual({ name: "instruction", value: null });
+    await settle(() => options.length > 5);
+    expect(options.slice(4)).toEqual([
+      { name: "instruction", value: null },
+      { name: "no-instruction", value: "chosen" },
+    ]);
     expect(root.querySelector("[data-instruction-toggle]")?.getAttribute("title")).toBe("No instruction");
   });
 
@@ -117,6 +128,31 @@ describe("the instruction in the command chip", () => {
     await gone.settle(() => gone.root.querySelector("[data-instruction-toggle]") !== null);
     expect(gone.root.querySelector("[data-instruction-toggle]")?.getAttribute("title")).toBe("No instruction");
     expect(options).toEqual([]);
+  });
+
+  it("Given a command carrying a choice, When the chip is drawn again, Then it keeps the choice over the person's last and Send carries it (PF_0001_002)", async () => {
+    vi.stubGlobal("fetch", answering({ reachable: true, isInstruction: false, instructions: [blog, exploration, archive], last: blog.id }));
+    const chosen = { instruction: exploration.id };
+    const again = await mount(chip(chosen));
+    await again.settle(() => again.root.querySelector("[data-instruction-toggle]") !== null);
+    await again.settle(() => false);
+    expect(again.root.querySelector("[data-instruction-toggle]")?.getAttribute("title")).toBe("Instruction: Exploration");
+    expect(options).toEqual([]);
+    const sent = afterSend({ byCommand: { "doc-1/blk-1": chosen } }, "doc-1", "blk-1");
+    expect(optionsOf(sent, "doc-1", "blk-1")).toEqual({ instruction: exploration.id });
+  });
+
+  it("Given No instruction chosen over a remembered last, When the chip is drawn again, Then it stays at No instruction; a command carrying nothing starts with the last (PF_0001_002)", async () => {
+    vi.stubGlobal("fetch", answering({ reachable: true, isInstruction: false, instructions: [blog, exploration], last: blog.id }));
+    const none = await mount(chip({ "no-instruction": "chosen" }));
+    await none.settle(() => none.root.querySelector("[data-instruction-toggle]") !== null);
+    await none.settle(() => false);
+    expect(none.root.querySelector("[data-instruction-toggle]")?.getAttribute("title")).toBe("No instruction");
+    expect(options).toEqual([]);
+    const fresh = await mount(chip({}));
+    await fresh.settle(() => options.length > 0);
+    expect(fresh.root.querySelector("[data-instruction-toggle]")?.getAttribute("title")).toBe("Instruction: Blog post");
+    expect(options[0]).toEqual({ name: "instruction", value: blog.id });
   });
 
   it("draws nothing while the instructions cannot be read, or the instance has none", async () => {
@@ -279,5 +315,14 @@ describe("Instruction tools in Settings", () => {
     await settle(() => root.querySelector('[data-instruction-secret="API_KEY"]') !== null);
     expect(asked.find((entry) => entry.method === "PUT")).toEqual({ url: "/api/x/instructions/secrets/API_KEY", method: "PUT", body: JSON.stringify({ value: "sk-live-9f2c" }) });
     expect(root.textContent).not.toContain("sk-live-9f2c");
+  });
+});
+
+describe("the chip's size on every pointer (PF_0002_001)", () => {
+  it("Given the stylesheet, Then the toggle is 24px high and no rule gives it a touch minimum", () => {
+    const css = readFileSync(new URL("./instructions.css", import.meta.url), "utf8");
+    expect(css).toMatch(/\n\.instruction-chip__toggle \{[^}]*height:\s*24px;/u);
+    expect(css).not.toMatch(/pointer:\s*coarse/u);
+    expect(css).not.toMatch(/44px/u);
   });
 });

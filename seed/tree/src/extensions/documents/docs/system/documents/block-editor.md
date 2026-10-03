@@ -22,7 +22,7 @@
 - Rich text renders in its supported roles, and dividers render as authored content rather than as a gap.
 - A stored block type the view does not draw shows a visible unsupported-type fallback. A block is never silently omitted.
 - Activation is reachable by pointer and by keyboard, and the activation affordance carries an accessible name.
-* The bar stands whenever the view holds a document it could read, in reading and in command mode, drawn by the shell from the groups this view contributes ([Layout](../../../../../../docs/system/workspace/layout.md#the-view-bar)). The groups are, in order: *Work* — *Work in a proposal* (`git-branch`); *View* — icon toggles, *Show removed* (Phosphor `archive`, `BO_0315_015`), prompts (`terminal-window`) and proposed changes (`git-pull-request`), each `aria-pressed`, named by what it reveals and pressed by more than colour; then, only while a block is the subject, *Format*, *Turn into*, *Block*, *Standing* and *History*, each its own group; and, trailing, *Document* — *Take back* (`arrow-counter-clockwise`) and *Delete* (`trash`), destructive, asking first. With no block active the block groups and their separators are absent and nothing else moves. A view that could not read its document contributes no group. User decision, 2026-09-18 (`CA_0053`).
+* The bar stands whenever the view holds a document it could read, in reading and in command mode, drawn by the shell from the groups this view contributes ([Layout](../../../../../../docs/system/workspace/layout.md#the-view-bar)). The groups are, in order: *Work* — *Work in a proposal* (`git-branch`); *View* — icon toggles, *Show removed* (Phosphor `archive`, `BO_0315_015`), prompts (`terminal-window`) and proposed changes (`git-pull-request`), each `aria-pressed`, named by what it reveals and pressed by more than colour; then, only while a block is the subject, *Format*, *Turn into*, *Block* and *History*, each its own group, the bar carrying no standing (`DO_0031`); and, trailing, *Document* — *Take back* (`arrow-counter-clockwise`) and *Delete* (`trash`), destructive, asking first. With no block active the block groups and their separators are absent and nothing else moves. A view that could not read its document contributes no group. User decision, 2026-09-18 (`CA_0053`).
 - Reading is still the resting state: at rest the bar carries what the reader sees and what acts on the document, and nothing that acts on a block, since no block is active.
 - The bar was walked on the served build at pin 101 on a desktop and a phone, and the user accepted it on 2026-09-18 (`CA_0053_007`): the *View* and *Document* groups at rest, the block groups arriving on activation and leaving with *Done editing* with nothing in the document moving, each toggle revealing what it names, *Delete* asking first, the link's address field, and the trailing group at the phone's edge while the rest scrolls.
 - The bar renders over the surface rather than in the editor area's flow, so showing and hiding it moves no document content. The space it lands on is the headline's own, reserved at the top of the scrolling surface whether or not a block is ever activated, rather than a slot held for a control that is not there (`CA_0031_001`).
@@ -66,19 +66,9 @@
 - Repositioning is the one operation whose meaning is spatial, which is why it is the one that earns a spatial position. The rule decides where a later control goes, so neither position drifts into carrying the other kind of operation.
 - [ ] Give a divider a way to move. Activation is what puts the grips on a block, and only a text block can be activated, so a divider has neither the drag handle nor the move arrows and cannot be repositioned once inserted. Deciding this means deciding what a block that can be moved but not typed into is, since activation currently means that a block has an editor. This line carries no task identifier because no change document owns it yet.
 - A document that says nothing reads as a blank page: no blocks, or one text block with no text, shows a placeholder across the block area rather than a row reporting that a block is empty. Clicking it starts writing, and clicking below the last block of a document that does have content opens a paragraph directly below the lowest drawn row ([A New Block Lands Below](#a-new-block-lands-below)) — from reading; with a block active either press only ends the edit. A trailing empty paragraph that is the lowest drawn row is activated rather than followed by another, so repeated clicks cannot stack blocks that say nothing.
-- [ ] DO_0028_001 In reading presentation, align the blank-document *Write Something* placeholder
-  with the first block's text origin, and make the full blank writing surface and all remaining
-  document space below the final drawn row clickable to begin writing in the corresponding
-  position. Preserve existing active-block, command-mode, trailing-empty-paragraph and drop
-  behavior.
-  - Given a blank document, including one with its initial empty text block, When the reader
-    clicks anywhere in the blank writing surface, Then the placeholder begins at the first
-    block's text origin and writing starts at that position.
-  - Given a document with a final drawn row and unused document space below it, When the reader
-    clicks anywhere in that remaining space, Then writing starts in a paragraph directly below
-    the final drawn row.
-  - Given either writing target or an active block, When a drag is released on the target or a
-    press leaves the active block, Then the existing drop and leave-edit behavior is preserved.
+- The blank page's *Write something* stands where typing begins: the page holds the gutters a block row holds and the hint the box a block's text has, so its words start at the first block's text origin, with no block or with the one empty block a new document holds. Measured in Chromium on the editor's own markup: the hint's words and a first paragraph's both start 70.6px from the region's left and 126.6px from its top in a desktop region, and 26.6px from the left under the phone breakpoint, where before the hint stood 28px left of them and, centred in the page, 76px lower (`DO_0028_001`).
+- The rest of the surface below the document, down to its bottom edge and over its bottom padding, answers as the blank page and the area below the last block do: from reading a click starts writing at the same place, with a block active a press only ends the edit, command mode leaves it alone, and a drag released there lands the block last (`block:end`). It is a pointer surface out of tab order; the blank page and the area below the last block stay the keyboard's way in (`DO_0028_001`).
+- The surface is a column only so that rest can take the height the document leaves; the document stays one block flow inside it (`.document-flow`), so the header's spacing and the rows' still collapse as before. Measured the same way: the header, every row and the scroll extent are where they were, the compact header's anchor still holds under the bar, and the rest reaches the surface's bottom edge on a short document and on one that scrolls (`DO_0028_001`).
 - A proposal shown is something the document has to show, so an empty document with a proposal on screen is drawn with its blocks and the proposal among them, never as the blank page. A document is created with one empty block, so the first thing a reader asks of a new document meets this case: the toggle, or a run's end that turns it on, showed a blank page and nothing else (`DO_0002`).
 - Walked on the served build at pin 75, 2026-09-18, by the user: on `Chat interface`, a new document holding only its empty block, the toggle drew the run's proposal (the empty block rewritten and ten inserted blocks) in place of the blank page, and its items were answerable there (`DO_0002_001`).
 - [ ] CA_0012_006 Prove that activating a block covered by the bar scrolls it clear. The margin and the activation scroll are in place, and `CA_0014_002` has since bounded the regions, so the editor's surface now scrolls under a bar that stays put and the scenario is reachable. `CA_0027_002` makes it worth more: once the bar covers the document rather than the inset above it, a block activated near the top is genuinely underneath.
@@ -89,7 +79,7 @@
 - The listener is the surface's own, document-level, beside the keydown listener it already owns, with the same inert guard and the same cleanup. One place decides a press: a surface that answers its own — another block's reading row, which activates itself and commits the outgoing block on the way, and the blank page and the area below the last block, which are buttons whose handlers already run — is left to answer it alone (`CA_0028_001`).
 - Focus moving out of the block by keyboard leaves it active. `Escape` is already the keyboard's way out, and tabbing to the bar's controls is how the keyboard uses them (`CA_0028_001`).
 - Leaving happens once. The editor records that it is under way before it awaits anything, so two surfaces answering one gesture cannot each save from the same base and have the second refused as a conflict the reader never caused (`CA_0028_001`).
-- The blank page and the area below the last block are ways into writing from reading. With a block active a press on either only ends the edit, like every other press outside the block, and writing there takes a second press (`CA_0028_002`).
+- The blank page, the area below the last block and the rest of the surface under them are ways into writing from reading. With a block active a press on any of them only ends the edit, like every other press outside the block, and writing there takes a second press (`CA_0028_002`).
 - [ ] CA_0028_003 Make a press on the document title end the edit and land the caret where the press landed. The resolution and the restoration are built — the offset is read before the surface is re-read, because the repaint replaces the very text node it counts into, and put back after it — and the title is now clear of the bar at the top of the surface (`CA_0031_001`), so the gesture is reachable. Prove it on both form factors.
 
 ## Focused Work
@@ -343,7 +333,7 @@ Each of these arrives as its own change, adding its model and validation before 
 - `first` and `last` come from the document's own block order rather than from the reading order the rows are drawn in. A revealed retired block sits in that reading order too, and the arrows are disabled at the ends of the sibling order, not of the view (`CA_0016_001`).
 - Activation calls `scrollIntoView({ block: "nearest" })` on the row. `nearest` with the row's scroll margin scrolls only far enough to clear the bar, and not at all when the block is already clear, which is why activation needs no test for whether it should scroll (`CA_0012_002`).
 - The view reports its save state to the shell naming its own tab, never "the active tab": the flush that runs as the view unmounts lands after the switch that unmounted it, and reported as the active tab a document's last save would mark whichever tab the reader had moved to (`CA_0012_005`).
-- The document title is the editor area's headline, an `h2` presented at first-level scale, with an editable span inside it named by a visually hidden label rather than by an `aria-label` on the span, so the heading keeps the title as its own accessible name. The span reserves its focus border transparently, so clicking the title moves it by nothing. Its paste handler inserts the clipboard's plain text and collapses whitespace, because letting markup land and relying on `textContent` to flatten it later would show formatting the document cannot keep (`CA_0013_002`). Enter commits and Escape restores; leaving the title commits it. A blank title is not a rename, because a document requires a title and an entry the library cannot name is worse than the one it had, so clearing the field and leaving puts the current title back. The write names the revision it is based on, so a stale rename is a conflict rather than a silent overwrite, and the new name reaches the tab and the library entry through `setTitle$` on the view bridge (`CA_0011_004`).
+- The document title is the editor area's headline, an `h2` presented at first-level scale, with an editable span inside it named by a visually hidden label rather than by an `aria-label` on the span, so the heading keeps the title as its own accessible name. The span reserves its focus border transparently, so clicking the title moves it by nothing. Its paste handler inserts the clipboard's plain text and collapses whitespace, because letting markup land and relying on `textContent` to flatten it later would show formatting the document cannot keep (`CA_0013_002`). Enter commits and Escape restores; leaving the title commits it, and so does a press anywhere outside it (`DO_0032_001`). A blank title is not a rename, because a document requires a title and an entry the library cannot name is worse than the one it had, so clearing the field and leaving puts the current title back. The write names the revision it is based on, so a stale rename is a conflict rather than a silent overwrite, and the new name reaches the tab and the library entry through `setTitle$` on the view bridge (`CA_0011_004`).
 - Reading and editing use the same element and the same stylesheet; the role decides the tag once. Heading roles render `h3`-`h5` because the page's `h1` is the application and the document title is the `h2` beneath it, so a document's headings sit below the title that names them and the outline skips no level (`CA_0013_002`).
 - `src/components/shell/view-bridge.ts` is the whole of a view's reach into the shell: the live drag state, an inspector contribution store, a save-state store, and QRLs to start a drag, record the tab's selection, rename its target, and report the save state for the tab the view is mounted on. The inspector is a store rather than a value because the shell renders it and the view writes it (`CA_0008_009`).
 - The shell hands a view any drop that lands on a target the shell does not own, rather than learning what a block is. Both the pointer drag and the keyboard move compile into the same atomic move mutation (`CA_0008_008`).
@@ -359,10 +349,11 @@ Each of these arrives as its own change, adding its model and validation before 
 - [ ] Make the pointer-drag scenarios prove their gesture without racing it. "When a drag crosses two blocks, Then neither becomes an editor" and "When a block is dropped on another, Then it lands where the keyboard move would put it" in `tests/browser/block-editor.spec.ts` fail intermittently on trees that do not touch dragging: both were seen failing before and during `CA_0017`, and each time a completion gate run that failed on one passed unchanged on the next run, most recently during `CA_0038`, where the same run also timed out inside the accessibility analysis on the retired-toggle scenario. The gesture is synthesised from pointer events whose timing the scenario does not pin, so what it observes depends on when the surface happens to have settled. Nothing in the product waits on this; this line carries no task identifier because no change document owns it yet.
 - The phone was walked on the served build at pin 387, and the user accepted it and set the change completed on 2026-09-11. The walk covered what the harness and the layout measurement could not reach: the keyboard staying open through a press on another block, the arrow keys across a boundary, Backspace at a block's start and Enter pressed repeatedly and typed straight on, with the text's width, the handle's margin and the arrows on the top border seen on the phone itself (`CA_0045_006`).
 - [ ] CA_0008_012 Offer the conflict outcome a recovery path. The editor names the conflict on the affected block and stops, which is correct but leaves the reader to reload the tab by hand; decide what re-reading a conflicted block should look like and build it.
-- [ ] CA_0079_003 The tests expect what `CA_0070` and `CA_0071` made true: `server/vocabulary.test.ts` reads `admonition` in the committed vocabulary, and `views/bar.test.ts`'s *block controls are icons in one settled order* expects no `block-add-admonition` control, since an admonition is chosen from the block-type picker ([Admonitions](#admonitions)). Nothing in the editor changes (`CA_0079`).
-- [ ] CA_0079_004 `views/bar.test.ts`'s *link toggle pressed* waits for the `block-link-address` field and *the editor did not settle*. Find whether the test presses something the bar no longer draws or the toggle no longer opens the field. A test behind the code is brought up to it; a regression is named in `CA_0079` and fixed, with a `Fixed` release-note line.
-- [ ] CA_0079_005 `views/handover.test.ts`'s *characters typed into the tail before its split lands* never sees the tail's `revise`. Settle it the same way: a test behind the instant split, or text typed into a split tail that is not saved, a regression to name and fix (`CA_0079`).
-- [ ] CA_0079_006 `views/reference-math.test.ts`'s *offers the document's numbered equations* never sees `block-reference-equation` in the bar of a sentence block in a document holding a numbered equation. Settle it the same way, against [References From The Hash](#references-from-the-hash) and `block-document-model.md`'s numbered equations (`CA_0079`).
+- `server/vocabulary.test.ts` reads `admonition` in the committed vocabulary and `views/bar.test.ts` finds no `block-add-admonition` control, an admonition being chosen from the block-type picker ([Admonitions](#admonitions)) (`CA_0079_003`).
+- The render harness draws any frame already queued or being drawn before it dispatches an event (`CA_0079_004`, `views/testing/editor-harness.ts`): a press that wrote while Qwik was finishing a frame staged its task for a draw that had already ended, and nothing ran it, so the bar never drew the link field and the split tail never saved. The instruction chip's read (`BO_0311`) set that timing. A browser dispatches a press as its own task, after the frame, so the editor itself never meets it. A frame waiting for the platform's one slot waits again when another took it first, rather than rejecting.
+- [ ] The admonition callout mixes its tint with `var(--surface, white)`, and the theme defines no `--surface`, so in the dark theme a callout is tinted towards white. Mix it with the theme's `panel` token instead, and see it drawn on a dark page.
+- `views/handover.test.ts`'s characters typed into a tail before its split lands reach the graph under the tail's identity again with the harness's frame order (`CA_0079_005`); the editor did not change.
+- `views/reference-math.test.ts` no longer presses a *Reference an equation* control, which `BO_0300_006` took out of the bar; a numbered equation is referred to from `#` and `views/references.test.ts` proves it (`CA_0079_006`).
 
 ## Never Waiting On A Read
 
@@ -411,20 +402,20 @@ Each of these arrives as its own change, adding its model and validation before 
 
 * A text block carries one standing on the scale keep · fixate, or the prompt standing *Send* gives it, off the scale ([Prompts](#prompts), user decision 2026-09-18). Keep is the absence of a stored value: where a block stands unless someone says otherwise. Fixate subsumes keep: a fixated block is left standing and also stands behind every command issued in its document. A block the reader no longer wants is removed, which retires it ([Swipe Removes Or Keeps](#swipe-removes-or-keeps)). User decision, 2026-09-21 (`BO_0272`), narrowed 2026-09-30 (`BO_0315`).
 * On touch, a horizontal swipe on a reading row acts on it: one action each way, as [Swipe Removes Or Keeps](#swipe-removes-or-keeps) says. The row follows the finger, the reveal names what release would commit **from the first movement** — the word beside the finger, quiet until the travel reaches the threshold and then in the ground of what it would do — and a release short of the threshold commits nothing. User decision, 2026-09-21; the naming from the first movement after the walk found it came too late to see on a phone.
-* No gesture is the only path. The bar's **Standing** control sets the active block's, `Alt`+`Shift`+`ArrowRight` fixates a focused reading row and `Alt`+`Shift`+`ArrowLeft` returns it to keep, in reading and in command mode, and while reading the row the bar acts on carries its block bar, whose *Fixate* sets it where the row is (`BO_0231`, `DO_0014`, `BO_0315`). Beside that control stands an info control saying what each standing and *Remove* mean and how each is set, drawn when the control it explains is (`BO_0272`, moved there from a group of its own by `DO_0010_005`, user decision 2026-09-22).
+* No gesture is the only path, and the bar is none of them: `Alt`+`Shift`+`ArrowRight` fixates a focused reading row and `Alt`+`Shift`+`ArrowLeft` returns it to keep, in reading and in command mode; the block bar's *Fixate* sets it on the row turned to and on the row being edited; and the swipe acts on touch (`BO_0231`, `DO_0014`, `BO_0315`). No control in the view explains what each standing and *Remove* mean until the shell has a help surface ([Standing Leaves The Bar](#standing-leaves-the-bar)). User decision, 2026-10-03 (`DO_0031`).
 * Every change of standing can be taken back from *Take back* in the bar's trailing group, which names what it takes back. It writes the previous value: a separately named action, never the undo keystroke. User decision, 2026-09-20 (`CA_0058_011`, replacing the dock's undo line).
 * A fixated block is drawn as a card labelled on its top border, as every marked row is ([A Marked Block Is A Card](#a-marked-block-is-a-card)); a kept block carries no mark at all, since a mark means someone acted. User decision, 2026-09-21.
 
 - One threshold per direction, the same distance each way, measured on the room the finger has — the lesser of the row and the screen: 36% of it within 132–250px and never beyond 72% of the screen. The distance sits between the near and far thresholds the five-position scale had (18% floored at 64px, 55% floored at 200px), since with one action each way there is no long pull left to make discard deliberate and no short one left to make fixate cheap. The floors are the load-bearing half: proportion alone collapsed on a phone whose column measured 172px (`BO_0138`). User decision, 2026-09-21.
 - The swipe's table is configuration: the thresholds, the flick and the edge guard are a value `lib/swipe.ts` takes, so another table — two thresholds again, other distances — is a value rather than a rewrite. User decision, 2026-09-21.
 - A flick commits what is revealed. A press within 24px of a screen edge is the system's back gesture. A mouse never swipes: a horizontal drag under a mouse selects text.
-- The chord never acts on the block being edited, where `Option`+`Shift`+arrow is macOS's word selection; the bar and the block's own toolbar are that block's paths, both of which name it while it is being edited.
+- The chord never acts on the block being edited, where `Option`+`Shift`+arrow is macOS's word selection; the block bar on its top border is that block's path.
 - A standing written on the block being edited saves the edit first and writes from the editor's base, which then advances; nothing under the caret is re-read, and the new standing shows until the document is next read. On any other block, an edit under way ends first, as a press outside would, and the document is read again. Discarding the block being edited ends the edit, since it leaves the flow.
 - A row's accessible name says its standing (`row-name.ts`), and each change is announced.
 
-- `lib/disposition.ts` is the scale: `SCALE`, the words (`LABEL`, `DONE`, `MARK`, `MEANING`), the glyphs (`GLYPH` for the mark, `CONTROL_GLYPH` for a control that offers a state, which is why keep has one there and no mark at all), `step` — one press is the whole distance, so the chord and a stepping control commit it — and `RETIRED`, what a value written before the scale narrowed reads as. `lib/swipe.ts` is the physics, pure: `SWIPE`, `thresholds`, and the action each direction commits on a row (`swipeAction`, `swipeTarget`, `swipeReveal`, `swipeOutcome`), each over a `SwipeTable` (`BO_0227_011`, `BO_0272_007`, `BO_0315_010`).
+- `lib/disposition.ts` is the scale: `SCALE`, the words (`LABEL`, `DONE`, `MARK`), the glyphs (`GLYPH` for the mark, `CONTROL_GLYPH` for a control that offers a state, which is why keep has one there and no mark at all), `step` — one press is the whole distance, so the chord and a stepping control commit it — and `RETIRED`, what a value written before the scale narrowed reads as. `lib/swipe.ts` is the physics, pure: `SWIPE`, `thresholds`, and the action each direction commits on a row (`swipeAction`, `swipeTarget`, `swipeReveal`, `swipeOutcome`), each over a `SwipeTable` (`BO_0227_011`, `BO_0272_007`, `BO_0315_010`).
 - `src/components/views/block-swipe.ts` is the adapter, and holds no decisions: it asks `pointerIntent` whether the gesture is a swipe, keeps the gesture outside Qwik, writes the row's transform directly, and draws the reveal in the page's body over the strip the row has vacated, so nothing is written into an element Qwik renders. `swipeJustEnded` is the one answer both the command row's click and the reading row's activation ask, so neither follows a swipe — the fallout `BO_0153` fixed. Reading text declares `touch-action: pan-y` (`BO_0227_011`).
-- `views/standing/`: `use-standing.ts` is the one write every path goes through — `setStanding$`, the overlay, the announcement and the take-back of a standing or a removal, the bar's *Standing* choice and a proposal's *Fixate* included; `standing-mark.tsx` is `CardLabel`, the label a marked row carries on its top border, and the standing that picks it; `standing-announcement.tsx` the live region (`BO_0227_012`–`BO_0227_014`). The block bar is `views/block-bar.tsx` (`BO_0315_013`).
+- `views/standing/`: `use-standing.ts` is the one write every path goes through — `setStanding$`, the overlay, the announcement and the take-back of a standing or a removal, the block bar's *Fixate*, a prompt's *Keep as content* and a proposal's *Fixate* included; `standing-mark.tsx` is `CardLabel`, the label a marked row carries on its top border, and the standing that picks it; `standing-announcement.tsx` the live region (`BO_0227_012`–`BO_0227_014`). The block bar is `views/block-bar.tsx` (`BO_0315_013`).
 - A proposed change is drawn as a block among the blocks (`ProposalBlock`), in its proposer's colour with one line on its bottom border — the proposer's face, what it does in words, and its answer icons (`BO_0265_010`) — and its text can be edited, which accepts it, and dragged or arrow-moved by its face, which does not ([Proposed Changes In Place](./proposed-changes.md#proposed-changes-in-place), `BO_0233`). `Marked` and `ROLE_TAG` moved to `src/components/views/block-text.tsx`, so a proposal renders in the typography of the block it would become. Activating a block scrolls through the view's own element, and `paintRuns`, `selectRange` and `selectionIn` reach the element's own document, so the render harness can activate a block and type into one (`BO_0233_009`).
 - The editor's calls to the documents API live in `views/documents-client.ts`, and `readingOrder` and `placeProposals` in `views/reading-order.ts`, so the editor composes these modules rather than holding them (`BO_0227`).
 
@@ -451,7 +442,7 @@ Each of these arrives as its own change, adding its model and validation before 
 
 - Under `calliopa-bootstrap`'s `BO_0267` (2026-09-18), a block sent as a command takes the `prompt` standing ([Command Mode](./command-mode.md#blocks-as-commands)).
 * A prompt is set by *Send* alone, never by the swipe or the chord, and it leaves the drawn flow while it stays in the document. User decision, 2026-09-18.
-- The bar's *Standing* choice lists *Prompt* while the active block is one, so a prompt can be set back to neutral or any other standing through the path every standing takes, the take-back included.
+- A prompt is set back from its own block bar (`DO_0031_002`): on a row whose standing is `prompt` — revealed by *Show prompts* and turned to, or being edited — `views/block-bar.tsx` draws *Keep as content* (`data-standing-option="keep"`, ○) and *Fixate* (`data-standing-option="fixate"`, ◆) where any other text row carries *Fixate* alone. Both write through `setStanding$`, so *Take back* takes either back.
 - The `prompt` standing (`BO_0267_014`). The `text` member's `disposition` permits `prompt`, revised through `kernel commit --members` in this change's graph proposal. `lib/disposition.ts` has `STANDINGS` — the scale and `prompt` — and `STORED`, what the graph holds; `step` and `swipeTargets` leave a prompt where it is and never reach it, and the standing toolbar offers the scale's four alone. `LABEL` and `DONE` carry *Prompt* and *Sent as prompt*; a prompt is labelled with the terminal glyph (Phosphor `terminal-window`) and its word on the card's top border ([A Marked Block Is A Card](#a-marked-block-is-a-card), `DO_0008`), and the block being edited carries none. The word was taken out of the gutter in `BO_0267_024` because it overran it and the glyph had to give the gutter to the grip (`BO_0267_027`); with the label off the gutter altogether, both hold at once and neither rule is needed. `setStanding$` ends the edit of a block it makes a prompt, as it does a discarded one, since both leave the flow; `setDisposition` is refused for anything outside `STANDINGS`.
 - Composing into a block (`BO_0267_016`). The editor answers the shell's `composeBlock` for its document by inserting a text block holding the words after the block being edited, or at the end with none, and editing it with the caret after them (`composeInBlock$`); nothing is sent.
 - The documents skill (`BO_0267_017`). `ui.shell.documents` gains the `prompts` convention — a prompt block is the reader's command, never rewritten, removed, moved or built on unless the command asks, and a question is answered by one insert after the block the command was sent from — and the `answerAQuestion` example, revised through `kernel commit --members` in the change's graph proposal.
@@ -469,9 +460,9 @@ Each of these arrives as its own change, adding its model and validation before 
 ## The Standing Is Three States
 
 - Under `calliopa-bootstrap`'s `BO_0272` (2026-09-21), a block's standing is three states instead of five, one swipe action reaches each end, and the bar says what the three mean. The scale itself is [Standing](#standing) above; the kernel's half is `calliopa-bootstrap`'s `docs/system/ui-kernel.md`, *The Standing Is Three States*, which holds the same scale and the wording every run is told; the bar's popover kind is `ui.shell`'s ([Workspace Layout](../../../../../../docs/system/workspace/layout.md)); a proposal's standing is [Proposed Changes](./proposed-changes.md#a-proposal-takes-a-standing).
-- The scale was three states (`BO_0272_006`) and is two since `BO_0315_009`: `SCALE` is `keep · fixate`, keep being the absence of a stored value, and `STANDINGS` keeps `prompt` beside it. `LABEL`, `DONE`, `MARK`, `GLYPH` and `MEANING` name the two — *Keep*/*Unfixated* with no mark and no glyph, *Fixate*/*Fixated*/*fixated*/◆ — and `CONTROL_GLYPH` gives keep a face (○) where a control offers it. `step` is the whole distance: right fixates, left returns to keep. `RETIRED` maps a value written before the narrowings: `pin` reads as fixate, and `discarded`, `resolved` and the old `keep` as the resting state until the migration has retired a block set aside (`BO_0315_008`); the kernel maps them the same way (`StandingOf`).
+- The scale was three states (`BO_0272_006`) and is two since `BO_0315_009`: `SCALE` is `keep · fixate`, keep being the absence of a stored value, and `STANDINGS` keeps `prompt` beside it. `LABEL`, `DONE`, `MARK` and `GLYPH` name the two — *Keep*/*Unfixated* with no mark and no glyph, *Fixate*/*Fixated*/*fixated*/◆ — and `CONTROL_GLYPH` gives keep a face (○) where a control offers it. `step` is the whole distance: right fixates, left returns to keep. `RETIRED` maps a value written before the narrowings: `pin` reads as fixate, and `discarded`, `resolved` and the old `keep` as the resting state until the migration has retired a block set aside (`BO_0315_008`); the kernel maps them the same way (`StandingOf`).
 - One threshold, configurable (`BO_0272_007`). `lib/swipe.ts` takes a `SwipeTable` — the proportion, the floor and ceiling, the viewport cap, the flick and the edge guard — and `SWIPE` is the one in use; `thresholds` answers the one distance a release must have, and `swipeTarget`, `swipeReveal` and `swipeOutcome` each read the table their thresholds were made with. `swipeReveal` answers the action this direction would commit and whether the travel has armed it, so `views/block-swipe.ts` can say the word from the first movement (`BO_0272_016`): the strip stays the vacated ground and the word is a chip at the row's moving edge, `overflow: visible` so a sliver of a strip does not clip it, muted with a hairline until armed and in the action's own ground after (`data-action`, `data-armed`).
-- The bar (`BO_0272_009`). The *Standing* group's `choice` offers keep and fixate, with `prompt` listed while the block is one. Beside it the info control (`standing-info`, Phosphor `info`) says, through the popover kind `ui.shell` added, what each state and *Remove* mean in `MEANING`'s words and how each is set — the swipe, Delete, `Alt`+`Shift`+arrow, the bar's *Standing* choice and the block bar (`BO_0315_016`). The reader's wording and the run's say the same of each state.
+- The bar carries no standing (`DO_0031_001`). The *Standing* group — its `choice` and the `standing-info` popover beside it — went from `views/block-editor.tsx` with `STANDING_ICON` and `lib/disposition.ts`' `MEANING`, which only the popover read; the shell's `choice` and popover kinds stay for other views (`CA_0053_002`).
 - The block bar (`BO_0315_013`, `views/block-bar.tsx`) replaced the standing toolbar's three buttons; a swipeable proposal carries the same bar, its *Remove* rejecting it and its *Fixate* accepting it and fixating the block it becomes.
 - Verified 2026-09-21 (`BO_0272_012`). `lib/disposition.test.ts`: the three states, their words and glyphs, keep marked nowhere and offered everywhere, `step` as the whole distance and never crossing the scale in one press, and a retired value read as what it became. `lib/swipe.test.ts`: the floor, the ceiling, the viewport cap, the distance sitting between the two the old scale had, another table answering its own threshold and flick, the walk on a 414px phone with nothing committed short of the threshold, the reveal naming its action from the first movement and arming it at the threshold, naming nothing where nothing would change, and the flick. `views/bar.test.ts`: the *Standing* choice over three, and the info control standing with no block active with its three states and how they are set. `views/block-editor.test.ts`: the chord stepping to fixate and *Take back* returning to keep, one step left discarding a marked block and the reference kept, a discarded row reopened as kept, the fixated block reaching the command control's chips, the toolbar's three buttons and its press. `views/proposals/proposal-standing.test.ts` is the proposal's ([Proposed Changes](./proposed-changes.md#a-proposal-takes-a-standing)). The unit project passes (117 files, 1009 tests), `tsc --noEmit` is clean and both bundles build.
 - Walked by the user on the served build at pin 747 on 2026-09-21, with the kernel rebuilt, and it works (`BO_0272_013`): a block discarded and fixated by the swipe, the chord, the bar's *Standing* and the toolbar's three buttons, *Take back* after each; the info control read, closed by `Escape` and by a press outside it; a proposal swiped both ways, accepted and standing; and a run told the three states. The walk asked for one thing, the reveal naming its action from the first movement (`BO_0272_016`); that was made and re-walked at pin 759, where the word reads from the first movement on a phone.
@@ -479,12 +470,12 @@ Each of these arrives as its own change, adding its model and validation before 
 ## The Bar Before Editing
 
 - Under `DO_0006`, promoted to draft by the user on 2026-09-21 and transferred here the same day, the bar's block groups come up as soon as a block is focused, and only the inline formatting waits for the caret. The proposal half is [Proposed Changes](./proposed-changes.md#the-bar-acts-on-a-proposal) (`DO_0006_004`).
-* While a block is focused and not being edited, the bar draws the groups that act on the whole block — *Turn into*, *Block* (`plus` and the other *Add …*) and *Standing* with its *i* — and they act on that block. *Format* and *History* are drawn only while a block is being edited: *Format* acts on a selection, *Undo* and *Redo* are the block's transient text history, and *Done editing* has nothing to leave. This replaces *only while a block is active* in [Presentation](#presentation) (`CA_0053`). User decision, 2026-09-21; *Retire* left the bar 2026-09-30 (`BO_0315`).
+* While a block is focused and not being edited, the bar draws the groups that act on the whole block — *Turn into* and *Block* (`plus` and the other *Add …*) — and they act on that block. *Format* and *History* are drawn only while a block is being edited: *Format* acts on a selection, *Undo* and *Redo* are the block's transient text history, and *Done editing* has nothing to leave. This replaces *only while a block is active* in [Presentation](#presentation) (`CA_0053`). User decision, 2026-09-21; *Retire* left the bar 2026-09-30 (`BO_0315`).
 * What is being edited is always what the bar acts on — a block, or a proposal whose text holds the caret. While anything is being edited, hovering another row focuses nothing, takes nothing and ends no edit; a press outside it ends it. User decision, 2026-09-21, the second half from the walk (`DO_0006_008`).
 * On a desktop, hover focus holds. A row — a block or a proposal alike — focuses once the pointer has rested on it, and it keeps that focus, its ring and its controls until another row takes focus, until something is edited, or until a press lands outside the document. A focused proposal is drawn as a focused block is, since several proposals stand together and at rest they differ only by their proposer's colour: the ring says which one the bar is naming, and its chip stays with it when the pointer moves away. The ring is one weight for every kind of row and heavier than any edge a row carries of its own, so the row the bar acts on is told from the rows beside it at a glance. User decision, 2026-09-21; the proposal's half from the second walk (`DO_0006_010`), the weight from the third (`DO_0006_012`). The pointer leaving a row no longer lets its focus go, so the bar never empties behind the pointer and the block its controls name is always visibly focused. This replaces `DO_0004_002`'s *`unfocus$` lets it go when the pointer leaves* and draws the focus ring it withheld. User decision, 2026-09-21.
 * A revealed removed row is out of the document's flow: it brings up the *Block* group's *Add …* controls alone, which place below the row where it is drawn ([A New Block Lands Below](#a-new-block-lands-below)), and carries *Restore* in its own bar. User decision, 2026-09-21; the *Add …* half 2026-09-24 (`DO_0016`); the bar 2026-09-30 (`BO_0315`).
 - A phone is unchanged in how a block is focused: the first tap focuses and the second edits (`CA_0046_001`). What changes there is what the bar holds after that first tap.
-- *Take back* stays in the trailing *Document* group (`CA_0058_011`), drawn whenever the bar is, because a standing is still set on rows the bar never names — by the swipe and by `Alt`+`Shift`+arrow. The info control no longer stands beside it in a group of its own: it is in the *Standing* group, beside the control it explains, and so is drawn while a block is focused or being edited (`DO_0010_005`).
+- *Take back* stays in the trailing *Document* group (`CA_0058_011`), drawn whenever the bar is, because a standing is still set on rows the bar never names — by the swipe and by `Alt`+`Shift`+arrow.
 - The subject (`DO_0006_001`, landed 2026-09-21). The bar's contribution task in `views/block-editor.tsx` (`CA_0053_006`) tracks `state.focusedBlockId` and `state.focusedItemId` beside `editor.blockId` and names one subject: the block being edited when there is one, else the block or the proposal the reader has turned to. *Turn into*, *Block* and *Standing* are pushed for the subject, *Format* and *History* only while a block is being edited. The block controls are named by the subject's place in the document's order, which `editor.position` holds only for the edited block, so a focused block's is read from `state.document.blocks`; a proposal's are named *the proposed block*. A subject that is not a text block keeps *Standing* absent, as it always did, and a proposal shows the resting standing, since it carries none until it is accepted. What a press does travels as data — `BlockAct`: insert, retire, role, standing — through one `actOnBlock$`, never as a function handed across a QRL boundary, so a proposal's press carries the same act across its acceptance.
 - *Turn into* on a block that is not being edited (`DO_0006_002`). `setRole$` takes the block to act on: the block being edited is revised from the editor's own base and words, so what is under the caret is written; any other block is revised from the revision and the runs the document read holds, and the document is read again with the caret going nowhere. A refusal on the edited block is named on it, as a refused save is; on a block the reader has only turned to there is no editor to name it, so it is the view's notice.
 - Hover focus holds (`DO_0006_003`). The pointer leaving a row only cancels a rest that has not focused yet; the focus itself goes when another row takes it, when a block becomes editable (activation clears both focuses), in command mode, and on a press outside the rows, a proposal and the bar — the rule `CA_0046_001` already wrote, widened to a proposal's row. `unfocus$` is gone. The ring is drawn wherever a row is focused, the hover included, since it now stands on one row rather than following the pointer: `block-editor.css` no longer blanks the outline under `(hover: hover)`. A block being edited still takes hover away entirely.
@@ -580,7 +571,7 @@ Each of these arrives as its own change, adding its model and validation before 
 
 Under `DO_0010`, set to draft by the user on 2026-09-22 and transferred here the same day: the two
 act that decides what a document *is* leads the bar, the block controls stand in one settled order
-in icons, and the *Standing* explanation stands beside the control it explains. The shell's half —
+in icons. The shell's half —
 an icon-only choice on the bar, the popover leaving the bar's clip, and the icons the table gains —
 is [Layout](../../../../../../docs/system/workspace/layout.md#the-view-bar).
 
@@ -594,19 +585,15 @@ is [Layout](../../../../../../docs/system/workspace/layout.md#the-view-bar).
   leading edge on its own: `merged` stands a group the view lacks *after* the view's, so a group
   that leads has to be the view's. The trailing *Document* group keeps *Take back* and *Delete* and is still
   drawn whenever the bar is.
-- The block groups in order, in icons (`DO_0010_002`). `ROLE_ICON` and `STANDING_ICON` in
-  `views/block-editor.tsx` name the symbol each option wears, so the bar draws each choice as its
+- The block groups in order, in icons (`DO_0010_002`). `ROLE_ICON` in
+  `views/block-editor.tsx` names the symbol each option wears, so the bar draws each choice as its
   current option's icon alone; *+ Paragraph* is the `plus` button and *Retire* the `archive` button,
   each keeping the accessible name it had, which already says which block it acts on. The order the
-  reader sees is *Format* → the role → `plus` → `archive` → *Standing* and its *i* → *History*.
+  reader sees is *Format* → the role → `plus` and the other *Add …* → *History*; *Retire* and *Standing* have
+  left the bar (`BO_0315_012`, `DO_0031_001`).
 - Nothing in the bar inserts a divider (`DO_0010_003`). The *Block* group's divider button is gone;
   `insert$`'s `divider` arm and the `BlockAct` that carries it stay for the paths that still reach
   them, and existing dividers are drawn, moved, marked and retired as before.
-- The standing control wears the block's own mark (`DO_0010_004`): `x`, `circle`, `diamond` and
-  `terminal-window` on the four options. `GLYPH` and `CONTROL_GLYPH` in `lib/disposition.ts` are
-  untouched, so the card's label and the standing toolbar still draw the glyphs.
-- The *i* is in the *Standing* group (`DO_0010_005`), after the choice, and the `standing-help`
-  group is gone. Its words are unchanged: what they say about the bar's control still holds.
 - Verified 2026-09-22 (`DO_0010_006`): `views/bar.test.ts` in the render harness — the group order
   with *Work* leading and *View* carrying the line, the block controls in one settled order with
   `plus` and `archive` and no divider control anywhere, the role and standing choices carrying a
@@ -648,6 +635,11 @@ shell's half — the muted row in the drawer and the muted tab label — is
   instruction's words for an instruction, the document's for everything else — so the view carries
   `record` and the `instructions` section draws an unnamed instruction's row muted as the Documents
   section does.
+- A structure is minted under its own words (`structures`' `RO_0006_001`, 2026-10-03):
+  `UNNAMED_STRUCTURE` (*Untitled structure*) in `lib/naming.ts`, unnamed by the same rule, which
+  `structures` takes from here. `unnamedTitle` answers the minted name a document carries before it
+  looks at `record`, so a new structure's headline paints its own words as the placeholder.
+  `title-placeholder.test.ts` and `naming.test.ts` prove it.
 - The headline is a placeholder field (`DO_0012_002`). `.document-title__text` carries
   `data-unnamed` and `data-placeholder`, and `block-editor.css` paints the minted words over the
   empty field — absolutely positioned at the field's own padding, from `--text-muted`, under
@@ -689,12 +681,11 @@ shell's half — the muted row in the drawer and the muted tab label — is
 * Command mode draws no standing toolbar on any row, whatever the pointer is doing and whether or not a block is being edited to point from. Pointing is for choosing what a command names; judging a block is what reading is for. This reverses `BO_0231`, which put the toolbar there, and `BO_0227` before it, which decided a pointer in command mode needed no path of its own. User decision, 2026-09-23.
 * While reading, the toolbar stands on the view bar's subject: the block being edited when there is one, else the block or the proposal the reader has turned to (`DO_0006_001`). The row the bar names, the row that is ringed or holds the caret, and the row carrying the three buttons are always one row. User decision, 2026-09-23.
 * It goes when the focus goes — when another row takes it, when command mode is entered, or on a press outside the rows, a proposal and the bar (`CA_0046_001`, `DO_0006_003`). Nothing focused and nothing being edited is a document at rest, carrying no toolbar anywhere. The ring and the buttons are one state, so this needs no rule of its own. User decision, 2026-09-23.
-* The block being edited carries it too, beside the bar's *Standing* group rather than instead of it. Its top border is free: a card's label is not drawn on the block being edited, and the command control stands below the bottom border (`BO_0267_012`). User decision, 2026-09-23.
+* The block being edited carries it too, as its one pointer path to a standing (`DO_0031`). Its top border is free: a card's label is not drawn on the block being edited, and the command control stands below the bottom border (`BO_0267_012`). User decision, 2026-09-23.
 * A phone gets it on the first tap, which is the tap that makes the row the subject (`CA_0046_001`), beside the swipe that was touch's path all along. User decision, 2026-09-23.
 - The marking control stays a literal `div` around a text block's words when the toolbar leaves it. `BO_0231_001` gave two reasons and only one was about the toolbar: a tag held in a variable compiles through `_jsxC`, which treats every attribute as immutable, so a block marked after it was drawn went on reporting that it was not. That reason stands on its own, and the row keeps its click and key handlers either way.
 - The toolbar left command mode (`DO_0014_001`, landed 2026-09-23). `views/block-editor.tsx` draws `StandingToolbar` only while `mode === "reading"`, and `block-editor.css` lost the two rules that lifted `.standing-toolbar` out of `display: none` under `[data-editor-mode="command"]` — the `@media (hover: hover)` hover rule and the `:focus-within` one. No row carries it in command mode, the prompt being edited while pointing from it included; pointing ends with that prompt still edited, so reading finds it as its subject again. The row's click and key handlers lost their `inStandingToolbar` guard, and `views/press.ts` lost the helper: with the toolbar gone from the mode those handlers answer for, the guard could never fire, and a press on the toolbar while reading reaches no activation, which asks for `[data-block-reading][role='button']`.
 - It is drawn rather than hidden (`DO_0014_002`, landed 2026-09-23). The subject is not one selector — a focused row carries `data-focused="true"` while `focused && !active && !marking`, and the edited row carries no attribute of its own — so the mechanism chosen is the markup: the row draws the toolbar when `active || focused`, and `.standing-toolbar` is plain `display: flex`. A button that should not be there is absent rather than hidden, so nothing has to keep it out of the focus order.
-- The words follow the rule (`DO_0014_005`, landed 2026-09-23). The info popover in `views/block-editor.tsx` says the bar's *Standing* control sets the block you have turned to or are editing, *and that block also carries the three buttons on its top edge*, where it named command mode.
 - The docs say the new truth (`DO_0014_006`, landed 2026-09-23): the `*` line in *Standing* above, `BO_0231`'s *Command mode only* line, [Command Mode](./command-mode.md)'s note on the marking `div`, and *A Marked Block Is A Card*'s shared border.
 - Verified 2026-09-23 on `.local/tree-do0014w` at dataRevision 1759 (`DO_0014_007`): `tsc --noEmit` clean of ours, the unit project 149 files and 1333 tests, and both bundles built with no warning of ours. `views/block-editor.test.ts`'s *standing while reading* proves the row turned to carries the three buttons and no other row does, the toolbar following the focus to the next row, the block being edited carrying it, command mode carrying none — the prompt pointed from included — and that prompt carrying it again when the mode ends, a press writing the standing, and a divider carrying none. `views/proposals/proposal-standing.test.ts` moved from command mode to reading, where its presses now reach a control a browser would show. `views/standing/marked-cards.test.ts` proves the revealed discarded row's toolbar with `discarded` pressed and the retired row's absence. Each new assertion was shown to bite by putting the toolbar back in command mode, by dropping the edited block from the subject, and by removing the discarded row's buttons. Two failures at head are neither this change's nor this extension's: `calliopa-refine/lib/context.test.ts(147,9)` does not typecheck, and `calliopa-refine/views/depth/block-depth.test.ts` looks for a `.block-derived-mark` that `RF_0004_008` removed from this view — both reproduce on an untouched checkout.
 - Walked by the user on the served build at pin 1773 on 2026-09-23 and accepted (`DO_0014_008`): command mode carries no standing buttons on any row, the prompt pointed from included; the row turned to carries them and loses them when another row takes the focus; the block being edited carries them, where pressing ✕ ends the edit as `setStanding$` already did for a block it discards; and a proposed change and a revealed discarded row carry them for the first time.
@@ -823,7 +814,7 @@ syntax, a parse error and an engine that never loaded. Nothing is ever auto-repa
 - **The typed gesture is not proven in the render harness, and is not claimed to be.** It depends on where the caret stands, and the harness has no live selection — `selectionIn` answers null there, so no caret-dependent gesture can be pressed in it, which is why no test in this extension presses one. What decides the conversion is unit-tested above; the gesture itself is walked on a built origin (`BO_0290_019`).
 - A sentence can name a numbered equation, and one standing in a sentence can be edited (`BO_0290_025`, landed 2026-09-23). *Reference an equation* joins the Format group as a choice listing the document's numbered equations by number with a glimpse of each source, and inserts a reference where the caret stands; it is offered only where there is a number to name, since a reference is drawn as one. A press on an equation in the line opens the popover on **that** equation — found by its place among the atoms drawn, which is the order the runs hold them in — and closing it gives that run its new source while it keeps its place among the words.
 - The reference run carries the equation's identity and no text of its own, so what it is drawn as stays the number the read resolves and nothing here stores one. Inline mathematics has no caption and no number of its own, so the panel opens on it without them.
-- Proven in `views/reference-math.test.ts`: the control offering the numbered equations with their numbers and sources, absent when the document has none, the popover opening on the second of two equations with *its* source, and a press on the words opening nothing.
+- Proven in `views/reference-math.test.ts`: the popover opening on the second of two equations with *its* source, and a press on the words opening nothing. A numbered equation is referred to from `#` ([References From The Hash](#references-from-the-hash)).
 - **How a press is driven in the harness, and why it is honest.** Qwik's test platform walks the parents itself, so a press inside the editing surface does reach it; what it does not do is set the event's `target`, which a browser always sets and which is how the surface tells one equation from another. The test names the target, as a browser would. A settle condition here is written `!= null` rather than `!== null`, because this DOM answers a `querySelector` miss with `undefined` — a settle waiting on `!== null` returns at once and proves nothing, which is what hid this gesture's first failure.
 - Verified in the render harness beside the renderer's unit tests (`BO_0290_018`, 2026-09-23), each shown to fail with its draw site removed. The equation block is `views/equation-block.test.ts`: drawn from the server's markup with its source as its accessible name and never as its words, its place among the prose, the number outside the scrolling body and absent when none was asked for, the caption, unreadable TeX as its source with one sentence, and no text editor on the row. The editing surface is `views/inline-math.test.ts`: the atom painted as one uneditable element, the DOM's count agreeing with the model's, the round trip through a paint and a read, two adjacent equations staying two, and a round trip beside marked words. The reading row is `views/inline-reading.test.ts`: the equation drawn in the line from the source the read set, mathematics it could not set drawn as its source so the sentence keeps it, a reference drawn as its equation's number, a vanished equation said in words, and mathematics drawn before the marks are peeled. The popover is `views/equation-popover.test.ts`, the renderer `lib/mathjax.test.ts`, and a stored equation the build cannot read is drawn as unsupported content in `server/equation-content.test.ts`.
 - What the harness cannot answer is not claimed here. A long equation scrolling inside its block at phone width is CSS the harness does not compute, so it is measured on a built origin with the no-jump check (`BO_0290_019`); `$…$` converting as it is typed is `BO_0290_024`'s, and is verified with the gesture that introduces it.
@@ -993,7 +984,7 @@ from the code block before it. What is stored and what the read resolves is
 - The three bar choices are gone (`BO_0300_006`, 2026-09-25): *Reference an equation*, *Reference a figure* and *Reference a table* left the Format group with `insertReference$` and `insertBlockReference$`, and `figures.test.ts` lost the two cases that pressed them. The run kinds they wrote stay readable and drawn.
 - A reference is drawn as the read answers it (`BO_0300_007`, 2026-09-25; `block-text.tsx`, `editor-dom.ts`): in the reading row a link, `run-block-ref--link`, whose words are the read's `referenceLabels[target]` — the heading's words, *Remark 2*, *Figure 3* — or *(gone)* marked `run-block-ref--missing` when the read answered none; a press (`revealBlock`) scrolls the target's row into view and focuses it, so the bar is about it (`BO_0300_Q3`). On the editing surface the atom carries `data-block-ref` and its label in `data-block-ref-label`, one character wide, read back as the run it was. A reference whose target left the reading order keeps its run and draws gone, and draws live again when the block returns (`BO_0300_Q4`).
 - Verified (`BO_0300_008`, 2026-09-25): `views/references.test.ts` in the render harness — `#` in a paragraph offering the heading, the other paragraph and the numbered picture with the block itself absent, a choice writing the atom with the `#` taken back, the list narrowed by the words typed, the bar without the three choices, the four drawings in the reading row with a press bringing the target's row into view, and the atom painted on the surface with its label and read back; `lib/reference-choices.test.ts` for the entries and the filter; `command-control.test.ts`'s mark case still passing beside them.
-- Found in the walk and fixed the same day (2026-09-25): the list drew with no background, since the old composer's styles had gone with it, and now stands as a raised panel above the command line that scrolls when the blocks do not fit; and the `#` was measured in `runsText`, which drops every atom, so after a citation the range was one place too far left — a chosen reference ate the words before it and two references could not stand side by side. The `#` is measured in `runsPoints` now, one point per atom (`ui.shell`'s `runs.ts`), and `pendingBlockReference` and `pendingReference` admit a `#` directly after an atom. Cases in `references.test.ts` and `runs.test.ts` pin both.
+- Found in the walk and fixed the same day (2026-09-25): the list drew with no background, since the old composer's styles had gone with it, and now stands as a raised panel below the command row (`DO_0033_002`) that scrolls when the blocks do not fit; and the `#` was measured in `runsText`, which drops every atom, so after a citation the range was one place too far left — a chosen reference ate the words before it and two references could not stand side by side. The `#` is measured in `runsPoints` now, one point per atom (`ui.shell`'s `runs.ts`), and `pendingBlockReference` and `pendingReference` admit a `#` directly after an atom. Cases in `references.test.ts` and `runs.test.ts` pin both.
 - Walked by the user at pin 2848 (`BO_0300_009`, 2026-09-25, "works"), after the two faults the first pass found were fixed: the `#` list as a panel narrowing as words are typed, references to a heading, a figure, an equation and a paragraph written from it and read as the heading's words, *Figure 1*, *(1)* and *Remark 1*, a click reaching the block, the paragraph retired and its reference gone, restored and live, a prompt's `#` still pointing at its marks, the bar without the three choices, and the manuscript setting the paragraph apart as *Remark 1*. The change is complete.
 
 ## A Merge Keeps The Words
@@ -1210,8 +1201,8 @@ it marks (the bar's *Retire* until `BO_0315_012`).
   subject, no chip opens, and no row takes the active or focused look from the selection alone.
   User decision, 2026-09-29.
 * While the selection marks more than one block, the bar keeps its single-block controls — *Turn
-  into*, the *Add* buttons, *Number*, *Standing* — visible and disabled. User decision, 2026-09-29;
-  *Retire* left the bar 2026-09-30 (`BO_0315`).
+  into*, the *Add* buttons, *Number* — visible and disabled. User decision, 2026-09-29;
+  *Retire* left the bar 2026-09-30 (`BO_0315`), *Standing* 2026-10-03 (`DO_0031`).
 * Delete or Backspace retires every marked block, fixated blocks included, each landing in the
   document's retired list and restorable one by one; an open proposal the selection marks is
   declined by the same press. Fixation guards the words against rewriting, not the block against
@@ -1256,7 +1247,7 @@ it marks (the bar's *Retire* until `BO_0315_012`).
   under it. The focus the reader gave a row before the selection stays in the state and returns
   when the selection is back inside one row.
 - The bar while several rows are marked (`DO_0023_003`): no row is the subject, and *Turn into*
-  (`block-role`), the *Add* buttons, *Import table* and *Standing* (`block-standing`) stand as
+  (`block-role`), the *Add* buttons and *Import table* stand as
   disabled buttons wearing their icons, since only a button carries `disabled` in the bar's
   contract; *Number* is offered only on a subject that can be numbered and so is not drawn. The
   bar carries no *Retire* (`BO_0315_012`); the page's keydown listener sends `retireMarked$` for
@@ -1410,7 +1401,7 @@ to it.
   row's bar. This replaces the arrows of [A Grip On Every Row](#a-grip-on-every-row) (`BO_0263`, 2026-09-18). User
   decision, 2026-09-30.
 - The scale in code (`BO_0315_009`). `lib/disposition.ts` holds keep and fixate (`SCALE`), and `prompt` off the
-  scale; `LABEL`, `DONE`, `MARK`, `MEANING`, `GLYPH` and `CONTROL_GLYPH` name those, and `MARK` names the removed row
+  scale; `LABEL`, `DONE`, `MARK`, `GLYPH` and `CONTROL_GLYPH` name those, and `MARK` names the removed row
   *removed* (`CardMark` `removed`). `RETIRED` reads `discarded` and `resolved` as keep for a block the migration has
   not yet reached (`BO_0315_008`). Nothing draws a discarded block any more: no discarded row, no *Show discarded
   blocks*, no discarded branch in `readingOrder`, no remembered `discarded` flag, no chip saying *since discarded*, no
@@ -1552,7 +1543,7 @@ Under `calliopa-bootstrap`'s `BO_0322` (`docs/changes/BO_0322_FEAT_a-pinch-deepe
   desktop); the header begins 48px below the surface's top, under a 40px bar; the compact line
   stands 40px below it, 36px high, one line, its pills inside it, the title 177px of 353px at 360,
   and the surface's scroll height unchanged by its appearing. The observer and the *+N* count run
-  only in a live page and are the walk's. Mutations — rows drawn without their wrapper, the
+  only in a live page and were walked (`DO_0030_009`). Mutations — rows drawn without their wrapper, the
   sighting ignoring where the header went — each failed a test. `structures`' 80 and
   `keywords`' 31 unit tests pass; the unit project's failures are the nine already failing at head 3729
   (`line-breaks`, equations, `bar`, `sources`, the vocabulary), none new.
@@ -1560,11 +1551,127 @@ Under `calliopa-bootstrap`'s `BO_0322` (`docs/changes/BO_0322_FEAT_a-pinch-deepe
   *Changed*: the structures line says a document's structures and their values stand in its header and that
   focused work's header shows the structures from above, and a line of its own says the header, the
   mentions count replacing the list at a keyword document's end, and the compact line.
-- [ ] DO_0030_009 Walked by the user on the served build, on a desktop and a phone: a focused work's
-      header with its route, title, own and inherited structures and a structure used from the always-drawn
-      control; a document with filled and empty values; a keyword document's mentions, listed and
-      opened; scrolling down to the compact line and pressing it back to the top; on the phone the
-      pills counted as *+N*.
-- [ ] DO_0030_010 Close: this change's document carried at its status in the same proposal, moved
-      to `docs/changes/completed/` at `completed`, and `scripts/export-graph.sh` run in
-      `calliopa-bootstrap`.
+- Walked by the user on the served build, on a desktop and a phone, 2026-10-03 (`DO_0030_009`): a
+  focused work's header with its route, title, own and inherited structures and a structure used from
+  the always-drawn control; a document with filled and empty values; a keyword document's mentions,
+  listed and opened; scrolling down to the compact line and pressing it back to the top; on the phone
+  the pills counted as *+N*. All as described.
+
+## The Compact Line Beside The Drawer And Inspector
+
+- Under `calliopa-bootstrap`'s `BO_0343` (`docs/changes/completed/BO_0343_FIX_title-overlap-structures-and-slow-graph-work.md`),
+  set to draft by the user on 2026-10-03 and transferred here the same day.
+* On a phone, the compact line never covers the left drawer or the inspector. It stays inside the
+  document surface, below every panel that opens over the document. Reported by the user,
+  2026-10-03.
+- The compact line's level (`BO_0343_010`, landed 2026-10-03; `views/block-editor.css`):
+  `.document-header-anchor` stands at `z-index: 5`. Every other layer of the document is at most 4
+  (rows, a pinched or swiped row, the bar, the gutters), so the line stays over them. On a phone,
+  the shell's panels open over the document from 10 up: `ui.shell`'s `.drawer` (the left drawer
+  and the inspector) at 20 and `.sheet-handle` at 10. So both drawers cover the line, whatever
+  their order in the page. At 20, the drawer's own level, the later element won, and the line was
+  drawn over the drawer and the inspector. The line is lowered rather than the surface given its
+  own stacking, so the passage affordance (fixed, 40) keeps its place over the shell. The document's
+  popovers already leave its stacking through the top layer.
+- `views/document-header.test.ts` asserts it from both stylesheets: the line's level is above
+  every level in `block-editor.css` other than the fixed layers, and below the shell's `.drawer`
+  and `.sheet-handle`. At 20 it fails (*expected 20 to be less than 20*).
+- Verified on the served build (`BO_0343_011`, 2026-10-03, pin 4268): headless Chromium (Playwright
+  1.62.1) at 360 and 390 CSS px, signed in as a throwaway account, opened *Make it work* and
+  scrolled past its header. With the library drawer open, then with the inspector open, the
+  element under the compact line at three points was the drawer wherever the drawer reached, and
+  the compact line only beyond its edge (`elementFromPoint`).
+- Walked by the user on a phone at pin 4296, 2026-10-03, "worked" (`BO_0343_011`): the left
+  drawer and the inspector each cover the compact line.
+
+## A Title Is Kept Before Another Control Acts
+
+- Under `DO_0032` (`docs/changes/completed/DO_0032_FIX_a-title-is-kept-before-the-header-acts.md`), set to
+  draft by the user on 2026-10-03 and transferred here the same day.
+* A title typed is kept when the person acts anywhere else before leaving the title: any press
+  outside the title's field — a line of the header under the title, a block's command, a chip —
+  saves the pending title first, as a blur does. Requested by the user, 2026-10-02; widened to
+  every press outside the field, user decision, 2026-10-03 (`DO_0032_Q1`).
+- A press saves the title first (`DO_0032_001`, landed 2026-10-03; `views/block-editor.tsx`): a
+  page listener in the capture phase takes every `pointerdown` that lands outside the title's
+  field while the field holds words other than the shown title, and saves them through
+  `saveTitle$`, the path the blur takes (`rename$`, then the shown title put back when the rename
+  did not take). The press comes before the click the pressed control acts on, so the rename is
+  sent before the control's own write; a structure taken under the title names no document
+  revision, so neither is a conflict. `savingTitle` holds the title on its way, so the blur that
+  follows a press sends it no second time. A press on the field itself saves nothing. The caret
+  stays where the pressed control keeps it.
+- Proven in the render harness (`DO_0032_002`): `views/title-kept.test.ts` with the structures'
+  routes stood in beside the documents' — a title typed and a structure taken from the header's
+  `+` sends the rename before the structure's write, and the title stays shown, and leaving the
+  field after sends nothing more; a title typed and a block's *Point from this block* pressed
+  sends the rename; an untouched title sends nothing; a press on the title itself sends nothing.
+  With the press listener taken out the first two fail, and without the field's own exclusion the
+  last fails. The documents and structures unit projects pass, 950 of 950.
+- The release line (`DO_0032_003`): `calliopa-bootstrap`'s `docs/release-notes/unreleased.md`,
+  under *Fixed*: a document's new title is no longer lost when a structure is given or anything
+  else pressed before leaving the title.
+- Walked by the user on the served build at pin 4483, 2026-10-03, "works" (`DO_0032_004`): a title
+  typed and a structure taken from the header's `+` before leaving it, and the title kept.
+- `views/title-kept.test.ts` imports nothing from `structures` (`DO_0036_001`, landed
+  2026-10-03): the structures' answers its stand-in routes serve — the listing, a document's
+  structures, one structure — are plain objects of the test's own, untyped, and the test proves
+  `DO_0032_002` as before. `documents` ships while an owner switches `structures` off, so none of
+  its files, a test included, imports from it; the release's absence check refused `0.5.1` at pin
+  4534 on that import (`TS2307`). Verified (`DO_0036_002`): the test passes, 4 of 4, and
+  `kernel toolchain absence` on a head checkout carrying the fix builds every combination of
+  switched-off extensions.
+
+## Standing Leaves The Bar
+
+- Under `DO_0031` (`docs/changes/completed/DO_0031_FEAT_standing-leaves-the-bar.md`), set to draft by the
+  user on 2026-10-03 and transferred here the same day.
+* The document's bar carries no *Standing* group. Its block groups are *Format*, *Turn into*,
+  *Block* and *History*; nothing else in the bar moves. Requested by the user, 2026-10-01.
+* No gesture is the only path, without the bar: `Alt`+`Shift`+`ArrowRight` fixates a focused
+  reading row and `Alt`+`Shift`+`ArrowLeft` returns it to keep, the block bar's *Fixate* sets it on
+  the row turned to and on the row being edited (`BO_0315_013`), and the swipe acts on touch.
+  *Take back* stays in the *Document* group (`CA_0058_011`). The block being edited keeps the
+  block bar as its path; the chord still never acts on it. User decision, 2026-10-03.
+* "The toolbar" is the document's bar at the top of the view alone: the block bar keeps *Remove*
+  and *Fixate*. User decision, 2026-10-03.
+* A prompt is set back from its own block bar: a prompt row revealed by *Show prompts* and turned
+  to carries *Keep as content*, which returns it to keep, and *Fixate*. *Send* stays the only way
+  a block becomes a prompt, and the swipe and the chord still never reach one. User decision,
+  2026-10-03.
+* What each standing and *Remove* mean is no longer explained in the view: the info control goes
+  with the group and nothing replaces it until the shell has a help surface. User decision,
+  2026-10-03.
+- [ ] The explanation of keep, fixate and *Remove* — what they mean and how each is set — returns
+      when the shell has a help surface to carry it.
+- The bar's *Standing* group is gone (`DO_0031_001`, landed 2026-10-03). `views/block-editor.tsx`
+  contributes no `standing` group — not the `block-standing` choice and `standing-info` popover
+  while a block or a proposal is the subject, and not the disabled `block-standing` while several
+  rows are marked (`DO_0023_003`) — and `STANDING_ICON` went with it, as did `MEANING` from
+  `lib/disposition.ts`, which only the popover read. The shell's `choice` and popover kinds are
+  untouched (`CA_0053_002`).
+- A prompt's own block bar (`DO_0031_002`, landed 2026-10-03). `views/block-bar.tsx` draws, on a row
+  whose standing is `prompt`, *Keep as content* (`data-standing-option="keep"`, ○) and *Fixate*
+  (`data-standing-option="fixate"`, ◆), both through the row's `fixate$` — `setStanding$` — where
+  any other text row carries *Fixate* alone. A prompt carries the block bar only where it is drawn:
+  revealed by *Show prompts* and turned to, or being edited.
+- Proven 2026-10-03 on `.local/tree-do31` at dataRevision 4471 (`DO_0031_003`): `tsc --noEmit`
+  clean, the documents unit suite 106 files and 847 tests, and both bundles built with no warning of
+  ours. `views/bar.test.ts` reads the groups with no `standing` — a block edited, a block turned to,
+  the pointer resting elsewhere while editing, a proposal turned to — and the block groups' controls
+  in their order with neither `block-standing` nor `standing-info`; `views/marked-rows.test.ts` the
+  disabled controls with no `block-standing`; `views/command/command-control.test.ts` a revealed
+  prompt turned to carrying *Keep as content* and *Fixate* on its own bar and none in the top bar,
+  *Keep as content* writing keep and *Take back* writing `prompt` back, and its *Fixate* writing
+  fixate. Each shown to bite: the earlier `views/block-bar.tsx` fails both prompt cases, and the
+  earlier `views/block-editor.tsx` fails the five bar cases, the prompt case and the several-rows
+  case.
+- The docs say it (`DO_0031_004`, landed 2026-10-03): *Presentation*'s groups, *Standing*'s *No
+  gesture* line, the chord's line and `use-standing.ts`' paths, *Prompts*, *The Standing Is Three
+  States*, *The Bar Before Editing* and *Take back*'s line, *The Bar Says It In Icons*, *Standing
+  Belongs To Reading*, *Retiring Marked Blocks*, and [Proposed Changes](./proposed-changes.md).
+- The release line (`DO_0031_005`, landed 2026-10-03): `calliopa-bootstrap`'s
+  `docs/release-notes/unreleased.md`, under *Changed*.
+- Walked by the user on the served build at pin 4504, 2026-10-03, "works" (`DO_0031_006`): no
+  *Standing* in the bar with a block focused, edited or several marked; *Fixate* from the block bar
+  on a row turned to and on the block being edited; a revealed prompt kept as content and taken back.

@@ -163,6 +163,14 @@ describe("the agent at work in the document", () => {
       ],
     };
     const ended = runChipsOf(proposals, []);
+    expect(ended.every((chip) => chip.elsewhere === undefined)).toBe(true);
+    // What a run started elsewhere rides on its ended chip, each opening its
+    // document. DO_0034_002
+    const elsewhere = runChipsOf(
+      { ...proposals, groups: proposals.groups.map((group) => (group.groupId === "node:run-new" ? { ...group, elsewhere: [{ documentId: "doc-beat", title: "video-beat", kind: "structure" }] } : group)) },
+      [],
+    );
+    expect(elsewhere[0]?.elsewhere).toEqual([{ title: "video-beat", kind: "structure", open: { kind: "documents:document", itemId: "doc-beat", title: "video-beat" } }]);
     expect(ended.map((chip) => [chip.key, chip.text, chip.ended])).toEqual([
       ["node:run-new", "1 rewrite", true],
       ["node:run-old", "1 removal", true],

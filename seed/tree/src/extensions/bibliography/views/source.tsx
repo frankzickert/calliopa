@@ -65,8 +65,9 @@ export const SourceProvider = component$<DocumentDecorationProps>(({ documentId 
       state.unready = capability === undefined || capability.state === "ready" ? null : capability.reason;
     };
     void read();
-    // A page without a window — a suite's render — has no network to follow.
-    if (typeof window === "undefined") return;
+    // A page without a window — a suite's render, whose stand-in window
+    // dispatches no events — has no network to follow. CA_0079_001
+    if (typeof window === "undefined" || typeof window.addEventListener !== "function") return;
     window.addEventListener("online", read);
     window.addEventListener("offline", read);
     cleanup(() => {

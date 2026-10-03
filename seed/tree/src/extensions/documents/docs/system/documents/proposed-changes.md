@@ -144,9 +144,9 @@
 ## The Bar Acts On A Proposal
 
 - Under `documents`' `DO_0006` (2026-09-21), the bar's block groups come up on a focused proposal as they do on a block ([Block Editor View](./block-editor.md#the-bar-before-editing)).
-* A proposed block is worked with as an ordinary block: focusing it brings *Standing*, *Block* and *Turn into* up, and a press in one of them accepts the proposal first and then acts on the block the acceptance established. This is the grain typing into a proposed block already has, and rejecting stays the way a proposal goes away. User decision, 2026-09-21.
+* A proposed block is worked with as an ordinary block: focusing it brings *Block* and *Turn into* up, and a press in one of them accepts the proposal first and then acts on the block the acceptance established. This is the grain typing into a proposed block already has, and rejecting stays the way a proposal goes away. User decision, 2026-09-21.
 * The *Block* group's *Add …* controls are the exception: they leave the proposal open and place the new block directly below where the proposal is drawn, so it reads below it before and after the proposal is answered ([Block Editor View](./block-editor.md#a-new-block-lands-below), `DO_0016_003`). User decision, 2026-09-24.
-- The bar is a third path to a proposal's standing, beside the swipe and the standing toolbar on the proposal turned to (`BO_0272_008`, `BO_0272_010`, `DO_0014_003`).
+- A proposal's standing is set by the swipe and by the block bar on the proposal turned to (`BO_0272_008`, `DO_0014_003`); the bar carries none (`DO_0031_001`).
 - A press in a block group on a focused proposal (`DO_0006_004`, landed 2026-09-21). `ProposalBlock` tells the editor the reader has turned to it (`focus$` from its `onFocusIn`), which makes the proposal the bar's subject and lets the focused block go; the two focuses are exclusive. `acceptThenAct$` is the one accept-then-act path for every act but *Add …*, which places below the proposal and answers nothing (`DO_0016_003`), and `BO_0272_008`'s swipe now calls it: the guards are its own — a kind outside `SWIPEABLE_PROPOSALS` has no block to act on, and an item already answered or edited into is left alone — then the acceptance, the drop, a read of the document, and the named act on the block it established (`item.blockId`: the item's own, which a rewrite and a move keep and an insert creates), which is then the focused block. A refused acceptance acts on nothing and says why where the proposal is read. A proposal shows the resting standing until it is accepted, since it carries none.
 
 ## The Relation Card Answers In Its Chip
@@ -177,3 +177,119 @@ Under `calliopa-bootstrap`'s `BO_0322` (`docs/changes/BO_0322_FEAT_a-pinch-deepe
 * A gather is answered whole: the summary, the focused work and every move are accepted or rejected together, and a rejected gather leaves the document as it was. User decision, 2026-10-01.
 * A block that already has focused work gathers into it, after its last block, and the block's original words stay as a block of the focused work in their own place among the gathered blocks. User decisions, 2026-09-30 (`BO_0322_Q21`) and 2026-10-01.
 - The gather is read, drawn and answered (`BO_0322_013`, landed 2026-10-01). `readDocumentProposals` derives it from the group's touched set as the kernel does (`gatherOf` in `server/reach.ts`): the blocks whose containment in the document the group closes and that it places under another node, and the one block left here that the group rewrites. It is the group's one item, of kind `gather`, carrying the summary as its block, `gathered` in document order and `createsChild`. `placeProposals` puts the summary in its block's place as a rewrite; each gathered row is framed by the gather (`ProposalBlock` with `framed`), saying *Gathered into the summary's focused work*, and the summary's mark says *Proposes a summary, gathering N blocks into new | its focused work* (`gatherWords`). The summary is neither dragged nor edited, a gathered row is focused and not edited while the gather stands, and the swipe takes a gather (`SWIPEABLE_PROPOSALS`). Answering it anywhere — the summary, a framed row, the chip, a swipe — goes to `answerDocumentProposal`, which answers a `gather` item as its group through `decideGroup`: the kernel's accept with `gather: true` or its reject of the whole group (`BO_0322_009`). Proven in `views/proposals/gather.test.ts` (the summary in its block's place, both rows framed with their words, a framed row not edited and its *Remove* rejecting the one item) and `server/reach.test.ts` (`gatherOf`, and a removal or an insert read as none).
+
+## The Time It Takes
+
+- Under `calliopa-bootstrap`'s `BO_0343` (`docs/changes/completed/BO_0343_FIX_title-overlap-structures-and-slow-graph-work.md`),
+  set to draft by the user on 2026-10-03 and transferred here the same day. The kernel half, the
+  measurement and the one-second line stand in `calliopa-bootstrap`'s `docs/system/ccgw.md`, The
+  Time Graph Work Takes (`BO_0343_001`–`BO_0343_005`).
+* *Accept all* on a typical run finishes in under one second, from the press to the document
+  showing the result. User decision, 2026-10-03.
+- *Accept all* and *Reject all* answer a group in one request (`BO_0343_012`, landed 2026-10-03).
+  `answerGroup$` sends the `answerGroup` command with the group and the answer
+  (`views/documents-client.ts` `answerGroup`). It drops the answered items at once, says the
+  answer's notice, and reads the document once; the proposals and the changes are read after it,
+  as for any reload. A group holding an item under an edit is still answered item by item, since
+  the edit settles that item.
+- `answerDocumentGroup` (`server/documents.ts`) reads the group's items once and refuses an
+  acceptance a guard keeps (`RO_0005_020`). It takes a started document first (`BO_0251_009`) and
+  the sources the group's sentences cite (`BO_0291_036`), then sends every item's members, in the
+  items' order, to the kernel as one batch (`ccgw/client.ts` `decideMembers`, over
+  `calliopa-bootstrap`'s `BO_0343_002`). An item whose members all landed is answered.
+  - An item whose first member the batch could not decide (drifted, refused, or kept behind the
+    confirmation) is then answered alone through `answerDocumentProposal`. That accepts over a
+    standing set since, or says why not, as its own icon would.
+  - An item stopped after its first member stays as answering it alone would leave it, and is
+    named in the notice.
+  - After an acceptance, the code among the accepted members is formatted once, and the items
+    withdrawn in favour of an answered one are rejected, one batch per group.
+  - Rejecting every item of a started document rejects the document.
+  - A gather's group is still answered whole.
+- Measured in the kernel harness (`calliopa-bootstrap`'s ccgw.md, The Time Graph Work Takes): 20
+  rewrites accepted fell from 1.6 s and 342 CCGW requests to 0.14 s and 15. 50 fell from 3.0 s to
+  0.25 s. *Reject all* on 20 fell from 0.68 s to 64 ms.
+- Verified: `tests/behavior/answer-group.test.ts` over the kernel harness covers three cases. A run's
+  rewrites and an insert, accepted, all land with one batch to the kernel. A rewrite whose block's
+  words changed since stays and is said, while the rest lands. Rejected, the document is as it
+  was and the group is gone. In the render harness, `agent-at-work.test.ts` checks that a run
+  chip's *Reject all* sends one `answerGroup` and no `answerProposal`, and that its items leave.
+  `proposal-block.test.ts` checks that *Accept all* is neither an edit's answer nor one answer per
+  item.
+- Opening a document and following a run's staging meet the one-second line without a change of
+  their own (`BO_0343_013`, measured 2026-10-03 at pin 4296). Staging a typical run's rewrites
+  takes 13–27 ms in the kernel harness. Opening *Make it work* (equations and code, 38 proposals)
+  in the served shell at 360 CSS px drew its blocks after 0.76 s; the document read (647 ms, the
+  equations and the code rendered on the server) dominates.
+- Walked by the user on the dev instance at pin 4296, 2026-10-03, "worked": *Accept all* and
+  *Reject all* on a person's real run answered at once.
+
+
+## Accept All Answers The Whole Run
+
+- Under `DO_0034` (`docs/changes/completed/DO_0034_FIX_accept-all-answers-the-whole-run.md`), set to draft by
+  the user on 2026-10-03 and transferred here the same day: a run asked in *Calliopa* to create the
+  structure *video-beat* staged a block in *Calliopa* and the started document *video-beat*, and
+  the chip's *Accept all* took the block alone — `answerDocumentGroup` decides only the items of the
+  document it is pressed in, and a document the run started elsewhere is listed nowhere a person
+  could open it. The shell's half is `ui.shell`'s [Agent Activity](../../../../../../docs/system/workspace/agent-activity.md),
+  *A Run's Work Elsewhere*; `structures`' half its system document, *A Structure Is Named On The
+  Chip*.
+* *Accept all* on a run's chip answers the run: every member of its group, wherever it lands — the
+  document the chip stands in, a document the run started, a structure, a source, a relation.
+  User decision, 2026-10-03.
+* *Reject all* answers the run the same way: every member of its group, so a document the run
+  started elsewhere is discarded with its items here. User decision, 2026-10-03.
+* Before the press, the chip names what the run proposes outside this document — *also creates the
+  structure video-beat* — each name opening that document. User decision, 2026-10-03.
+* An item's ✓ and ✗ answer that item alone; only *Accept all* and *Reject all* reach the run's work
+  elsewhere. User decision, 2026-10-03.
+- The whole group answered (`DO_0034_001`, landed 2026-10-03; `server/documents.ts`
+  `answerElsewhere`). After the document's own items, as before, `answerDocumentGroup` reads the
+  group's touched set and its candidates once and sends every node it still stages outside this
+  document — a started document's node first, then the nodes it holds — to the kernel in one batch
+  (`decideMembers`), then the relations the group still stages or closes in one more. This
+  document's node, the nodes its staged relations place and its items' members are its items' to
+  answer, and the run's `agent.run` record goes as before. *Reject all* does the same with
+  `reject`. A member the kernel will not decide stays and is named in the notice. A person's
+  branch is still answered through its session card, and a gather whole.
+- The chip's `elsewhere` (`DO_0034_002`, landed 2026-10-03). `readDocumentProposals` gives each group
+  `elsewhere` — every document node the group itself stages besides this one, by id and title,
+  read from the candidates the group read already holds (`elsewhereOf`) — and `runChipsOf`
+  (`lib/agent-at-work.ts`) carries it on an ended run's chip, each with the target that opens it
+  (`documents:document`). `server/guards.ts` keeps a namer registry beside the guards:
+  `nameDocuments(name, namer)` and `kindOfDocument(documentId, group?)`, the first word a registered
+  namer answers, read through the group when one is given; a namer that fails answers nothing.
+- The notice (`DO_0034_003`, landed 2026-10-03): after *Accept all*, each started document is named
+  by its title — *Beat is now a structure*, or *… now stands as a document* where no extension names
+  it; after *Reject all*, *… was discarded*. The names open nothing in the notice; the chip's names
+  do.
+- Proven (`DO_0034_004`, 2026-10-03) under the kernel harness. `tests/behavior/answer-group.test.ts`:
+  a run's rewrite and insert here and a started document in the same group — the read's `elsewhere`
+  names it; *Accept all* lands the items and the document, said in the notice; *Reject all* leaves
+  the document as it was and the started one unknown; accepting one item lands it alone while the
+  started document still holds the run's proposals. `structures`' suite proves the word *structure*
+  and the catalogue (`DO_0034_008`). In the render harness `run-chips.test.ts` draws the names and
+  opens one; `lib/agent-at-work.test.ts` carries `elsewhere` onto the chip. The unit suites pass
+  (one timing case of `views/handover.test.ts` failed once under the full run's load and passes
+  alone).
+- Walked by the user on the dev instance at pin 4405, 2026-10-03, "it worked": a run asked in a
+  document to create structures named them on its chip, and *Accept all* made them structures. The
+  new structures appeared under *Structures* only after a reload of the page; that is
+  `DO_0034_009`.
+- The library reads its sections again (`DO_0034_009`, landed 2026-10-03; `views/block-editor.tsx`
+  `answerGroup$`): once *Accept all* or *Reject all* lands on a group the read named work elsewhere
+  for, the view asks the shell to read again the sections whose rows open documents
+  (`bridge.targetChanged$`, the shell's `refreshKind$`), so a structure the run made is listed
+  under *Structures* at once and one it discarded leaves. A group with nothing elsewhere asks for
+  nothing. Proven in `views/proposals/agent-at-work.test.ts`: *Accept all* on a group with a
+  structure elsewhere asks once, *Reject all* on one without asks never.
+- Walked again at pin 4440 (`DO_0034_005`, 2026-10-03): the user, having asked a run for a
+  structure and pressed *Accept all*, closed the change; the structure stands under *Structures*
+  without a reload.
+- The release line stands under *Fixed* in `calliopa-bootstrap`'s `docs/release-notes/unreleased.md`
+  (`DO_0034_006`, 2026-10-03).
+- [ ] A run that changes a document already standing elsewhere — a rewrite or an insert there, not
+  a document it started — is answered by *Accept all* with the rest, but the chip does not name
+  that document: `elsewhereOf` names only the documents the group started. Naming it needs the
+  document each staged block or relation belongs to.

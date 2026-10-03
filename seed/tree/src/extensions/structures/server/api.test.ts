@@ -4,8 +4,19 @@ import { parseStructureCommand, withCreate } from "../contributions.server";
 import {
   BUILTIN_STRUCTURES,
   CSL_TYPES,
+  DEFINITION_STRUCTURE,
+  FIELD_STRUCTURE,
+  FORMAT_STRUCTURE,
+  INPUT_STRUCTURE,
+  INSTRUCTION_STRUCTURE,
+  KEYWORD_STRUCTURE,
+  SOURCE_STRUCTURE,
+  STRUCTURE_STRUCTURE,
+  ALIAS_STRUCTURE,
   blocksAllowed,
+  declaredFor,
   defaultsOf,
+  fieldFromBlock,
   fieldOf,
   inOrder,
   isStructureId,
@@ -18,12 +29,13 @@ import {
   type StructureView,
   type TakenStructure,
 } from "../lib/structures";
-import { oneStructureTypeStatement } from "./migrations";
+import { oneStructureTypeStatement, structuresAsDocumentsStatement, type StructureNode } from "./migrations";
 import { titleOfNode } from "./structures";
 
 /**
- * The acts the structure page posts, the rules the one structure type holds to, and the
- * migration's statement (`BO_0309_017`), each pure.
+ * The acts a structure's document posts, the rules structures hold to, a field
+ * as a block using *Field* declares it, and the migrations' statements
+ * (`BO_0309_017`, `RO_0005_006`), each pure.
  */
 const id = "2b0c1f3a-0f6a-4d1e-9a3c-1d2e3f4a5b6c";
 
@@ -38,46 +50,36 @@ const structure = (structureId: string, name: string, extra: Partial<StructureVi
   offers: [],
   offeredBy: [],
   blocks: true,
+  text: "",
   ...extra,
 });
 
 describe("parseStructureCommand", () => {
-  it("reads each act with what it carries", () => {
-    expect(parseStructureCommand({ command: "rename", name: "Story" })).toEqual({ command: { command: "rename", name: "Story" } });
-    expect(parseStructureCommand({ command: "describe", description: "A story" })).toEqual({ command: { command: "describe", description: "A story" } });
+  it("reads the acts that stay acts: retire, restore and Keyword's Send with prompt (RO_0005_003)", () => {
     expect(parseStructureCommand({ command: "retire" })).toEqual({ command: { command: "retire" } });
-    expect(parseStructureCommand({ command: "offer", structure: id })).toEqual({ command: { command: "offer", structure: id } });
-    expect(parseStructureCommand({ command: "unoffer", structure: "builtin:keyword" })).toEqual({ command: { command: "unoffer", structure: "builtin:keyword" } });
-    expect(parseStructureCommand({ command: "addField", name: "Channel", type: "choice", options: ["Blog"], required: true })).toEqual({
-      command: { command: "addField", name: "Channel", type: "choice", required: true, options: ["Blog"] },
+    expect(parseStructureCommand({ command: "restore" })).toEqual({ command: { command: "restore" } });
+    expect(parseStructureCommand({ command: "sendWithPrompt", entry: "definition", on: true })).toEqual({
+      command: { command: "sendWithPrompt", entry: "definition", on: true },
     });
-    expect(parseStructureCommand({ command: "reviseField", key: "k", default: null })).toEqual({ command: { command: "reviseField", key: "k", default: null } });
-    expect(parseStructureCommand({ command: "removeField", key: "k" })).toEqual({ command: { command: "removeField", key: "k" } });
-    expect(parseStructureCommand({ command: "moveField", key: "k", by: -1 })).toEqual({ command: { command: "moveField", key: "k", by: -1 } });
   });
 
-  it("refuses what is not an act, in words", () => {
-    expect(parseStructureCommand({ command: "delete" })).toEqual({ failure: "delete is not an act on a structure" });
-    expect(parseStructureCommand({ command: "offer", structure: "story" })).toEqual({ failure: "offer names the structure by its id" });
-    expect(parseStructureCommand({ command: "addField", name: "X", type: "colour" })).toHaveProperty("failure");
-    expect(parseStructureCommand({ command: "addField", name: "X", type: "choice", options: "a,b" })).toEqual({ failure: "a choice's options are a list of words" });
-    expect(parseStructureCommand({ command: "reviseField", key: "k", required: "yes" })).toEqual({ failure: "required is true or false" });
-    expect(parseStructureCommand({ command: "moveField", key: "k", by: 2 })).toEqual({ failure: "moveField moves by -1 or 1" });
-    expect(parseStructureCommand({ command: "blocks", allowed: "no" })).toEqual({ failure: "blocks is allowed: true or false" });
-  });
-
-  it("reads whether blocks may take the structure (BO_0332_010)", () => {
-    expect(parseStructureCommand({ command: "blocks", allowed: false })).toEqual({ command: { command: "blocks", allowed: false } });
-    expect(parseStructureCommand({ command: "blocks", allowed: true })).toEqual({ command: { command: "blocks", allowed: true } });
+  it("refuses in words what is written in the structure's document, and what is no act", () => {
+    for (const command of ["rename", "describe", "offer", "addField", "reviseField", "removeField", "moveField", "blocks"])
+      expect(parseStructureCommand({ command })).toEqual({
+        failure: `${command} is not an act on a structure: a structure's name, description, fields and what it allows are written in its document`,
+      });
+    expect(parseStructureCommand({ command: "sendWithPrompt", entry: "", on: true })).toEqual({ failure: "sendWithPrompt names a field's key or an allowed structure's id" });
+    expect(parseStructureCommand({ command: "sendWithPrompt", entry: "d", on: "yes" })).toEqual({ failure: "sendWithPrompt is on or off" });
   });
 });
 
 describe("whether blocks may take a structure (BO_0332_010)", () => {
   it("is the release's on a built-in: the four are taken by documents alone, Definition and Alias by blocks", () => {
-    for (const builtin of ["builtin:keyword", "builtin:profile", "builtin:format", "builtin:source"])
+    for (const builtin of [KEYWORD_STRUCTURE, INSTRUCTION_STRUCTURE, FORMAT_STRUCTURE, SOURCE_STRUCTURE, STRUCTURE_STRUCTURE])
       expect(blocksAllowed(builtin, true)).toBe(false);
-    expect(blocksAllowed("builtin:definition", false)).toBe(true);
-    expect(blocksAllowed("builtin:alias", undefined)).toBe(true);
+    expect(blocksAllowed(DEFINITION_STRUCTURE, false)).toBe(true);
+    expect(blocksAllowed(ALIAS_STRUCTURE, undefined)).toBe(true);
+    expect(blocksAllowed(FIELD_STRUCTURE, undefined)).toBe(true);
   });
 
   it("is a person's structure's stored setting, absent meaning allowed (RO_0003_Q1)", () => {
@@ -104,6 +106,11 @@ describe("what a block may take", () => {
   const line = structure("line", "Line", { order: 4, offeredBy: ["hook"] });
   const old = structure("old", "Old", { order: 6, retired: true });
   const structures = [line, hook, story, definition, keyword, old];
+
+  it("never offers Structure, which only Structures' + gives a document (RO_0005_Q9)", () => {
+    const made = structure(STRUCTURE_STRUCTURE, "Structure", { builtin: true, order: 7, blocks: false });
+    expect(takeableFrom([made, story], [], false)).toEqual(["story"]);
+  });
 
   it("is every structure nobody offers, the built-ins first, and never a retired one", () => {
     expect(takeableFrom(structures, [], true)).toEqual(["builtin:keyword", "story"]);
@@ -217,7 +224,7 @@ describe("the migration to one structure type", () => {
 /** Source's release fields and the row's create action (BO_0313_010, BO_0313_011). */
 describe("Source", () => {
   it("declares the CSL record as its release fields, Kind a required choice of every CSL type", () => {
-    const fields = releaseFieldsOf("builtin:source");
+    const fields = releaseFieldsOf(SOURCE_STRUCTURE);
     expect(fields.map((field) => field.key)).toEqual([
       "kind", "authors", "editors", "issued", "container", "volume", "issue", "pages", "publisher",
       "place", "doi", "isbn", "url", "accessed", "abstract", "tags", "file", "fetched",
@@ -231,16 +238,16 @@ describe("Source", () => {
   });
 
   it("leaves a structure without release fields with none, and Format keeps its own", () => {
-    expect(releaseFieldsOf("builtin:keyword")).toEqual([]);
-    expect(releaseFieldsOf("builtin:format").map((field) => field.key)).toEqual(["type", "schema", "provider", "model", "ratio", "quality"]);
-    expect(BUILTIN_STRUCTURES.find((one) => one.id === "builtin:source")).toBeDefined();
+    expect(releaseFieldsOf(KEYWORD_STRUCTURE)).toEqual([]);
+    expect(releaseFieldsOf(FORMAT_STRUCTURE).map((field) => field.key)).toEqual(["type", "schema", "provider", "model", "ratio", "quality"]);
+    expect(BUILTIN_STRUCTURES.find((one) => one.id === SOURCE_STRUCTURE)).toBeDefined();
   });
 
   it("carries Add source on the Source row while its kind is registered, and nothing on any other row", () => {
-    const source = structure("builtin:source", "Source", { builtin: true });
+    const source = structure(SOURCE_STRUCTURE, "Source", { builtin: true });
     expect(withCreate(source, (kind) => kind === "bibliography:new-source").create).toEqual({ kind: "bibliography:new-source", label: "Add source" });
     expect(withCreate(source, () => false).create).toBeUndefined();
-    expect(withCreate(structure("builtin:keyword", "Keyword", { builtin: true }), () => true).create).toBeUndefined();
+    expect(withCreate(structure(KEYWORD_STRUCTURE, "Keyword", { builtin: true }), () => true).create).toBeUndefined();
     expect(withCreate(structure(id, "Source"), () => true).create).toBeUndefined();
   });
 });
@@ -265,3 +272,108 @@ describe("titleOfNode", () => {
     expect(titleOfNode({}, true)).toBe("");
   });
 });
+
+/** A field as a block using Field declares it (RO_0005). */
+describe("a field as a block using Field", () => {
+  it("reads the block's words as the name, Field's values as the rest, and its key as stored or the block's id", () => {
+    expect(fieldFromBlock("blk", "  Citation style ", { key: "citationStyle", type: "Choice", required: true, options: "APA\n\nMLA\nAPA" })).toEqual({
+      key: "citationStyle",
+      name: "Citation style",
+      type: "choice",
+      required: true,
+      blockId: "blk",
+      options: ["APA", "MLA"],
+    });
+    expect(fieldFromBlock("blk", "", {})).toEqual({ key: "blk", name: "Untitled field", type: "text", required: false, blockId: "blk" });
+    expect(fieldFromBlock("b", "Allowed", { type: "Reference", many: true, carrying: FORMAT_STRUCTURE })).toMatchObject({ type: "reference", many: true, carrying: FORMAT_STRUCTURE });
+    expect(fieldFromBlock("b", "Model", { type: "Text", suggest: "media:model", suggestions: "a\nb" })).toMatchObject({ suggest: "media:model", suggestions: ["a", "b"] });
+  });
+
+  it("reads a default as the type Type names, and drops one that does not fit (RO_0005_Q4)", () => {
+    expect(fieldFromBlock("b", "Pages", { type: "Number", default: "12" }).default).toBe(12);
+    expect(fieldFromBlock("b", "Pages", { type: "Number", default: 12 }).default).toBe(12);
+    expect(fieldFromBlock("b", "Done", { type: "True/false", default: "true" }).default).toBe(true);
+    expect(fieldFromBlock("b", "Style", { type: "Choice", options: "APA", default: "MLA" }).default).toBeUndefined();
+    expect(fieldFromBlock("b", "See", { type: "Reference", default: "x" }).default).toBeUndefined();
+  });
+
+  it("declares Field's Default as the type the block's Type names, and leaves it out for a file or a reference", () => {
+    const fields = releaseFieldsOf(FIELD_STRUCTURE);
+    const defaultOf = (values: Record<string, unknown>) => declaredFor(FIELD_STRUCTURE, fields, values as never).find((field) => field.key === "default");
+    expect(defaultOf({ type: "Date" })).toMatchObject({ type: "date" });
+    expect(defaultOf({ type: "Choice", options: "A\nB" })).toMatchObject({ type: "choice", options: ["A", "B"] });
+    expect(defaultOf({ type: "File" })).toBeUndefined();
+    expect(defaultOf({ type: "Reference" })).toBeUndefined();
+    expect(declaredFor(SOURCE_STRUCTURE, releaseFieldsOf(SOURCE_STRUCTURE), { type: "Date" })).toBe(releaseFieldsOf(SOURCE_STRUCTURE));
+  });
+
+  it("holds several references as a list of record ids", () => {
+    const allows = releaseFieldsOf(STRUCTURE_STRUCTURE).find((field) => field.key === "allows")!;
+    expect(valueFor(allows, [id, id])).toEqual({ value: [id] });
+    expect(valueFor(allows, id)).toEqual({ failure: "Allows names documents or blocks by their ids." });
+    expect(valueFor(allows, ["story"])).toEqual({ failure: "Allows names documents or blocks by their ids." });
+  });
+});
+
+/** The migration making every structure a document (RO_0005_002). */
+describe("the migration to structures as documents", () => {
+  const essay: StructureNode = {
+    id: "essay",
+    name: "Essay",
+    description: "A long argument",
+    retired: false,
+    order: 3,
+    blocks: false,
+    fields: [{ key: "pages", name: "Pages", type: "number", required: true, default: 10 }],
+    offers: ["thesis"],
+    uses: [{ relationId: "h1", subject: "doc" }],
+    values: [{ nodeId: "vals", fieldsFor: "ff1" }],
+  };
+  const thesis: StructureNode = { id: "thesis", name: "Thesis", description: "", retired: true, order: 4, blocks: true, fields: [], offers: [], uses: [], values: [] };
+  const everyBuiltin = { ids: new Set(BUILTIN_STRUCTURES.map((release) => release.id as string)), formerIds: new Set<string>() };
+
+  it("makes each node a document using Structure, its fields blocks using Field by key, and moves what hung on it", () => {
+    let n = 0;
+    const statement = structuresAsDocumentsStatement([essay, thesis], everyBuiltin, () => `m-${(n += 1)}`);
+    const lines = statement.statement.split("; ");
+    // Every document stands before anything relates to it.
+    expect(lines.slice(0, 2)).toEqual([
+      'CREATE (d1:document {id: $d1_id, title: $d1_title, status: "established"})',
+      'CREATE (d6:document {id: $d6_id, title: $d6_title, status: "established"})',
+    ]);
+    expect(statement.parameters).toMatchObject({ d1_id: "m-1", d1_title: "Essay", d6_id: "m-2", d6_title: "Thesis" });
+    const values = Object.entries(statement.parameters).filter(([key]) => key.endsWith("_values")).map(([, value]) => value);
+    expect(values).toEqual([
+      { key: "pages", type: "Number", required: true, default: "10" },
+      { order: 3, blocks: false, allows: ["m-2"], formerIds: ["essay"] },
+      { order: 4, blocks: true, retired: true, formerIds: ["thesis"] },
+    ]);
+    expect(lines.slice(-5)).toEqual(["CLOSE u9c", "RELATE u9s -[u9n:hasBlockRole]-> u9t", "SET v10.role = $v10_role", "CLOSE v10c", "RELATE v10f -[v10n:fieldsFor]-> v10t"]);
+    expect(statement.parameters).toMatchObject({ u9cRelationId: "h1", u9cFrom: "node:doc", u9t: "node:m-1", v10_role: "m-1", v10cRelationId: "ff1", v10NodeId: "node:vals" });
+  });
+
+  it("makes every built-in the instance lacks from the release, Structure using itself, and answers nothing once all stand", () => {
+    const statement = structuresAsDocumentsStatement([], { ids: new Set(), formerIds: new Set() }, () => crypto.randomUUID());
+    for (const release of BUILTIN_STRUCTURES) expect(Object.values(statement.parameters)).toContain(release.id);
+    expect(Object.values(statement.parameters)).toContainEqual(expect.objectContaining({ allows: [FIELD_STRUCTURE] }));
+    expect(structuresAsDocumentsStatement([], everyBuiltin)).toEqual({ statement: "", parameters: {} });
+    expect(structuresAsDocumentsStatement([essay], { ...everyBuiltin, formerIds: new Set(["essay"]) }, () => "x").statement).not.toContain("CREATE (d");
+  });
+
+  // ME_0002_002: the input-structure migration makes the one built-in an
+  // instance holding the others lacks, and nothing more.
+  it("Given an instance holding every built-in but Input, Then only Input's document is made, with its three fields", () => {
+    const standing = { ids: new Set([...everyBuiltin.ids].filter((one) => one !== INPUT_STRUCTURE)), formerIds: new Set<string>() };
+    let n = 0;
+    const statement = structuresAsDocumentsStatement([], standing, () => `m-${(n += 1)}`);
+    expect(statement.statement.match(/CREATE \(d\d+:document/gu)).toHaveLength(1);
+    expect(statement.parameters).toMatchObject({ d1_id: INPUT_STRUCTURE, d1_title: "Input" });
+    const fields = Object.entries(statement.parameters).filter(([key]) => key.endsWith("_values")).map(([, value]) => value);
+    expect(fields.slice(0, 3)).toEqual([
+      { key: "kind", type: "Choice", required: true, options: "Start frame\nEnd frame\nReference image\nReference video\nReference audio" },
+      { key: "name", type: "Text", required: true, suggest: "media:inputName" },
+      { key: "required", type: "True/false" },
+    ]);
+  });
+});
+

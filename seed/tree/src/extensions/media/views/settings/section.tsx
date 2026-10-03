@@ -16,8 +16,8 @@ import type { ServiceView, SignInState } from "../../server/media";
  * Signing in runs that vendor's own browser login; the credential stays in the
  * vendor's home and never passes through Calliopa, as for Codex and Claude.
  * Both vendors finish on a loopback redirect inside the service's container,
- * and **OpenArt picks a fresh port for every flow**, so its redirect can never
- * be caught from your browser — the code and state are pasted back instead.
+ * which no browser reaches and the service never publishes, so every sign-in
+ * is finished by pasting the code and state back (`BO_0342`).
  */
 
 interface Flow {
@@ -130,12 +130,20 @@ export const GeneratorsSection = component$(() => {
           <h4>{service.service === "higgsfield" ? "Higgsfield" : "OpenArt"}</h4>
 
           <p data-media-signed-in={String(service.signedIn)}>
-            {service.signedIn ? "Signed in." : (service.reason ?? "Not signed in.")}
+            {service.byKey === true
+              ? service.signedIn
+                ? "Ready: its key is set under Connections."
+                : (service.reason ?? "Enter its key under Connections.")
+              : service.signedIn
+                ? "Signed in."
+                : (service.reason ?? "Not signed in.")}
           </p>
 
           {/* The way in, before anything else on the row, where there is
             one. BO_0273_033 BO_0319_043 */}
-          {!(service.unavailable ?? false) && (
+          {/* A keyed vendor is entered under Connections, not signed in to.
+              BO_0319_025 */}
+          {!(service.unavailable ?? false) && service.byKey !== true && (
           <div class="generators__entry">
             <button
               type="button"
@@ -161,7 +169,8 @@ export const GeneratorsSection = component$(() => {
                 <div data-media-redirect>
                   <p>
                     Approve it, then copy <code>code</code> and <code>state</code> out of the
-                    address of the page it lands on — that page cannot load, which is expected.
+                    address of the page it lands on. That page does not load, or shows another
+                    app that uses the same port; either is expected.
                   </p>
                   <label class="generators__field">
                     <span>code</span>
@@ -207,7 +216,12 @@ export const GeneratorsSection = component$(() => {
             </label>
           )}
 
-          {service.service === "higgsfield" && (
+          {service.service === "higgsfield" && service.byKey === true && (
+            <p class="generators__aside" data-media-by-key>
+              Each picture is paid from the key's own Higgsfield balance; asking what one would cost spends nothing.
+            </p>
+          )}
+          {service.service === "higgsfield" && service.byKey !== true && (
             <p class="generators__aside">
               {service.signedIn && !(service.workspaces ?? []).some((held) => held.selected)
                 ? "Pick a workspace: Higgsfield refuses every generation until one is chosen."

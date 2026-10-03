@@ -385,13 +385,15 @@ describe("proposed changes in the block editor", () => {
     // A run chip's Accept all, as the shell hands it over. BO_0265_014
     view.record.answerAll = { group: "node:run-claude", answer: "accepted" };
     await view.userEvent("[data-harness-answer-all]", "click");
-    await view.waitFor(() => view.commands("answerProposal").length > 2);
+    await view.waitFor(() => view.commands("answerGroup").length > 0);
     // Without an edit's say, a rewrite whose block moved since is still
-    // refused. CA_0042_003
+    // refused: neither the icon nor the group's answer is an edit's.
+    // CA_0042_003 BO_0343_012
     expect(view.commands("answerProposal").map((command) => command.body)).toEqual([
       { command: "answerProposal", itemId: move, answer: "accepted" },
-      { command: "answerProposal", itemId: rewrite, answer: "accepted" },
-      { command: "answerProposal", itemId: newBlock, answer: "accepted" },
+    ]);
+    expect(view.commands("answerGroup").map((command) => command.body)).toEqual([
+      { command: "answerGroup", groupId: "node:run-claude", answer: "accepted" },
     ]);
     await view.settle();
   });

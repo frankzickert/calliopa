@@ -8,6 +8,7 @@ import {
   HAS_BLOCK_STRUCTURE,
   STRUCTURE_FIELDS_TYPE,
   SOURCE_STRUCTURE,
+  isFile,
   type FieldValue,
   type FileValue,
 } from "~/extensions/structures/lib/structures";
@@ -151,7 +152,7 @@ export function sourceAnswer<T>(outcome: GraphOutcome<T>): OutcomeResponse<T> {
 export function filesOf(values: Readonly<Record<string, FieldValue>>): BlobReference[] {
   const files: BlobReference[] = [];
   for (const value of Object.values(values)) {
-    if (typeof value !== "object" || value === null) continue;
+    if (!isFile(value)) continue;
     const file: FileValue = value;
     const objectId = objectIdOfHash(file.hash);
     if (objectId !== null) files.push({ ...blobReference(objectId, file.mediaType, file.size), filename: file.filename });

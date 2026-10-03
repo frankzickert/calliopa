@@ -30,13 +30,12 @@ That one command downloads this repository into `~/calliopa`, generates every
 secret the stack needs, seeds the bundled core into your graph, and starts
 Calliopa at <http://127.0.0.1:8090> — or on the port you chose: the installer asks
 *Which port should Calliopa listen on?* on its first run, and enter keeps 8090.
-Calliopa takes that port and the next three, in a row, and the installer names
-them when it asks and checks that all four are free: the port itself, the
-confirmation origin, the candidate origin where a proposed change can be tried,
-and the sign-in callback of the generators (Higgsfield), which listens on
-`127.0.0.1` only — 8090 to 8093 by default. To change the port later, edit
+Calliopa takes that port and the next two, in a row, and the installer names
+them when it asks and checks that all three are free: the port itself, the
+confirmation origin, and the candidate origin where a proposed change can be
+tried — 8090 to 8092 by default. To change the port later, edit
 `CALLIOPA_PORT` in `.env` and run `./install.sh` again; the installer derives
-the other three on every run, so never move the port with `docker compose up -d`
+the other two on every run, so never move the port with `docker compose up -d`
 alone.
 
 Other machines reach Calliopa too: it listens on every network adapter of

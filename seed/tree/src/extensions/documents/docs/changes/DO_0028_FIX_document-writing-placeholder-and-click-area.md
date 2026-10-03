@@ -1,6 +1,6 @@
 # DO_0028_FIX_document-writing-placeholder-and-click-area
 
-Status: draft
+Status: completed
 
 The document's *Write Something* placeholder does not sit where the first text of a block would
 begin, and the writing target below the last block covers too little space. The user asks for the
@@ -21,5 +21,8 @@ area below the last drawn block to start writing when clicked.
 - Keep existing writing semantics: a press while a block is active only ends that edit; command
   mode remains a reading surface; a trailing empty paragraph is activated rather than duplicated;
   and a drag onto the blank page or below-last-row target remains a drop, not a writing click.
-- The editor documentation now carries the claimable DO_0028_001 task and its behavior
-  scenarios. Implementation waits until the user sets this change to ready.
+- Landed as DO_0028_001 (2026-10-03): the blank page holds a row's gutters and the hint a block
+  text's box, so *Write something* begins at the first block's text origin; the surface is a
+  column whose document stays one block flow, and a rest below it reaches the surface's bottom
+  edge with the same answer as the area below the last block. The truth is in
+  [Block Editor View](../system/documents/block-editor.md).

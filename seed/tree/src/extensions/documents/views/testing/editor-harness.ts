@@ -76,6 +76,8 @@ export interface HarnessActivity {
 export interface BridgeRecord {
   /** The targets a view asked the shell to open, in order. BO_0291_026 */
   opened?: { kind: string; itemId: string; title: string }[];
+  /** How often the view asked the shell to read its sections again. DO_0034_009 */
+  targetsChanged?: number;
   pointing: Pointing | null;
   selection: string | null | undefined;
   /** What the next press on `[data-harness-reveal]` asks the view to show,
@@ -538,6 +540,35 @@ export function documentsApi(
         }
         return answer({ itemId: body["itemId"], answer: body["answer"], dataRevision: "1", groupState: "open" });
       }
+      // A whole group answered at once, each item as its own answer lands.
+      // BO_0343_012
+      if (body["command"] === "answerGroup") {
+        const items = proposals.groups.find((group) => group.groupId === body["groupId"])?.items ?? [];
+        const answered: string[] = [];
+        for (const item of items) {
+          if (options.refuseAnswer?.(item.itemId) !== undefined || options.refuseAnswers === true) continue;
+          if (body["answer"] === "accepted" && item.block !== null) {
+            const proposed = { ...item.block };
+            current = {
+              ...current,
+              blocks:
+                item.kind === "insert"
+                  ? [...current.blocks, proposed]
+                  : item.kind === "remove"
+                    ? current.blocks.filter((block) => block.blockId !== item.blockId)
+                    : current.blocks.map((block) => (block.blockId === item.blockId ? proposed : block)),
+            };
+          }
+          withoutItem(item.itemId);
+          answered.push(item.itemId);
+        }
+        return answer({
+          groupId: body["groupId"],
+          answer: body["answer"],
+          answered,
+          ...(answered.length < items.length ? { notice: "A proposal could not be answered and still stands." } : {}),
+        });
+      }
       if (body["command"] === "rename") {
         // Retitling a started document takes it. BO_0251_009
         const { proposed: _taken, ...taken } = current;
@@ -738,7 +769,9 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
       openTarget$: $((target: { kind: string; itemId: string; title: string }) => {
         (record.opened ??= []).push({ kind: target.kind, itemId: target.itemId, title: target.title });
       }),
-      targetChanged$: noop,
+      targetChanged$: $(() => {
+        record.targetsChanged = (record.targetsChanged ?? 0) + 1;
+      }),
       agentsChanged$: noop,
       composeCommand$: $((text: string) => {
         record.compose = text;
@@ -997,23 +1030,41 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
  * a draw by timing alone.
  */
 let framesQueue = false;
+
+/** Whether the container around `root` has a frame queued or being drawn:
+ * Qwik's own record of it, the one state the test platform does not expose.
+ * CA_0079_004 */
+function drawing(root: HTMLElement): boolean {
+  for (let node: Node | null = root; node !== null; node = node.parentNode) {
+    const key = Object.getOwnPropertySymbols(node).find((symbol) => symbol.description === "ContainerState");
+    if (key === undefined) continue;
+    const state = (node as unknown as Record<symbol, { $hostsRendering$?: unknown; $renderPromise$?: unknown } | undefined>)[key];
+    if (state === undefined) return false;
+    return state.$hostsRendering$ !== undefined || state.$renderPromise$ !== undefined;
+  }
+  return false;
+}
+
 function queueFrames(): void {
   if (framesQueue) return;
   framesQueue = true;
   const platform = getPlatform() as unknown as { nextTick: (fn: () => unknown) => Promise<unknown> };
   const nextTick = platform.nextTick.bind(platform);
-  let pending: Promise<unknown> = Promise.resolve();
-  platform.nextTick = (fn) => {
+  // The frame that holds the platform's one slot: a waiting frame waits for
+  // it, and tries again when it is drawn, since another may have taken the
+  // slot in between. CA_0079_001
+  let drawingNow: Promise<unknown> = Promise.resolve();
+  const schedule = (fn: () => unknown): Promise<unknown> => {
     try {
-      pending = nextTick(fn);
-      return pending;
+      drawingNow = nextTick(fn);
+      return drawingNow;
     } catch (error) {
       if (!(error instanceof Error) || error.message !== "Must be same function") throw error;
-      const queued = pending.then(() => nextTick(fn), () => nextTick(fn));
-      pending = queued;
-      return queued;
+      const retry = () => schedule(fn);
+      return drawingNow.then(retry, retry);
     }
   };
+  platform.nextTick = schedule;
 }
 
 /**
@@ -1109,8 +1160,19 @@ export async function mountEditor(
       return quiet >= 3;
     });
   };
+  /** Draws whatever frame is already queued before an event is dispatched.
+   * A frame a provider's read queued between presses (the instruction chip's
+   * choices, `BO_0311`) would otherwise be drawn by the event's own flush,
+   * while the pressed control is still writing: a task its write notifies in
+   * the moment the frame finishes its tasks is staged for a draw that has
+   * already ended, and nothing runs it again. A browser dispatches a press as
+   * its own task, after the frame, so it never meets that moment. CA_0079_004 */
+  const userEvent: typeof dom.userEvent = async (...event) => {
+    for (let tick = 0; tick < 50 && drawing(root); tick++) await dom.userEvent(root, "harnessSettle");
+    return dom.userEvent(...event);
+  };
   if (options.awaitReads !== false) await idle();
-  return { ...dom, root, record, settle, idle };
+  return { ...dom, userEvent, root, record, settle, idle };
 }
 
 type MountedEditor = Awaited<ReturnType<typeof mountEditor>>;

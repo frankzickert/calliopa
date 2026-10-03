@@ -11,6 +11,7 @@ import {
   listConnections,
   proveConnection,
   writeConnectionSecret, startSignIn } from "./server/connections";
+import { lockOn, lockState, setLock } from "./server/lock";
 
 /**
  * The server half of the settings extension: its handler table under
@@ -133,6 +134,29 @@ const update: readonly ApiRoute[] = [
 const routes: readonly ApiRoute[] = [
   ...people,
   ...update,
+  {
+    // The app lock, a device's alone: an instance answers 404. BO_0319_048
+    method: "GET",
+    path: "lock",
+    handle: async (event) => event.json(200, await lockState()),
+  },
+  {
+    // Whether the app asks on opening, read by the device's entry before it
+    // shows anything; never asks the person. BO_0319_048
+    method: "GET",
+    path: "lock/on",
+    handle: async (event) => event.json(200, { on: await lockOn() }),
+  },
+  {
+    // Turned on only once the person unlocked with it; off at once. BO_0319_048
+    method: "PUT",
+    path: "lock",
+    handle: async (event) => {
+      const on = (await bodyOf(event))["on"];
+      if (typeof on !== "boolean") throw new HttpError(400, "on must be true or false.");
+      event.json(200, await setLock(on));
+    },
+  },
   {
     method: "GET",
     path: "connections",
@@ -376,6 +400,23 @@ export const contributions = declare({
       probe: {
         authorization: { header: "X-Subscription-Token", scheme: "", secretField: "apiKey" },
         test: { method: "GET", url: "https://api.search.brave.com/res/v1/web/search?q=calliopa&count=1", expectStatus: 200 },
+      },
+    },
+    {
+      // Higgsfield's HTTP API on a device: a key made in its console, `<id>:<secret>`,
+      // generations paid from its prepaid balance. Proven free: the status of
+      // a request nobody made is `404` to a valid key and `401` to any other.
+      // calliopa-bootstrap's BO_0319_025
+      id: "higgsfield",
+      kind: "service",
+      credential: "apiKey",
+      where: "device",
+      label: "Higgsfield",
+      purpose: "Higgsfield API key, as <id>:<secret> from its console, for making pictures and videos",
+      fields: [],
+      probe: {
+        authorization: { header: "Authorization", scheme: "Key", secretField: "apiKey" },
+        test: { method: "GET", url: "https://api.higgsfield.ai/requests/00000000-0000-0000-0000-000000000000/status", expectStatus: 404 },
       },
     },
     {

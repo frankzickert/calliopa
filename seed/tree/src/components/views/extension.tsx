@@ -51,6 +51,8 @@ interface Control {
   servedPin: number | null;
   promotion: KernelPromotion | null;
   canChange: boolean;
+  /** Why nothing here changes, in the kernel's words, on a device. BO_0319_052 */
+  readOnly: string | null;
   declaresVocabulary: boolean;
   elevated: boolean;
   health: KernelHealth | null;
@@ -71,6 +73,7 @@ interface ControlAnswer {
   readonly servedPin: number | null;
   readonly promotion: KernelPromotion | null;
   readonly canChange: boolean;
+  readonly readOnly?: string | null;
   readonly declaresVocabulary: boolean;
   readonly elevated?: boolean;
   readonly health: KernelHealth | null;
@@ -134,6 +137,7 @@ export const ExtensionView = component$<ViewProps>(({ tab }) => {
     servedPin: null,
     promotion: null,
     canChange: false,
+    readOnly: null,
     declaresVocabulary: false,
     elevated: false,
     health: null,
@@ -169,6 +173,7 @@ export const ExtensionView = component$<ViewProps>(({ tab }) => {
       control.servedPin = answer.servedPin;
       control.promotion = answer.promotion;
       control.canChange = answer.canChange;
+      control.readOnly = answer.readOnly ?? null;
       control.declaresVocabulary = answer.declaresVocabulary;
       control.elevated = answer.elevated === true;
       control.health = answer.health;
@@ -448,7 +453,32 @@ export const ExtensionView = component$<ViewProps>(({ tab }) => {
           {control.status === "loading" && (
             <span class="extension-note">Reading the kernel…</span>
           )}
-          {served !== null && (
+          {served !== null && control.readOnly !== null && (
+            // A device reads the extensions its app carries: what is served
+            // is said, and nothing offers to change it. BO_0319_052
+            <>
+              <span
+                class="extension-served"
+                data-extension-served={served.servedVersion ?? served.version}
+              >
+                {served.active ? "Active" : "Inactive"} · version{" "}
+                {served.servedVersion ?? served.version}
+              </span>
+              <span class="extension-note" data-extension-note="read-only">
+                {control.readOnly}
+              </span>
+              <a
+                class="extension-export"
+                data-extension-export={served.id}
+                href={exportHref(served.id, served.pinned ? served.pin : undefined)}
+                download
+                title={`${served.id} as one file: its sources, vocabulary, skills and change documents`}
+              >
+                Export
+              </a>
+            </>
+          )}
+          {served !== null && control.readOnly === null && (
             <>
               <label
                 class="extension-toggle"
@@ -627,7 +657,9 @@ export const ExtensionView = component$<ViewProps>(({ tab }) => {
           root-mapped path.
         </p>
       )}
-      {served !== null && <ExtensionGroups extension={served.id} />}
+      {served !== null && (
+        <ExtensionGroups extension={served.id} readOnly={control.readOnly} />
+      )}
       {state.document !== null && isChangeDocumentPath(nodeTarget(tab.itemId ?? "").path) && (
         <ChangeStatus
           extension={nodeTarget(tab.itemId ?? "").extension}

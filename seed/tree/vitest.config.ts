@@ -12,6 +12,13 @@ export default defineConfig({
   plugins: [registryPlugin(), qwikVite(), tsconfigPaths({ root: "." })],
   test: {
     environment: "node",
+    // Half the cores: with a worker on every core the editor's timing
+    // scenarios lost to contention, a different one each run, and the run
+    // took twice as long. An editor mounted in the render harness, or a
+    // citation style loaded into citeproc, still takes seconds under load,
+    // so a test has twenty before it times out. CA_0079_001
+    maxWorkers: "50%",
+    testTimeout: 20000,
     projects: [
       {
         extends: true,

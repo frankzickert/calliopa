@@ -39,6 +39,34 @@ export function currentDataRevision(): number | undefined {
   return pinned === undefined || pinned <= 0 ? undefined : pinned;
 }
 
+/**
+ * The read scope of the run a kernel callback is made for: its pin, and its
+ * group laid over truth once it has staged — the projection the kernel's own
+ * document tools read, so an extension's tool sees what the same run proposed
+ * a moment before (`calliopa-bootstrap`'s `BO_0344`). The kernel sends it in
+ * `X-Calliopa-Run-Pin` and `X-Calliopa-Run-Overlay`, and `dispatch` sets it.
+ * It never sets the branch: `commit` is untouched, so an extension gains no
+ * write path. A read at the run's pin — naming it, or inside
+ * `atDataRevision` — reads through the group too; one at another revision
+ * reads truth there, as before. BO_0344_004
+ */
+export interface RunScope {
+  readonly pin: number;
+  readonly overlay?: string;
+}
+
+const runs = port.scope<RunScope>();
+
+export function asRun<T>(scope: RunScope, run: () => Promise<T>): Promise<T> {
+  return runs.run(scope, run);
+}
+
+/** The run the current call reads for, or `undefined` outside one. */
+export function currentRun(): RunScope | undefined {
+  const scope = runs.current();
+  return scope === undefined || scope.pin <= 0 ? undefined : scope;
+}
+
 /** Runs a call against truth, whatever branch the request is in. */
 export function outsideBranch<T>(run: () => Promise<T>): Promise<T> {
   return storage.run({ branch: "" }, run);

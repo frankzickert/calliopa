@@ -224,6 +224,9 @@ export const ExtensionsSection = component$<SectionProps>(
     });
 
     const listing = state.listing;
+    // On a device nothing here changes: the kernel says so, and the controls
+    // that would are absent. BO_0319_052
+    const readOnly = listing.reachable ? (listing.readOnly ?? null) : null;
     const active = changeFilterOf(filter);
     const filtered = !isDefaultChangeFilter(active);
     return (
@@ -238,21 +241,23 @@ export const ExtensionsSection = component$<SectionProps>(
           >
             <Icon name="arrow-clockwise" />
           </button>
-          <button
-            type="button"
-            class="library-action library-action--body library-action--icon"
-            aria-label="New extension"
-            aria-expanded={state.formOpen}
-            aria-controls="library-new-extension"
-            data-new-extension
-            onClick$={() => {
-              state.formOpen = !state.formOpen;
-              state.formRefusal = "";
-              nameInput.value?.focus();
-            }}
-          >
-            <Icon name="plus" />
-          </button>
+          {readOnly === null && (
+            <button
+              type="button"
+              class="library-action library-action--body library-action--icon"
+              aria-label="New extension"
+              aria-expanded={state.formOpen}
+              aria-controls="library-new-extension"
+              data-new-extension
+              onClick$={() => {
+                state.formOpen = !state.formOpen;
+                state.formRefusal = "";
+                nameInput.value?.focus();
+              }}
+            >
+              <Icon name="plus" />
+            </button>
+          )}
           <button
             type="button"
             class="library-action library-action--body library-action--icon"
@@ -265,7 +270,7 @@ export const ExtensionsSection = component$<SectionProps>(
           >
             <Icon name="funnel" />
           </button>
-          {listing.reachable && listing.owner === true && (
+          {listing.reachable && listing.owner === true && readOnly === null && (
             <>
               <button
                 type="button"
@@ -293,6 +298,11 @@ export const ExtensionsSection = component$<SectionProps>(
             </>
           )}
         </div>
+        {readOnly !== null && (
+          <p class="library-note" data-extensions-read-only>
+            {readOnly}
+          </p>
+        )}
         {state.importRefusal !== "" && (
           <p class="library-refusal" role="alert" data-import-refusal>
             {state.importRefusal}
@@ -302,7 +312,7 @@ export const ExtensionsSection = component$<SectionProps>(
           id="library-new-extension"
           class="library-create"
           data-new-extension-form
-          hidden={!state.formOpen}
+          hidden={!state.formOpen || readOnly !== null}
           preventdefault:submit
           onSubmit$={() => createExtension$()}
         >

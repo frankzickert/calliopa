@@ -1,4 +1,4 @@
-import { CSL_TYPES, type FieldValue, type FileValue } from "~/extensions/structures/lib/structures";
+import { CSL_TYPES, isFile, type FieldValue, type FileValue } from "~/extensions/structures/lib/structures";
 
 /**
  * The bibliography's vocabulary (`BO_0291_015`, reshaped by `BO_0313`): a
@@ -435,7 +435,7 @@ export function recordOfSource(title: string, values: Readonly<Record<string, Fi
   const fetched = fetchedOf(words("fetched"));
   if (fetched !== undefined) out["fetched"] = fetched;
   const file = values["file"];
-  if (typeof file === "object" && file !== null)
+  if (isFile(file))
     out["file"] = { _kind: "blob", hash: file.hash, mediaType: file.mediaType, size: file.size, filename: file.filename };
   return readWorkRecord(out);
 }

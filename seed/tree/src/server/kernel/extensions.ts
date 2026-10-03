@@ -64,6 +64,10 @@ export interface KernelExtensionListing {
   readonly stateWrittenAt?: number;
   readonly promotion?: KernelPromotion;
   readonly canChange: boolean;
+  /** Why nothing here changes, in the kernel's words: a device reads the
+   * extensions its app carries and changes none (`calliopa-bootstrap`'s
+   * BO_0319_052). Absent on an instance. */
+  readonly readOnly?: string;
 }
 
 /** One extension as `GET /__kernel/extensions/{id}` answers it. BO_0257_009 */

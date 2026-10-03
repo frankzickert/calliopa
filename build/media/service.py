@@ -62,20 +62,37 @@ class Adapter:
     module: str                   # directory under adapters/
     entry: str                    # module file inside it
     open_set: bool = False        # the model is a free parameter, not a closed set
+    # The reference roles it takes, each under its own flag. A role it has no flag for is refused
+    # before anything is written or spent, never handed to it. BO_0346_001
+    roles: tuple[tuple[str, str], ...] = ()
+
+    def flag_for(self, role: str) -> str | None:
+        return dict(self.roles).get(role)
 
     @property
     def path(self) -> Path:
         return ADAPTER_DIR / self.module / self.entry
 
 
+# The Seedance adapters take two frames and three kinds of reference at once; the image adapters
+# take reference images under one flag; Codex takes none. BO_0346_001
+SEEDANCE_ROLES = (("start", "--start-image"), ("end", "--end-image"), ("image", "--image-reference"),
+                  ("video", "--video-reference"), ("audio", "--audio-reference"))
+IMAGE_ROLES = (("image", "--reference"),)
+
 ADAPTERS: tuple[Adapter, ...] = (
     Adapter("codex", "image", "codex-image", "codex_image.py"),
-    Adapter("higgsfield", "image", "higgsfield-image", "higgsfield_image.py"),
+    Adapter("higgsfield", "image", "higgsfield-image", "higgsfield_image.py", roles=IMAGE_ROLES),
     # The Higgsfield job type is a parameter by the adapter's own design, so its video set is open.
-    Adapter("higgsfield", "video", "higgsfield-seedance", "seedance.py", open_set=True),
-    Adapter("openart", "image", "openart-seedream", "seedream.py"),
-    Adapter("openart", "video", "openart-seedance", "seedance.py"),
+    Adapter("higgsfield", "video", "higgsfield-seedance", "seedance.py", open_set=True,
+            roles=SEEDANCE_ROLES),
+    Adapter("openart", "image", "openart-seedream", "seedream.py", roles=IMAGE_ROLES),
+    Adapter("openart", "video", "openart-seedance", "seedance.py", roles=SEEDANCE_ROLES),
 )
+
+# What each role is, in the words a refusal says it in.
+ROLE_WORDS = {"start": "a start frame", "end": "an end frame", "image": "a reference image",
+              "video": "a reference video", "audio": "a reference audio"}
 
 _loaded: dict[str, Any] = {}
 _load_lock = threading.Lock()
@@ -220,6 +237,30 @@ def materialize_references(body: dict[str, Any], area: Path) -> None:
         reference["path"] = str(path)
 
 
+def reference_flags(body: dict[str, Any], adapter: Adapter) -> list[tuple[str, str]]:
+    """Each reference's alias and the flag its adapter takes it under, or a refusal.
+
+    A reference names what it is by `role`; one with none keeps what it always meant, the clip's
+    start frame for a video and a reference image for a picture. A role the adapter has no flag
+    for is refused here, before a byte is written or the adapter is run. BO_0346_001
+    """
+    flags: list[tuple[str, str]] = []
+    model = str(body.get("model") or adapter.module)
+    for reference in body.get("references") or []:
+        alias = str(reference.get("alias") or "").strip()
+        if not alias:
+            raise Refusal("every reference needs an alias and a path")
+        role = str(reference.get("role") or ("start" if adapter.kind == "video" else "image"))
+        if role not in ROLE_WORDS:
+            raise Refusal(f"@{alias} names an unknown role {role!r}; "
+                          f"a reference is one of {', '.join(ROLE_WORDS)}")
+        flag = adapter.flag_for(role)
+        if flag is None:
+            raise Refusal(f"@{alias} is {ROLE_WORDS[role]}, which {model} does not take")
+        flags.append((alias, flag))
+    return flags
+
+
 def drop_references(area: Path) -> None:
     """The bytes go once the job is submitted; the provider holds what it needs."""
     shutil.rmtree(area, ignore_errors=True)
@@ -256,7 +297,7 @@ def shortest_clip(adapter: Adapter) -> int:
 
 
 def request_argv(body: dict[str, Any], output: Path, *, dry_run: bool,
-                 adapter: Adapter | None = None) -> list[str]:
+                 adapter: Adapter) -> list[str]:
     """The adapters' shared CLI, built from one request shape."""
     argv: list[str] = ["--output", str(output)]
     prompt = str(body.get("prompt") or "").strip()
@@ -266,22 +307,19 @@ def request_argv(body: dict[str, Any], output: Path, *, dry_run: bool,
     model = body.get("model")
     if model:
         argv += ["--model", str(model)]
-    for reference in body.get("references") or []:
-        alias = str(reference.get("alias") or "").strip()
+    # Each reference under the flag its adapter takes for its role: a video's start frame is what
+    # the film opens on, not material the prompt may name. BO_0273_045 BO_0346_001
+    for reference, (alias, flag) in zip(body.get("references") or [], reference_flags(body, adapter)):
         path = str(reference.get("path") or "").strip()
-        if not alias or not path:
+        if not path:
             raise Refusal("every reference needs an alias and a path")
-        # A video is made from a picture, and the adapters take that picture as the clip's first
-        # frame under its own flag: `--reference` is material the prompt may name, `--start-image`
-        # is what the film opens on. Both adapters spell it the same way. BO_0273_045
-        flag = "--start-image" if reference.get("role") == "start" else "--reference"
         argv += [flag, f"@{alias}={path}"]
     options = body.get("options") or {}
     for name, value in options.items():
         if value is None:
             continue
         argv += axis_argv(adapter, str(name), str(value))
-    if adapter is not None and adapter.kind == "video" and options.get("duration") is None:
+    if adapter.kind == "video" and options.get("duration") is None:
         argv += ["--duration", str(shortest_clip(adapter))]
     if dry_run:
         argv.append("--dry-run")
@@ -347,6 +385,7 @@ def start_generation(body: dict[str, Any], *, runner: Callable[..., Any] | None 
     identity = uuid.uuid4().hex
     output = output_path(adapter, identity)
     area = references_area(identity)
+    reference_flags(body, adapter)
     materialize_references(body, area)
     argv = request_argv(body, output, dry_run=False, adapter=adapter)
     record = {"id": identity, "service": adapter.service, "kind": adapter.kind,
@@ -620,6 +659,7 @@ class Handler(BaseHTTPRequestHandler):
             body = self.read_body()
             if self.path == "/v1/quote":
                 adapter = adapter_for(str(body.get("service") or ""), str(body.get("kind") or ""))
+                reference_flags(body, adapter)
                 area = references_area("quote-" + uuid.uuid4().hex)
                 try:
                     materialize_references(body, area)

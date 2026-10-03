@@ -1,6 +1,6 @@
 # RO_0005_FEAT_a-structure-is-a-document
 
-Status: ready
+Status: completed
 
 Requested: 2026-10-02, by the user: the page that creates and edits a structure must improve its
 interface by reusing the document's. It shapes the work and authorizes no implementation. It uses
@@ -75,8 +75,31 @@ rename.
 - Measured: no fixed-layer work. No declaration changes — `hasBlockRole` fences neither end,
   `record` has no permitted set, and the new keys live in `values` — so the kernel harness's
   vocabulary copy stays, and the kernel reads no structure by id. It stays an `RO` change.
+- Corrected at implementation, 2026-10-02: built-ins and their release field blocks take fixed
+  UUIDs, since `documents` takes UUIDs alone, and what the release fixes is enforced through a
+  guard `documents` lets a dependent extension register, asked by every act that deletes, retitles
+  or takes a block out — a run's at its acceptance, since the kernel stages it — in place of an id
+  prefix and `record: structure`. Still no fixed-layer work.
 - A field's key is kept as a value on its *Field* block, not the block's id, so the keys readers
   hold today, minted or UUID, survive.
 - Order: after `BO_0338` completes, since it rewrites what that change renames; `RO_0005_001` and
   `RO_0005_002` first, then the acts, the page and `documents`' guards, then the readers, which
   move with the ids in the same proposal as the migration.
+
+## Where It Stands
+
+- Proposal A, the guards in `documents` (`RO_0005_020`, landed 2026-10-02): `guardDocuments` and
+  `fixedOf`, asked by every delete, retitle and removal and at a proposal's acceptance, the read
+  answering what is fixed and the editor drawing it; inert until `structures` registers its guard.
+  It carries this document at `wip` and the corrected technical lines.
+- Proposal B, the cutover (`RO_0005_001`–`RO_0005_005`, `RO_0005_022`, `RO_0005_030`–`RO_0005_070`,
+  and `RO_0005_006`'s unit and harness parts, built 2026-10-02): structures read from documents,
+  the acts, the page drawn in the structure's document, the run's tools and skill, the migration
+  `structures-as-documents` as a new member, `structures`' guard, and every reader on the fixed
+  ids; its docs say what is true after it. Proven by the unit project and over CCGW under the
+  kernel harness, the harness's other failures standing at head as before.
+- Proposal C (2026-10-03): the migration member named the migrations of the extensions depending
+  on `structures` in `after`, which the kernel orders after it already; pin 4105 refused the cycle
+  and ran none. `after` names `structures`' own alone; pin 4115 ran the move once.
+- Served and walked on the dev instance at pin 4115, 2026-10-03 (`RO_0005_006`), the user's word
+  "works"; closed the same day with the release note and the graph export (`RO_0005_008`).

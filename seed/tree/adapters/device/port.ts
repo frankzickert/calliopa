@@ -1,6 +1,8 @@
 import {
   CapacitorHttp,
+  Capture,
   Cell,
+  Lock,
   PROTOCOL,
   type CellRequest,
   type CellResponse,
@@ -31,6 +33,17 @@ import type {
 const BRIDGE = "cell:";
 
 const text = new TextDecoder("utf-8", { fatal: true });
+
+/**
+ * The page's own kernel callback secret, minted at each load: on a device the
+ * page answers the routes the kernel would call — an extension's migrations —
+ * and presents it there itself (`entry.ts`), so no other caller does.
+ * `calliopa-bootstrap`'s BO_0319_053
+ */
+export const callbackSecret = Array.from(
+  crypto.getRandomValues(new Uint8Array(16)),
+  (byte) => byte.toString(16).padStart(2, "0"),
+).join("");
 
 function utf8(bytes: Uint8Array): string | null {
   try {
@@ -199,7 +212,9 @@ export const port: Port = {
   env: (name: PortEnvName) =>
     name === "CALLIOPA_CCGW_URL" || name === "CALLIOPA_KERNEL_URL"
       ? BRIDGE
-      : undefined,
+      : name === "CALLIOPA_KERNEL_CALLBACK_SECRET"
+        ? callbackSecret
+        : undefined,
   now: () => new Date(),
   uuid: () => crypto.randomUUID(),
   randomBytes: (size) => crypto.getRandomValues(new Uint8Array(size)),
@@ -221,4 +236,22 @@ export const port: Port = {
   gateway: bridged,
   kernel: bridged,
   fetch: outbound,
+  device: {
+    lock: {
+      // A host that cannot answer — the desktop harness, which has nothing
+      // to lock with — is a device that cannot lock. BO_0319_048
+      availability: () =>
+        Lock.availability().then(
+          (answer) => answer.available,
+          () => false,
+        ),
+      authenticate: async (reason) =>
+        (await Lock.authenticate({ reason })).authenticated,
+    },
+    capture: {
+      photo: async () => (await Capture.photo()).item,
+      pickFiles: async (multiple) => (await Capture.pickFiles({ multiple })).items,
+      takeShared: async () => (await Capture.takeShared()).items,
+    },
+  },
 };

@@ -29,5 +29,9 @@ describe("a block dropped on a blank page (found in the CA_0072 walk)", () => {
     const moved = sent.find((command) => command.body["command"] === "moveIn");
     expect(moved?.url).toBe("/api/x/documents/d/doc-blank/commands");
     expect(moved?.body).toEqual({ command: "moveIn", blockId: "blk-far", fromDocumentId: "doc-2", placement: { between: [null, null] } });
+    // The move reads the proposals again; a read that outlives the test
+    // reaches the unstubbed `fetch`, and its rejection is what exhausted the
+    // runner's memory. CA_0079_001
+    await view.idle();
   });
 });

@@ -35,6 +35,18 @@ export interface RuntimeRecord {
   readonly startedAt: string | null;
   readonly lastUsedAt: string | null;
   readonly sessions: readonly SessionRecord[];
+  /** A device's language, run in its sandbox: always running, never made,
+   * started, stopped or removed, and each block fresh (`calliopa-bootstrap`'s
+   * BO_0319_053). Absent from a code service's runtime. */
+  readonly sandbox?: boolean;
+}
+
+/** What a code block may reach beyond compute on a device, as the person
+ * granted it on the block: the document's files, and the hosts it may fetch
+ * from (`calliopa-bootstrap`'s BO_0319_046). */
+export interface Permissions {
+  readonly attachments: boolean;
+  readonly hosts: readonly string[];
 }
 
 /** The section's reader: the runtimes, whether the reader is the owner, and

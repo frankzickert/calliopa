@@ -1,7 +1,7 @@
 import { $, component$, useStore } from "@builder.io/qwik";
 
 import { RunChips } from "../run-chips";
-import type { RunChip, ViewAnswerAll, ViewToggleRun } from "../view-bridge";
+import type { RunChip, RunChipElsewhere, ViewAnswerAll, ViewToggleRun } from "../view-bridge";
 
 /** The chips a document's view reports while its run goes and after: the
  * running one first, then an ended one, shown. BO_0265_008 CA_0055_002 */
@@ -24,6 +24,10 @@ export const RunChipsHost = component$<{ chips: readonly RunChip[]; pointing?: b
   // the view reports — a run ending expands its chip — without rendering over
   // the container again, which Qwik's harness refuses. CA_0062_004
   const reported = useStore<{ chips: RunChip[] }>({ chips: chips.map((chip) => ({ ...chip })) });
+  const opened = useStore<{ target: RunChipElsewhere["open"] | null }>({ target: null });
+  const open$ = $((target: RunChipElsewhere["open"]) => {
+    opened.target = target;
+  });
   const show$ = $((key: string) => {
     reported.chips = reported.chips.map((chip) => (chip.key === key ? { ...chip, shown: true } : chip));
   });
@@ -32,7 +36,7 @@ export const RunChipsHost = component$<{ chips: readonly RunChip[]; pointing?: b
       <section class="workspace" data-host-region>
         <div class="view-bar" data-host-bar />
         {reported.chips.length > 0 && (
-          <RunChips itemId="doc-1" chips={reported.chips} answerAll={answerAll} toggleRun={toggleRun} pointing={pointing} />
+          <RunChips itemId="doc-1" chips={reported.chips} answerAll={answerAll} toggleRun={toggleRun} open$={open$} pointing={pointing} />
         )}
       </section>
       {chips.map((chip) => (
@@ -40,6 +44,7 @@ export const RunChipsHost = component$<{ chips: readonly RunChip[]; pointing?: b
           show {chip.key}
         </button>
       ))}
+      <output data-opened>{JSON.stringify(opened.target)}</output>
       <output data-answer-all>
         {JSON.stringify({ itemId: answerAll.itemId, group: answerAll.group, answer: answerAll.answer, seq: answerAll.seq })}
       </output>

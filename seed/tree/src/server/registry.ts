@@ -12,7 +12,8 @@ import { matchRoute, qualify, type RegisteredParty, type RegisteredSection } fro
 import { REGISTRY } from "~/registry.gen";
 import { SERVER_REGISTRY } from "~/registry.server.gen";
 import { api } from "./api";
-import { KERNEL_CALLBACK_HEADER, kernelCallbackRefusal } from "./kernel-callback";
+import { asRun } from "./ccgw/branch-scope";
+import { KERNEL_CALLBACK_HEADER, kernelCallbackRefusal, runScopeOf } from "./kernel-callback";
 import { port } from "./port";
 
 /**
@@ -161,7 +162,11 @@ export async function dispatch(event: RequestEvent, extension: string, path: str
       return;
     }
   }
-  await api(event, () => matched.route.handle(event, matched.params));
+  // A run's callback reads as the run does: at its pin, through its group
+  // once it has staged. Only the kernel's call, checked above, names one. BO_0344_004
+  const run = matched.route.kernelCallback === true ? runScopeOf(event.request.headers) : undefined;
+  const handle = () => matched.route.handle(event, matched.params);
+  await api(event, () => (run === undefined ? handle() : asRun(run, handle)));
 }
 
 /**

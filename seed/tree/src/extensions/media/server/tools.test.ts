@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { currentBranch } from "~/server/ccgw/branch-scope";
 
 import { TOOLS, ToolRefusal, answerTool } from "./tools";
+import { FORMAT_STRUCTURE, INPUT_STRUCTURE, INSTRUCTION_STRUCTURE, VARIATION_STRUCTURE } from "~/extensions/structures/lib/structures";
 
 /**
  * What an agent may reach (`calliopa-bootstrap`'s `BO_0312_041`,
@@ -29,6 +30,12 @@ const graph = vi.hoisted(() => ({
 const doc = vi.hoisted(() => ({
   words: "a laurel on a hill",
   pictureAbove: true,
+  /** Other documents' blocks, by document id: a format's words, a picture a
+   * reference points into. The Send's document reads as the default. */
+  documents: {} as Record<string, unknown[]>,
+  /** Blocks of the Send's document below the prompt: pictures and videos a
+   * command marks with #. */
+  below: [] as unknown[],
   composed: [] as unknown[],
   filled: [] as unknown[],
 }));
@@ -82,12 +89,13 @@ vi.mock("~/server/kernel/client", () => ({
 }));
 
 vi.mock("~/extensions/documents/server/documents", () => ({
-  readDocument: async () => ({
+  readDocument: async (documentId: string) => ({
     outcome: "success",
     result: {
-      blocks: [
+      blocks: doc.documents[documentId] ?? [
         ...(doc.pictureAbove ? [{ blockId: "pic-1", kind: "image", objectId: "a".repeat(64), mediaType: "image/png" }] : []),
         { blockId: "blk-1", kind: "text", runs: [{ text: doc.words }] },
+        ...doc.below,
       ],
     },
   }),
@@ -143,14 +151,14 @@ const spent = () => kernel.calls.filter((one) => one.path === "/__kernel/media/g
  * 1k) with the variation *Story 9:16*, and one naming *Trailer* (video). */
 const seed = (square: Record<string, unknown> = {}) => {
   graph.roles = {
-    "prof-img": { structures: [{ id: "builtin:profile", values: { format: "fmt-sq" } }], titles: { "fmt-sq": "Instagram square" } },
-    "prof-vid": { structures: [{ id: "builtin:profile", values: { format: "fmt-vid" } }], titles: { "fmt-vid": "Trailer" } },
-    "prof-none": { structures: [{ id: "builtin:profile", values: {} }] },
+    "prof-img": { structures: [{ id: INSTRUCTION_STRUCTURE, values: { format: "fmt-sq" } }], titles: { "fmt-sq": "Instagram square" } },
+    "prof-vid": { structures: [{ id: INSTRUCTION_STRUCTURE, values: { format: "fmt-vid" } }], titles: { "fmt-vid": "Trailer" } },
+    "prof-none": { structures: [{ id: INSTRUCTION_STRUCTURE, values: {} }] },
     "fmt-sq": {
-      structures: [{ id: "builtin:format", values: { type: "image", provider: "higgsfield", model: "gpt_image_2", ratio: "1:1", quality: "1k", ...square } }],
-      blocks: [{ blockId: "var-story", structures: [{ id: "builtin:variation", values: { ratio: "9:16", model: "" } }] }, { blockId: "blk-plain", structures: [] }],
+      structures: [{ id: FORMAT_STRUCTURE, values: { type: "image", provider: "higgsfield", model: "gpt_image_2", ratio: "1:1", quality: "1k", ...square } }],
+      blocks: [{ blockId: "var-story", structures: [{ id: VARIATION_STRUCTURE, values: { ratio: "9:16", model: "" } }] }, { blockId: "blk-plain", structures: [] }],
     },
-    "fmt-vid": { structures: [{ id: "builtin:format", values: { type: "video", provider: "higgsfield", model: "kling_video" } }] },
+    "fmt-vid": { structures: [{ id: FORMAT_STRUCTURE, values: { type: "video", provider: "higgsfield", model: "kling_video" } }] },
   };
 };
 seed();
@@ -165,6 +173,8 @@ afterEach(() => {
   kernel.jobState = "completed";
   doc.words = "a laurel on a hill";
   doc.pictureAbove = true;
+  doc.documents = {};
+  doc.below = [];
   doc.composed = [];
   doc.filled = [];
 });
@@ -198,7 +208,7 @@ describe("what an agent may reach", () => {
   });
 
   it("offers the quote, the one spending tool and its collection", () => {
-    expect(Object.keys(TOOLS)).toEqual(["quote_generation", "generate", "collect_generation"]);
+    expect(Object.keys(TOOLS)).toEqual(["read_format", "quote_generation", "generate", "collect_generation"]);
   });
 });
 
@@ -241,14 +251,14 @@ describe("generate", () => {
     expect(spent()[0]?.body).toMatchObject({ model: "nano_banana_9" });
   });
 
-  it("makes a video with a video format, animating the picture above", async () => {
-    const answer = await TOOLS.generate({ input: { block: "blk-1", words: "the laurel sways" }, run: video });
+  it("makes a video with a video format, animating the picture above as @start", async () => {
+    const answer = await TOOLS.generate({ input: { block: "blk-1", words: "@start the laurel sways" }, run: video });
     expect(answer.result).toMatchObject({ kind: "video", job: "job-1" });
     expect(doc.composed[0]).toMatchObject({ block: { kind: "video" } });
     expect(spent()[0]?.body).toMatchObject({
       kind: "video",
       model: "kling_video",
-      prompt: "the laurel sways",
+      prompt: "@start the laurel sways",
       references: [{ alias: "start", role: "start", mediaType: "image/png" }],
     });
   });
@@ -297,3 +307,119 @@ describe("collect_generation", () => {
     await expect(TOOLS.collect_generation({ input: { block: "made-1", job: "job-1" }, run: image })).rejects.toThrow(/unsupported format/u);
   });
 });
+
+/**
+ * A format says what it takes (`ME_0002_010`–`ME_0002_012`): its inputs are
+ * blocks of it using *Input*, the run reads them and the format's words with
+ * `read_format`, and `generate` attaches what the call names under each
+ * input's name and kind, refusing before anything is composed or spent what
+ * the format does not take.
+ */
+describe("a format's inputs", () => {
+  const clip = { ...run, instruction: "prof-clip" };
+  const inputBlock = (blockId: string, values: Record<string, unknown>) => ({ blockId, structures: [{ id: INPUT_STRUCTURE, values }] });
+  /** *Product clip*: a video format whose words say how it is used, with an
+   * opening shot (start frame, required) and a closing shot (end frame). */
+  const clipFormat = (opening: Record<string, unknown> = {}) => {
+    graph.roles["prof-clip"] = { structures: [{ id: INSTRUCTION_STRUCTURE, values: { format: "fmt-clip" } }], titles: { "fmt-clip": "Product clip" } };
+    graph.roles["fmt-clip"] = {
+      structures: [{ id: FORMAT_STRUCTURE, values: { type: "video", provider: "higgsfield", model: "kling_video" } }],
+      blocks: [
+        { blockId: "how", structures: [] },
+        inputBlock("in-open", { kind: "Start frame", name: "start", required: true, ...opening }),
+        inputBlock("in-close", { kind: "End frame", name: "end" }),
+        { blockId: "var-slow", structures: [{ id: VARIATION_STRUCTURE, values: {} }] },
+      ],
+    };
+    doc.documents["fmt-clip"] = [
+      { blockId: "how", kind: "text", runs: [{ text: "A slow product reveal, ten seconds." }] },
+      { blockId: "in-open", kind: "text", runs: [{ text: "The product shot the clip opens on" }] },
+      { blockId: "in-close", kind: "text", runs: [{ text: "Where it ends" }] },
+      { blockId: "var-slow", kind: "text", runs: [{ text: "Slower" }] },
+    ];
+    doc.below = [
+      { blockId: "pic-2", kind: "image", objectId: "c".repeat(64), mediaType: "image/jpeg" },
+      { blockId: "vid-1", kind: "video", objectId: "d".repeat(64), mediaType: "video/mp4" },
+      { blockId: "pic-pending", kind: "image" },
+    ];
+  };
+
+  it("Given a format with inputs, When the run reads it, Then it is told the format's words and each input's name, kind and purpose, with nothing spent", async () => {
+    clipFormat();
+    const answer = await TOOLS.read_format({ input: {}, run: clip });
+    expect(answer.result).toEqual({
+      format: "Product clip",
+      type: "video",
+      provider: "higgsfield",
+      model: "kling_video",
+      words: "A slow product reveal, ten seconds.",
+      inputs: [
+        { name: "start", kind: "a start frame", required: true, for: "The product shot the clip opens on" },
+        { name: "end", kind: "an end frame", required: false, for: "Where it ends" },
+      ],
+    });
+    // A video format declaring none takes the picture above as @start.
+    const plain = await TOOLS.read_format({ input: {}, run: video });
+    expect((plain.result as { inputs: unknown[] }).inputs).toEqual([
+      { name: "start", kind: "a start frame", required: true, for: "The picture above the block, the clip's first frame.", taken: "the picture above the block, unless the call names another" },
+    ]);
+    expect(spent()).toEqual([]);
+  });
+
+  it("Given a command pointing at two pictures, Then the video is made from the first to the second, each under its name and kind", async () => {
+    clipFormat();
+    await TOOLS.generate({ input: { block: "blk-1", words: "from @start to @end, slowly", inputs: { start: "pic-1", end: "pic-2" } }, run: clip });
+    expect(spent()[0]?.body).toMatchObject({
+      prompt: "from @start to @end, slowly",
+      references: [
+        { alias: "start", role: "start", mediaType: "image/png" },
+        { alias: "end", role: "end", mediaType: "image/jpeg" },
+      ],
+    });
+  });
+
+  it("Given a reference into another document, Then the picture is read there", async () => {
+    clipFormat();
+    doc.documents["doc-2"] = [{ blockId: "far", kind: "image", objectId: "e".repeat(64), mediaType: "image/webp" }];
+    await TOOLS.generate({ input: { block: "blk-1", words: "@start opens", inputs: { start: "doc-2/far" } }, run: clip });
+    expect(spent()[0]?.body).toMatchObject({ references: [{ alias: "start", role: "start", mediaType: "image/webp" }] });
+  });
+
+  it("Given a reference video input, Then a made video is attached as a video", async () => {
+    clipFormat({ kind: "Reference video", name: "motion" });
+    await TOOLS.generate({ input: { block: "blk-1", words: "move like @motion", inputs: { motion: "vid-1" } }, run: clip });
+    expect(spent()[0]?.body).toMatchObject({ references: [{ alias: "motion", role: "video", mediaType: "video/mp4" }] });
+  });
+
+  it("Given an image format, Then a quote carries what the call names, and nothing when it names nothing", async () => {
+    clipFormat();
+    await TOOLS.quote_generation({ input: { prompt: "from @start", inputs: { start: "pic-1" } }, run: clip });
+    expect(kernel.calls.at(-1)).toMatchObject({ path: "/__kernel/media/quote", body: { references: [{ alias: "start", role: "start" }] } });
+    await TOOLS.quote_generation({ input: { prompt: "a laurel" }, run: image });
+    expect(kernel.calls.at(-1)?.body).not.toHaveProperty("references");
+  });
+
+  it("refuses, before anything is composed or spent, what the format does not take", async () => {
+    const refusals: [string, () => void, Record<string, unknown>, RegExp][] = [
+      ["an input the format does not declare", () => clipFormat(), { words: "@start @mood", inputs: { start: "pic-1", mood: "pic-2" } }, /takes no input mood; it takes start, end/u],
+      ["an input on a format declaring none", () => seed(), { words: "@start", inputs: { start: "pic-1" } }, /Instagram square takes no inputs/u],
+      ["a required input not given", () => clipFormat(), { words: "a slow pan" }, /needs a start frame, start, and the command points at none/u],
+      ["a given input the words do not name", () => clipFormat(), { words: "a slow pan", inputs: { start: "pic-1" } }, /do not name @start/u],
+      ["a picture's kind given a video", () => clipFormat(), { words: "@start", inputs: { start: "vid-1" } }, /takes a picture, and the block given for it is not one/u],
+      ["a video's kind given a picture", () => clipFormat({ kind: "Reference video", name: "motion" }), { words: "@motion", inputs: { motion: "pic-1" } }, /takes a video/u],
+      ["a picture not made yet", () => clipFormat(), { words: "@start", inputs: { start: "pic-pending" } }, /is not made yet/u],
+      ["audio, which no block holds", () => clipFormat({ kind: "Reference audio", name: "voice" }), { words: "@voice", inputs: { voice: "pic-1" } }, /no block holds audio/u],
+      ["an input with no kind", () => clipFormat({ kind: "" }), { words: "@start" }, /An input of Product clip names no kind/u],
+      ["two inputs of one name", () => clipFormat({ name: "end" }), { words: "@end" }, /names two inputs end/u],
+      ["the picture above not named", () => seed(), { words: "the laurel sways" }, /do not name @start/u],
+    ];
+    for (const [why, arrange, input, says] of refusals) {
+      arrange();
+      const instruction = why === "an input on a format declaring none" ? image : why === "the picture above not named" ? video : clip;
+      await expect(TOOLS.generate({ input: { block: "blk-1", ...input }, run: instruction }), why).rejects.toThrow(says);
+    }
+    expect(spent()).toEqual([]);
+    expect(doc.composed).toEqual([]);
+  });
+});
+

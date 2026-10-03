@@ -2,6 +2,7 @@ import { $ } from "@builder.io/qwik";
 import { contributions as declare, type ViewContribution } from "~/contract";
 import { BlockEditorView } from "./views/block-editor";
 import { UNNAMED_DOCUMENT } from "./lib/naming";
+import { receiveShared } from "./views/share";
 
 /**
  * What `documents` contributes to the frame: the Documents section and the
@@ -55,4 +56,6 @@ export const contributions = declare({
     },
   ],
   kinds: { document: blockEditor },
+  // What is shared into the app on a device lands in a document. BO_0319_050
+  share: receiveShared,
 });

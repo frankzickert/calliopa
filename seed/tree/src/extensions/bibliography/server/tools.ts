@@ -1,4 +1,3 @@
-import { atDataRevision } from "~/server/ccgw/branch-scope";
 
 import { duplicateOf, readWorkRecord, recordFromCsl, type WorkRecord } from "../lib/work";
 import { workLineOf } from "../lib/line";
@@ -55,7 +54,8 @@ export function recordOfInput(input: Readonly<Record<string, unknown>>): WorkRec
  */
 export async function proposeWork(call: ToolCall): Promise<ToolAnswer> {
   const record = recordOfInput(call.input);
-  const held = await atDataRevision(call.run.pin, () => listWorks());
+  // At the run's pin through its group, as the shell's scope reads. BO_0344_009
+  const held = await listWorks();
   if (held.outcome !== "success") throw new ToolRefusal(`the sources could not be read: ${held.outcome}`);
   const duplicate = duplicateOf(record, held.result);
   if (duplicate !== undefined) {
@@ -76,7 +76,7 @@ export async function proposeWork(call: ToolCall): Promise<ToolAnswer> {
  * narrowed by every word of an optional query.
  */
 export async function readWorks(call: ToolCall): Promise<ToolAnswer> {
-  const held = await atDataRevision(call.run.pin, () => listWorks());
+  const held = await listWorks();
   if (held.outcome !== "success") throw new ToolRefusal(`the sources could not be read: ${held.outcome}`);
   const query = typeof call.input["query"] === "string" ? call.input["query"].trim().toLowerCase() : "";
   const works = held.result

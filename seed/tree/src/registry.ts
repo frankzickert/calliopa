@@ -13,6 +13,7 @@ import type {
   ProposedTarget,
   ServerContributions,
   SettingsSection,
+  ShareReceiver,
   SuggestionSource,
   ViewContribution,
 } from "~/contract";
@@ -112,6 +113,8 @@ export interface Registry {
   readonly decorations: Readonly<Record<string, readonly RegisteredDecorations[]>>;
   /** Settings sections, in extension order. BO_0264_016 */
   readonly settingsSections: readonly RegisteredSettingsSection[];
+  /** What takes things shared into the app, in extension order. BO_0319_050 */
+  readonly shareReceivers: readonly { readonly extension: string; readonly receive$: ShareReceiver }[];
 }
 
 export function buildRegistry(
@@ -123,6 +126,7 @@ export function buildRegistry(
   const kinds: Record<string, string> = {};
   const decorations: Record<string, RegisteredDecorations[]> = {};
   const settingsSections: RegisteredSettingsSection[] = [];
+  const shareReceivers: { extension: string; receive$: ShareReceiver }[] = [];
   const views = new Map<string, { view: ViewType; source: ViewContribution }>();
 
   const addView = (extension: string, source: ViewContribution, presents: readonly string[]) => {
@@ -208,6 +212,7 @@ export function buildRegistry(
       }
       settingsSections.push({ ...section, key, extension: id });
     }
+    if (contributions.share !== undefined) shareReceivers.push({ extension: id, receive$: contributions.share });
   }
 
   // Decorations are keyed by the *qualified* kind they draw on, so an
@@ -241,6 +246,7 @@ export function buildRegistry(
     views: [...views.values()].map((entry) => entry.view),
     decorations,
     settingsSections,
+    shareReceivers,
   };
   // A view contributed for a kind nothing declares would never be reached;
   // saying so is what keeps a stale contribution from surviving unnoticed.

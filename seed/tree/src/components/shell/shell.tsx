@@ -98,6 +98,7 @@ import {
   type SpringHold,
 } from "~/lib/drag";
 import type { LibraryItem, OpenTarget } from "~/contract";
+import type { Captured } from "~/server/port/port";
 import { qualify } from "~/registry";
 import { REGISTRY } from "~/registry.gen";
 import type { RunEvent } from "~/server/agent/run-events";
@@ -190,6 +191,7 @@ import {
   type ViewAnswerAll,
   type ViewToggleRun,
   type RunChip,
+  type RunChipElsewhere,
   type ViewFocus,
   type ViewReveal,
   type ViewPointing,
@@ -1377,6 +1379,51 @@ export const Shell = component$<{
   const decorationBar = useStore<ViewBar>({ groups: [] });
   const save = useStore<ViewSave>({ state: null });
   const message = useStore<ViewMessage>({ current: null });
+  /**
+   * What is shared into the app on a device (`calliopa-bootstrap`'s
+   * BO_0319_050): taken from the host at the shell's start and whenever the
+   * device says something arrived, and handed to the extensions that take
+   * shares, in extension order, with the target the reader has open; the one
+   * that takes them may name a target to open. An instance answers no share,
+   * and nothing is asked again there.
+   */
+  // eslint-disable-next-line qwik/no-use-visible-task -- what was shared is the device's, asked in the browser
+  useVisibleTask$(({ cleanup }) => {
+    let asking = false;
+    let none = false;
+    const take = async () => {
+      if (asking || none) return;
+      asking = true;
+      try {
+        const response = await fetch("/api/x/ui.shell/capture/shared", { method: "POST" }).catch(() => null);
+        if (response === null || response.status === 404) {
+          none = true;
+          return;
+        }
+        if (!response.ok) return;
+        const { items } = (await response.json()) as { items?: readonly Captured[] };
+        if (items === undefined || items.length === 0) return;
+        const tab = activeTab(tabs);
+        const at = { kind: tab?.kind ?? null, itemId: tab?.itemId ?? null };
+        for (const receiver of REGISTRY.shareReceivers) {
+          const answer = await receiver.receive$(items, at);
+          if (!answer.taken) continue;
+          if (answer.open !== undefined) await openTarget$(answer.open);
+          return;
+        }
+        message.current = {
+          headline: "Nothing here takes what was shared",
+          body: "No active extension places shared text, addresses or files.",
+          answers: [{ id: "ok", label: "OK" }],
+        };
+      } finally {
+        asking = false;
+      }
+    };
+    void take();
+    window.addEventListener("calliopa:shared", take);
+    cleanup(() => window.removeEventListener("calliopa:shared", take));
+  });
   // A tab switch mounts a different view, and the state the old one reported
   // is not this tab's. Clearing it means an unreported tab shows nothing
   // rather than the previous tab's answer.
@@ -2059,6 +2106,7 @@ export const Shell = component$<{
               chips={chipsFor(runChips.byItem, active)}
               answerAll={answerAll}
               toggleRun={toggleRun}
+              open$={$((target: RunChipElsewhere["open"]) => openTarget$(target))}
               // While a pointing stands anywhere, a chip's press marks its
               // whole proposal for the prompt. BO_0321_011
               pointing={pointing.documentId !== null}

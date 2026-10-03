@@ -2,7 +2,6 @@ import { readCatalogue } from "~/extensions/structures/server/structures";
 import { DEFINITION_STRUCTURE, KEYWORD_STRUCTURE, shownValue } from "~/extensions/structures/lib/structures";
 import { readDocument } from "~/extensions/documents/server/documents";
 import type { Run } from "~/lib/runs";
-import { atDataRevision } from "~/server/ccgw/branch-scope";
 import { isRecordId } from "~/server/uuid";
 
 import { definitionText, type DocumentMentionsView, type Keyword } from "../lib/keywords";
@@ -58,8 +57,8 @@ const reasonOf = (outcome: { outcome: string } & Record<string, unknown>): strin
  */
 export async function readKeywords(call: ToolCall): Promise<ToolAnswer> {
   const document = documentOfInput(call.input);
-  const scope = call.run.pin > 0 ? { dataRevision: call.run.pin } : {};
-  const read = await mentionsOf(document, scope);
+  // At the run's pin through its group, as the shell's scope reads. BO_0344_008
+  const read = await mentionsOf(document);
   if (read.outcome !== "success") throw new ToolRefusal(reasonOf(read));
   const all = await keywordsOf();
   if (all.outcome !== "success") throw new ToolRefusal(reasonOf(all));
@@ -192,7 +191,7 @@ export async function promptKeywords(call: ToolCall): Promise<RunStartAnswer> {
       items,
     };
   };
-  return call.run.pin > 0 ? atDataRevision(call.run.pin, read) : read();
+  return read();
 }
 
 export const TOOLS = { read_keywords: readKeywords, prompt_keywords: promptKeywords } as const;

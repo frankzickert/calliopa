@@ -19,11 +19,14 @@ import {
   type EditorSurface,
 } from "~/extensions/documents/views/editor-surface";
 
-import type {
-  DocumentStructuresView,
-  StructuresListing,
-  StructureView,
-  TakenStructure,
+import {
+  FIELD_STRUCTURE,
+  KEYWORD_STRUCTURE,
+  STRUCTURE_STRUCTURE,
+  type DocumentStructuresView,
+  type StructuresListing,
+  type StructureView,
+  type TakenStructure,
 } from "../lib/structures";
 import { BlockStructureControl, fittingPills, TitleStructureControl } from "./control";
 import { StructureLabel } from "./label";
@@ -53,6 +56,7 @@ const structure = (id: string, name: string, extra: Partial<StructureView> = {})
   offers: [],
   offeredBy: [],
   blocks: true,
+  text: "",
   ...extra,
 });
 
@@ -62,7 +66,7 @@ const BIG = "1a2b3c4d-1111-4aaa-8bbb-000000000002";
 const BLOG = "7e8f9a0b-1c2d-4e3f-8a5b-6c7d8e9f0a1b";
 const OLD = "3c3c3c3c-3c3c-4c3c-8c3c-3c3c3c3c3c3c";
 const DEFINITION = "4e4e4e4e-4e4e-4e4e-8e4e-4e4e4e4e4e4e";
-const KEYWORD = "builtin:keyword";
+const KEYWORD = KEYWORD_STRUCTURE;
 
 const keyword = structure(KEYWORD, "Keyword", { builtin: true, order: 0, offers: [DEFINITION] });
 const definition = structure(DEFINITION, "Definition", { order: 6, offeredBy: [KEYWORD] });
@@ -201,7 +205,7 @@ describe("the Structures section", () => {
   const section = (data: StructuresListing) =>
     jsx(StructuresSection, { data, activeItemId: STORY, sectionKey: "structures:structures", filter: null, setFilter$: $(async () => {}) });
 
-  it("lists the structures with the built-ins first and retired ones left out, and opens one on its page", async () => {
+  it("lists the structures with the built-ins first and retired ones left out, and opens one as its document (RO_0005)", async () => {
     vi.stubGlobal("fetch", async () => new Response(JSON.stringify(listing), { status: 200 }));
     const { root, settle, dom } = await mount(section(listing));
     const rows = () => Array.from(root.querySelectorAll("[data-structure-row]")).map((row) => row.querySelector(".library-entry__label")?.textContent);
@@ -210,7 +214,7 @@ describe("the Structures section", () => {
     expect(root.querySelector(`[data-structure-row="${STORY}"]`)?.getAttribute("aria-current")).toBe("true");
     await dom.userEvent(`[data-structure-row="${BLOG}"]`, "click");
     await settle(() => opened.length > 0);
-    expect(opened).toEqual([{ kind: "structures:documentRole", itemId: BLOG, title: "Blog post" }]);
+    expect(opened).toEqual([{ kind: "documents:document", itemId: BLOG, title: "Blog post" }]);
   });
 
   it("unfolds a built-in to the documents carrying it, each opening as itself", async () => {
@@ -639,68 +643,108 @@ describe("fittingPills", () => {
   });
 });
 
-// *Keyword*'s page (`calliopa-bootstrap`'s `BO_0310_031`): one *Send with
-// prompt* switch per field and per offered structure, the definition on as a fresh
-// install holds it; a flip posts the one act and shows what the route
-// answered; the offers the release makes carry no ×.
-describe("Keyword's page", () => {
-  const ALIAS = "builtin:alias";
+// A structure's acts on its document (RO_0005_004): beside its header's lines,
+// Retire on a person's structure, Used by unfolding to the documents using it,
+// and on Keyword one Send with prompt switch per field and allowed structure
+// (`calliopa-bootstrap`'s `BO_0310_031`); Structure's pill carries no ×.
+describe("a structure's acts on its document", () => {
+  const structureBuiltin = structure(STRUCTURE_STRUCTURE, "Structure", { builtin: true, order: 7, blocks: false, offers: [FIELD_STRUCTURE] });
+  const fieldBuiltin = structure(FIELD_STRUCTURE, "Field", { builtin: true, order: 8, offeredBy: [STRUCTURE_STRUCTURE] });
   const builtinKeyword = structure(KEYWORD, "Keyword", {
     builtin: true,
     order: 0,
-    offers: ["builtin:definition", ALIAS],
+    offers: [DEFINITION],
     fields: [{ key: "domain", name: "Domain", type: "text", required: false }],
-    sendWithPrompt: ["builtin:definition"],
+    sendWithPrompt: [DEFINITION],
   });
-  const builtinDefinition = structure("builtin:definition", "Definition", { builtin: true, order: 4, offeredBy: [KEYWORD] });
-  const builtinAlias = structure(ALIAS, "Alias", { builtin: true, order: 5, offeredBy: [KEYWORD] });
+  const usingStructure = (id: string): DocumentStructuresView => ({
+    ...view([], [taken(structureBuiltin, { values: { blocks: true }, missing: [] })]),
+    documentId: id,
+    takeable: [],
+  });
 
-  it("draws a switch per field and offered structure, and posts a flip", async () => {
-    const { StructurePage } = await import("./structure-page");
+  /** The routes on a structure's document, each request kept. */
+  const routes = (asked: Asked[], structures: readonly StructureView[], current: DocumentStructuresView, after: (body: unknown) => void = () => {}) =>
+    async (url: string, init?: RequestInit) => {
+      const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : undefined;
+      asked.push({ url, ...(body === undefined ? {} : { body }) });
+      if (url === "/api/library/structures/structures") return new Response(JSON.stringify({ reachable: true, structures }), { status: 200 });
+      if (init?.method === "POST") {
+        after(body);
+        return new Response(JSON.stringify({ outcome: "success", result: structures[0] }), { status: 200 });
+      }
+      if (url.endsWith("/documents") && url.startsWith("/api/x/structures/structures/"))
+        return new Response(JSON.stringify({ outcome: "success", result: [{ id: documentId, title: "Quantum computing" }] }), { status: 200 });
+      return new Response(JSON.stringify({ outcome: "success", result: current }), { status: 200 });
+    };
+
+  it("draws Keyword's switches per field and allowed structure, posts a flip, and offers no Retire on a built-in", async () => {
     const asked: Asked[] = [];
     let current = builtinKeyword;
-    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
-      asked.push({ url, ...(typeof init?.body === "string" ? { body: JSON.parse(init.body) as unknown } : {}) });
-      if (url === "/api/library/structures/structures")
-        return new Response(JSON.stringify({ reachable: true, structures: [builtinKeyword, builtinDefinition, builtinAlias] }), { status: 200 });
-      if (init?.method === "POST") current = { ...current, sendWithPrompt: ["builtin:definition", "domain"] };
-      return new Response(JSON.stringify({ outcome: "success", result: current }), { status: 200 });
-    });
-    const tab = { id: "tab-1", kind: "structures:documentRole", itemId: KEYWORD, title: "Keyword" };
-    const { root, settle, dom } = await mount(jsx(StructurePage, { tab } as never));
+    vi.stubGlobal(
+      "fetch",
+      async (url: string, init?: RequestInit) =>
+        routes(asked, [current, definition, structureBuiltin, fieldBuiltin], usingStructure(KEYWORD), () => {
+          current = { ...current, sendWithPrompt: [DEFINITION, "domain"] };
+        })(url, init),
+    );
+    const { root, settle, dom } = await mount(jsx(TitleStructureControl, { documentId: KEYWORD, form: "full" }));
     await settle(() => root.querySelector("[data-send-with-prompt]") !== null);
     const switches = () =>
-      Array.from(root.querySelectorAll("[data-send-with-prompt-entry]")).map((input) => [
-        input.getAttribute("data-send-with-prompt-entry"),
-        (input as HTMLInputElement).checked,
-      ]);
+      Array.from(root.querySelectorAll("[data-send-with-prompt-entry]")).map((input) => [input.getAttribute("data-send-with-prompt-entry"), (input as HTMLInputElement).checked]);
     expect(switches()).toEqual([
       ["domain", false],
-      ["builtin:definition", true],
-      [ALIAS, false],
+      [DEFINITION, true],
     ]);
-    expect(root.querySelector(`[data-unoffer="${ALIAS}"]`)).toBeFalsy();
-    expect(root.querySelector(`[data-builtin-offer="${ALIAS}"]`)).toBeTruthy();
+    expect(root.querySelector("[data-structure-retire]")).toBeFalsy();
+    // Structure's pill carries no ×: a structure stays one (RO_0005_Q9).
+    expect(root.querySelector(`[data-chip-structure="${STRUCTURE_STRUCTURE}"]`)).toBeTruthy();
     const domain = root.querySelector('[data-send-with-prompt-entry="domain"]') as HTMLInputElement;
     domain.checked = true;
     await dom.userEvent('[data-send-with-prompt-entry="domain"]', "change");
     await settle(() => posted(asked).length > 0 && switches()[0]?.[1] === true);
-    expect(posted(asked).map((entry) => entry.body)).toEqual([{ command: "sendWithPrompt", entry: "domain", on: true }]);
-    expect(switches()[0]).toEqual(["domain", true]);
+    expect(posted(asked).map((entry) => [entry.url, entry.body])).toEqual([
+      [`/api/x/structures/structures/${encodeURIComponent(KEYWORD)}`, { command: "sendWithPrompt", entry: "domain", on: true }],
+    ]);
   });
 
-  it("draws no switches on any other structure", async () => {
-    const { StructurePage } = await import("./structure-page");
-    vi.stubGlobal("fetch", async (url: string) =>
-      url === "/api/library/structures/structures"
-        ? new Response(JSON.stringify(listing), { status: 200 })
-        : new Response(JSON.stringify({ outcome: "success", result: blog }), { status: 200 }),
-    );
-    const tab = { id: "tab-2", kind: "structures:documentRole", itemId: BLOG, title: "Blog post" };
-    const { root, settle } = await mount(jsx(StructurePage, { tab } as never));
-    await settle(() => root.querySelector("[data-structure-page]") !== null);
-    expect(root.querySelector("[data-structure-page]")).toBeTruthy();
+  it("retires a person's structure by its act, and unfolds Used by to the documents using it, each opening as itself", async () => {
+    const asked: Asked[] = [];
+    vi.stubGlobal("fetch", routes(asked, [story, structureBuiltin, fieldBuiltin], usingStructure(STORY)));
+    const { root, settle, dom } = await mount(jsx(TitleStructureControl, { documentId: STORY, form: "full" }));
+    await settle(() => root.querySelector("[data-structure-retire]") !== null);
     expect(root.querySelector("[data-send-with-prompt]")).toBeFalsy();
+    expect(root.querySelector("[data-structure-retire]")?.textContent?.trim()).toBe("Retire");
+    await dom.userEvent("[data-structure-retire]", "click");
+    await settle(() => posted(asked).length > 0);
+    expect(posted(asked).map((entry) => [entry.url, entry.body])).toEqual([[`/api/x/structures/structures/${STORY}`, { command: "retire" }]]);
+    await dom.userEvent("[data-structure-used-by]", "click");
+    await settle(() => root.querySelector("[data-using-document]") !== null);
+    await dom.userEvent("[data-using-document]", "click");
+    await settle(() => opened.length > 0);
+    expect(opened).toEqual([{ kind: "documents:document", itemId: documentId, title: "Quantum computing" }]);
+  });
+
+  it("says beside an allowing of a structure blocks may not use that the document under a block using this one uses it (RO_0003_Q5)", async () => {
+    const documentHook = { ...hook, blocks: false };
+    vi.stubGlobal("fetch", routes([], [story, documentHook, big, structureBuiltin, fieldBuiltin], usingStructure(STORY)));
+    const { root, settle } = await mount(jsx(TitleStructureControl, { documentId: STORY, form: "full" }));
+    await settle(() => root.querySelector("[data-structure-acts]") !== null);
+    expect(root.querySelector(`[data-offer-document-only="${HOOK}"]`)?.textContent).toBe("Hook: used by the document under a block using Story, never by its blocks");
+    expect(root.querySelector(`[data-offer-document-only="${BIG}"]`)).toBeFalsy();
+  });
+
+  it("draws Structure's pill without a × in the document's control, and nothing of a structure's acts on a document that is none", async () => {
+    vi.stubGlobal("fetch", routes([], [story, structureBuiltin, fieldBuiltin], usingStructure(STORY)));
+    const { root, settle, dom } = await mount(jsx(TitleStructureControl, { documentId: STORY, form: "full" }));
+    await settle(() => root.querySelector(`[data-chip-structure="${STRUCTURE_STRUCTURE}"]`) !== null);
+    await dom.userEvent(`[data-chip-structure="${STRUCTURE_STRUCTURE}"]`, "click");
+    await settle(() => root.querySelector(`[data-taken-structure="${STRUCTURE_STRUCTURE}"]`) !== null);
+    expect(root.querySelector(`[data-clear-structure="${STRUCTURE_STRUCTURE}"]`)).toBeFalsy();
+    vi.stubGlobal("fetch", routes([], [story], view([], [taken(story)])));
+    const plain = await mount(jsx(TitleStructureControl, { documentId, form: "full" }));
+    await plain.settle(() => plain.root.querySelector("[data-chip-structure]") !== null);
+    expect(plain.root.querySelector("[data-structure-acts]")).toBeFalsy();
   });
 });
 
@@ -732,38 +776,6 @@ describe("a block's focused work", () => {
 // BO_0312_010: Format's type and schema are the release's — no ×, and the
 // type and its options cannot be changed — while a field the person added
 // beside them can be removed.
-describe("Format's page", () => {
-  const FORMAT = "builtin:format";
-  const builtinFormat = structure(FORMAT, "Format", {
-    builtin: true,
-    order: 2,
-    fields: [
-      { key: "type", name: "Type", type: "choice", required: true, options: ["text", "table", "image", "video", "PDF", "structured"] },
-      { key: "schema", name: "Schema", type: "longText", required: false },
-      { key: "paper", name: "Paper size", type: "text", required: false },
-    ],
-  });
-
-  it("draws the built-in fields fixed and a person's own removable", async () => {
-    const { StructurePage } = await import("./structure-page");
-    vi.stubGlobal("fetch", async (url: string) =>
-      url === "/api/library/structures/structures"
-        ? new Response(JSON.stringify({ reachable: true, structures: [builtinFormat] }), { status: 200 })
-        : new Response(JSON.stringify({ outcome: "success", result: builtinFormat }), { status: 200 }),
-    );
-    const tab = { id: "tab-3", kind: "structures:documentRole", itemId: FORMAT, title: "Format" };
-    const { root, settle } = await mount(jsx(StructurePage, { tab } as never));
-    await settle(() => root.querySelector('[data-field-row="type"]') !== null);
-    expect(root.querySelector('[data-field-row="type"]')?.getAttribute("data-builtin-field")).toBe("true");
-    expect(root.querySelector('[data-remove-field="type"]')).toBeFalsy();
-    expect(root.querySelector('[data-remove-field="schema"]')).toBeFalsy();
-    expect((root.querySelector('[data-field-type-of="type"]') as HTMLSelectElement).disabled).toBe(true);
-    expect((root.querySelector('[data-field-options="type"]') as HTMLInputElement).disabled).toBe(true);
-    expect(root.querySelector('[data-remove-field="paper"]')).toBeTruthy();
-    expect(root.querySelector('[data-field-row="paper"]')?.getAttribute("data-builtin-field")).toBeNull();
-  });
-});
-
 describe("structures used by documents alone", () => {
   it("says on a block's pill that blocks may no longer take the structure it keeps", async () => {
     vi.stubGlobal("fetch", api([], view([taken(hook, { blocks: false, notOnBlock: true }), taken(blog)])));
@@ -779,58 +791,12 @@ describe("structures used by documents alone", () => {
     expect(pills[0]?.getAttribute("title")).toBe("Hook is not allowed on a block");
     expect(pills[1]?.getAttribute("data-structure-state")).toBeNull();
   });
-
-  it("switches a person's structure to documents alone, and says where an offered document-only structure is taken", async () => {
-    const { StructurePage } = await import("./structure-page");
-    const asked: Asked[] = [];
-    const documentHook = { ...hook, blocks: false };
-    let current = story;
-    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
-      asked.push({ url, ...(typeof init?.body === "string" ? { body: JSON.parse(init.body) as unknown } : {}) });
-      if (url === "/api/library/structures/structures")
-        return new Response(JSON.stringify({ reachable: true, structures: [story, documentHook, big] }), { status: 200 });
-      if (init?.method === "POST") current = { ...current, blocks: false };
-      return new Response(JSON.stringify({ outcome: "success", result: current }), { status: 200 });
-    });
-    const tab = { id: "tab-4", kind: "structures:documentRole", itemId: STORY, title: "Story" };
-    const { root, settle, dom } = await mount(jsx(StructurePage, { tab } as never));
-    await settle(() => root.querySelector("[data-structure-blocks]") !== null);
-    const toggle = () => root.querySelector("[data-structure-blocks]") as HTMLInputElement;
-    expect(toggle().checked).toBe(true);
-    expect(toggle().disabled).toBe(false);
-    expect(root.querySelector(`[data-offer-document-only="${HOOK}"]`)?.textContent).toBe(
-      "taken by the document under a block carrying Story, never by its blocks",
-    );
-    expect(root.querySelector(`[data-offer-document-only="${BIG}"]`)).toBeFalsy();
-    toggle().checked = false;
-    await dom.userEvent("[data-structure-blocks]", "change");
-    await settle(() => posted(asked).length > 0 && !toggle().checked);
-    expect(posted(asked).map((entry) => entry.body)).toEqual([{ command: "blocks", allowed: false }]);
-    expect(root.querySelector("[data-structure-blocks-row]")?.textContent).toContain("used by documents alone");
-  });
-
-  it("draws a built-in's switch fixed, as the release says", async () => {
-    const { StructurePage } = await import("./structure-page");
-    const format = structure("builtin:format", "Format", { builtin: true, order: 2, blocks: false });
-    vi.stubGlobal("fetch", async (url: string) =>
-      url === "/api/library/structures/structures"
-        ? new Response(JSON.stringify({ reachable: true, structures: [format] }), { status: 200 })
-        : new Response(JSON.stringify({ outcome: "success", result: format }), { status: 200 }),
-    );
-    const tab = { id: "tab-5", kind: "structures:documentRole", itemId: "builtin:format", title: "Format" };
-    const { root, settle } = await mount(jsx(StructurePage, { tab } as never));
-    await settle(() => root.querySelector("[data-structure-blocks]") !== null);
-    const toggle = root.querySelector("[data-structure-blocks]") as HTMLInputElement;
-    expect(toggle.checked).toBe(false);
-    expect(toggle.disabled).toBe(true);
-    expect(toggle.getAttribute("title")).toBe("Built in: used by documents alone, as the release says.");
-  });
 });
 
 describe("fields that suggest and references by title (calliopa-bootstrap's BO_0336)", () => {
-  const FORMAT = "builtin:format";
-  const VARIATION = "builtin:variation";
-  const PROFILE = "builtin:profile";
+  const FORMAT = "7c7c7c7c-7c7c-4c7c-8c7c-7c7c7c7c7c7c";
+  const VARIATION = "6b6b6b6b-6b6b-4b6b-8b6b-6b6b6b6b6b6b";
+  const PROFILE = "5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a";
   const FORMAT_DOC = "8a8a8a8a-8a8a-4a8a-8a8a-8a8a8a8a8a8a";
   const generation = [
     { key: "provider", name: "Provider", type: "text", required: false, suggest: "media:provider" },
@@ -918,45 +884,22 @@ describe("fields that suggest and references by title (calliopa-bootstrap's BO_0
     expect(posted(asked)[0]?.body).toEqual({ values: { format: FORMAT_DOC } });
   });
 
-  it("lets a person's own text field name a source the build answers, and keeps a release field's fixed", async () => {
-    const { StructurePage } = await import("./structure-page");
-    const mine = structure("9e9e9e9e-9e9e-4e9e-8e9e-9e9e9e9e9e9e", "Delivery", {
-      fields: [{ key: "service", name: "Service", type: "text", required: false }, { key: "format", name: "Format", type: "reference", required: false }],
-    });
+  it("holds several references as pills, each removed by its ×, and adds one chosen by title (RO_0005_Q3)", async () => {
     const asked: Asked[] = [];
-    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
-      asked.push({ url, ...(typeof init?.body === "string" ? { body: JSON.parse(init.body) as unknown } : {}) });
-      if (url === "/api/library/structures/structures") return new Response(JSON.stringify({ reachable: true, structures: [format, mine] }), { status: 200 });
-      if (url === "/api/suggestions") return new Response(JSON.stringify({ sources: [{ source: "media:provider", label: "Generation services" }] }), { status: 200 });
-      return new Response(JSON.stringify({ outcome: "success", result: mine }), { status: 200 });
+    const OTHER = "9f9f9f9f-9f9f-4f9f-8f9f-9f9f9f9f9f9f";
+    const allowing = structure("9d9d9d9d-9d9d-4d9d-8d9d-9d9d9d9d9d9e", "Chapter", {
+      fields: [{ key: "allows", name: "Allows", type: "reference", required: false, many: true, carrying: FORMAT }],
     });
-    const tab = { id: "tab-4", kind: "structures:documentRole", itemId: mine.id, title: "Delivery" };
-    const { root, settle, dom } = await mount(jsx(StructurePage, { tab } as never));
-    await settle(() => root.querySelector('[data-field-source="service"] option[value="media:provider"]') !== null);
-    (root.querySelector('[data-field-source="service"]') as HTMLSelectElement).value = "media:provider";
-    await dom.userEvent('[data-field-source="service"]', "change");
-    (root.querySelector('[data-field-carrying="format"]') as HTMLSelectElement).value = FORMAT;
-    await dom.userEvent('[data-field-carrying="format"]', "change");
+    const current = { ...view([taken(allowing, { values: { allows: [OTHER] }, missing: [] })]), referenceTitles: { [OTHER]: "Square" } };
+    const { root, settle, dom } = await openAt(allowing.id, current, asked, null);
+    expect(root.querySelector(`[data-field-chosen="${OTHER}"]`)?.textContent?.trim()).toBe("Square");
+    await dom.userEvent('[data-structure-field="allows"]', "focus");
+    await settle(() => root.querySelector(`[data-choice="${FORMAT_DOC}"]`) !== null);
+    await dom.userEvent(`[data-choice="${FORMAT_DOC}"]`, "click");
+    await settle(() => posted(asked).length > 0);
+    expect(posted(asked)[0]?.body).toEqual({ values: { allows: [OTHER, FORMAT_DOC] } });
+    await dom.userEvent(`[data-field-chosen="${OTHER}"] button`, "click");
     await settle(() => posted(asked).length > 1);
-    expect(posted(asked).map((one) => one.body)).toEqual([
-      { command: "reviseField", key: "service", suggest: "media:provider" },
-      { command: "reviseField", key: "format", carrying: FORMAT },
-    ]);
-  });
-
-  it("draws what a release field suggests fixed on its structure's page", async () => {
-    const { StructurePage } = await import("./structure-page");
-    vi.stubGlobal("fetch", async (url: string) =>
-      url === "/api/library/structures/structures"
-        ? new Response(JSON.stringify({ reachable: true, structures: [format] }), { status: 200 })
-        : url === "/api/suggestions"
-          ? new Response(JSON.stringify({ sources: [{ source: "media:provider", label: "Generation services" }] }), { status: 200 })
-          : new Response(JSON.stringify({ outcome: "success", result: format }), { status: 200 }),
-    );
-    const tab = { id: "tab-5", kind: "structures:documentRole", itemId: FORMAT, title: "Format" };
-    const { root, settle } = await mount(jsx(StructurePage, { tab } as never));
-    await settle(() => root.querySelector('[data-field-source="provider"]') !== null);
-    expect((root.querySelector('[data-field-source="provider"]') as HTMLSelectElement).disabled).toBe(true);
-    expect((root.querySelector('[data-field-suggestions-of="provider"]') as HTMLInputElement).disabled).toBe(true);
+    expect(posted(asked)[1]?.body).toEqual({ values: { allows: [] } });
   });
 });

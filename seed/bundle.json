@@ -1,9 +1,9 @@
 {
-  "version": "0.5.0",
-  "pin": 4095,
+  "version": "0.5.1",
+  "pin": 4556,
   "mapRoot": "ui.shell",
   "marker": "ui.shell",
-  "members": 64,
+  "members": 67,
   "inactive": [],
   "extensions": [
     "bibliography",

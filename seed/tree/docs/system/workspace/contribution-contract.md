@@ -25,6 +25,7 @@
   change with where a party comes from.
 - Two slots arrived with `BO_0264`. A route an extension marks `kernelCallback` — a trigger, a context, a tool the kernel calls — is answered only when the request carries the secret the kernel generated at its start and handed this process as `CALLIOPA_KERNEL_CALLBACK_SECRET`, in `X-Calliopa-Kernel-Callback`; `dispatch` refuses anything else `403`, and the kernel strips the header from every browser request it forwards (`src/server/kernel-callback.ts`, `BO_0264_002`). `settingsSections` on the client half — a name, a title and a component — are drawn below the settings tab's own sections while their extension is active, keyed `<ext>:<name>` and refused twice as `settings_section_collision` (`BO_0264_016`); one marked `owner: true` is drawn for the owner alone, heading and all, which `instructions`' *Profile tools* is (`BO_0311_040`). Reads at an earlier data revision run inside `atDataRevision` (`src/server/ccgw/branch-scope.ts`), which the CCGW client honours for every read that names none, against truth.
 - `src/registry.ts` is the merge: `buildRegistry(host, entries)` qualifies sections and kinds, gives a kind's default view that kind and a further view the kinds it names, and refuses by name a section key contributed twice (`section_collision`), a kind contributed twice (`kind_collision`), a view id from two extensions (`view_collision`) and a view presenting a kind nothing contributes (`target_kind_unknown`); `buildServerRegistry(entries)` keys readers by section and tables by extension, and refuses a table naming one method and path twice (`route_collision`), a rest segment that is not last (`route_shape`) and a party from two extensions (`party_collision`). `matchRoute` walks a table in the order the extension listed it. The merge runs where the generated module is evaluated — the server at startup, the unit project, the promotion gate's serve probe — so a collision is refused before a pin serves it. `BO_0202_001` `BO_0202_004`
+- The `share` slot (`calliopa-bootstrap`'s `BO_0319_050`): an extension's `ShareReceiver` is handed what was shared into the app on a device and the target the reader has open, and answers whether it took the items and, when it placed them somewhere new, the target the shell opens. The registry keeps the receivers in extension order (`shareReceivers`), and the frame asks each in turn until one takes them, saying so in a message when none does (`docs/system/foundation/device.md`). `documents` contributes the one receiver there is.
 - `scripts/registry.mjs` is the scan, plain JavaScript so node runs it without a build: `scanExtensions` reads every directory under `src/extensions/` in name order and fails by name a directory without a manifest (`manifest_missing`), a manifest that is not JSON (`manifest_unreadable`), an id not matching its directory (`id_mismatch`), an entrypoint that names no module or is not a module name beside the manifest (`entrypoint_missing`, `entrypoint_shape`), a half that does not export `contributions` (`entrypoint_shape`), a declared dependency the tree does not hold (`dependency_missing`) and a declared range the version present does not satisfy (`dependency_out_of_range`, `BO_0219_007` — the grammar `satisfies` reads is the kernel's: comparator sets joined by `||`, `^`, `~`, the six comparators, bare and partial versions, `*`); `emitClient` and `emitServer` write the two modules; `writeRegistry` touches a file only when its text changed. `scripts/registry-plugin.mjs` runs it at `configResolved` and again in watch mode when a manifest or an entrypoint changes; `scripts/gen-registry.mjs` is `pnpm gen`, which `prebuild`, `pretypecheck`, `precheck` and `pretest:*` run, so a fresh checkout typechecks before Vite starts. Both are unit-tested over fixture trees (`src/registry-scan.test.ts`, `src/registry.test.ts`), including every named error. `BO_0202_001` `BO_0202_011`
 - The host's own contributions are `src/components/shell/host-contributions.tsx`, merged first with bare names: the `context` placeholder for every host kind and the `outline` placeholder for the structural ones. `context` presents anything, which is what makes view resolution total: a tab whose kind nothing contributes any more — an extension that left the tree — opens there and says so, rather than being refused with the workspace. `BO_0202_004`
 - The frame is `src/` root source and not a contribution: the workspace, tabs, drawers, the process registry, the CCGW and kernel clients, and the host's own endpoints — `/api/workspaces/**`, `/api/processes/**`, `/api/runs/**`, `/api/library/<ext>/<section>` (one section re-read through its contributed reader) and `/health`. `BO_0202_005` `BO_0202_006`
@@ -235,3 +236,28 @@ identifier and route, and `doc-block-roles` and `profiles` become `structures` a
   ordered by their former ids so nothing moves, and the run's detail says *Instruction*.
 - The shell's docs speak the new terms (`BO_0338_053`, 2026-10-02): this document's lines on the chip,
   the command's option and the run's detail, and *The Run Used An Instruction* in `processes.md`.
+
+## A Run's Callback Reads What The Run Proposed
+
+- Under `BO_0344` (`calliopa-bootstrap`'s `docs/changes/completed/BO_0344_FIX_extension-tools-read-the-runs-own-proposals.md`,
+  this extension's `docs/changes/completed/` beside it), transferred 2026-10-03: an extension's tool reads at
+  the run's pin and never through the run's group, so a run cannot build on what it proposed a
+  moment before — `structures`' `propose_structures` refuses a document the run itself started. The
+  kernel's half is `calliopa-bootstrap`'s `ui-kernel.md`, *An Extension Tool Reads What Its Run
+  Proposed* (`BO_0344_001`–`BO_0344_003`).
+* An extension tool reads as the kernel's own document tools do: at the run's pin with the run's
+  own group laid over truth, so what the same run proposed earlier stands for it; what it stages
+  still lands only when the person accepts. A person's acts and the routes read as before. User
+  decision, 2026-10-03.
+- A run's callback reads in the run's scope (`BO_0344_004`, landed 2026-10-03):
+  `dispatch` (`src/server/registry.ts`) reads `X-Calliopa-Run-Pin` and `X-Calliopa-Run-Overlay`
+  through `runScopeOf` (`src/server/kernel-callback.ts`) on a `kernelCallback` route only, after
+  the secret is checked, and answers the route inside `asRun({pin, overlay})`
+  (`src/server/ccgw/branch-scope.ts`). `query` (`src/server/ccgw/client.ts`) reads in that scope
+  at the run's pin through its group — a read naming no revision, one naming the run's pin and one
+  inside `atDataRevision` at the pin alike — and truth at any other revision, as before. The scope
+  never sets the branch, so `commit` is untouched and an extension gains no write path; a request
+  without the headers is answered as before. `kernel-callback.test.ts` proves the headers read
+  and refused; the extensions' behaviour suites under the kernel harness prove the reads
+  (`structures` `BO_0344_007`, `keywords` `BO_0344_008`, `bibliography` `BO_0344_009`,
+  `manuscripts` `BO_0344_010`).

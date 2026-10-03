@@ -86,17 +86,19 @@ kernel's half is `ui-kernel.md`, *The Instruction In The Command, With Tools*, a
   relating every instruction that does not use *Instruction* to it, and clearing every document's
   attached instruction (`documents`' `clearProfileSlotsStatement`, `BO_0311_020`), or nothing once
   both stand.
-- The chip control (`BO_0311_011`, `views/chip.tsx`, `ProfileChip`): a `command` block place, the
-  `compass` icon, named *No instruction* or *Instruction: <title>* and drawn in the accent once one is
+- The chip control (`BO_0311_011`, `views/chip.tsx`, `InstructionChip`): a `command` block place, the
+  `compass` icon, 24px on every pointer with no touch minimum like the chip's own buttons (`documents`'
+  `BO_0273` line; the coarse-pointer 44px rule went with `PF_0002_001`, which made the bar 48px high on a phone), named *No instruction* or *Instruction: <title>* and drawn in the accent once one is
   chosen, opening *No instruction* first, then under *For this block's structures* the instructions using
   a structure the document or the block uses, then the others, each by title. It reads
   `GET /api/x/instructions/documents/[id]/blocks/[block]/choices`, which answers the instructions with
   whether each uses such a structure (the document's and the block's roles from `structuresOf`, the
   instructions using each from `documentsCarrying`, *Instruction* itself left out), whether the
   document is itself an instruction, and the person's last instruction there. A choice calls the place's
-  `setOption$("profile", id | null)` (`ui.shell`'s *Options On A Command*), so *Send* carries
-  it, and nothing is written on the document. The chip starts with the person's last while it is
-  still an instruction, and at *No instruction* on an instruction's own document. The kernel keeps the last as
+  `setOption$("instruction", id | null)` (`ui.shell`'s *Options On A Command*), so *Send* carries
+  it, and nothing is written on the document. A command carrying no choice starts with the
+  person's last while it is still an instruction, and at *No instruction* on an instruction's own
+  document; one carrying a choice keeps it (`PF_0001_001`, below). The kernel keeps the last as
   a run starts, in its per-person state (`people/<person>/profile/<document>`), the person's
   alone. Nothing is drawn while the instructions cannot be read or the instance has none. This
   replaces the open `BO_0299_020`; the document bar's selector and the selection route are gone.
@@ -217,10 +219,41 @@ remembered choice — is `calliopa-bootstrap`'s `extension-model.md` (`BO_0338_0
 
 ## A Structure Is A Document
 
-Under `structures`' `RO_0005` (2026-10-02): every structure becomes a document and *Instruction*'s
-id becomes `structure:instruction`, where `builtin:profile` stood
+Under `structures`' `RO_0005` (2026-10-02): every structure becomes a document and *Instruction*
+takes a fixed id `structures` names, where `builtin:profile` stood
 ([A Structure Is A Document](../../../structures/docs/system/system.md#a-structure-is-a-document)).
 
-- [ ] RO_0005_040 `INSTRUCTION_ROLE` imports the id `structures` names, and an instruction
-      created or listed relates and reads *Instruction* by it; the format an instruction names
-      stays a document id and needs no move; the suites green over the documents.
+- `INSTRUCTION_STRUCTURE` is `structures`' name for *Instruction*'s fixed id, re-exported by
+  `lib/instructions.ts` (`RO_0005_040`, landed 2026-10-02), so an instruction created or listed
+  relates and reads *Instruction* by it; the format an instruction names is a document id and moved
+  nothing.
+
+## The Chip Keeps The Command's Instruction
+
+Under `PF_0001` (`docs/changes/completed/PF_0001_FIX_the-chip-keeps-the-commands-instruction.md`, promoted
+to draft by the user on 2026-10-03 and transferred here the same day): the chip set the person's
+last on the command each time it was drawn, so a choice was lost when the block was left and
+opened again, and *Send* carried the last instead.
+
+* An instruction chosen for a command stays chosen until the person chooses another or sends.
+  Requested by the user, 2026-10-02.
+* After *Send*, the command in that block keeps the instruction it was sent with, even when the
+  person has since sent with another one elsewhere in the document; the person's last starts only a
+  command that carries no choice, as on a fresh page. User decision, 2026-10-03 (`PF_0001_Q1`).
+- The chip reads its command's choice (`PF_0001_001`, landed 2026-10-03; `views/chip.tsx`): from
+  the place's `commandOptions` (`ui.shell`'s `BO_0336_051`), a command carrying an `instruction` is
+  shown with it and nothing is set over it; a command carrying `no-instruction` stays at *No
+  instruction*; only a command carrying neither starts with the person's last. Choosing *No
+  instruction* sets `no-instruction` (`NO_INSTRUCTION_OPTION`, `lib/instructions.ts`) beside
+  clearing `instruction`, and choosing an instruction clears it, since the shell drops an option
+  set to nothing (`withOption`); the runs route reads only `instruction` and `variation`, so the
+  mark goes no further. The shell is unchanged: `afterSend` keeps both after *Send*.
+- Proven in `views/views.test.ts` (`PF_0001_002`, 2026-10-03): a chip drawn again on a command
+  carrying an instruction shows it over the person's last, sets nothing, and `afterSend` keeps it
+  for *Send*; one drawn again on *No instruction* chosen over a remembered last stays at none; a
+  command carrying nothing still starts with the last. Both fail against the chip before the fix.
+- Walked by the user on the served build on 2026-10-03 (`PF_0001_003`, pin 4499), and the
+  user said it works: an instruction chosen, the block left and opened again, the choice kept and
+  the run naming it; *No instruction* chosen over a remembered last, kept the same way.
+- The change document stands in `docs/changes/completed/` at `Status: completed`; the
+  *Fixed* line stands in `calliopa-bootstrap`'s `docs/release-notes/unreleased.md`.

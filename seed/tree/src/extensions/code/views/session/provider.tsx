@@ -121,6 +121,9 @@ export const SessionProvider = component$<DocumentDecorationProps>(({ documentId
     if (runtime !== null && !options.some((option) => option.value === runtime)) {
       options.push({ value: runtime, label: `${state.runtimeName || runtime} (${state.runtimeState || "gone"})` });
     }
+    // A device's sandbox runs each block fresh and holds no session to
+    // restart or interrupt. BO_0319_046
+    const sandboxed = runtimes.find((record) => record.id === runtime)?.sandbox === true;
     const group: ViewBarGroup = {
       id: "code",
       label: "Code",
@@ -133,16 +136,16 @@ export const SessionProvider = component$<DocumentDecorationProps>(({ documentId
           options,
           run$: connect$,
         },
-        {
-          kind: "button",
+        ...(sandboxed ? [] : [{
+          kind: "button" as const,
           id: "code-restart",
           label: "Restart session",
-          icon: "arrow-counter-clockwise",
+          icon: "arrow-counter-clockwise" as const,
           name: "Restart the document's session: state gone, files kept",
           disabled: runtime === null,
           run$: restart$,
-        },
-        ...(running !== ""
+        }]),
+        ...(running !== "" && !sandboxed
           ? [
               {
                 kind: "button" as const,

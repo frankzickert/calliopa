@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { takeableFrom, type StructureView } from "./structures";
+import { FIELD_STRUCTURE, takeableFrom, type StructureView } from "./structures";
 import { offerDistance, suggestStructures } from "./suggest";
 
 /**
@@ -12,6 +12,7 @@ const structure = (id: string, name: string, extra: Partial<StructureView> = {})
   id,
   name,
   description: "",
+  text: "",
   retired: false,
   builtin: false,
   order: 1,
@@ -68,5 +69,13 @@ describe("a structure blocks may not take (BO_0332_013)", () => {
     expect(suggestStructures({ structures: withDocumentStructure, takeable: onBlock, distance: new Map(), words, taken: [] })).toEqual([]);
     const onDocument = takeableFrom(withDocumentStructure, [], false);
     expect(suggestStructures({ structures: withDocumentStructure, takeable: onDocument, distance: new Map(), words, taken: [] })).toEqual(["blog"]);
+  });
+
+  it("puts Field first where a block may use it: giving a block Field adds a field (RO_0005_Q10)", () => {
+    const field = structure(FIELD_STRUCTURE, "Field", { builtin: true, offeredBy: ["s"] });
+    const blog = structure("blog", "Blog post", { description: "A post for the blog" });
+    expect(
+      suggestStructures({ structures: [blog, field], takeable: ["blog", FIELD_STRUCTURE], distance: new Map(), words: "Our blog post", taken: [] })[0],
+    ).toBe(FIELD_STRUCTURE);
   });
 });

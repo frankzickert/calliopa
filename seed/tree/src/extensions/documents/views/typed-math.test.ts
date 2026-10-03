@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BlockView, DocumentView } from "../server/assemble";
-import { activateBlock, documentsApi, mountEditor } from "./testing/editor-harness";
+import { activateBlock, documentsApi, mountEditor, type SentCommand } from "./testing/editor-harness";
+import { SAVE_PAUSE_MS } from "./block-editor";
 
 /**
  * Words pasted with `$…$` in them arrive as mathematics (`BO_0290_024`).
@@ -30,9 +31,20 @@ async function mount() {
     title: "Mathematics",
     blocks: [text("blk-a", "a", "Draft.")],
   };
-  vi.stubGlobal("fetch", documentsApi(document, []));
-  return mountEditor(document);
+  const sent: SentCommand[] = [];
+  vi.stubGlobal("fetch", documentsApi(document, sent));
+  return Object.assign(await mountEditor(document), { sent });
 }
+
+/** Waits out the paste's paused save, so the write lands while the test's
+ * `fetch` still answers it rather than after it is unstubbed. CA_0079_001 */
+const saved = async (view: Awaited<ReturnType<typeof mount>>) => {
+  for (let tick = 0; tick < 200 && !view.sent.some((entry) => entry.body["command"] === "revise"); tick++) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await view.settle(() => true);
+  }
+  await view.idle();
+};
 
 const paste = async (view: Awaited<ReturnType<typeof mount>>, words: string) => {
   await view.userEvent("[data-block-editor]", "paste", {
@@ -61,8 +73,8 @@ describe("pasting words that carry mathematics", () => {
     expect((editable.textContent ?? "").includes("$")).toBe(false);
     expect(editable.textContent ?? "").toContain("where ");
     expect(editable.textContent ?? "").toContain(" meet");
-    await view.idle();
-  });
+    await saved(view);
+  }, SAVE_PAUSE_MS + 20000);
 
   it("leaves a pasted sentence about money alone", async () => {
     const view = await mount();
@@ -71,6 +83,6 @@ describe("pasting words that carry mathematics", () => {
     const editable = view.root.querySelector("[data-block-editor]") as HTMLElement;
     expect(editable.querySelector("[data-math]") ?? null).toBeNull();
     expect(editable.textContent ?? "").toContain("$5 and $10");
-    await view.idle();
-  });
+    await saved(view);
+  }, SAVE_PAUSE_MS + 20000);
 });

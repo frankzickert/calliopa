@@ -2402,6 +2402,12 @@
   font-size: 0.8rem;
   color: var(--error);
 }
+/* Why nothing in the section changes, on a device (BO_0319_052). */
+.library-note {
+  margin: 0.25rem 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
 
 /* The Extensions section as a tree: an extension row with the control that
    starts a change beside it, its changes indented under it with the icon that
@@ -2876,6 +2882,26 @@
   white-space: nowrap;
 }
 
+/* What the run proposes outside this document, each name opening it.
+   DO_0034_007 */
+.run-chip__elsewhere {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-chip__elsewhere-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .run-chip__answers {
   flex: none;
   display: inline-flex;
@@ -2987,6 +3013,11 @@
 }
 
 .run-chips[data-run-chips-several] .run-chip[data-run-chip-ended]:not([data-run-chip-shown]) .run-chip__text {
+  display: none;
+}
+
+/* A minimized chip names nothing elsewhere either; its count stands. DO_0034_007 */
+.run-chips[data-run-chips-several] .run-chip[data-run-chip-ended]:not([data-run-chip-shown]) .run-chip__elsewhere {
   display: none;
 }
 

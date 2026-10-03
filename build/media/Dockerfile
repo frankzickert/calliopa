@@ -46,5 +46,5 @@ COPY entrypoint.sh /opt/calliopa/media/entrypoint.sh
 COPY adapters /opt/calliopa/media/adapters
 RUN chmod +x /opt/calliopa/media/entrypoint.sh
 
-EXPOSE 8095 8765
+EXPOSE 8095
 ENTRYPOINT ["/opt/calliopa/media/entrypoint.sh"]

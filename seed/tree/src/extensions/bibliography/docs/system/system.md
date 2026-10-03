@@ -300,9 +300,24 @@ identifier and route, and `doc-block-roles` and `profiles` become `structures` a
 
 ## A Structure Is A Document
 
-Under `structures`' `RO_0005` (2026-10-02): every structure becomes a document and *Source*'s id
-becomes `structure:source`
+Under `structures`' `RO_0005` (2026-10-02): every structure becomes a document and *Source* takes a
+fixed id `structures` names
 ([A Structure Is A Document](../../../structures/docs/system/system.md#a-structure-is-a-document)).
 
-- [ ] RO_0005_050 A source is related to *Source* by the id `structures` names (`server/works.ts`)
-      and read by it; its fields keep their keys; the suites green over the documents.
+- A source is related to *Source* by `SOURCE_STRUCTURE`, `structures`' name for its fixed id
+  (`server/works.ts`), and read by it (`RO_0005_050`, landed 2026-10-02); its fields keep their
+  keys, and a file value is told from a list reference by `isFile`.
+
+## A Run's Tools Read What The Run Proposed
+
+- Under `BO_0344` (`calliopa-bootstrap`'s `docs/changes/completed/BO_0344_FIX_extension-tools-read-the-runs-own-proposals.md`),
+  transferred 2026-10-03: this extension's tools read the works at the run's pin outside its group,
+  so a source the same run proposed is not found by its next call. The shell's read scope
+  (`ui.shell`'s *A Run's Callback Reads What The Run Proposed*, `BO_0344_004`) is the fix.
+* The tools read as the kernel's own tools do: at the run's pin with the run's own group laid over
+  truth. User decision, 2026-10-03.
+- The tools read in the shell's scope (`BO_0344_009`, landed 2026-10-03; `server/tools.ts`):
+  `propose_work` and `read_works` drop their `atDataRevision(call.run.pin, …)`, so a source the
+  run proposed is found by its next call and a second proposal of it is refused as a duplicate.
+  Proven in `tests/behavior/works.test.ts` under the kernel harness: a source proposed into a
+  run's group is read by the run and not outside it.

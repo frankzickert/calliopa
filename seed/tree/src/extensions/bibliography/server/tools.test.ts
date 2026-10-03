@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { recordOfInput, ToolRefusal } from "./tools";
 import { sourceStatements } from "./works";
+import { SOURCE_STRUCTURE } from "~/extensions/structures/lib/structures";
 
 /** What a run hands `propose_work`, and how the work is written (`BO_0291_021`). */
 describe("propose_work's record", () => {
@@ -39,7 +40,7 @@ describe("a source document's write (BO_0313_020)", () => {
     expect(statements.some((statement) => statement.includes("status"))).toBe(false);
     expect(statements[0]).toMatch(/^CREATE \(sd:document \{id: \$sd_id, title: \$sd_title, record: \$sd_record\}\)$/u);
     expect(parameters["sd_record"]).toBe("source");
-    expect(parameters["sf_role"]).toBe("builtin:source");
+    expect(parameters["sf_role"]).toBe(SOURCE_STRUCTURE);
     expect(parameters["sf_values"]).toEqual({ kind: "interview", authors: "Lee, Ana", issued: "2024-03", url: "https://example.org/i" });
     expect(parameters["sdref"]).toBe("node:d1");
     expect(statements).toContain("RELATE sdref -[sh:hasBlockRole]-> srref");

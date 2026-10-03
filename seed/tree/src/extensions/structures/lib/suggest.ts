@@ -1,4 +1,4 @@
-import type { StructureView } from "./structures";
+import { FIELD_STRUCTURE, type StructureView } from "./structures";
 
 /**
  * Which structures to suggest for a block (`calliopa-bootstrap`'s `BO_0318_Q3`,
@@ -18,6 +18,9 @@ import type { StructureView } from "./structures";
  */
 
 export const SUGGESTIONS = 3;
+
+/** What puts *Field* before every other suggestion where it may be used. */
+const FIELD_FIRST = 1_000;
 
 /** Where a structure offered from above comes from: how many steps up the
  * offering block stands, 0 for the nearest. */
@@ -79,7 +82,9 @@ export function suggestStructures(input: {
         : overlap(words, structure.name) * 6 +
           overlap(words, structure.description) * 2 +
           overlap(words, structure.fields.map((field) => field.name).join(" "));
-    const score = nearness + text;
+    // On a block of a structure's document, Field comes first: giving a
+    // block Field is how a field is added (RO_0005_Q10).
+    const score = nearness + text + (id === FIELD_STRUCTURE ? FIELD_FIRST : 0);
     if (score > 0) scored.push({ id, score, order });
   });
   return scored

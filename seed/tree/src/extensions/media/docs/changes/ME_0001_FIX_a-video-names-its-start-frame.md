@@ -1,6 +1,6 @@
 # A Video Names Its Start Frame
 
-Status: idea
+Status: rejected
 
 A video is made from the picture above its prompt block, attached to the job as its start frame
 under the alias `start` (`BO_0273_045`). Higgsfield's Seedance adapter checks, as the OpenRouter
@@ -16,6 +16,11 @@ nothing is spent. The pending block then stands as a placeholder that nothing wi
 * A video made from the picture above its block is accepted by the vendor: the request names its
   start frame. Requested by the user, 2026-10-02.
 
+Rejected on 2026-10-03 at the user's direction: `ME_0002` covers the case. A format declares the
+inputs a video takes, a video format with no *Input* keeps the picture above as its start frame,
+and the agent names every input in the words; `media.generate` refuses an unnamed one rather than
+adding the name itself.
+
 ## Proposed Shape
 
 - `media.generate`, for a video with a start frame, sends the prompt beginning with `@start` when
@@ -26,11 +31,6 @@ nothing is spent. The pending block then stands as a placeholder that nothing wi
 - The block's `source` keeps the words as the person wrote them.
 - A test in `server/tools.test.ts`: a video's request carries `@start` once, a prompt naming it
   already is sent as it is, and an image's prompt is untouched.
-
-## Functional Questions
-
-- [ ] ME_0001_Q1 Is the mention placed at the start of the prompt? Proposed: yes, as `@start ` before
-      the words; the alternative is a sentence after them (*… Start from @start.*).
 
 ## Boundaries
 

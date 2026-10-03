@@ -265,10 +265,28 @@ identifier and route, and `doc-block-roles` and `profiles` become `structures` a
 
 ## A Structure Is A Document
 
-Under `structures`' `RO_0005` (2026-10-02): every structure becomes a document and *Format*'s id
-becomes `structure:format`
+Under `structures`' `RO_0005` (2026-10-02): every structure becomes a document and *Format* takes a
+fixed id `structures` names
 ([A Structure Is A Document](../../../structures/docs/system/system.md#a-structure-is-a-document)).
 
-- [ ] RO_0005_070 A manuscript reads *Format* and a venue's and a paper's values by the id
-      `structures` names and by key as before (`server/structures-read.ts`); the suites green over the
-      documents.
+- A manuscript reads *Format* by `FORMAT_STRUCTURE` and a venue's and a paper's values by key as
+  before (`RO_0005_070`, landed 2026-10-02). The migration `formats` (`BO_0312`) makes *Paper* as
+  a node only where front matter from before `BO_0312` stands, which no fresh install holds and
+  every instance an update reaches moved on the release carrying it; the kernel runs it after
+  `structures-as-documents`, as every migration of an extension depending on `structures`. The
+  suite over CCGW runs `formats` and then the move, proving both.
+
+## A Run's Tools Read What The Run Proposed
+
+- Under `BO_0344` (`calliopa-bootstrap`'s `docs/changes/completed/BO_0344_FIX_extension-tools-read-the-runs-own-proposals.md`),
+  transferred 2026-10-03: the projection reads the run's document at the run's pin outside its
+  group, so a manuscript made after the run proposed into its document leaves those proposals out.
+  The shell's read scope (`ui.shell`'s *A Run's Callback Reads What The Run Proposed*,
+  `BO_0344_004`) is the fix.
+* The projection a run asks for reads as the kernel's own tools do: at the run's pin with the run's
+  own group laid over truth. User decision, 2026-10-03.
+- The projection reads in the shell's scope (`BO_0344_010`, landed 2026-10-03; `server/tools.ts`):
+  `projectForKernel` drops `pinned` and its own `dataRevision`; the revision it answers is the
+  document's as read, the run's pin. Proven in `tests/behavior/manuscripts.test.ts` under the
+  kernel harness: a block proposed in a run's group stands in the run's projection and not in one
+  outside the run.

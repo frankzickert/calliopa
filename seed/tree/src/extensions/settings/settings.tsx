@@ -16,6 +16,7 @@ import { ViewBridgeContext } from "~/components/shell/view-bridge";
 import { REGISTRY } from "~/registry.gen";
 import { candidates, fetchReleases, parseReleases } from "~/lib/releases";
 import type { UpdateView } from "~/server/kernel/update";
+import { LockSection } from "./lock-section";
 
 /**
  * The instance's settings, mounted like any other view. The tab is sectioned;
@@ -1397,6 +1398,9 @@ export const SettingsView = component$<ViewProps>(() => {
           </form>
         )}
       </section>
+
+      {/* The app lock, on a device alone. BO_0319_048 */}
+      <LockSection />
 
       {/* The sections active extensions contribute, below the tab's own:
           an extension's settings are its own, and leave with it when it is

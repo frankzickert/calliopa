@@ -73,32 +73,58 @@ async function refusalOf(response: Response, fallback: string): Promise<string> 
 /**
  * What a picture is, on its way to the generator: the bytes themselves, since
  * nothing in the service holds a graph credential and the adapters take a
- * file. `role: "start"` marks it the clip's first frame rather than material
- * the prompt may name. BO_0273_045
+ * file. `role` says what it is — `start` the clip's first frame rather than
+ * material the prompt may name, and each kind a format's *Input* declares
+ * (`ME_0002_012`); the service takes each under its adapter's flag
+ * (`calliopa-bootstrap`'s `BO_0346`). BO_0273_045
  */
 export interface ReferenceBytes {
   readonly alias: string;
-  readonly role: "start";
+  readonly role: "start" | "end" | "image" | "video" | "audio";
   readonly mediaType: string;
   /** Base64, which is how the service takes bytes over JSON. */
   readonly bytes: string;
 }
 
-/** Reads the picture's bytes for the generator, or null when they will not come. */
-export async function startFrame(
-  picture: { readonly objectId: string; readonly mediaType: string },
+/** Reads a made picture's or video's bytes for the generator under its
+ * alias and role, or null when they will not come. */
+export async function referenceBytes(
+  alias: string,
+  role: ReferenceBytes["role"],
+  made: { readonly objectId: string; readonly mediaType: string },
 ): Promise<ReferenceBytes | null> {
   try {
-    const bytes = await readBlob(`sha256:${picture.objectId}`);
-    return {
-      alias: "start",
-      role: "start",
-      mediaType: picture.mediaType,
-      bytes: Buffer.from(bytes).toString("base64"),
-    };
+    const bytes = await readBlob(`sha256:${made.objectId}`);
+    return { alias, role, mediaType: made.mediaType, bytes: Buffer.from(bytes).toString("base64") };
   } catch {
     return null;
   }
+}
+
+/** Reads the picture's bytes for the generator as the clip's start frame. */
+export const startFrame = (picture: { readonly objectId: string; readonly mediaType: string }): Promise<ReferenceBytes | null> =>
+  referenceBytes("start", "start", picture);
+
+/**
+ * A made picture or video a command points at, by its block — in the Send's
+ * document, or the one a reference names (`calliopa-bootstrap`'s
+ * `BO_0304_013`) — or null when there is no such block. A block not made
+ * yet has no bytes and answers its kind alone.
+ */
+export async function madeBlock(
+  documentId: string,
+  blockId: string,
+): Promise<{ readonly kind: string; readonly objectId?: string; readonly mediaType: string } | null> {
+  const read = await readDocument(documentId);
+  if (read.outcome !== "success") return null;
+  const block = read.result.blocks.find((candidate) => candidate.blockId === blockId);
+  if (block === undefined) return null;
+  return {
+    kind: block.kind,
+    ...(block.kind === "image" || block.kind === "video"
+      ? { ...(block.objectId === undefined ? {} : { objectId: block.objectId }), mediaType: block.mediaType ?? (block.kind === "image" ? "image/png" : "video/mp4") }
+      : { mediaType: "" }),
+  };
 }
 
 /**

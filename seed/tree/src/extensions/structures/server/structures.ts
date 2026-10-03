@@ -1,5 +1,6 @@
 
 import { port } from "~/server/port";
+import { orderBetween } from "~/lib/order";
 import { runsText, type Run } from "~/lib/runs";
 
 import { CONTAINS, type BlockView } from "~/extensions/documents/server/assemble";
@@ -7,6 +8,7 @@ import { readDocument } from "~/extensions/documents/server/documents";
 import { INSTRUCTION_RECORD } from "~/extensions/documents/lib/instruction";
 import {
   atDataRevision,
+  currentRun,
   outsideBranch,
   withBranch,
 } from "~/server/ccgw/branch-scope";
@@ -21,36 +23,34 @@ import { bareId, nodeRef, typeOf } from "~/server/ccgw/nodes";
 import { focusOf } from "~/server/focused-work";
 import { commit } from "~/server/ccgw/script";
 import type { GraphOutcome } from "~/server/outcome";
+import type { Fixed } from "~/extensions/documents/lib/fixed";
 
 import {
-  BLOCK_STRUCTURE_TYPE,
   BUILTIN_OFFERS,
   BUILTIN_STRUCTURES,
-  DEFAULT_SEND_WITH_PROMPT,
   FIELDS_FOR,
+  FIELD_STRUCTURE,
   KEYWORD_STRUCTURE,
   INSTRUCTION_STRUCTURE,
+  STRUCTURE_STRUCTURE,
   isBuiltinField,
-  isBuiltinOffer,
   mintFieldKey,
   FIELDS_OF,
   HAS_BLOCK_STRUCTURE,
-  OFFERS,
   STRUCTURE_FIELDS_TYPE,
-  UNNAMED_FIELD,
   UNNAMED_STRUCTURE,
-  cleanWords,
+  declaredFor,
   defaultsOf,
-  fieldOf,
+  fieldFromBlock,
   inOrder,
   isHeld,
   missingOf,
+  releaseFieldsOf,
   takeableFrom,
   blocksAllowed,
   valueFor,
   type DocumentStructuresView,
   type FieldDeclaration,
-  type FieldType,
   type FieldValue,
   type FileValue,
   type InheritedStructure,
@@ -61,19 +61,20 @@ import {
 
 /**
  * The structures as the graph holds them (`BO_0299`, made one structure type by
- * `BO_0309`): the catalogue — every structure with the structures it offers and its
- * fields — read as one list; a structure created, renamed, described, retired,
- * restored and given fields and offers, each one truth write as the
- * signed-in person; a structure taken and cleared on a block or a document, many
+ * `BO_0309`, documents by `RO_0005`): the catalogue — every structure's
+ * document read as the structure, with what it allows and its fields — read as
+ * one list; a structure created as a document using *Structure*, retired and
+ * restored, each one truth write as the signed-in person; a structure taken and cleared on a block or a document, many
  * per subject, written outside any branch because taking a structure is the
  * person's direct act, established at once (`BO_0308_Q4`); a field's value
  * written the same way; and `structuresOf`, the one read everything else answers
  * from — the route, the tool and a dependent extension alike.
  *
- * A structure is retired, never deleted (`BO_0299_Q4`). A structure taken while its
- * offering structure stood above stays when that structure goes, and says it is not
- * offered (`BO_0299_Q3`). A built-in is never renamed, retired or restored
- * (`BO_0308_Q5`).
+ * A structure is retired, never deleted (`BO_0299_Q4`): `documents` asks this
+ * extension's guard before a deletion (`guardOf`). A structure taken while its
+ * allowing structure stood above stays when that structure goes, and says it
+ * is not allowed (`BO_0299_Q3`). A built-in is never renamed, retired or
+ * restored (`BO_0308_Q5`).
  */
 
 export const refuse = <T>(rule: string, detail: string): GraphOutcome<T> => ({
@@ -83,7 +84,6 @@ export const refuse = <T>(rule: string, detail: string): GraphOutcome<T> => ({
 
 const text = (value: unknown): string =>
   typeof value === "string" ? value : "";
-const flag = (value: unknown): boolean => value === true;
 const number = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) ? value : 0;
 
@@ -94,85 +94,146 @@ const isType = (node: ReadNode, type: string): boolean =>
 const active = (relation: ReadRelation, type: string): boolean =>
   relation.type === type && relation.validity.status === "active";
 
-const fieldsFrom = (value: unknown): FieldDeclaration[] =>
-  Array.isArray(value)
-    ? value
-        .map(fieldOf)
-        .filter((field): field is FieldDeclaration => field !== null)
-    : [];
-
 /** The catalogue as one structure. */
 export interface Catalogue {
   readonly structures: readonly StructureView[];
   readonly byId: ReadonlyMap<string, StructureView>;
 }
 
+/** A block of a structure's document, in reading order. */
+interface StructureBlock {
+  readonly node: string;
+  readonly blockId: string;
+  readonly order: string;
+  readonly words: string;
+}
+
+/** Ids a value lists, a list reference's (`RO_0005_Q3`). */
+const idsOf = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((one): one is string => typeof one === "string" && one !== "") : [];
+
 /**
- * Every structure with its offers and fields. Two reads: the structures by type, then —
- * rooted at them — the `offers` hop, which is where a rooted read answers
- * relations.
+ * Every structure (`RO_0005`): the documents using *Structure*, each read as
+ * a structure — its title the name (a built-in's the release's), its blocks
+ * not using *Field* the description, its blocks using *Field* the fields in
+ * reading order, its *Structure* values whether blocks may use it, what it
+ * allows and what this extension keeps beside them. Four reads, rooted where
+ * a read answers relations: the documents using *Structure*, their blocks,
+ * the blocks using *Field*, and the values of both.
  */
 export async function readCatalogue(): Promise<GraphOutcome<Catalogue>> {
-  const found = await query({
-    statement: `MATCH (r:${BLOCK_STRUCTURE_TYPE}) RETURN GRAPH r`,
+  const using = await query({
+    statement: `MATCH (d)-[h:${HAS_BLOCK_STRUCTURE}]->(r) RETURN GRAPH d, h, r ROOT r`,
+    roots: [nodeRef(STRUCTURE_STRUCTURE)],
     unbounded: true,
     purpose: "structures",
   });
-  if (found.outcome !== "success" && found.outcome !== "noResult")
-    return found as GraphOutcome<never>;
-  const nodes =
-    found.outcome === "success"
-      ? found.result.nodes.filter((node) => isType(node, BLOCK_STRUCTURE_TYPE))
-      : [];
-  const offers = new Map<string, string[]>();
-  const offeredBy = new Map<string, string[]>();
-  if (nodes.length > 0) {
-    const hop = await query({
-      statement: `MATCH (r)-[o:${OFFERS}]->(b) RETURN GRAPH r, o, b ROOT r`,
-      roots: nodes.map((node) => node.id),
-      unbounded: true,
-      metadataOnly: true,
-      purpose: "what structures offer",
-    });
-    if (hop.outcome !== "success" && hop.outcome !== "noResult")
-      return hop as GraphOutcome<never>;
-    const known = new Set(nodes.map((node) => node.id));
-    for (const relation of hop.outcome === "success" ? hop.result.relations : []) {
-      if (!active(relation, OFFERS) || relation.to.nodeId === undefined) continue;
-      if (!known.has(relation.fromNodeId) || !known.has(relation.to.nodeId))
-        continue;
-      const from = bareId(relation.fromNodeId);
-      const to = bareId(relation.to.nodeId);
-      if (!(offers.get(from) ?? []).includes(to))
-        offers.set(from, [...(offers.get(from) ?? []), to]);
-      if (!(offeredBy.get(to) ?? []).includes(from))
-        offeredBy.set(to, [...(offeredBy.get(to) ?? []), from]);
+  if (using.outcome === "noResult") return { outcome: "success", result: { structures: [], byId: new Map() } };
+  if (using.outcome !== "success") return using as GraphOutcome<never>;
+  const documents = new Map<string, ReadNode>();
+  const byNode = new Map(using.result.nodes.map((node) => [node.id, node] as const));
+  for (const relation of using.result.relations) {
+    if (!active(relation, HAS_BLOCK_STRUCTURE) || relation.to.nodeId !== nodeRef(STRUCTURE_STRUCTURE)) continue;
+    const node = byNode.get(relation.fromNodeId);
+    if (node !== undefined && isType(node, "document")) documents.set(node.id, node);
+  }
+  if (documents.size === 0) return { outcome: "success", result: { structures: [], byId: new Map() } };
+
+  const contained = await query({
+    statement: `MATCH (d)-[c:${CONTAINS}]->(b) RETURN GRAPH d, c, b ROOT d`,
+    roots: [...documents.keys()],
+    unbounded: true,
+    purpose: "structures' blocks",
+  });
+  if (contained.outcome !== "success" && contained.outcome !== "noResult") return contained as GraphOutcome<never>;
+  const blocksOf = new Map<string, StructureBlock[]>();
+  if (contained.outcome === "success") {
+    const nodes = new Map(contained.result.nodes.map((node) => [node.id, node] as const));
+    for (const relation of contained.result.relations) {
+      if (!active(relation, CONTAINS) || relation.to.nodeId === undefined || !documents.has(relation.fromNodeId)) continue;
+      const block = nodes.get(relation.to.nodeId);
+      if (block === undefined || block.revision.status !== "established") continue;
+      const content = block.revision.content ?? {};
+      blocksOf.set(relation.fromNodeId, [
+        ...(blocksOf.get(relation.fromNodeId) ?? []),
+        {
+          node: block.id,
+          blockId: bareId(block.id),
+          order: text(content["order"]),
+          words: Array.isArray(content["runs"]) ? runsText(content["runs"] as readonly Run[]) : "",
+        },
+      ]);
     }
   }
-  const unordered: StructureView[] = nodes.map((node) => {
-    const content = node.revision.content ?? {};
+  for (const [document, blocks] of blocksOf)
+    blocksOf.set(document, [...blocks].sort((left, right) => (left.order < right.order ? -1 : left.order > right.order ? 1 : 0)));
+
+  const fielded = await query({
+    statement: `MATCH (b)-[h:${HAS_BLOCK_STRUCTURE}]->(r) RETURN GRAPH b, h, r ROOT r`,
+    roots: [nodeRef(FIELD_STRUCTURE)],
+    unbounded: true,
+    metadataOnly: true,
+    purpose: "the blocks that are fields",
+  });
+  if (fielded.outcome !== "success" && fielded.outcome !== "noResult") return fielded as GraphOutcome<never>;
+  const inDocuments = new Set([...blocksOf.values()].flatMap((blocks) => blocks.map((block) => block.node)));
+  const fieldBlocks = new Set(
+    (fielded.outcome === "success" ? fielded.result.relations : [])
+      .filter((relation) => active(relation, HAS_BLOCK_STRUCTURE) && inDocuments.has(relation.fromNodeId))
+      .map((relation) => relation.fromNodeId),
+  );
+
+  const standing = await readStanding([...[...documents.keys()].map(bareId), ...[...fieldBlocks].map(bareId)]);
+  if (standing.outcome !== "success") return standing as GraphOutcome<never>;
+  const valuesOf = (node: string, structure: string): Readonly<Record<string, FieldValue>> =>
+    standing.result.fields.get(node)?.get(structure)?.values ?? {};
+
+  const unordered: StructureView[] = [...documents.values()].map((node) => {
     const id = bareId(node.id);
-    const former = text(content["formerId"]);
-    const send = content["sendWithPrompt"];
+    const release = BUILTIN_STRUCTURES.find((candidate) => candidate.id === id);
+    const values = valuesOf(node.id, STRUCTURE_STRUCTURE);
+    const blocks = blocksOf.get(node.id) ?? [];
+    const words = blocks
+      .filter((block) => !fieldBlocks.has(block.node))
+      .map((block) => block.words.trim())
+      .filter((one) => one !== "");
+    const declared = blocks
+      .filter((block) => fieldBlocks.has(block.node))
+      .map((block) => fieldFromBlock(block.blockId, block.words, valuesOf(block.node, FIELD_STRUCTURE)));
+    const fields = release === undefined ? declared : withReleaseFields(id, declared);
+    const title = text((node.revision.content ?? {})["title"]).trim();
+    const send = values["sendWithPrompt"];
+    const formerIds = release !== undefined && "formerId" in release ? [release.formerId] : idsOf(values["formerIds"]);
     return {
       id,
-      name: text(content["name"]),
-      description: text(content["description"]),
-      retired: flag(content["retired"]),
-      builtin: flag(content["builtin"]),
-      order: number(content["order"]),
-      fields: fieldsFrom(content["fields"]),
-      offers: offers.get(id) ?? [],
-      offeredBy: offeredBy.get(id) ?? [],
-      blocks: blocksAllowed(id, content["blocks"]),
-      ...(former === "" ? {} : { formerId: former }),
+      name: release?.name ?? (title === "" ? UNNAMED_STRUCTURE : title),
+      description: words[0] ?? release?.description ?? "",
+      text: words.length > 0 ? words.join("\n\n") : (release?.description ?? ""),
+      retired: release === undefined && values["retired"] === true,
+      builtin: release !== undefined,
+      order: release === undefined ? number(values["order"]) : BUILTIN_STRUCTURES.indexOf(release),
+      fields,
+      offers: [...new Set([...BUILTIN_OFFERS.filter(([from]) => from === id).map(([, to]) => to), ...idsOf(values["allows"])])],
+      offeredBy: [],
+      blocks: release === undefined ? values["blocks"] !== false : blocksAllowed(id, undefined),
+      ...(formerIds.length === 0 ? {} : { formerIds }),
       // Read on Keyword alone: what it means is keywords' (BO_0310_031).
       ...(id === KEYWORD_STRUCTURE && Array.isArray(send)
         ? { sendWithPrompt: send.filter((entry): entry is string => typeof entry === "string") }
         : {}),
     };
   });
-  const structures = inOrder(unordered);
+  const byFormer = new Map<string, string>();
+  for (const structure of unordered) for (const former of structure.formerIds ?? []) byFormer.set(former, structure.id);
+  const known = new Set(unordered.map((structure) => structure.id));
+  const resolve = (id: string): string | undefined => (known.has(id) ? id : byFormer.get(id));
+  const offeredBy = new Map<string, string[]>();
+  const resolved = unordered.map((structure) => {
+    const offers = [...new Set(structure.offers.map(resolve).filter((to): to is string => to !== undefined && to !== structure.id))];
+    for (const to of offers) offeredBy.set(to, [...(offeredBy.get(to) ?? []), structure.id]);
+    return { ...structure, offers };
+  });
+  const structures = inOrder(resolved.map((structure) => ({ ...structure, offeredBy: offeredBy.get(structure.id) ?? [] })));
   const rank = new Map(structures.map((structure, index) => [structure.id, index] as const));
   const ranked = (ids: readonly string[]): string[] =>
     [...ids].sort((left, right) => (rank.get(left) ?? 0) - (rank.get(right) ?? 0));
@@ -183,11 +244,34 @@ export async function readCatalogue(): Promise<GraphOutcome<Catalogue>> {
   }));
   const byId = new Map<string, StructureView>();
   for (const structure of listed) byId.set(structure.id, structure);
-  // A reader still holding the id a structure had as a document structure finds it.
+  // A reader still holding an id a structure had before it was a document
+  // finds it by that id.
   for (const structure of listed)
-    if (structure.formerId !== undefined && !byId.has(structure.formerId))
-      byId.set(structure.formerId, structure);
+    for (const former of structure.formerIds ?? []) if (!byId.has(former)) byId.set(former, structure);
   return { outcome: "success", result: { structures: listed, byId } };
+}
+
+/**
+ * A built-in's fields: its release fields as the release declares them —
+ * type, options, suggestions and limit — each under the name and the
+ * *Required* its block gives it, in its block's place, a release field no
+ * block declares after them; then the fields a person added (`RO_0005`).
+ */
+function withReleaseFields(structureId: string, declared: readonly FieldDeclaration[]): FieldDeclaration[] {
+  const release = releaseFieldsOf(structureId);
+  const placed = declared.map((field) => {
+    const own = release.find((candidate) => candidate.key === field.key);
+    if (own === undefined) return field;
+    return {
+      ...own,
+      name: field.name,
+      required: own.required || field.required,
+      ...(field.blockId === undefined ? {} : { blockId: field.blockId }),
+      ...(field.default === undefined ? {} : { default: field.default }),
+    };
+  });
+  const missing = release.filter((field) => !declared.some((one) => one.key === field.key));
+  return [...placed, ...missing];
 }
 
 /** Every structure, retired ones included and marked, the built-ins first. */
@@ -213,7 +297,13 @@ export async function readStructure(
 const named = (name: string, fallback = UNNAMED_STRUCTURE): string =>
   name.trim() === "" ? fallback : name.trim();
 
-/** A new structure, offering nothing and carrying no fields yet, placed last. */
+/**
+ * A new structure (`RO_0005_003`): a document using *Structure*, titled as
+ * named, its first block the description when one is given and empty
+ * otherwise, blocks allowed to use it, allowing nothing and carrying no
+ * field yet, placed last. One truth write, so a structure never stands
+ * without being one.
+ */
 export async function createStructure(input: {
   readonly name: string;
   readonly description?: string;
@@ -221,23 +311,36 @@ export async function createStructure(input: {
   const catalogue = await readCatalogue();
   if (catalogue.outcome !== "success") return catalogue as GraphOutcome<never>;
   const id = port.uuid();
+  const blockId = port.uuid();
+  const fieldsId = port.uuid();
   const description = (input.description ?? "").trim();
   const order =
     catalogue.result.structures.reduce((highest, structure) => Math.max(highest, structure.order), 0) + 1;
-  const parameters: Record<string, unknown> = {
-    r_id: id,
-    r_name: named(input.name),
-    r_order: order,
-  };
-  const fields = ["id: $r_id", "name: $r_name", "order: $r_order"];
-  if (description !== "") {
-    fields.push("description: $r_description");
-    parameters["r_description"] = description;
-  }
   const written = await outsideBranch(() =>
     commit(
-      `CREATE (r:${BLOCK_STRUCTURE_TYPE} {${fields.join(", ")}, status: "established"})`,
-      parameters,
+      [
+        `CREATE (d:document {id: $d_id, title: $d_title, status: "established"})`,
+        `CREATE (b:text {id: $b_id, order: $b_order, runs: $b_runs, status: "established"})`,
+        `RELATE dref -[c:${CONTAINS}]-> bref`,
+        `RELATE dref -[h:${HAS_BLOCK_STRUCTURE}]-> sref`,
+        `CREATE (f:${STRUCTURE_FIELDS_TYPE} {id: $f_id, role: $f_structure, values: $f_values, status: "established"})`,
+        `RELATE fref -[fo:${FIELDS_OF}]-> dref`,
+        `RELATE fref -[ff:${FIELDS_FOR}]-> sref`,
+      ].join("; "),
+      {
+        d_id: id,
+        d_title: named(input.name),
+        b_id: blockId,
+        b_order: orderBetween("", ""),
+        b_runs: description === "" ? [] : [{ text: description }],
+        f_id: fieldsId,
+        f_structure: STRUCTURE_STRUCTURE,
+        f_values: { blocks: true, order },
+        dref: nodeRef(id),
+        bref: nodeRef(blockId),
+        sref: nodeRef(STRUCTURE_STRUCTURE),
+        fref: nodeRef(fieldsId),
+      },
       `create structure ${named(input.name)}`,
       async () => undefined,
     ),
@@ -246,113 +349,60 @@ export async function createStructure(input: {
   return readStructure(id);
 }
 
+/**
+ * The acts on a structure that are not its document's (`RO_0005_003`): its
+ * name, description, fields and what it allows are written in its document
+ * like any document's; what stays an act is retiring and restoring it
+ * (`RO_0005_Q7`), and *Keyword*'s *Send with prompt*.
+ */
 export type StructureCommand =
-  | { readonly command: "rename"; readonly name: string }
-  | { readonly command: "describe"; readonly description: string }
   | { readonly command: "retire" }
   | { readonly command: "restore" }
-  | { readonly command: "offer"; readonly structure: string }
-  | { readonly command: "unoffer"; readonly structure: string }
-  | {
-      readonly command: "addField";
-      readonly name: string;
-      readonly type: FieldType;
-      readonly required?: boolean;
-      readonly options?: readonly string[];
-    }
-  | {
-      readonly command: "reviseField";
-      readonly key: string;
-      readonly name?: string;
-      readonly type?: FieldType;
-      readonly required?: boolean;
-      readonly options?: readonly string[];
-      /** `null` clears the default. */
-      readonly default?: unknown;
-      /** A text field's source, `null` clearing it (`BO_0336_012`). */
-      readonly suggest?: string | null;
-      /** A text field's own words to suggest. */
-      readonly suggestions?: readonly string[];
-      /** A reference field's structure, `null` clearing it. */
-      readonly carrying?: string | null;
-    }
-  | { readonly command: "removeField"; readonly key: string }
-  | { readonly command: "moveField"; readonly key: string; readonly by: -1 | 1 }
-  /** One *Send with prompt* switch on *Keyword*: a field's key or an offered
+  /** One *Send with prompt* switch on *Keyword*: a field's key or an allowed
    * structure's id, on or off (`BO_0310_031`). */
-  | { readonly command: "sendWithPrompt"; readonly entry: string; readonly on: boolean }
-  /** Whether blocks may take the structure; the document always may (`BO_0332`). */
-  | { readonly command: "blocks"; readonly allowed: boolean };
+  | { readonly command: "sendWithPrompt"; readonly entry: string; readonly on: boolean };
 
-const writeStructureProperty = (
+/**
+ * Values this extension keeps on a structure's *Structure* values beside the
+ * ones a person sets — `retired`, `sendWithPrompt` — written as one truth
+ * write, merged over what is stored.
+ */
+async function keepStructureValues(
   structureId: string,
-  property: string,
-  value: unknown,
+  patch: Readonly<Record<string, unknown>>,
   rationale: string,
-): Promise<GraphOutcome<void>> =>
-  outsideBranch(() =>
-    commit(
-      `SET r.${property} = $value`,
-      { rNodeId: nodeRef(structureId), value },
+): Promise<GraphOutcome<void>> {
+  const standing = await readStanding([structureId]);
+  if (standing.outcome !== "success") return standing as GraphOutcome<never>;
+  const stored = standing.result.fields.get(nodeRef(structureId))?.get(STRUCTURE_STRUCTURE);
+  if (stored !== undefined)
+    return writeTruth({
+      statement: "SET f.values = $f_values",
+      parameters: { fNodeId: stored.nodeId, f_values: { ...stored.values, ...patch } },
       rationale,
-      async () => undefined,
-    ),
-  );
-
-/** A field as stored: `default` only when there is one. */
-const stored = (field: FieldDeclaration): Record<string, unknown> => ({
-  key: field.key,
-  name: field.name,
-  type: field.type,
-  required: field.required,
-  ...(field.options === undefined ? {} : { options: [...field.options] }),
-  ...(field.default === undefined ? {} : { default: field.default }),
-  ...(field.suggest === undefined ? {} : { suggest: field.suggest }),
-  ...(field.suggestions === undefined ? {} : { suggestions: [...field.suggestions] }),
-  ...(field.carrying === undefined ? {} : { carrying: field.carrying }),
-});
-
-/** A field revised: a changed type drops a default that no longer fits it. */
-function revisedField(
-  field: FieldDeclaration,
-  command: Extract<StructureCommand, { command: "reviseField" }>,
-): FieldDeclaration | { failure: string } {
-  const type = command.type ?? field.type;
-  const options =
-    command.options !== undefined
-      ? [...new Set(command.options.map((option) => option.trim()).filter((option) => option !== ""))]
-      : field.options;
-  // What a text field suggests and the structure a reference carries stay with a
-  // field of that type, and go when its type does (`BO_0336_012`).
-  const suggest = command.suggest === undefined ? field.suggest : (command.suggest ?? undefined);
-  const suggestions = command.suggestions === undefined ? field.suggestions : cleanWords(command.suggestions);
-  const carrying = command.carrying === undefined ? field.carrying : (command.carrying ?? undefined);
-  const base: FieldDeclaration = {
-    key: field.key,
-    name: command.name === undefined ? field.name : named(command.name, UNNAMED_FIELD),
-    type,
-    required: command.required ?? field.required,
-    ...(type === "choice" ? { options: options ?? [] } : {}),
-    ...(type === "text" && suggest !== undefined ? { suggest } : {}),
-    ...(type === "text" && suggestions !== undefined && suggestions.length > 0 ? { suggestions } : {}),
-    ...(type === "reference" && carrying !== undefined ? { carrying } : {}),
-  };
-  const fallback = command.default === undefined ? field.default : command.default;
-  if (fallback === undefined || fallback === null) return base;
-  if (type === "file" || type === "reference")
-    return command.default === undefined
-      ? base
-      : { failure: `A ${type} field has no default.` };
-  const read = valueFor(base, fallback);
-  if ("failure" in read)
-    return command.default === undefined ? base : { failure: read.failure };
-  return read.value === null || !isHeld(read.value) ? base : { ...base, default: read.value };
+    });
+  const id = port.uuid();
+  return writeTruth({
+    statement: [
+      `CREATE (f:${STRUCTURE_FIELDS_TYPE} {id: $f_id, role: $f_structure, values: $f_values, status: "established"})`,
+      `RELATE fref -[fo:${FIELDS_OF}]-> sref`,
+      `RELATE fref -[ff:${FIELDS_FOR}]-> rref`,
+    ].join("; "),
+    parameters: {
+      f_id: id,
+      f_structure: STRUCTURE_STRUCTURE,
+      f_values: patch,
+      fref: nodeRef(id),
+      sref: nodeRef(structureId),
+      rref: nodeRef(STRUCTURE_STRUCTURE),
+    },
+    rationale,
+  });
 }
 
 /**
- * One act on a structure, each one truth write, answering the structure as it stands
- * afterwards. A built-in refuses rename, retire and restore in words; adding
- * fields and offered structures is open to it like any structure (`BO_0309_014`).
+ * One act on a structure, one truth write, answering the structure as it
+ * stands afterwards. A built-in refuses retire and restore in words.
  */
 export async function reviseStructure(
   structureId: string,
@@ -363,133 +413,15 @@ export async function reviseStructure(
   const structure = catalogue.result.byId.get(structureId);
   if (structure === undefined)
     return refuse("unknownStructure", `Structure ${structureId} is not here.`);
-  if (
-    structure.builtin &&
-    (command.command === "rename" ||
-      command.command === "retire" ||
-      command.command === "restore")
-  )
-    return refuse(
-      "builtinStructure",
-      `${structure.name} is built in: it is never renamed, retired or restored.`,
-    );
-  const writeFields = (fields: readonly FieldDeclaration[], verb: string) =>
-    writeStructureProperty(structure.id, "fields", fields.map(stored), `${verb} of structure ${structure.name}`);
   let written: GraphOutcome<unknown>;
   switch (command.command) {
-    case "rename":
-      written = await writeStructureProperty(structure.id, "name", named(command.name), `rename structure ${structure.name} to ${named(command.name)}`);
-      break;
-    case "describe":
-      written = await writeStructureProperty(structure.id, "description", command.description.trim(), `describe structure ${structure.name}`);
-      break;
     case "retire":
     case "restore":
-      written = await writeStructureProperty(structure.id, "retired", command.command === "retire", `${command.command} structure ${structure.name}`);
+      if (structure.builtin)
+        return refuse("builtinStructure", `${structure.name} is built in: it is never retired or restored.`);
+      if (structure.retired === (command.command === "retire")) return { outcome: "success", result: structure };
+      written = await keepStructureValues(structure.id, { retired: command.command === "retire" }, `${command.command} structure ${structure.name}`);
       break;
-    case "offer":
-    case "unoffer": {
-      const other = catalogue.result.byId.get(command.structure);
-      if (other === undefined)
-        return refuse("unknownStructure", `Structure ${command.structure} is not here.`);
-      if (other.id === structure.id)
-        return refuse("offersItself", `${structure.name} cannot allow itself.`);
-      const offered = structure.offers.includes(other.id);
-      if (command.command === "offer") {
-        if (offered) return { outcome: "success", result: structure };
-        written = await outsideBranch(() =>
-          commit(
-            `RELATE rref -[o:${OFFERS}]-> bref`,
-            { rref: nodeRef(structure.id), bref: nodeRef(other.id) },
-            `${structure.name} allows ${other.name}`,
-            async () => undefined,
-          ),
-        );
-        break;
-      }
-      if (!offered) return { outcome: "success", result: structure };
-      if (isBuiltinOffer(structure.id, other.id))
-        return refuse(
-          "builtinOffer",
-          `${structure.name} allows ${other.name} on every instance: that is built in and stays.`,
-        );
-      const hop = await query({
-        statement: `MATCH (r)-[o:${OFFERS}]->(b) RETURN GRAPH r, o, b ROOT r`,
-        roots: [nodeRef(structure.id)],
-        metadataOnly: true,
-        purpose: "the offer to close",
-      });
-      if (hop.outcome !== "success") return hop as GraphOutcome<never>;
-      const relation = hop.result.relations.find(
-        (candidate) =>
-          active(candidate, OFFERS) &&
-          candidate.to.nodeId === nodeRef(other.id),
-      );
-      if (relation === undefined) return { outcome: "success", result: structure };
-      written = await outsideBranch(() =>
-        commit(
-          "CLOSE o",
-          { oRelationId: relation.id, oFrom: nodeRef(structure.id) },
-          `${structure.name} no longer allows ${other.name}`,
-          async () => undefined,
-        ),
-      );
-      break;
-    }
-    case "addField": {
-      const name = named(command.name, UNNAMED_FIELD);
-      const field: FieldDeclaration = {
-        key: mintFieldKey(name, structure.fields.map((candidate) => candidate.key)),
-        name,
-        type: command.type,
-        required: command.required === true,
-        ...(command.type === "choice"
-          ? { options: [...new Set((command.options ?? []).map((option) => option.trim()).filter((option) => option !== ""))] }
-          : {}),
-      };
-      written = await writeFields([...structure.fields, field], `add field ${field.name}`);
-      break;
-    }
-    case "reviseField": {
-      const field = structure.fields.find((candidate) => candidate.key === command.key);
-      if (field === undefined)
-        return refuse("unknownField", `${structure.name} has no field ${command.key}.`);
-      if (
-        isBuiltinField(structure.id, field.key) &&
-        ((command.type !== undefined && command.type !== field.type) ||
-          command.options !== undefined ||
-          command.suggest !== undefined ||
-          command.suggestions !== undefined ||
-          command.carrying !== undefined)
-      )
-        return refuse(
-          "builtinField",
-          `${structure.name}'s ${field.name} is built in: its type, its options and what it suggests are the release's. Add a field beside it.`,
-        );
-      if (command.carrying !== undefined && command.carrying !== null && !catalogue.result.byId.has(command.carrying))
-        return refuse("unknownStructure", `Structure ${command.carrying} is not here.`);
-      const revised = revisedField(field, command);
-      if ("failure" in revised) return refuse("fieldShape", revised.failure);
-      written = await writeFields(
-        structure.fields.map((candidate) => (candidate.key === field.key ? revised : candidate)),
-        `revise field ${field.name}`,
-      );
-      break;
-    }
-    case "removeField": {
-      // The values stored under the key stay, unread: a field put back under
-      // the same key would find them, and nothing is lost by a slip.
-      const field = structure.fields.find((candidate) => candidate.key === command.key);
-      if (field === undefined)
-        return refuse("unknownField", `${structure.name} has no field ${command.key}.`);
-      if (isBuiltinField(structure.id, field.key))
-        return refuse("builtinField", `${structure.name}'s ${field.name} is built in and stays. Add a field beside it.`);
-      written = await writeFields(
-        structure.fields.filter((candidate) => candidate.key !== field.key),
-        `remove field ${field.name}`,
-      );
-      break;
-    }
     case "sendWithPrompt": {
       if (structure.id !== KEYWORD_STRUCTURE)
         return refuse("sendWithPrompt", `Only Keyword sends its words with a prompt; ${structure.name} does not.`);
@@ -500,35 +432,7 @@ export async function reviseStructure(
       const next = command.on
         ? current.includes(command.entry) ? current : [...current, command.entry]
         : current.filter((entry) => entry !== command.entry);
-      written = await writeStructureProperty(structure.id, "sendWithPrompt", next, `${command.on ? "send" : "stop sending"} ${command.entry} with a prompt`);
-      break;
-    }
-    case "blocks": {
-      // A built-in's is the release's, as its name is (BO_0332).
-      if (structure.builtin)
-        return refuse(
-          "builtinBlocks",
-          `${structure.name} is built in: ${structure.blocks ? "blocks may use it" : "it is used by documents alone"}, as the release says.`,
-        );
-      if (structure.blocks === command.allowed) return { outcome: "success", result: structure };
-      written = await writeStructureProperty(
-        structure.id,
-        "blocks",
-        command.allowed,
-        command.allowed ? `blocks may use structure ${structure.name}` : `structure ${structure.name} is used by documents alone`,
-      );
-      break;
-    }
-    case "moveField": {
-      const at = structure.fields.findIndex((candidate) => candidate.key === command.key);
-      if (at < 0)
-        return refuse("unknownField", `${structure.name} has no field ${command.key}.`);
-      const to = at + command.by;
-      if (to < 0 || to >= structure.fields.length) return { outcome: "success", result: structure };
-      const fields = [...structure.fields];
-      const [moved] = fields.splice(at, 1);
-      fields.splice(to, 0, moved as FieldDeclaration);
-      written = await writeFields(fields, `move field ${command.key}`);
+      written = await keepStructureValues(structure.id, { sendWithPrompt: next }, `${command.on ? "send" : "stop sending"} ${command.entry} with a prompt`);
       break;
     }
   }
@@ -602,6 +506,10 @@ const valuesFrom = (value: unknown): Record<string, FieldValue> => {
       held === null
     )
       values[key] = held;
+    else if (Array.isArray(held))
+      // A reference holding several, and the lists this extension keeps
+      // beside the values (RO_0005).
+      values[key] = held.filter((one): one is string => typeof one === "string");
     else if (typeof held === "object" && !Array.isArray(held)) {
       const file = held as Record<string, unknown>;
       if (typeof file["hash"] === "string" && typeof file["filename"] === "string")
@@ -721,16 +629,18 @@ const takenView = (
   onBlock: boolean,
 ): TakenStructure => {
   const values = stored?.values ?? {};
+  const fields = declaredFor(structure.id, structure.fields, values);
   return {
     id: structure.id,
     name: structure.name,
     description: structure.description,
+    ...(structure.text === structure.description ? {} : { text: structure.text }),
     retired: structure.retired,
     builtin: structure.builtin,
     offered,
-    fields: structure.fields,
+    fields,
     values,
-    missing: missingOf(structure.fields, values),
+    missing: missingOf(fields, values),
     blocks: structure.blocks,
     ...(proposed === undefined ? {} : { proposed }),
     ...(structure.sendWithPrompt === undefined ? {} : { sendWithPrompt: structure.sendWithPrompt }),
@@ -749,9 +659,11 @@ export async function structuresOf(
   documentId: string,
   scope: { readonly branch?: string; readonly dataRevision?: number } = {},
 ): Promise<GraphOutcome<DocumentStructuresView>> {
+  // Other groups' proposals are marked for a person; a run reads its own
+  // through its group and marks none. BO_0344_005
   const read = () =>
     withBranch(scope.branch, () =>
-      readStructures(documentId, scope.dataRevision === undefined),
+      readStructures(documentId, scope.dataRevision === undefined && currentRun() === undefined),
     );
   return scope.dataRevision === undefined
     ? read()
@@ -844,7 +756,8 @@ async function readStructures(
       takeable: documentView.takeable,
       blocks: structuredBlocks,
       inherited,
-      referenceTitles: await referenceTitles(documentView.structures),
+      // A block's references too: a field's Limited to names a structure (RO_0005).
+      referenceTitles: await referenceTitles([...documentView.structures, ...structuredBlocks.flatMap((block) => block.structures)]),
     },
   };
 }
@@ -872,7 +785,9 @@ async function referenceTitles(structures: readonly TakenStructure[]): Promise<R
   for (const structure of structures)
     for (const field of structure.fields) {
       const value = structure.values[field.key];
-      if (field.type === "reference" && typeof value === "string" && value !== "") ids.add(value);
+      if (field.type !== "reference") continue;
+      if (typeof value === "string" && value !== "") ids.add(value);
+      if (Array.isArray(value)) for (const one of value) ids.add(one);
     }
   const titles: Record<string, string> = {};
   await Promise.all(
@@ -977,6 +892,11 @@ interface Situation {
   readonly node: string;
   readonly takeable: readonly string[];
   readonly taken: readonly string[];
+  /** The subject block's words and the keys its document's fields hold, a
+   * field's key being minted from them as the block takes *Field*
+   * (`RO_0005`); empty for the document. */
+  readonly words: string;
+  readonly fieldKeys: readonly string[];
 }
 
 async function situationOf(subject: Subject): Promise<GraphOutcome<Situation>> {
@@ -999,9 +919,22 @@ async function situationOf(subject: Subject): Promise<GraphOutcome<Situation>> {
   const node = subjectNode(subject);
   const standing = await readStanding([node]);
   if (standing.outcome !== "success") return standing as GraphOutcome<never>;
+  let words = "";
+  if (subject.blockId !== undefined) {
+    const document = await documentOf(subject.documentId);
+    if (document.outcome !== "success") return document as GraphOutcome<never>;
+    const block = document.result.blocks.find((candidate) => candidate.blockId === subject.blockId);
+    words = block !== undefined && block.kind === "text" ? runsText(block.runs) : "";
+  }
+  const fieldKeys = view.result.blocks.flatMap((block) =>
+    block.structures
+      .filter((structure) => structure.id === FIELD_STRUCTURE)
+      .map((structure) => structure.values["key"])
+      .filter((key): key is string => typeof key === "string"),
+  );
   return {
     outcome: "success",
-    result: { catalogue: catalogue.result, view: view.result, standing: standing.result, node, takeable, taken },
+    result: { catalogue: catalogue.result, view: view.result, standing: standing.result, node, takeable, taken, words, fieldKeys },
   };
 }
 
@@ -1014,15 +947,33 @@ const subjectName = (subject: Subject): string =>
  * (`BO_0318_Q8`). Refused in words for a structure that is not here, is retired,
  * or cannot be taken where the subject stands. Null when it is taken already.
  */
+/**
+ * The status a created node carries: a person's write is truth at once; a
+ * run's is staged into its group, where the core refuses an explicit status
+ * and makes the node a candidate (`calliopa-bootstrap`'s `BO_0344`).
+ */
+const establishedUnless = (byRun: boolean): string => (byRun ? "" : ', status: "established"');
+
 function takeStatement(
   situation: Situation,
   subject: Subject,
   structureId: string,
   withDefaults = true,
+  /** A run proposing a structure gives its document *Structure*, the one
+   * place it is taken outside Structures' `+` (`RO_0005_005`). */
+  structureByRun = false,
 ): GraphOutcome<Staged | null> {
   const structure = situation.catalogue.byId.get(structureId);
   if (structure === undefined) return refuse("unknownStructure", `Structure ${structureId} is not here.`);
   if (situation.taken.includes(structure.id)) return { outcome: "success", result: null };
+  // A structure is made from Structures' `+`, never by giving a document
+  // Structure (RO_0005_Q9).
+  if (structure.id === STRUCTURE_STRUCTURE && !(structureByRun && subject.blockId === undefined))
+    return refuse("structureFromStructures", "A structure is made with the + of Structures; Structure is never given to a document by hand.");
+  // Structure and Field define structures, and take no field a person adds
+  // (RO_0005_Q6).
+  if (structure.id === FIELD_STRUCTURE && (subject.documentId === STRUCTURE_STRUCTURE || subject.documentId === FIELD_STRUCTURE))
+    return refuse("builtinField", "Structure and Field define structures themselves: they take no field of a person's.");
   if (structure.retired)
     return refuse("retiredStructure", `${structure.name} is retired and is not allowed any more.`);
   // Before the offer: an offer never lets a block take a structure blocks may not
@@ -1032,7 +983,9 @@ function takeStatement(
       "blockNotAllowed",
       `${structure.name} is used by documents alone: use it on the document${structure.offeredBy.length > 0 ? ", or on the focused work of the block that allows it" : ""}.`,
     );
-  if (!situation.takeable.includes(structure.id)) {
+  // Structure is in no typeahead, so a run's proposal of it is not asked
+  // what the document may use (RO_0005_005).
+  if (structure.id !== STRUCTURE_STRUCTURE && !situation.takeable.includes(structure.id)) {
     const offering = structure.offeredBy
       .map((id) => situation.catalogue.byId.get(id)?.name ?? "")
       .filter((name) => name !== "");
@@ -1053,7 +1006,10 @@ function takeStatement(
     parameters["sp_record"] = INSTRUCTION_RECORD;
     statements.push("SET sp.record = $sp_record");
   }
-  const defaults = withDefaults ? defaultsOf(structure.fields) : {};
+  const defaults: Record<string, FieldValue> = withDefaults ? defaultsOf(structure.fields) : {};
+  // A field's key, minted once from the block's words and never changed, so
+  // a rename keeps every value (RO_0005).
+  if (structure.id === FIELD_STRUCTURE) defaults["key"] = mintFieldKey(situation.words, situation.fieldKeys);
   const stored = situation.standing.fields.get(nodeRef(situation.node))?.get(structure.id);
   const missing = Object.fromEntries(
     Object.entries(defaults).filter(([key]) => !isHeld(stored?.values[key])),
@@ -1066,7 +1022,7 @@ function takeStatement(
       parameters["f_values"] = missing;
       parameters["fref"] = nodeRef(id);
       statements.push(
-        `CREATE (f:${STRUCTURE_FIELDS_TYPE} {id: $f_id, role: $f_structure, values: $f_values, status: "established"})`,
+        `CREATE (f:${STRUCTURE_FIELDS_TYPE} {id: $f_id, role: $f_structure, values: $f_values${establishedUnless(structureByRun)}})`,
         `RELATE fref -[fo:${FIELDS_OF}]-> sref`,
         `RELATE fref -[ff:${FIELDS_FOR}]-> rref`,
       );
@@ -1098,6 +1054,13 @@ function clearStatement(
     .get(nodeRef(situation.node))
     ?.get(structure?.id ?? structureId);
   if (relation === undefined) return { outcome: "success", result: null };
+  // A structure stops being one by being retired, never by clearing
+  // Structure (RO_0005_Q9).
+  if (structure?.id === STRUCTURE_STRUCTURE)
+    return refuse("structureFromStructures", "A structure stays one: retire it rather than clearing Structure.");
+  const release = structure?.id === FIELD_STRUCTURE ? releaseFieldAt(situation, subject) : null;
+  if (release !== null)
+    return refuse("builtinField", `${release.owner.name}'s ${release.field.name} is built in and stays a field. Add a field beside it.`);
   // A document clearing *Profile* is no profile any more. BO_0311_015
   const unprofiled = structure?.id === INSTRUCTION_STRUCTURE && subject.blockId === undefined;
   return {
@@ -1109,6 +1072,110 @@ function clearStatement(
       statement: unprofiled ? "CLOSE h; SET sp.record = null" : "CLOSE h",
       parameters: { hRelationId: relation.id, hFrom: nodeRef(situation.node), ...(unprofiled ? { spNodeId: nodeRef(situation.node) } : {}) },
       rationale: `${subjectName(subject)} no longer uses the structure ${structure?.name ?? structureId}`,
+    },
+  };
+}
+
+/** A held file, as against a list of ids. */
+const isFileValue = (value: FieldValue): value is FileValue =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** The entries of these keys alone. */
+const pick = (entries: Readonly<Record<string, unknown>>, keys: readonly string[]): Record<string, FieldValue> =>
+  Object.fromEntries(Object.entries(entries).filter(([key]) => keys.includes(key))) as Record<string, FieldValue>;
+
+/** The release field a block of a built-in's document declares, if it
+ * declares one (`RO_0005`). */
+function releaseFieldAt(situation: Situation, subject: Subject): { readonly owner: StructureView; readonly field: FieldDeclaration } | null {
+  const owner = situation.catalogue.byId.get(subject.documentId);
+  if (owner === undefined || !owner.builtin || subject.blockId === undefined) return null;
+  const field = owner.fields.find((candidate) => candidate.blockId === subject.blockId);
+  return field !== undefined && isBuiltinField(owner.id, field.key) ? { owner, field } : null;
+}
+
+/**
+ * What only the release sets (`RO_0005`): on a built-in's document, whether
+ * blocks may use it and the structures it allows by release; on a release
+ * field's block, what the field holds — a person renames it, marks it
+ * required and gives it a default, as before.
+ */
+function releaseRefusal(
+  situation: Situation,
+  subject: Subject,
+  structureId: string,
+  entries: Readonly<Record<string, unknown>>,
+): GraphOutcome<never> | null {
+  const owner = situation.catalogue.byId.get(subject.documentId);
+  if (owner === undefined || !owner.builtin) return null;
+  if (structureId === STRUCTURE_STRUCTURE && subject.blockId === undefined) {
+    if ("blocks" in entries)
+      return refuse(
+        "builtinBlocks",
+        `${owner.name} is built in: ${owner.blocks ? "blocks may use it" : "it is used by documents alone"}, as the release says.`,
+      );
+    if ("allows" in entries) {
+      const next = Array.isArray(entries["allows"]) ? (entries["allows"] as readonly unknown[]) : [];
+      const dropped = BUILTIN_OFFERS.filter(([from, to]) => from === owner.id && !next.includes(to)).map(
+        ([, to]) => situation.catalogue.byId.get(to)?.name ?? to,
+      );
+      if (dropped.length > 0)
+        return refuse("builtinOffer", `${owner.name} allows ${dropped.join(" and ")} on every instance: that is built in and stays.`);
+    }
+  }
+  const release = structureId === FIELD_STRUCTURE ? releaseFieldAt(situation, subject) : null;
+  if (release !== null && Object.keys(entries).some((key) => key !== "required" && key !== "default"))
+    return refuse(
+      "builtinField",
+      `${release.owner.name}'s ${release.field.name} is built in: its type, its options and what it suggests are the release's. Add a field beside it.`,
+    );
+  return null;
+}
+
+/**
+ * What this extension keeps a document's guards to (`RO_0005_020`,
+ * `documents`' `guardDocuments`): a structure's document is never deleted,
+ * and a built-in's title and its release fields' blocks stay as the release
+ * says. A document using no *Structure* is not read further.
+ */
+/**
+ * What a document is, for `documents`' namer (`DO_0034_008`): a document
+ * using *Structure* — established, or staged in the group read through — is a
+ * *structure*; anything else this extension leaves unnamed.
+ */
+export async function structureKindOf(documentId: string, group?: string): Promise<string | undefined> {
+  const read = await query({
+    statement: `MATCH (d)-[h:${HAS_BLOCK_STRUCTURE}]->(r) RETURN GRAPH d, h, r ROOT d`,
+    roots: [nodeRef(documentId)],
+    ...(group === undefined ? {} : { proposalOverlay: group }),
+    purpose: "what a document is",
+  });
+  if (read.outcome !== "success") return undefined;
+  const uses = read.result.relations.some(
+    (relation) => active(relation, HAS_BLOCK_STRUCTURE) && relation.fromNodeId === nodeRef(documentId) && relation.to.nodeId === nodeRef(STRUCTURE_STRUCTURE),
+  );
+  return uses ? "structure" : undefined;
+}
+
+export async function guardOf(documentId: string): Promise<GraphOutcome<Fixed>> {
+  const standing = await readStanding([documentId]);
+  if (standing.outcome !== "success") return standing as GraphOutcome<never>;
+  if (standing.result.taken.get(nodeRef(documentId))?.has(STRUCTURE_STRUCTURE) !== true)
+    return { outcome: "success", result: { blocks: {} } };
+  const catalogue = await readCatalogue();
+  if (catalogue.outcome !== "success") return catalogue as GraphOutcome<never>;
+  const structure = catalogue.result.byId.get(documentId);
+  if (structure === undefined || structure.id !== documentId) return { outcome: "success", result: { blocks: {} } };
+  const blocks: Record<string, string> = {};
+  if (structure.builtin)
+    for (const field of structure.fields)
+      if (field.blockId !== undefined && isBuiltinField(structure.id, field.key))
+        blocks[field.blockId] = `${field.name} is a field ${structure.name} carries on every instance: it stays, and its words may change.`;
+  return {
+    outcome: "success",
+    result: {
+      undeletable: `${structure.name} is a structure: retire it rather than deleting it, so what uses it keeps it.`,
+      ...(structure.builtin ? { title: `${structure.name} is built in: its name is the release's.` } : {}),
+      blocks,
     },
   };
 }
@@ -1136,6 +1203,7 @@ async function valuesStatement(
   subject: Subject,
   structureId: string,
   entries: Readonly<Record<string, unknown>>,
+  byRun = false,
 ): Promise<GraphOutcome<Staged | null>> {
   const structure = situation.catalogue.byId.get(structureId);
   if (structure === undefined) return refuse("unknownStructure", `Structure ${structureId} is not here.`);
@@ -1143,28 +1211,39 @@ async function valuesStatement(
     return refuse("structureNotTaken", `This ${subject.blockId === undefined ? "document" : "block"} does not use ${structure.name}.`);
   const stored = situation.standing.fields.get(nodeRef(situation.node))?.get(structure.id);
   const values: Record<string, FieldValue> = { ...(stored?.values ?? {}) };
+  // A field's Default is read against the Type the same write gives it.
+  const fields = declaredFor(structure.id, structure.fields, { ...values, ...pick(entries, ["type", "options"]) });
+  const refused = releaseRefusal(situation, subject, structure.id, entries);
+  if (refused !== null) return refused;
   for (const [key, raw] of Object.entries(entries)) {
-    const field = structure.fields.find((candidate) => candidate.key === key);
+    const field = fields.find((candidate) => candidate.key === key);
     if (field === undefined) return refuse("unknownField", `${structure.name} has no field ${key}.`);
     const read = valueFor(field, raw);
     if ("failure" in read) return refuse("valueShape", read.failure);
     if (field.type === "reference" && typeof read.value === "string" && !(await exists(read.value)))
       return refuse("unknownReference", `${field.name} names ${read.value}, which is not here.`);
+    if (field.type === "reference" && Array.isArray(read.value))
+      for (const one of read.value)
+        if (!(await exists(one))) return refuse("unknownReference", `${field.name} names ${one}, which is not here.`);
+    // A structure never allows itself (RO_0005).
+    if (structure.id === STRUCTURE_STRUCTURE && key === "allows" && Array.isArray(read.value) && read.value.includes(subject.documentId))
+      return refuse("offersItself", "A structure cannot allow itself.");
     // A reference limited to a structure takes only a document carrying it. BO_0336_011
-    if (field.type === "reference" && field.carrying !== undefined && typeof read.value === "string") {
+    const named = typeof read.value === "string" ? [read.value] : Array.isArray(read.value) ? read.value : [];
+    if (field.type === "reference" && field.carrying !== undefined && named.length > 0) {
       const carrying = await documentsCarrying(field.carrying);
       if (carrying.outcome !== "success") return carrying as GraphOutcome<never>;
-      if (!carrying.result.some((document) => document.id === read.value)) {
+      if (!named.every((one) => carrying.result.some((document) => document.id === one))) {
         const wanted = situation.catalogue.byId.get(field.carrying)?.name ?? field.carrying;
         return refuse("notCarrying", `${field.name} names a document using ${wanted}, and this one does not.`);
       }
     }
-    if (read.value === null || read.value === "") delete values[key];
+    if (!isHeld(read.value)) delete values[key];
     else values[key] = read.value;
   }
   const files: BlobReference[] = [];
   for (const value of Object.values(values)) {
-    if (typeof value !== "object" || value === null) continue;
+    if (!isFileValue(value)) continue;
     const objectId = objectIdOfHash(value.hash);
     if (objectId === null) return refuse("valueShape", `${value.filename} was not uploaded here.`);
     const file: FileValue = value;
@@ -1182,7 +1261,7 @@ async function valuesStatement(
       rref: nodeRef(structure.id),
     });
     statement = [
-      `CREATE (f:${STRUCTURE_FIELDS_TYPE} {id: $f_id, role: $f_structure, values: $f_values, files: $f_files, status: "established"})`,
+      `CREATE (f:${STRUCTURE_FIELDS_TYPE} {id: $f_id, role: $f_structure, values: $f_values, files: $f_files${establishedUnless(byRun)}})`,
       `RELATE fref -[fo:${FIELDS_OF}]-> sref`,
       `RELATE fref -[ff:${FIELDS_FOR}]-> rref`,
     ].join("; ");
@@ -1270,7 +1349,7 @@ export async function proposeStructures(input: Subject & {
     const newlyTaken = id !== undefined && !taken.includes(id);
     // A structure taken with values in the same proposal gets its defaults beside
     // those values in one roleFields node, not a node from each statement.
-    const one = takeStatement({ ...situation.result, taken }, input, structure, !(id !== undefined && valued.has(id)));
+    const one = takeStatement({ ...situation.result, taken }, input, structure, !(id !== undefined && valued.has(id)), true);
     if (one.outcome !== "success") return one as GraphOutcome<never>;
     if (one.result !== null) staged.push(one.result);
     if (id === undefined) continue;
@@ -1286,73 +1365,11 @@ export async function proposeStructures(input: Subject & {
     if (one.result !== null) staged.push(one.result);
   }
   for (const [structure, entries] of Object.entries(values)) {
-    const one = await valuesStatement({ ...situation.result, taken }, input, structure, entries);
+    const one = await valuesStatement({ ...situation.result, taken }, input, structure, entries, true);
     if (one.outcome !== "success") return one as GraphOutcome<never>;
     if (one.result !== null) staged.push(one.result);
   }
   return { outcome: "success", result: staged };
-}
-
-/**
- * The built-ins an instance does not hold yet (`BO_0309_014`), as one
- * statement creating them, or none. Idempotent: run by the executable
- * migration `builtin-structures` once per instance, and by nothing else.
- */
-export async function builtinsStatement(): Promise<GraphOutcome<Staged>> {
-  const catalogue = await readCatalogue();
-  if (catalogue.outcome !== "success") return catalogue as GraphOutcome<never>;
-  const statements: string[] = [];
-  const parameters: Record<string, unknown> = {};
-  BUILTIN_STRUCTURES.forEach((structure, index) => {
-    if (catalogue.result.byId.has(structure.id)) return;
-    const alias = `b${index}`;
-    parameters[`${alias}_id`] = structure.id;
-    parameters[`${alias}_name`] = structure.name;
-    parameters[`${alias}_description`] = structure.description;
-    parameters[`${alias}_order`] = index;
-    const fields = "fields" in structure ? structure.fields : undefined;
-    if (fields !== undefined) parameters[`${alias}_fields`] = fields;
-    const fieldsProperty = fields === undefined ? "" : `, fields: $${alias}_fields`;
-    statements.push(
-      `CREATE (${alias}:${BLOCK_STRUCTURE_TYPE} {id: $${alias}_id, name: $${alias}_name, description: $${alias}_description, order: $${alias}_order, builtin: true${fieldsProperty}, status: "established"})`,
-    );
-  });
-  return {
-    outcome: "success",
-    result: { statement: statements.join("; "), parameters, rationale: "the built-in structures" },
-  };
-}
-
-/**
- * What *Keyword* needs on an instance beyond the built-ins themselves
- * (`BO_0310_030`, `BO_0310_031`): the offers of *Definition* and *Alias*
- * where they do not stand, and *Send with prompt* set to the definition where
- * it was never set — once, so an upgrade never resets a person's switches.
- * Idempotent: run by the executable migration `keyword-builtins` after the
- * built-ins stand.
- */
-export async function keywordBuiltinsStatement(): Promise<GraphOutcome<Staged>> {
-  const catalogue = await readCatalogue();
-  if (catalogue.outcome !== "success") return catalogue as GraphOutcome<never>;
-  const statements: string[] = [];
-  const parameters: Record<string, unknown> = {};
-  BUILTIN_OFFERS.forEach(([from, to], index) => {
-    const offering = catalogue.result.byId.get(from);
-    if (offering === undefined || !catalogue.result.byId.has(to) || offering.offers.includes(to)) return;
-    parameters[`o${index}from`] = nodeRef(from);
-    parameters[`o${index}to`] = nodeRef(to);
-    statements.push(`RELATE o${index}from -[o${index}:${OFFERS}]-> o${index}to`);
-  });
-  const keyword = catalogue.result.byId.get(KEYWORD_STRUCTURE);
-  if (keyword !== undefined && keyword.sendWithPrompt === undefined) {
-    parameters["kNodeId"] = nodeRef(KEYWORD_STRUCTURE);
-    parameters["kSend"] = [...DEFAULT_SEND_WITH_PROMPT];
-    statements.push("SET k.sendWithPrompt = $kSend");
-  }
-  return {
-    outcome: "success",
-    result: { statement: statements.join("; "), parameters, rationale: "what Keyword offers and sends" },
-  };
 }
 
 /** A document carrying a structure, as a built-in's row lists it. */

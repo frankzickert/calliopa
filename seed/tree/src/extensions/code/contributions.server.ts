@@ -67,6 +67,25 @@ const routes: readonly ApiRoute[] = [
     handle: async (event) => event.json(200, await kernelJSON("/__kernel/code/restart", jsonInit("POST", await body(event)))),
   },
   {
+    // A code block's grant on a device, read and written on the block.
+    // BO_0319_046
+    method: "GET",
+    path: "permissions",
+    handle: async (event) =>
+      event.json(
+        200,
+        await kernelJSON(
+          `/__kernel/code/permissions?artifact=${encodeURIComponent(event.url.searchParams.get("artifact") ?? "")}&block=${encodeURIComponent(event.url.searchParams.get("block") ?? "")}`,
+          { method: "GET" },
+        ),
+      ),
+  },
+  {
+    method: "PUT",
+    path: "permissions",
+    handle: async (event) => event.json(200, await kernelJSON("/__kernel/code/permissions", jsonInit("PUT", await body(event)))),
+  },
+  {
     method: "GET",
     path: "executions",
     handle: async (event) =>

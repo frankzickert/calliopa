@@ -100,3 +100,13 @@ describe("a format's suggestions", () => {
     expect((await source("ratio").answer({ provider: "higgsfield", model: "gpt_image_2" })).note).toBe("The media service is not answering.");
   });
 });
+
+// ME_0002_013: an input's name is suggested from its kind, without asking a vendor.
+describe("an input's name", () => {
+  it("Given a kind, Then its name is suggested, and without one the field says to choose it first", async () => {
+    expect(await source("inputName").answer({ kind: "Start frame" })).toEqual({ suggestions: [{ value: "start" }] });
+    expect(await source("inputName").answer({ kind: "Reference audio" })).toEqual({ suggestions: [{ value: "audio" }] });
+    expect(await source("inputName").answer({})).toEqual({ suggestions: [], note: "Choose the input's kind first." });
+    expect(kernel.asked).toEqual([]);
+  });
+});

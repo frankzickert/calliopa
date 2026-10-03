@@ -64,6 +64,11 @@
 - The workspace API can create and read a non-default workspace so browser scenarios do not share mutable state.
 - Tabs and layout are saved on every change. Scroll position stays browser-local.
 - The record also stores the view last chosen for each target, keyed by item identity, so reopening a target answers with that view.
+- [ ] DO_0037_030 A sweep for `documents`' clearing of the content (`DO_0037`): `pruneWorkspaces(removed)`
+  in `src/server/workspaces.ts` reads every workspace record (`kernelState.list("workspaces")`) and
+  drops each tab whose target is a removed document, with the view remembered for it and its
+  entries in other tabs' routes; a workspace left without its active tab activates the tab beside, or
+  none. Proven in `tests/behavior/` against the kernel harness.
 
 ## Implementation
 

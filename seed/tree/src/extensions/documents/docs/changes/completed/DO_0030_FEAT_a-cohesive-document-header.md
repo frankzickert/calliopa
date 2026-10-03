@@ -1,6 +1,6 @@
 # DO_0030_FEAT_a-cohesive-document-header
 
-Status: wip
+Status: completed
 
 Requested 2026-10-01: **create a cohesive header for a doc, including roles.** User statement.
 
@@ -74,4 +74,7 @@ transferred to. The header is one `<header>` holding the route, the title and th
 the roles line draws the pills form with an always-drawn `+`; the values line reads `rolesOf`, which
 answers `referenceTitles`; the keywords' mentions line replaces the foot's list; the compact line
 hangs from a sticky anchor of no height under the bar. Measured in Chromium at 360, 390 and 1280 CSS
-px. Open: `_009`, the walk on the served build, and `_010`, the close.
+px.
+
+Walked by the user on the served build, desktop and phone, 2026-10-03 (`_009`): all as described.
+Closed 2026-10-03 (`_010`).
