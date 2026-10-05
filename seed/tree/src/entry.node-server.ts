@@ -7,9 +7,12 @@ import qwikCityPlan from "@qwik-city-plan";
 import { manifest } from "@qwik-client-manifest";
 
 import render from "./entry.ssr";
+import { keepServingOnUnhandledRejection } from "./server/background";
 import { readGraphEnv } from "./server/ccgw/env";
 
 readGraphEnv();
+// A rejection nothing handled is logged, and the shell keeps serving. CA_0080_003
+keepServingOnUnhandledRejection();
 
 const distDir = join(fileURLToPath(import.meta.url), "..", "..", "dist");
 const port = Number(process.env.PORT ?? 4300);

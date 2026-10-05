@@ -539,6 +539,10 @@ export interface TakenStructure {
   readonly values: Readonly<Record<string, FieldValue>>;
   /** The required keys holding no value (`BO_0308_Q3`). */
   readonly missing: readonly string[];
+  /** The blocks nested into each field, by key, in order, each with its
+   * words: editing the child is editing the value (`calliopa-bootstrap`'s
+   * `BO_0349_020`). Absent when no field holds a child. */
+  readonly children?: Readonly<Record<string, readonly FieldChild[]>>;
   /** A run proposed this structure, or a value of it, in an open group: the
    * label says so until the person answers (`BO_0309_Q4`). */
   readonly proposed?: "structure" | "values";
@@ -549,6 +553,17 @@ export interface TakenStructure {
   /** Taken on a block although blocks may not take it — carried before the
    * structure became the document's alone. It stays and says so (`RO_0003_Q3`). */
   readonly notOnBlock?: true;
+}
+
+/** A block a field holds: nested into the subject's focused work and put
+ * into the field (`BO_0349_020`). */
+export interface FieldChild {
+  readonly blockId: string;
+  readonly words: string;
+  /** The focused work it stands in, and its title, so the popover opens it
+   * at this block (`BO_0349_024`). */
+  readonly documentId?: string;
+  readonly documentTitle?: string;
 }
 
 /** One block in reading order, the block it stands under, and its structures. */

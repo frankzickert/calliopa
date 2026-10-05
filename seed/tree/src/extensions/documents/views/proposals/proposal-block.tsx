@@ -42,6 +42,8 @@ import { clickMarks } from "../press";
 import { MarkingContext } from "../marking/use-marking";
 import { BlockBar } from "../block-bar";
 import { SWIPEABLE_PROPOSALS } from "../block-swipe";
+import type { CardPlace } from "../cards";
+import { CardLabel } from "../standing/standing-mark";
 import type { Standing } from "../../lib/disposition";
 import { RowMarks, rowMarkingName, rowNumbers } from "../marking/row-marks";
 import { RowGrip } from "../row-grip";
@@ -166,7 +168,16 @@ export const ProposalBlock = component$<{
   /** Whether the document numbers the lines of its code, so a proposed code
    * block is numbered on its row exactly as an accepted one is. BO_0302_006 */
   numbersCode?: boolean;
-}>(({ item, proposer, words, destination, answer$, settle$, startDrag$, step$, settleReason$, standing$, framed, grip, focus$, hoverFocus$, edit$, focused, editing, refinedBy, withdrawal, withdrawing, successor$, dropsFile, numbersCode }) => {
+  /** The card this row is part of: its group, where the row sits in it, and
+   * whether it is folded, when a swipe answers the whole group. BO_0350_001 */
+  card?: CardPlace | undefined;
+  /** Kept for later by the reader, and drawn because *Show proposed changes*
+   * is on: the card carries the deferred label. BO_0350_007 */
+  deferred?: boolean;
+  /** The run the card came from, named by its command and the block it was
+   * given from. BO_0350_013 */
+  origin?: string | null;
+}>(({ item, proposer, words, destination, answer$, settle$, startDrag$, step$, settleReason$, standing$, framed, grip, focus$, hoverFocus$, edit$, focused, editing, refinedBy, withdrawal, withdrawing, successor$, dropsFile, numbersCode, card, deferred, origin }) => {
   const root = useSignal<HTMLElement>();
   // A proposal being edited is drawn anew under the caret (its row's key says
   // so, CA_0063_005), and stays armed across that. DO_0023_001
@@ -308,6 +319,11 @@ export const ProposalBlock = component$<{
       data-proposal-withdrawn={withdrawer === null ? undefined : ""}
       data-proposal-kind={item.kind}
       data-proposal-tone={tone}
+      data-card-group={card?.group}
+      data-card-edge={card?.edge}
+      data-card-folded={card === undefined ? undefined : card.folded ? "true" : "false"}
+      data-card-segment={card?.segment}
+      data-proposal-deferred={deferred === true ? "true" : undefined}
       role="group"
       aria-label={names.block}
       // A tap focuses the proposal, which shows its chip and its grip; a
@@ -356,6 +372,7 @@ export const ProposalBlock = component$<{
       data-reference-proposal={commanding && numbers.whole !== null ? numbers.whole : undefined}
     >
       {markable && <RowMarks blockId={item.blockId} marked={marked} />}
+      {deferred === true && <CardLabel mark="deferred" />}
       {/* The block bar, for a pointer that cannot swipe: *Remove* rejects the
           proposal, *Fixate* accepts it and fixates the block it becomes, and
           the arrows stage its place. A proposal is the bar's subject like any
@@ -475,6 +492,11 @@ export const ProposalBlock = component$<{
         <span class="proposal-block__words" data-proposal-words>
           {withdrawing !== undefined && withdrawing > 0 ? `${words}, withdrawing ${withdrawing}` : words}
         </span>
+        {origin !== undefined && origin !== null && (
+          <span class="proposal-block__origin" data-proposal-origin>
+            {origin}
+          </span>
+        )}
         {strayed !== null && (
           <span class="proposal-block__drift" data-proposal-drift>
             {strayed}

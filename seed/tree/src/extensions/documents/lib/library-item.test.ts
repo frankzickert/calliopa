@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { documentItem } from "./library-item";
+import { DOCUMENTS_FILTER, documentItem } from "./library-item";
+import { applyFilter, filterChoiceOf } from "~/lib/library-filter";
 import { UNNAMED_DOCUMENT } from "./naming";
 
 /**
@@ -12,7 +13,12 @@ import { UNNAMED_DOCUMENT } from "./naming";
 describe("a document's library item", () => {
   it("Given an ordinary document, Then it names and opens it with nothing proposed", () => {
     const item = documentItem({ documentId: "doc-1", title: "Draft" }, undefined);
-    expect(item).toEqual({ id: "doc-1", label: "Draft", open: { kind: "document", itemId: "doc-1", title: "Draft" } });
+    expect(item).toEqual({
+      id: "doc-1",
+      label: "Draft",
+      facets: { kind: { value: "document", label: "Document" } },
+      open: { kind: "document", itemId: "doc-1", title: "Draft" },
+    });
   });
 
   it("Given a started document, Then it carries its proposer as the runtime and its words", () => {
@@ -44,5 +50,42 @@ describe("a document's library item", () => {
   it("Given a document a person's group started, Then its proposer is the person, with no runtime", () => {
     const item = documentItem({ documentId: "doc-3", title: "Mine", proposed: { group: "node:chg-1", proposer: { kind: "person", name: "frank" } } }, undefined);
     expect(item.proposedBy).toEqual({ agent: null, name: "frank" });
+  });
+
+  it("Given a recorded document, Then its kind is the record, named by its word", () => {
+    const item = documentItem({ documentId: "src-1", title: "Kucsko 2013", record: "source" }, undefined);
+    expect(item.facets?.["kind"]).toEqual({ value: "source", label: "Source" });
+  });
+
+  it("Given a started or unnamed document, Then it carries the value the filter hides it by", () => {
+    const started = documentItem(
+      { documentId: "doc-2", title: "Plan", proposed: { group: "node:run-1", proposer: { kind: "agent", agent: "hermes", executedBy: "hermes" } } },
+      undefined,
+    );
+    expect(started.facets?.["started"]).toEqual({ value: "started", label: "Started by an agent", icon: "robot" });
+    expect(started.facets?.["unnamed"]).toBeUndefined();
+    const unnamed = documentItem({ documentId: "doc-3", title: UNNAMED_DOCUMENT }, undefined);
+    expect(unnamed.facets?.["unnamed"]).toEqual({ value: "unnamed", label: "Unnamed" });
+    expect(unnamed.facets?.["started"]).toBeUndefined();
+  });
+
+  it("Given its times, Then it orders by them; without them it carries no order numbers", () => {
+    const item = documentItem({ documentId: "doc-1", title: "Draft", changedAt: 300, createdAt: 100 }, undefined);
+    expect(item.orderKeys).toEqual({ changed: 300, created: 100 });
+    expect(documentItem({ documentId: "doc-1", title: "Draft" }, undefined).orderKeys).toBeUndefined();
+  });
+
+  it("Given the section's filter with nothing stored, Then every document lists by title", () => {
+    const items = [
+      documentItem({ documentId: "b", title: "beta", changedAt: 1, createdAt: 1 }, undefined),
+      documentItem({ documentId: "a", title: "Alpha", record: "source", changedAt: 9, createdAt: 2 }, undefined),
+      documentItem({ documentId: "c", title: UNNAMED_DOCUMENT, changedAt: 5, createdAt: 3 }, undefined),
+    ];
+    const listed = (stored: readonly string[] | null) =>
+      applyFilter(DOCUMENTS_FILTER, filterChoiceOf(DOCUMENTS_FILTER, stored), "", items).map((item) => item.id);
+    expect(listed(null)).toEqual(["a", "b", "c"]);
+    expect(listed(["order:changed"])).toEqual(["a", "c", "b"]);
+    expect(listed(["order:created"])).toEqual(["c", "a", "b"]);
+    expect(listed(["kind:source", "unnamed:unnamed"])).toEqual(["b"]);
   });
 });

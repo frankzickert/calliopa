@@ -35,6 +35,14 @@ import { CloseAllTabs, HeaderMenu, HeaderModeToggle, TabEdge } from "./header-me
 import type { FocusedWork } from "~/server/focused-work";
 import { Icon } from "./icons";
 import { PanelIcons, PanelResizeHandle, SectionHeader, type PanelIconEntry } from "./panel";
+import { LibraryFilterRow, LibraryNoMatch } from "./library-filter-row";
+import {
+  applyFilter,
+  changedFilter,
+  filterChoiceOf,
+  isDefaultChoice,
+  type FilterChange,
+} from "~/lib/library-filter";
 import { SaveStatus } from "./save-status";
 import { ThemeToggle } from "./theme-toggle";
 import { Wordmark } from "./wordmark";
@@ -91,6 +99,9 @@ import {
   springDue,
   springRepeats,
   springs,
+  leavesSheet,
+  showsLater,
+  LATER_TARGET,
   tabSwipeStep,
   type DragOperation,
   type DragPayload,
@@ -126,6 +137,8 @@ import {
 import { ViewHost } from "./view-host";
 import { ViewBarPanel } from "./view-bar";
 import { EXECUTION_SECTION, ExecutionSection, type ExecutionRead } from "./execution";
+import { LEARNED_SECTION, LearnedSection } from "./learned";
+import { entryMarked, forwardMarked, readForward } from "~/lib/forward";
 import { executionProcess, isRunning, type ExecutionRun } from "~/lib/execution";
 import {
   InspectorPanel,
@@ -178,6 +191,7 @@ import {
   type ViewCommand,
   type SentCommand,
   type ViewGesture,
+  type ViewInstructedRun,
   type ViewPinch,
   type ViewBar,
   type ViewSave,
@@ -283,16 +297,21 @@ function targetUnder(x: number, y: number, iconIds: readonly string[] = []): Dro
   }
   // A target naming a second target for its middle means that one there: a
   // block row takes a block into it over its middle half. CA_0072_007
+  // The middle may accept more than the edges: a block row's middle takes a
+  // structure or an instruction dropped on it, its edges only a block to
+  // place (calliopa-bootstrap's BO_0349_011).
   const middle = element.getAttribute("data-drop-middle");
+  let accepts = element.getAttribute("data-accepts") ?? "";
   if (middle !== null) {
     const box = element.getBoundingClientRect();
-    if (inMiddle(y, box.top, box.height)) id = middle;
+    if (inMiddle(y, box.top, box.height)) {
+      id = middle;
+      accepts = element.getAttribute("data-middle-accepts") ?? accepts;
+    }
   }
   return {
     id,
-    accepts: (element.getAttribute("data-accepts") ?? "")
-      .split(" ")
-      .filter(Boolean) as DragOperation[],
+    accepts: accepts.split(" ").filter(Boolean) as DragOperation[],
   };
 }
 
@@ -887,10 +906,39 @@ export const Shell = component$<{
         pinch: pinch.pinch,
         artifact: pinch.itemId,
         block: pinch.blockId,
+        ...(pinch.proposal === undefined ? {} : { proposal: pinch.proposal }),
         ...(branch === undefined ? {} : { branch }),
         mode: pinch.mode,
       },
       pinch.itemId,
+    );
+    run.sending = false;
+    return started;
+  });
+
+  /**
+   * Starts a run whose words a view wrote, guided by the instruction it names
+   * — a drop that starts work (`BO_0349_052`) — proposing into the target in
+   * its branch, followed like every other.
+   */
+  const sendInstructed$ = $(async (instructed: ViewInstructedRun): Promise<SentCommand> => {
+    if (run.sending) return { ok: false, error: "A command is already being sent." };
+    run.sending = true;
+    const branch = aim.branch?.[instructed.itemId];
+    const mode = aim.mode?.[instructed.itemId];
+    const started = await startRun$(
+      {
+        ...(run.agent === null ? {} : { agent: run.agent }),
+        speed: run.speed,
+        instructed: true,
+        goal: instructed.goal,
+        artifact: instructed.itemId,
+        references: instructed.references.map((reference) => ({ ...reference })),
+        commandOptions: { instruction: instructed.instruction },
+        ...(branch === undefined ? {} : { branch }),
+        ...(mode === undefined ? {} : { mode }),
+      },
+      instructed.itemId,
     );
     run.sending = false;
     return started;
@@ -1093,6 +1141,22 @@ export const Shell = component$<{
       process.id === updated.id ? updated : process,
     );
   });
+  // The work Hermes puts forward, read as the shell opens and whenever the
+  // active tab changes; the documents the reader has opened since are no
+  // longer marked. Nothing here opens a tab. BO_0350_024
+  const forward = useStore({ list: [] as string[], seen: [] as string[] });
+  // eslint-disable-next-line qwik/no-use-visible-task
+  useVisibleTask$(async ({ track }) => {
+    const activeId = track(() => tabs.activeTabId);
+    const opened = tabs.tabs.find((tab) => tab.id === activeId)?.itemId ?? null;
+    if (opened !== null && !forward.seen.includes(opened)) forward.seen = [...forward.seen, opened];
+    try {
+      const response = await fetch("/api/hermes/forward");
+      if (response.ok) forward.list = [...readForward(await response.json())];
+    } catch {
+      // A mark is a convenience: a read that fails keeps the marks known.
+    }
+  });
   const startDrag$ = $((payload: DragPayload, event: PointerEvent) => {
     Object.assign(drag, idleDrag());
     drag.candidate = payload;
@@ -1194,6 +1258,11 @@ export const Shell = component$<{
       }
       if (intent !== "drag") return;
       drag.payload = drag.candidate;
+    }
+    // A library item dragged out of the phone's library sheet closes it once
+    // the pointer leaves it, so the work beneath is reached. BO_0349_003
+    if (leavesSheet(mobile.sheet, drag.payload, document.elementFromPoint(event.clientX, event.clientY)?.closest(".drawer--left") != null)) {
+      mobile.sheet = null;
     }
     const target = targetUnder(event.clientX, event.clientY, libraryIconIds(layout));
     drag.overId = target?.id ?? null;
@@ -1335,6 +1404,21 @@ export const Shell = component$<{
     layout.filters = filters;
     await save$(tabs, { ...layout, filters });
   });
+  /** An item section's filter row: whether it shows and the words typed in
+   * it, by section key, kept in the page alone and across re-reads.
+   * DO_0038_002 */
+  const sectionFilter = useStore<{ open: Record<string, boolean>; search: Record<string, string> }>({
+    open: {},
+    search: {},
+  });
+  /** Stores what an item section's filter row chose: a value shown or hidden,
+   * an order, or the default with the search emptied. DO_0038_002 */
+  const chooseFilter$ = $(async (key: string, change: FilterChange) => {
+    const filter = REGISTRY.sections.find((section) => section.key === key)?.filter;
+    if (filter === undefined) return;
+    if ("clear" in change) sectionFilter.search = { ...sectionFilter.search, [key]: "" };
+    await setSectionFilter$(key, changedFilter(filter, layout.filters[key] ?? null, change));
+  });
   /**
    * Settings is a tab like any other. Its target is synthetic and instance-wide,
    * so `openTab` reveals an open settings tab rather than opening a second one
@@ -1460,13 +1544,13 @@ export const Shell = component$<{
   /** Opens a block of a target as focused work, or finds the child it has,
    * through the target kind's contribution: the child, or the refusal in
    * words. CA_0065_003 CA_0072_005 */
-  const openChild$ = $(async (itemId: string, blockId: string): Promise<{ itemId: string; title: string } | string> => {
+  const openChild$ = $(async (itemId: string, blockId: string, blank = false): Promise<{ itemId: string; title: string } | string> => {
     const kind = kindOf(tabs, itemId);
     if (kind === null) return "This tab opens no focused work.";
     const answer = await fetch(`/api/focused-work/${itemId}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind, blockId }),
+      body: JSON.stringify(blank ? { kind, blockId, blank } : { kind, blockId }),
     });
     const outcome = (await answer.json()) as
       | { outcome: "success"; result: { itemId: string; title: string } }
@@ -1550,6 +1634,7 @@ export const Shell = component$<{
     refreshAgents$,
     sendCommand$,
     sendGesture$,
+    sendInstructed$,
     sendPinch$,
     // Focused work: the shell's own capability, offered to every view.
     // The kind comes from the tab the target is open in, so a view never
@@ -1569,7 +1654,9 @@ export const Shell = component$<{
       ] as const;
     }),
     focusedChild$: $(async (itemId: string, blockId: string) => {
-      const child = await openChild$(itemId, blockId);
+      // A nest's child is made with no blocks: the dragged block is its
+      // first. BO_0349_019
+      const child = await openChild$(itemId, blockId, true);
       if (typeof child === "string") return { refusal: child };
       await readFaces$(itemId);
       return { itemId: child.itemId };
@@ -1715,6 +1802,7 @@ export const Shell = component$<{
   const onReplay = active !== undefined && active.replay !== undefined && active.id === replay.tabId && replayRecord !== null;
   const shownRegistry: ProcessRegistry = replayRecord === null ? registry : { items: [...registry.items, replayRecord], selection: registry.selection };
 
+  const forwardMarks = forwardMarked(forward.list, forward.seen);
   return (
     <>
       <main
@@ -1810,6 +1898,11 @@ export const Shell = component$<{
                       role="img"
                       aria-label="Unsaved"
                     />
+                  )}
+                  {/* Hermes puts the tab's document forward; opening it
+                      clears the mark. BO_0350_024 */}
+                  {tab.itemId !== undefined && tab.itemId !== null && forwardMarks.has(tab.itemId) && (
+                    <span class="forward-mark" data-forward-mark role="img" aria-label="Hermes puts this forward" />
                   )}
                   {tabProcessState(registry.items, tab) === "running" && (
                     <span
@@ -2017,6 +2110,13 @@ export const Shell = component$<{
               const items = Body === undefined
                 ? ((library.data[key] as readonly LibraryItem[] | undefined) ?? [])
                 : [];
+              // An item section's filter, drawn by the shell over its rows. DO_0038_002
+              const filter = Body === undefined ? section.filter : undefined;
+              const choice = filter === undefined ? null : filterChoiceOf(filter, layout.filters[key] ?? null);
+              const search = sectionFilter.search[key] ?? "";
+              const shown = filter === undefined || choice === null ? items : applyFilter(filter, choice, search, items);
+              const filtered =
+                filter !== undefined && choice !== null && (!isDefaultChoice(filter, choice) || search.trim() !== "");
               return (
                 <section
                   class="library-category"
@@ -2036,12 +2136,30 @@ export const Shell = component$<{
                     createLabel={section.createLabel}
                     onToggle$={() => toggleSection$(key)}
                     onCreate$={() => createIn$(key)}
+                    filter={filter === undefined ? undefined : { open: sectionFilter.open[key] === true, filtered }}
+                    onFilter$={() =>
+                      (sectionFilter.open = { ...sectionFilter.open, [key]: sectionFilter.open[key] !== true })
+                    }
                   />
                   <div
                     id={`${elementId}-list`}
                     class="library-category__body"
                     hidden={state === "collapsed"}
                   >
+                    {filter !== undefined && choice !== null && (
+                      <LibraryFilterRow
+                        id={`${elementId}-filter`}
+                        name={name}
+                        filter={filter}
+                        items={items}
+                        choice={choice}
+                        search={search}
+                        open={sectionFilter.open[key] === true}
+                        onSearch$={(words) => (sectionFilter.search = { ...sectionFilter.search, [key]: words })}
+                        onToggle$={(group, value) => chooseFilter$(key, { toggle: [group, value] })}
+                        onOrder$={(order) => chooseFilter$(key, { order })}
+                      />
+                    )}
                     {Body !== undefined ? (
                       <Body
                         data={library.data[key] ?? null}
@@ -2054,9 +2172,11 @@ export const Shell = component$<{
                       <p class="library-empty" data-library-empty={name}>
                         {section.empty}
                       </p>
+                    ) : shown.length === 0 && filter !== undefined ? (
+                      <LibraryNoMatch name={name} words={filter.noMatch} onClear$={() => chooseFilter$(key, { clear: true })} />
                     ) : (
                       <ul class="library-list" key={library.reads}>
-                        {items.map((item) => {
+                        {shown.map((item) => {
                           const current = item.open !== undefined && active?.itemId === item.open.itemId;
                           return (
                             <li key={item.id}>
@@ -2067,6 +2187,7 @@ export const Shell = component$<{
                                 held={holdMark(drag.hold, `library:${item.id}`) !== undefined}
                                 pointing={rowPointing(pointing, item.open?.itemId ?? null)}
                                 onMark$={markDocument$}
+                                forward={entryMarked(forwardMarks, item.open?.itemId ?? null, tabs.tabs.map((held) => held.itemId))}
                               />
                             </li>
                           );
@@ -2145,6 +2266,14 @@ export const Shell = component$<{
                 ))}
             </div>
           )}
+          {/* The pile a card is kept for later on, only while a card is
+              dragged. BO_0350_020 */}
+          {showsLater(drag.payload) && (
+            <div class="later-pile" data-drop-target={LATER_TARGET} data-accepts="defer" data-over={drag.overId === LATER_TARGET ? "true" : undefined}>
+              <Icon name="clock" size={20} />
+              <span class="later-pile__word">Later</span>
+            </div>
+          )}
         </section>
 
         <aside class="drawer drawer--right" aria-label="Inspector">
@@ -2193,6 +2322,9 @@ export const Shell = component$<{
               onSelect$={selectProcess$}
               startDrag$={startDrag$}
             />
+            {/* What Hermes learned of the reader, theirs to read and erase.
+                BO_0350_023 */}
+            <LearnedSection layout={layout} onToggle$={() => toggleSection$(LEARNED_SECTION)} />
           </div>
           <PanelIcons
             side="right"

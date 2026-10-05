@@ -2,7 +2,8 @@ import { contributions as declare } from "~/contract";
 
 import { InstructionChip } from "./views/chip";
 import { InstructionToolsSettings } from "./views/settings";
-import { InstructionToolsProvider, ToolHeadline } from "./views/tools";
+import { DocumentStandingPill, InstructionsProvider, INSTRUCTION_DRAG_KIND, standDroppedInstruction } from "./views/standing";
+import { HeadlineMarks } from "./views/headline";
 
 /**
  * The client half of `instructions` (`calliopa-bootstrap`'s `BO_0298` and
@@ -21,8 +22,14 @@ export const contributions = declare({
   settingsSections: [{ name: "instruction-tools", title: "Instruction tools", component: InstructionToolsSettings, owner: true }],
   decorations: {
     document: {
-      provider: InstructionToolsProvider,
-      places: { command: InstructionChip, headline: ToolHeadline },
+      // The tools an instruction's code blocks are, and what stands on the
+      // document and its blocks (BO_0349_030).
+      provider: InstructionsProvider,
+      places: { command: InstructionChip, headline: HeadlineMarks },
+      documentPlaces: { title: DocumentStandingPill },
+      // An instruction dragged out of the Structures sheet stands where it
+      // lands. BO_0349_011
+      drops: { [INSTRUCTION_DRAG_KIND]: standDroppedInstruction },
     },
   },
 });

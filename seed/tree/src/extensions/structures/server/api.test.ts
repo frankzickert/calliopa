@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseStructureCommand, withCreate } from "../contributions.server";
+import { parseFieldChild, parseStructureCommand, withCreate } from "../contributions.server";
 import {
   BUILTIN_STRUCTURES,
   CSL_TYPES,
@@ -377,3 +377,22 @@ describe("the migration to structures as documents", () => {
   });
 });
 
+
+// A block put into a field names the field and the block (`calliopa-bootstrap`'s
+// `BO_0349_020`); a body naming no child stores values as before.
+describe("parseFieldChild", () => {
+  it("Given no child, Then the body stores values", () => {
+    expect(parseFieldChild({ values: { hook: "words" } })).toBeNull();
+  });
+
+  it("Given a field and a child, Then the block is put in, unless put is false", () => {
+    expect(parseFieldChild({ field: "hook", child: id })).toEqual({ field: "hook", child: id, put: true });
+    expect(parseFieldChild({ field: "hook", child: id, put: false })).toEqual({ field: "hook", child: id, put: false });
+  });
+
+  it("Given a child with no field, a child that is not an id, or put that is not true or false, Then why not", () => {
+    expect(parseFieldChild({ child: id })).toEqual({ failure: "a block is put into a field named by its key" });
+    expect(parseFieldChild({ field: "hook", child: "b1" })).toEqual({ failure: "a block put into a field is named by its id" });
+    expect(parseFieldChild({ field: "hook", child: id, put: "no" })).toEqual({ failure: "put is true or false" });
+  });
+});

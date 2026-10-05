@@ -78,7 +78,10 @@ import {
   type RelationInput,
 } from "./work";
 import { readMode, writeMode } from "./working-mode";
-import { fixedOf } from "./guards";
+import { readArrangement, recordTitle } from "./arrangement";
+import { markDeferred } from "~/server/ccgw/client";
+import type { Arrangement } from "../lib/arrangement";
+import { kindOfDocument, fixedOf } from "./guards";
 import type { WorkingMode } from "../lib/working-mode";
 import { branchOf, documentPolicy, readStanding, signedInAccount, type BranchOfDocument, type BranchStanding, type DocumentPolicy } from "./branch";
 import { withBranch } from "~/server/ccgw/branch-scope";
@@ -414,7 +417,8 @@ export type DocumentCommand =
       readonly edited?: boolean;
     }
   /** Every item of one group answered at once: *Accept all*, *Reject all*. BO_0343_012 */
-  | { readonly command: "answerGroup"; readonly groupId: string; readonly answer: ProposalAnswer }
+  | { readonly command: "answerGroup"; readonly groupId: string; readonly answer: ProposalAnswer; readonly itemIds?: readonly string[] }
+  | { readonly command: "deferGroup"; readonly groupId: string; readonly deferred: boolean }
   | {
       readonly command: "placeProposal";
       readonly itemId: string;
@@ -871,7 +875,23 @@ export function parseDocumentCommand(
       const answer = input["answer"];
       if (typeof groupId !== "string" || groupId === "") return { failure: "An answer to a whole proposal names its group." };
       if (answer !== "accepted" && answer !== "rejected") return { failure: "A proposal is accepted or rejected." };
+      // One card of the group, answered alone. BO_0351_024
+      const itemIds = input["itemIds"];
+      if (itemIds !== undefined) {
+        if (!Array.isArray(itemIds) || itemIds.length === 0 || itemIds.some((itemId) => typeof itemId !== "string" || itemId === "")) {
+          return { failure: "A card's answer names the items it answers." };
+        }
+        return { command: { command: "answerGroup", groupId, answer, itemIds: itemIds as string[] } };
+      }
       return { command: { command: "answerGroup", groupId, answer } };
+    }
+    case "deferGroup": {
+      // A card kept for later, or taken back. BO_0350_006
+      const groupId = input["groupId"];
+      const deferred = input["deferred"];
+      if (typeof groupId !== "string" || groupId === "") return { failure: "A deferral names the proposal it keeps for later." };
+      if (typeof deferred !== "boolean") return { failure: "A proposal is deferred or taken back." };
+      return { command: { command: "deferGroup", groupId, deferred } };
     }
     case "placeProposal": {
       const itemId = input["itemId"];
@@ -1031,6 +1051,7 @@ export function runDocumentCommand(
     | { readonly relationId: string; readonly revisionId: string; readonly dataRevision: string }
     | { readonly blockIds: readonly string[]; readonly dataRevision: string }
     | PromotedBlock
+    | { readonly deferred: boolean }
   >
 > {
   switch (command.command) {
@@ -1160,6 +1181,11 @@ export function runDocumentCommand(
         documentId,
         baseRevisionId: command.baseRevisionId,
         title: command.title,
+      }).then((renamed) => {
+        // What the person says the work is, for Hermes: the kernel cannot
+        // tell a title from the write that set it. BO_0350_065
+        if (renamed.outcome === "success") void recordTitle(documentId, command.title);
+        return renamed;
       });
     case "delete":
       return deleteDocument({
@@ -1185,7 +1211,9 @@ export function runDocumentCommand(
         edited: command.edited === true,
       });
     case "answerGroup":
-      return answerDocumentGroup({ documentId, groupId: command.groupId, answer: command.answer });
+      return answerDocumentGroup({ documentId, groupId: command.groupId, answer: command.answer, ...(command.itemIds === undefined ? {} : { itemIds: command.itemIds }) });
+    case "deferGroup":
+      return markDeferred(command.groupId, command.deferred);
     case "placeProposal":
       return placeProposedItem({
         documentId,
@@ -1252,7 +1280,12 @@ export async function handleDocumentRead(
   const fixed = await fixedOf(documentId);
   if (fixed.outcome !== "success") return respond(fixed as GraphOutcome<never>);
   const held = fixed.result.undeletable !== undefined || fixed.result.title !== undefined || Object.keys(fixed.result.blocks).length > 0;
-  return respond({ outcome: "success", result: held ? { ...read.result, fixed: fixed.result } : read.result });
+  // What an extension names it, for the header's drop. BO_0349_036
+  const named = await kindOfDocument(documentId);
+  return respond({
+    outcome: "success",
+    result: { ...read.result, ...(held ? { fixed: fixed.result } : {}), ...(named === undefined ? {} : { named }) },
+  });
 }
 
 /**
@@ -1282,6 +1315,11 @@ export async function handleProposalsRead(
  * run staged as it was staged, for a replay. BO_0340_007 */
 export async function handleReplayRead(documentId: string, runId: string): Promise<OutcomeResponse<ReplayDocument>> {
   return respond(await readReplayDocument(documentId, runId));
+}
+
+/** What Hermes arranged on the document for the signed-in person. BO_0350_005 */
+export async function handleArrangementRead(documentId: string): Promise<OutcomeResponse<Arrangement>> {
+  return respond(await readArrangement(documentId));
 }
 
 /** The signed-in person's working mode on a document: read as the document

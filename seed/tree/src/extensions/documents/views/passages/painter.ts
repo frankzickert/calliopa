@@ -51,10 +51,12 @@ export function paintPassages(
   const page = root.ownerDocument;
   const ranges: Range[] = [];
   const badges: Record<string, PassageBadge[]> = {};
+  // A page that makes no ranges has nowhere to say a number sits.
+  if (typeof page.createRange !== "function") return badges;
   for (const passage of passages) {
     const row =
       Array.from(root.querySelectorAll<HTMLElement>("[data-block-id]")).find(
-        (candidate) => candidate.dataset.blockId === passage.blockId,
+        (candidate) => candidate.getAttribute("data-block-id") === passage.blockId,
       ) ?? null;
     const text =
       row?.querySelector<HTMLElement>("[data-block-reading]") ?? null;

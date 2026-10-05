@@ -7,6 +7,10 @@ import { listInstructions, instructionSummary } from "~/extensions/documents/ser
 
 import type { GrantRow, GrantView, InstructionChoices, InstructionGrants, InstructionTools, SecretView } from "./lib/instructions";
 import { choicesFor, createInstruction, documentOf, forward, MIGRATIONS, record } from "./server/instructions";
+import { setStanding, standingOf } from "./server/standing";
+import { builtinGuard } from "./server/builtins";
+import { guardDocuments } from "~/extensions/documents/server/guards";
+import { isRecordId } from "~/server/uuid";
 
 /**
  * The server half of `instructions` (`calliopa-bootstrap`'s `BO_0298` and
@@ -20,6 +24,29 @@ import { choicesFor, createInstruction, documentOf, forward, MIGRATIONS, record 
  * `server/instructions.ts`; this half is the routes. Only server code imports
  * this module.
  */
+
+/**
+ * An instruction stood on a document or a block, or taken off with
+ * `{instruction: null}`, as the person's truth at once (`BO_0349_030`).
+ */
+const standingRoute = (path: string): ApiRoute => ({
+  method: "POST",
+  path,
+  handle: async (event, params) => {
+    const body = record(await event.request.json().catch(() => ({})));
+    const instruction = body["instruction"];
+    if (instruction !== null && (typeof instruction !== "string" || !isRecordId(instruction)))
+      throw new HttpError(400, "an instruction is named by its id, or null to take it off");
+    const block = params["block"];
+    const { status, body: answer } = respond(
+      await setStanding({ documentId: documentOf(params["id"]), ...(block === undefined ? {} : { blockId: block }), instruction }),
+    );
+    event.json(status, answer);
+  },
+});
+
+// A built-in instruction is never deleted. BO_0349_035
+guardDocuments("instructions", async (documentId) => ({ outcome: "success", result: builtinGuard(documentId) }));
 
 const routes: readonly ApiRoute[] = [
   {
@@ -35,6 +62,17 @@ const routes: readonly ApiRoute[] = [
       event.json(status === 200 ? 201 : status, answer);
     },
   },
+  {
+    // What stands on a document and its blocks. BO_0349_030
+    method: "GET",
+    path: "documents/[id]/standing",
+    handle: async (event, params) => {
+      const { status, body } = respond(await standingOf(documentOf(params["id"])));
+      event.json(status, body);
+    },
+  },
+  standingRoute("documents/[id]/standing"),
+  standingRoute("documents/[id]/blocks/[block]/standing"),
   {
     // What the chip in a block's command offers. BO_0311_011
     method: "GET",

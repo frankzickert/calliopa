@@ -3,7 +3,7 @@ import { component$, Slot, useContext, type JSXOutput, type QRL } from "@builder
 import { optionsOf, ViewBridgeContext } from "~/components/shell/view-bridge";
 
 import { REGISTRY } from "~/registry.gen";
-import type { BlockPlace, Decorations, DocumentPlace, DocumentPlaceForm } from "~/contract";
+import type { BlockPlace, DecorationDrop, Decorations, DocumentPlace, DocumentPlaceForm, NestedBlock } from "~/contract";
 
 /**
  * The decorations contributed for this extension's blocks (`BO_0256_007`).
@@ -32,7 +32,11 @@ export const BlockDecorations = component$<{
   /** The `command` place's: sets an option on the command it is drawn in.
    * The command control hands it over; no other place has one. BO_0311_030 */
   setOption$?: QRL<(name: string, value: string | null, once?: boolean) => void>;
-}>(({ at, documentId, blockId, revisionId, active, setOption$ }) => {
+  /** The `nested` place's: the block just nested, and how the place says it
+   * is finished. BO_0349_010 */
+  nested?: NestedBlock;
+  done$?: QRL<() => void>;
+}>(({ at, documentId, blockId, revisionId, active, setOption$, nested, done$ }) => {
   // The `command` place reads the options set on its command, read here
   // rather than by the chip, so a choice re-draws the places alone and not
   // the command it stands in. BO_0336_051
@@ -51,6 +55,8 @@ export const BlockDecorations = component$<{
           active={active}
           {...(setOption$ === undefined ? {} : { setOption$ })}
           {...(commandOptions === undefined ? {} : { commandOptions })}
+          {...(nested === undefined ? {} : { nested })}
+          {...(done$ === undefined ? {} : { done$ })}
         />
       );
     })}
@@ -110,3 +116,38 @@ export const DocumentDecorations = component$<{
     })}
   </>
 ));
+
+/**
+ * A drop of an item another extension knows — a structure or an instruction
+ * dragged out of the library — on a block or the header (`BO_0349_011`): the
+ * first extension declaring the item's kind says what it means, and its
+ * refusal, or null. An item no extension knows means nothing here.
+ */
+export async function dropOnDocument(
+  payload: { readonly itemId: string; readonly kind: string },
+  documentId: string,
+  blockId: string | null,
+  startRun?: DecorationDrop["startRun"],
+  body = false,
+  passage: DecorationDrop["passage"] | null = null,
+): Promise<string | null> {
+  const handler = sets()
+    .map(({ decorations }) => decorations.drops?.[payload.kind])
+    .find((candidate) => candidate !== undefined);
+  if (handler === undefined) return null;
+  return handler({
+    itemId: payload.itemId,
+    documentId,
+    ...(blockId === null ? {} : { blockId }),
+    ...(body ? { body: true as const } : {}),
+    ...(passage === null || passage === undefined ? {} : { passage }),
+    ...(startRun === undefined ? {} : { startRun }),
+  });
+}
+
+/** Whether a dragged kind starts work on the body between the rows, as an
+ * extension declares in `drops.onBody`, so the body lights red only for it
+ * (`BO_0349_012`). */
+export const actsOnBody = (kind: string): boolean =>
+  sets().some(({ decorations }) => decorations.actsOnBody?.includes(kind) === true);
+

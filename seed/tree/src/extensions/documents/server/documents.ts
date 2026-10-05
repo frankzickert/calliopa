@@ -57,7 +57,7 @@ import {
 } from "./vocabulary";
 import { checkTable, type TableColumn, type TableRow } from "~/extensions/documents/lib/table";
 import { SOURCE_RECORD } from "./vocabulary";
-import { proposedWorksCited } from "./proposed-works";
+import { proposedWorksCited, startedDocumentMembers } from "./proposed-works";
 
 /**
  * The document and block operations the editor works through, over the one
@@ -780,11 +780,14 @@ export async function listDocuments(): Promise<GraphOutcome<readonly ListedDocum
     if (contentOf(node)["record"] === INSTRUCTION_RECORD) continue;
     seen.add(node.id);
     const title = contentOf(node)["title"];
+    const record = contentOf(node)["record"];
     summaries.push({
       documentId: bareId(node.id),
       title: typeof title === "string" ? title : "",
+      ...(typeof record === "string" && record !== "" ? { record } : {}),
     });
   }
+  const times = await listingTimes();
 
   // The documents runs started that nobody has taken: every document with a
   // candidate and no established revision, in one read with candidates, and
@@ -836,15 +839,70 @@ export async function listDocuments(): Promise<GraphOutcome<readonly ListedDocum
       const run = runOf.get(group);
       seen.add(node.id);
       const title = contentOf(node)["title"];
+      const record = node.revision.content?.["record"];
+      // Nobody has established it, so the candidate is both its first
+      // revision and its last. DO_0038_003
+      const at = node.revision.createdAt;
       summaries.push({
         documentId: bareId(node.id),
         title: typeof title === "string" ? title : "",
+        ...(typeof record === "string" && record !== "" ? { record } : {}),
+        ...(typeof at === "number" && at > 0 ? { changedAt: at, createdAt: at } : {}),
         proposed: { group, proposer: proposerFrom(group, run === undefined ? [node] : [node, run]) },
       });
     }
   }
 
-  return { outcome: "success", result: summaries.sort(byTitle) };
+  const timed = summaries.map((entry) => {
+    const time = times.get(nodeRef(entry.documentId));
+    return entry.proposed !== undefined || time === undefined ? entry : { ...entry, ...time };
+  });
+  return { outcome: "success", result: timed.sort(byTitle) };
+}
+
+/**
+ * When each established document last changed and when it was created, for
+ * the listing's orders: two metadata-only reads over the whole list, never a
+ * read per document. Created is the oldest revision of the document node in
+ * its history; last changed is the newest of the document's own revision,
+ * its active containments and its blocks' current revisions. A read that
+ * fails leaves the times out rather than failing the listing, which still
+ * lists by title. DO_0038_003
+ */
+async function listingTimes(): Promise<ReadonlyMap<string, { changedAt: number; createdAt: number }>> {
+  const [histories, blocks] = await Promise.all([
+    query({
+      statement: `MATCH (d:${DOCUMENT_TYPE}) RETURN GRAPH d INCLUDE HISTORY`,
+      unbounded: true,
+      metadataOnly: true,
+      purpose: "document listing times",
+    }),
+    query({
+      statement: `MATCH (d:${DOCUMENT_TYPE})-[c:${CONTAINS}]->(b) RETURN GRAPH d, c, b`,
+      unbounded: true,
+      metadataOnly: true,
+      purpose: "document listing changes",
+    }),
+  ]);
+  const times = new Map<string, { changedAt: number; createdAt: number }>();
+  if (histories.outcome !== "success") return times;
+  for (const node of histories.result.nodes) {
+    if (typeOf(node) !== DOCUMENT_TYPE) continue;
+    const revisions = [node.revision, ...(node.history ?? [])].filter((revision) => revision.createdAt > 0);
+    if (revisions.length === 0) continue;
+    const stamps = revisions.map((revision) => revision.createdAt);
+    times.set(node.id, { changedAt: Math.max(...stamps), createdAt: Math.min(...stamps) });
+  }
+  if (blocks.outcome !== "success") return times;
+  const blockAt = new Map(blocks.result.nodes.map((node) => [node.id, node.revision.createdAt]));
+  for (const relation of blocks.result.relations) {
+    if (relation.type !== CONTAINS || relation.validity.status !== "active") continue;
+    const time = times.get(relation.fromNodeId);
+    if (time === undefined) continue;
+    const block = blockAt.get(relation.to.nodeId ?? "") ?? 0;
+    times.set(relation.fromNodeId, { ...time, changedAt: Math.max(time.changedAt, relation.createdAt, block) });
+  }
+  return times;
 }
 
 /**
@@ -2233,13 +2291,18 @@ export async function restoreBlock(input: {
  *
  * Deleting a document that is unknown or already deleted is refused rather
  * than answered as success, because the caller asked about something that is
- * not there.
+ * not there. A document a run started and nobody has taken is not truth, and
+ * deleting it rejects what the run proposed of it (`deleteStarted`).
  */
 export async function deleteDocument(input: {
   readonly documentId: string;
   readonly baseRevisionId: string;
 }): Promise<GraphOutcome<WrittenDocument>> {
   const loaded = await loadDocument(input.documentId);
+  if (!loaded.ok && loaded.outcome.outcome === "noResult") {
+    const group = await startedIn(input.documentId);
+    if (group !== null) return deleteStarted(input, group);
+  }
   if (!loaded.ok) return loaded.outcome;
   if (loaded.document.revisionId !== input.baseRevisionId) {
     return conflict(input.documentId, input.baseRevisionId, loaded.document.revisionId);
@@ -2268,6 +2331,44 @@ export async function deleteDocument(input: {
       dataRevision,
     }),
   );
+}
+
+/**
+ * Deletes a started document by rejecting what its run proposed of it
+ * (`DO_0040_001`): its blocks and the values *Source* holds on it, then the
+ * document node, so no block is left in the group without its document. The
+ * rest of the run's group stays open — its other sources and documents, and a
+ * sentence citing this source, which, accepted later, draws the citation as
+ * missing. User decision, 2026-10-05. The started revision stands in for the
+ * established one as the base, and a guard is asked as for any delete.
+ */
+async function deleteStarted(
+  input: { readonly documentId: string; readonly baseRevisionId: string },
+  group: string,
+): Promise<GraphOutcome<WrittenDocument>> {
+  const started = await readStarted(input.documentId);
+  if (started.outcome !== "success") return started as GraphOutcome<never>;
+  if (started.result.revisionId !== input.baseRevisionId) {
+    return conflict(input.documentId, input.baseRevisionId, started.result.revisionId);
+  }
+  const fixed = await fixedOf(input.documentId);
+  if (fixed.outcome !== "success") return fixed as GraphOutcome<never>;
+  if (fixed.result.undeletable !== undefined) return refuse("documentFixed", fixed.result.undeletable);
+  const touched = await touchedSet(group);
+  if (touched.outcome !== "success") return touched as GraphOutcome<never>;
+  const documentRef = nodeRef(input.documentId);
+  const members = startedDocumentMembers(documentRef, new Set(touched.result.touchedNodes.map(nodeRef)), touched.result.stagedRelations);
+  if (members.length > 0) {
+    const rejected = await decideMembers("reject", group, members, `delete document ${input.documentId}`);
+    if (rejected.outcome !== "success") return rejected as GraphOutcome<never>;
+    const failed = rejected.result.find((outcome) => outcome.status !== "success");
+    if (failed !== undefined) {
+      return refuse("documentNotDeleted", `This proposed document could not be deleted: ${failed.detail ?? failed.status}`);
+    }
+  }
+  const dropped = await decide("reject", group, documentRef, `delete document ${input.documentId}`);
+  if (dropped.outcome !== "success") return dropped as GraphOutcome<never>;
+  return { outcome: "success", result: { documentId: input.documentId, revisionId: input.baseRevisionId, dataRevision: "" } };
 }
 
 /**
@@ -2679,6 +2780,11 @@ export interface DocumentProposals {
     /** The documents the group started outside this one, which its run
      * chip names and *Accept all* answers with the rest. DO_0034_002 */
     readonly elsewhere?: readonly ElsewhereDocument[];
+    /** Deferred by the person and not come back: the card has left the
+     * flow, and *Show proposed changes* draws it marked deferred. A
+     * deferral whose block was revised since reads as not deferred.
+     * BO_0350_006 BO_0350_007 */
+    readonly deferred?: boolean;
   }[];
 }
 
@@ -2742,7 +2848,7 @@ async function readDocumentProposalsAgainstTruth(
   const loaded = { document: read.ok ? read.document : (started as { readonly result: DocumentView }).result };
   const documentNode = nodeRef(documentId);
   const established = new Map(loaded.document.blocks.map((block) => [nodeRef(block.blockId), block]));
-  const groups: { groupId: string; items: ProposedChange[]; stagedBy: string[]; proposer: Proposer; run?: { runId: string; stagedAt: number }; elsewhere?: ElsewhereDocument[] }[] = [];
+  const groups: { groupId: string; items: ProposedChange[]; stagedBy: string[]; proposer: Proposer; run?: { runId: string; stagedAt: number }; elsewhere?: ElsewhereDocument[]; deferred?: boolean }[] = [];
   let unanswered = 0;
 
   // Only a group that reaches this document is read: the core answers the
@@ -2936,6 +3042,7 @@ async function readDocumentProposalsAgainstTruth(
             ? { run: { runId: runId.replace(/^run:/u, ""), stagedAt: run.revision.createdAt } }
             : {}),
           ...(elsewhere.length === 0 ? {} : { elsewhere }),
+          ...(touched.result.deferred !== undefined && touched.result.returned !== true ? { deferred: true } : {}),
         },
       };
   };
@@ -3702,12 +3809,18 @@ export async function answerDocumentGroup(input: {
   readonly documentId: string;
   readonly groupId: string;
   readonly answer: ProposalAnswer;
+  /** The items of one card, when a swipe answers that card alone: one place
+   * of the group, answered in one batch, the rest left standing. Absent
+   * answers the whole group, as *Accept all* does. BO_0351_024 */
+  readonly itemIds?: readonly string[];
 }): Promise<GraphOutcome<AnsweredGroup>> {
   const { documentId, groupId, answer } = input;
+  const whole = input.itemIds === undefined;
   const decision = answer === "accepted" ? "accept" : "reject";
   const read = await readDocumentProposalsAgainstTruth(documentId);
   if (read.outcome !== "success") return read as GraphOutcome<never>;
-  const items = read.result.groups.find((group) => group.groupId === groupId)?.items ?? [];
+  const standing = read.result.groups.find((group) => group.groupId === groupId)?.items ?? [];
+  const items = whole ? standing : standing.filter((item) => input.itemIds?.includes(item.itemId) === true);
   if (items.length === 0) return refuse("unknownGroup", `${groupId} proposes nothing on this document.`);
   const parsed = items.map((item) => ({ item, parsed: parseItemId(item.itemId) }));
   // A gather is its group, answered whole. BO_0322_013
@@ -3726,7 +3839,8 @@ export async function answerDocumentGroup(input: {
     }
   }
   const started = await startedIn(documentId);
-  if (decision === "accept" && started === groupId) {
+  // Taking a started document is the whole proposal's, never one card's.
+  if (whole && decision === "accept" && started === groupId) {
     const taken = await decide("accept", groupId, nodeRef(documentId), `take document ${documentId} with its items`);
     if (taken.outcome !== "success") return taken as GraphOutcome<never>;
   }
@@ -3801,10 +3915,13 @@ export async function answerDocumentGroup(input: {
     const dropped = await decide("reject", groupId, nodeRef(documentId), `drop document ${documentId}, every item rejected`);
     if (dropped.outcome !== "success") return dropped as GraphOutcome<never>;
   }
-  // The run's work elsewhere, answered with the rest. DO_0034_001
-  const elsewhere = await answerElsewhere(decision, groupId, documentId, new Set(members));
-  if (elsewhere.outcome !== "success") return elsewhere as GraphOutcome<never>;
-  notices.push(...elsewhere.result);
+  // The run's work elsewhere, answered with the rest, by the whole answer
+  // alone: a card is a place of this document. DO_0034_001 BO_0351_024
+  if (whole) {
+    const elsewhere = await answerElsewhere(decision, groupId, documentId, new Set(members));
+    if (elsewhere.outcome !== "success") return elsewhere as GraphOutcome<never>;
+    notices.push(...elsewhere.result);
+  }
   return { outcome: "success", result: { groupId, answer, answered, ...(notices.length === 0 ? {} : { notice: notices.join(" ") }) } };
 }
 

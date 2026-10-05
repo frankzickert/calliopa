@@ -16,6 +16,7 @@ import {
   reviseStructure,
   structuresOf,
   setStructure,
+  setFieldChild,
   setValues,
   structureKindOf,
   type StructureCommand,
@@ -143,15 +144,40 @@ const takeRoute = (path: string): ApiRoute => ({
   },
 });
 
+/**
+ * A block put into a field, or taken out (`calliopa-bootstrap`'s
+ * `BO_0349_020`): `{field, child}` puts it, `{field, child, put: false}` takes
+ * it out. Null for a body that names no child, which stores values instead.
+ */
+export function parseFieldChild(
+  body: Readonly<Record<string, unknown>>,
+): { readonly field: string; readonly child: string; readonly put: boolean } | { readonly failure: string } | null {
+  if (!("child" in body)) return null;
+  const field = text(body["field"]);
+  const child = text(body["child"]);
+  if (field === null || field === "") return { failure: "a block is put into a field named by its key" };
+  if (child === null || !isRecordId(child)) return { failure: "a block put into a field is named by its id" };
+  const put = body["put"];
+  if (put !== undefined && typeof put !== "boolean") return { failure: "put is true or false" };
+  return { field, child, put: put !== false };
+}
+
 const valuesRoute = (path: string): ApiRoute => ({
-  // Values of a structure the subject takes, as the person's truth at once. BO_0309_013
+  // Values of a structure the subject takes, as the person's truth at once
+  // (BO_0309_013); or a block put into one of its fields (BO_0349_020).
   method: "POST",
   path,
   handle: async (event, params) => {
     const subject = subjectOf(params);
     const structure = structureIdOf(params, "structureId");
     const body = await bodyOf(event);
-    const { status, body: answer } = respond(await setValues({ ...subject, structure, values: record(body["values"]) }));
+    const child = parseFieldChild(body);
+    if (child !== null && "failure" in child) throw new HttpError(400, child.failure);
+    const { status, body: answer } = respond(
+      child === null
+        ? await setValues({ ...subject, structure, values: record(body["values"]) })
+        : await setFieldChild({ ...subject, structure, ...child }),
+    );
     event.json(status, answer);
   },
 });

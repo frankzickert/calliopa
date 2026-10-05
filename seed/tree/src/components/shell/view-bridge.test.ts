@@ -63,6 +63,7 @@ const Host = component$<{ workspaceId: string }>(({ workspaceId }) => {
     sendCommand$: $(async () => ({ ok: false as const, error: "not in this test" })),
     sendPinch$: $(async () => ({ ok: false as const, error: "not in this test" })),
     sendGesture$: $(async () => ({ ok: false as const, error: "not in this test" })),
+    sendInstructed$: $(async () => ({ ok: false as const, error: "not in this test" })),
     openAlongRoute$: noop,
     blockControls$: $(async () => []),
     pressBlockControl$: $(async () => null),

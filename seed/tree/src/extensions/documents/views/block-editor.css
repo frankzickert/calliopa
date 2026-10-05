@@ -283,6 +283,40 @@
   background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
+/* An instruction's header while a block dropped there would start a run that
+ * shapes the instruction by it: red, since letting go starts something
+ * (BO_0349_014, BO_0349_Q8). Out of the flow, so it changes colour and never
+ * geometry. */
+.document-header {
+  position: relative;
+}
+
+.shape-mark {
+  position: absolute;
+  inset: -0.25rem;
+  border-radius: 0.3rem;
+  pointer-events: none;
+}
+
+.shape-mark[data-drop-active="true"] {
+  outline: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* The body while a structure dropped between its rows would be applied to
+ * the whole document by a run: red, since letting go starts something
+ * (BO_0349_012). */
+.document-flow[data-applying="true"] {
+  outline: 2px solid var(--error);
+  outline-offset: 0.25rem;
+  border-radius: 0.3rem;
+}
+
+.shape-mark[data-drop-active="acts"] {
+  outline: 2px solid var(--error);
+  background: color-mix(in srgb, var(--error) 10%, transparent);
+}
+
 /* The room a bordered row keeps belongs to the row the document's flow holds.
  * Where the editor makes a row a place to drop a block it wraps it in a slot
  * with the drop mark above it, and a box standing between two margins is what
@@ -599,6 +633,35 @@ hr[data-block-divider] {
 .proposal-block[data-proposal-withdrawn] .proposal-block__text,
 .proposal-block[data-proposal-withdrawn] .proposal-block__quote {
   color: var(--text-muted);
+}
+
+/* A folded card (BO_0350_001): the rows one group draws next to each other
+ * are one decision, so they share a heavier leading edge and a connector runs
+ * that edge across the room between them. Unfolded, each row is its own again.
+ */
+.proposal-block[data-card-folded="true"] {
+  border-inline-start-width: 4px;
+}
+
+.proposal-block[data-card-folded="true"]:is([data-card-edge="first"], [data-card-edge="middle"])::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: -4px;
+  inset-block-start: 100%;
+  inline-size: 4px;
+  block-size: calc(2 * var(--row-overhang) + 2px);
+  background: var(--proposal-edge);
+  pointer-events: none;
+}
+
+/* The run a card came from, after what the proposal does: muted, one line,
+ * cut short rather than wrapping the chip. BO_0350_013 */
+.proposal-block__origin {
+  color: var(--text-muted);
+  max-inline-size: 24rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .proposal-block[data-lifted="true"] {
@@ -1047,8 +1110,17 @@ hr[data-block-divider] {
   font-size: 0.66rem;
   font-weight: 600;
   line-height: 1.3;
-  /* Pressing a number takes its passage back. */
+  /* Pressing a number takes its passage back; holding it drags the passage. */
   cursor: pointer;
+  touch-action: none;
+}
+
+/* A structure held over a passage's number applies to those words alone by a
+ * run, so the number lights red. BO_0349_038 */
+.passage-number[data-drop-active="true"] {
+  border-color: var(--error);
+  outline: 2px solid var(--error);
+  background: color-mix(in srgb, var(--error) 10%, var(--panel-raised));
 }
 
 /* A stale passage keeps its number, in the gutter, saying so; pressing it
@@ -1376,6 +1448,18 @@ hr[data-block-divider] {
 .block-face:hover,
 .block-face:focus-visible {
   color: var(--text);
+}
+
+/* A face listing what the work holds: each nested block's first words on a
+   line of its own, indented under the block it was put into (BO_0349_019). */
+.block-face__lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.block-face__line {
+  overflow-wrap: anywhere;
 }
 
 /* The line that opens the possible relations a block holds beyond the first

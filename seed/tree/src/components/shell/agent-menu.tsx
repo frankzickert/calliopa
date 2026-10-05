@@ -8,7 +8,15 @@ import {
   type QRL,
 } from "@builder.io/qwik";
 
-import { faceOf, menuKey, pick, roomFor, type MenuStep } from "~/lib/agent-menu";
+import {
+  clippedBounds,
+  faceOf,
+  menuKey,
+  pick,
+  roomFor,
+  type Bounds,
+  type MenuStep,
+} from "~/lib/agent-menu";
 import type { SelectableRuntime } from "~/lib/connections";
 import { Icon } from "./icons";
 
@@ -63,11 +71,21 @@ export const AgentMenu = component$<{
     const anchor = button.value;
     const drawn = list.value;
     if (anchor === undefined || drawn === undefined || typeof window === "undefined") return;
-    const rect = anchor.getBoundingClientRect();
-    const held = roomFor(rect, drawn.offsetWidth, {
-      width: window.innerWidth,
-      height: window.innerHeight,
-    });
+    // The room ends where the list is clipped: the window, cut down by every
+    // ancestor that clips its overflow, such as the region the document
+    // scrolls in (`CA_0081`).
+    const clips: Bounds[] = [];
+    for (let at = drawn.parentElement; at !== null; at = at.parentElement) {
+      const style = getComputedStyle(at);
+      if (style.overflowX !== "visible" || style.overflowY !== "visible") {
+        clips.push(at.getBoundingClientRect());
+      }
+    }
+    const bounds = clippedBounds(
+      { top: 0, bottom: window.innerHeight, left: 0, right: window.innerWidth },
+      clips,
+    );
+    const held = roomFor(anchor.getBoundingClientRect(), drawn.offsetWidth, bounds);
     drawn.dataset["side"] = held.side;
     drawn.dataset["from"] = held.from;
     drawn.style.setProperty("--agent-menu-room", `${held.room}px`);

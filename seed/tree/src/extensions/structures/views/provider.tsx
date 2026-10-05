@@ -14,6 +14,7 @@ import type { DocumentDecorationProps } from "~/contract";
 import { EditorSurfaceContext } from "~/extensions/documents/views/editor-surface";
 
 import type { DocumentStructuresView, StructuresListing, StructureView } from "../lib/structures";
+import { takeOpening } from "./drops";
 
 /**
  * The structures a document's editor draws from: read once per document — the
@@ -77,7 +78,7 @@ export async function readStructures(state: StructuresState, documentId: string)
  */
 export const STRUCTURES_CHANGED = "structures-changed";
 
-function announce(view: DocumentStructuresView, on: EventTarget | null): void {
+export function announce(view: DocumentStructuresView, on: EventTarget | null): void {
   // Made by the page itself, so the event is the page's own kind.
   const page = on as Document | null;
   if (page === null || typeof page.createEvent !== "function") return;
@@ -142,6 +143,9 @@ export const StructuresProvider = component$<DocumentDecorationProps>(({ documen
     const id = track(() => documentId);
     track(() => surface.loaded);
     await readStructures(state, id);
+    // A structure a drop just used opens on its fields. BO_0349_037
+    const opening = takeOpening(id, false);
+    if (opening !== null) state.opening = opening;
   });
 
   useOnDocument(

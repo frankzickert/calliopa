@@ -24,6 +24,11 @@ export interface SentRun {
   readonly source: string | null;
   readonly startedAt: number;
   readonly mode?: { readonly field: string; readonly work: string };
+  /** The run, its command's words and the group it staged, as the runs list
+   * answers them: what a card names its run by. BO_0350_013 */
+  readonly id?: string;
+  readonly goal?: string;
+  readonly group?: string | null;
 }
 
 /** Where the device keeps a block's choices, beside its marks. */

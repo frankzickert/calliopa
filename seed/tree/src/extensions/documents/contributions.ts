@@ -2,6 +2,7 @@ import { $ } from "@builder.io/qwik";
 import { contributions as declare, type ViewContribution } from "~/contract";
 import { BlockEditorView } from "./views/block-editor";
 import { UNNAMED_DOCUMENT } from "./lib/naming";
+import { DOCUMENTS_FILTER } from "./lib/library-item";
 import { receiveShared } from "./views/share";
 
 /**
@@ -34,6 +35,8 @@ export const contributions = declare({
       empty: "No documents yet",
       kind: "document",
       createLabel: "New document",
+      // Filtered and ordered by the shell over the rows. DO_0038_004
+      filter: DOCUMENTS_FILTER,
       // A new document, opened in its own tab. The graph owns the document;
       // the tab only names it, so this is a create followed by an ordinary
       // open.

@@ -334,20 +334,47 @@ export interface Room {
   readonly from: "left" | "right";
 }
 
+/** The edges the list may reach, in the window's coordinates. */
+export interface Bounds {
+  readonly top: number;
+  readonly bottom: number;
+  readonly left: number;
+  readonly right: number;
+}
+
+/**
+ * The room is measured against the bounds the list may occupy, not the window
+ * (`CA_0081`): the list hangs inside the region the document scrolls in, which
+ * clips it, and above a chip near the top of a document the window still has
+ * the header and the document's bar, which are no room at all.
+ */
 export function roomFor(
   anchor: { readonly top: number; readonly bottom: number; readonly left: number },
   width: number,
-  viewport: { readonly width: number; readonly height: number },
+  bounds: Bounds,
   margin = 8,
   least = 120,
 ): Room {
-  const above = anchor.top - margin;
-  const below = viewport.height - anchor.bottom - margin;
+  const above = anchor.top - bounds.top - margin;
+  const below = bounds.bottom - anchor.bottom - margin;
   const side = below > above ? "below" : "above";
   return {
     side,
     room: Math.max(least, Math.floor(side === "below" ? below : above)),
     // Left-aligned to the button unless that would run past the right edge.
-    from: anchor.left + width > viewport.width - margin ? "right" : "left",
+    from: anchor.left + width > bounds.right - margin ? "right" : "left",
   };
+}
+
+/** The window cut down by every region that clips the list. `CA_0081` */
+export function clippedBounds(window: Bounds, clips: readonly Bounds[]): Bounds {
+  return clips.reduce<Bounds>(
+    (held, clip) => ({
+      top: Math.max(held.top, clip.top),
+      bottom: Math.min(held.bottom, clip.bottom),
+      left: Math.max(held.left, clip.left),
+      right: Math.min(held.right, clip.right),
+    }),
+    window,
+  );
 }

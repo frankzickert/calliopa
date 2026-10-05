@@ -1,6 +1,7 @@
 import type { CommandTarget } from "~/lib/command-target";
 import type { SentMark } from "~/lib/execution";
 import type { ActiveRuns, HermesModel } from "~/lib/connections";
+import { describeError } from "../background";
 import { port } from "../port";
 import { forwardedCookie } from "../request-context";
 import type { RunEvent } from "./run-events";
@@ -22,6 +23,13 @@ import type { RunEvent } from "./run-events";
 export type BridgeReply<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly status: number; readonly detail: string };
+
+/** How following a run's stream ended: the run's `end`, a quiet stretch past
+ * `idleMs`, or a stream that broke after it opened, with the reason. CA_0080_001 */
+export type FollowReply =
+  | BridgeReply<"ended" | "idle">
+  | { readonly ok: true; readonly value: "dropped"; readonly detail: string };
+
 
 /** A run as the bridge records it. Only what the shell reads is named. */
 export interface BridgeRun {
@@ -390,17 +398,25 @@ function documentActivity(runId: string, at: number, event: BridgeEvent): RunEve
 const started = (event: BridgeEvent): { readonly document?: string } =>
   typeof event.document === "string" && event.document !== "" ? { document: event.document } : {};
 
-/** The frames of one SSE chunk: `event:` name and parsed `data:` payload. */
+/**
+ * The frames of one SSE chunk: `event:` name and parsed `data:` payload. A
+ * block with neither line is no frame: the kernel's `: keep-alive` comment on
+ * a quiet run's stream (`BO_0348_003`) is skipped. CA_0080_001
+ */
 export function parseSseFrames(chunk: string): { readonly event: string; readonly data: unknown }[] {
   const frames: { event: string; data: unknown }[] = [];
   for (const block of chunk.split("\n\n")) {
     if (block.trim() === "") continue;
     let event = "message";
+    let named = false;
     const data: string[] = [];
     for (const line of block.split("\n")) {
-      if (line.startsWith("event:")) event = line.slice("event:".length).trim();
-      else if (line.startsWith("data:")) data.push(line.slice("data:".length).trim());
+      if (line.startsWith("event:")) {
+        event = line.slice("event:".length).trim();
+        named = true;
+      } else if (line.startsWith("data:")) data.push(line.slice("data:".length).trim());
     }
+    if (!named && data.length === 0) continue;
     let parsed: unknown = null;
     try {
       parsed = data.length === 0 ? null : (JSON.parse(data.join("\n")) as unknown);
@@ -418,12 +434,18 @@ export function parseSseFrames(chunk: string): { readonly event: string; readonl
  * recognises; the promise settles when the stream ends or `idleMs` passes
  * with nothing arriving, whichever comes first — a poll wants the history and
  * leaves, a follower wants the end.
+ *
+ * A stream that breaks after it opened — a body timeout on a quiet run, a
+ * reset, a kernel restart — is answered as `dropped` with the reason, never
+ * thrown: a rejection here reached no handler on 2026-10-04 and ended the
+ * shell's server. A refusal before the stream opened keeps its status reply.
+ * CA_0080_001
  */
 export async function followBridgeEvents(
   runId: string,
   onEvent: (event: RunEvent) => Promise<void> | void,
   options: { readonly idleMs?: number; readonly signal?: AbortSignal } = {},
-): Promise<BridgeReply<"ended" | "idle">> {
+): Promise<FollowReply> {
   const controller = new AbortController();
   options.signal?.addEventListener("abort", () => controller.abort());
   // The stream is read as the person whose browser asked, exactly as `ask`
@@ -456,7 +478,14 @@ export async function followBridgeEvents(
     const idle = new Promise<"idle">((resolve) => {
       if (idleMs !== undefined) timer = setTimeout(() => resolve("idle"), idleMs);
     });
-    const next = await Promise.race([reader.read(), idle]);
+    let next: Awaited<ReturnType<typeof reader.read>> | "idle";
+    try {
+      next = await Promise.race([reader.read(), idle]);
+    } catch (error) {
+      if (timer !== undefined) clearTimeout(timer);
+      controller.abort();
+      return { ok: true, value: "dropped", detail: describeError(error) };
+    }
     if (timer !== undefined) clearTimeout(timer);
     if (next === "idle") {
       controller.abort();

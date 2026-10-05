@@ -131,3 +131,27 @@
 .instruction-settings__detail {
   color: var(--text-muted);
 }
+
+/* An instruction standing on a block or a document (BO_0349_032): a pill
+ * naming it, with a × that takes it off. */
+.instruction-standing {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 0.15rem 0 0.5rem;
+}
+
+.instruction-standing__clear {
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0.15rem;
+  cursor: pointer;
+}

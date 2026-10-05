@@ -62,7 +62,7 @@ export const DONE: Readonly<Record<Standing, string>> = {
  * flow rather than anywhere on the scale, but drawn as a card and so needing
  * a word. DO_0008_001 BO_0315_009
  */
-export type CardMark = Exclude<Standing, "keep"> | "removed";
+export type CardMark = Exclude<Standing, "keep"> | "removed" | "deferred";
 
 /**
  * The word a row carries for its mark, beside a glyph so the state never
@@ -75,6 +75,8 @@ export const MARK: Readonly<Partial<Record<CardMark | "keep", string>>> = {
   fixate: "fixated",
   prompt: "prompt",
   removed: "removed",
+  // A card kept for later, drawn by *Show proposed changes*. BO_0350_007
+  deferred: "deferred",
 };
 
 /**

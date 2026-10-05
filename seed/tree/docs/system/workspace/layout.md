@@ -351,3 +351,51 @@ the frame is told, never taught the words.
 ## A Held Drag Opens The Library
 
 - The library opens under a held drag (`CA_0072_004`, [Drag And Drop](./drag-and-drop.md), Holding Over A Place Opens It). A library icon carries `data-spring="library-icon:<id>"`, and a hold on it shows that icon's content, the panel shown, saved with the workspace. On a phone the sheet's handle carries `library-handle`, and a hold on it opens the library's sheet, where the icons and entries hold the same way. A document entry (`LibraryRow`) carries `library:<item>`, and a hold on it opens its document as a press would, through `openTarget$` with `beside`: in the tab it is already open in, or in a new tab directly after the active one (`openTabBeside` in `src/lib/tabs.ts`), the sheet closing as for any opened entry. The inspector's icons do not spring. `panel.test.ts` holds over an icon in the render harness and `library-row.test.ts` over a row: each carries the mark and names what it opens, and the others carry none; `tabs.test.ts` proves a new tab after the active one and an open one revealed where it stands.
+
+## A Filter On An Item Section
+
+Under `documents`' `DO_0038` (2026-10-05,
+[the change](../../../src/extensions/documents/docs/changes/completed/DO_0038_FEAT_filter-and-order-the-documents-list.md)),
+the shell draws the filter an item section declares ([Contribution Contract](./contribution-contract.md#a-filter-on-an-item-section)).
+
+- An item section declaring a filter carries a funnel in its header after its create control
+  (`DO_0038_002`; `SectionHeader`'s `filter` in `panel.tsx`): Phosphor `funnel`, named *Filter*
+  followed by the section's title, `aria-pressed` for whether the row shows. It reveals the filter
+  row (`LibraryFilterRow` in `library-filter-row.tsx`) at the top of the section's body, on the
+  inset and ruled off from the list, so it collapses with the section: the search field when the
+  filter searches, typed words narrowing the rows to the labels holding every word, ignoring case,
+  in the page over the rows already read; per group a row of toggles, one per value the listed
+  items carry by label, each `aria-pressed` for whether its rows show, drawn as the value's icon
+  named by its words or as the words where it has none; and a native order chooser named *Order*.
+  A toggle or an order stores the choice at once through the section's `Layout.filters` entry;
+  whether the row is open and the typed words are kept in the page by section key
+  (`sectionFilter` in `shell.tsx`), so a re-read keeps both and a reload empties both. The funnel
+  carries the Extensions category's active mark whenever the stored choice differs from the
+  default or a search is typed. When the filter hides every row the body draws the section's
+  `noMatch` words with *Clear filter* (`LibraryNoMatch`), which stores the default and empties the
+  search; a section with no items still says its empty line. An open tab of a hidden row stays
+  open. The drawer and the phone sheet are one render path, so the sheet carries the same row. The
+  render harness proves the closed row, the toggles, the stored toggle and the active mark, the
+  order, the unstored search, and the no-match line with its clear
+  (`library-filter.test.ts` over `testing/library-filter-host.tsx`); the choice surviving a reload
+  rests on the layout store the Extensions filter already proves, and is walked in `documents`'
+  `DO_0038_005`, since the browser suite does not travel with the tree.
+
+## What Hermes Learned
+
+- `calliopa-bootstrap`'s `BO_0350` is the originating change; what Hermes learns and how it is erased
+  in Honcho is `calliopa-bootstrap`'s `docs/system/hermes.md`, *Hermes Prepares, The Agents Work*
+  (`BO_0350_062`), and [Memory](../agent/memory.md).
+* What Hermes learned about the person is read in a category of its own in the right panel, one row
+  for each thing learned, and a row is erased by the left swipe, and by Delete on a desktop. No new
+  button. User decision, 2026-10-05 (`BO_0350_Q14`).
+- The category (`BO_0350_023`, landed 2026-10-05; `src/components/shell/learned.tsx`, `src/lib/learned.ts`).
+  The right panel draws *What Hermes learned* on every tab and in the empty workspace, after
+  *Execution*, as a collapsible band of its own (`ui.shell:learned`): one row for each conclusion
+  the shell's `GET /api/hermes/learned` answers from the kernel's `/__kernel/hermes/learned`, its
+  words and the day it was learned, newest first; *Nothing learned yet* when there is none, and
+  *Hermes keeps no memory on this instance* when the memory is off. A row is erased by a left swipe
+  past a third of its width, or by Delete or Backspace on the row turned to, through `DELETE
+  /api/hermes/learned/<id>`, and leaves the list; a right swipe never erases. A row the kernel
+  cannot erase leaves a notice and the row. Proven in `learned.test.ts`: the answer read, the swipe
+  rule, the rows drawn, one erased by Delete, and the memory off said.

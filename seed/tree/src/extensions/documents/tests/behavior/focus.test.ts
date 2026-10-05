@@ -4,6 +4,7 @@ import {
   createDocument,
   deleteDocument,
   insertBlock,
+  moveBlockIn,
   readDocument,
   retireBlock,
   reviseTextBlock,
@@ -118,11 +119,33 @@ describe.skipIf(!configured)("focused work over CCGW", () => {
     expect(ok<Doc>(await readDocument(parent)).blocks.map((block) => block.blockId)).toEqual([blockA, blockB]);
   });
 
-  it("Given focused work, Then the parent's face reads its title and no words", async () => {
+  it("Given focused work, Then the parent's face reads its title and no words, and lists none of its empty first block", async () => {
     await settle();
-    const face = ok<Record<string, { title: string; face: unknown }>>(await facesOf(DOCUMENT_TARGET_KIND, parent));
+    const face = ok<Record<string, { title: string; face: unknown; lines?: readonly string[] }>>(await facesOf(DOCUMENT_TARGET_KIND, parent));
     expect(face[blockA]?.face).toBeNull();
     expect(face[blockA]?.title).toBe("Request-local caching could reduce repeated checks.");
+    expect(face[blockA]?.lines).toEqual([]);
+  });
+
+  it("Given a block opened blank and a block moved in, Then the work holds that block alone, first, and the parent's face lists its words (BO_0349_019)", async () => {
+    const made = ok<{ documentId: string; blockId: string }>(await createDocument({ title: "Nesting" }));
+    created.push(made.documentId);
+    await settle();
+    await reviseTextBlock({ documentId: made.documentId, blockId: made.blockId, baseRevisionId: await revisionOf(made.documentId, made.blockId), runs: words("What is the story telling the reader") });
+    const moving = ok<{ blockId: string }>(
+      await insertBlock({ documentId: made.documentId, block: { kind: "text", runs: words("The hook lands here.") }, placement: { at: "end" } }),
+    ).blockId;
+    await settle();
+    const opened = ok<{ itemId: string; created: boolean }>(await openFocusedWork({ kind: DOCUMENT_TARGET_KIND, targetId: made.documentId, blockId: made.blockId, blank: true }));
+    created.push(opened.itemId);
+    expect(opened.created).toBe(true);
+    await settle();
+    expect(ok<Doc>(await readDocument(opened.itemId)).blocks).toEqual([]);
+    ok(await moveBlockIn({ documentId: opened.itemId, fromDocumentId: made.documentId, blockId: moving, placement: { at: "end" } }));
+    await settle();
+    expect(ok<Doc>(await readDocument(opened.itemId)).blocks.map((block) => block.blockId)).toEqual([moving]);
+    const face = ok<Record<string, { lines?: readonly string[] }>>(await facesOf(DOCUMENT_TARGET_KIND, made.documentId));
+    expect(face[made.blockId]?.lines).toEqual(["The hook lands here."]);
   });
 
   it("Given a block with focused work, Then retiring it is refused naming the child, and deleting the child closes the edge so the retire goes through", async () => {

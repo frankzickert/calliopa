@@ -69,6 +69,24 @@ describe("building the client registry", () => {
     ).toBe("section_opens");
   });
 
+  it("refuses a filter it could not draw as declared, each by name", () => {
+    const filter = {
+      groups: [{ name: "kind", label: "Kind" }],
+      orders: [{ id: "title", label: "Title", by: "label-ascending" as const }],
+      defaultOrder: "title",
+      noMatch: "No documents match",
+    };
+    const withFilter = (section: Record<string, unknown>) => () =>
+      buildRegistry(host, [
+        { id: "documents", contributions: { icon: { title: "Docs", name: "files" }, sections: [{ name: "documents", title: "Documents", empty: "", ...section }] } },
+      ]);
+    expect(withFilter({ filter })().sections[0]?.filter).toEqual(filter);
+    expect(code(withFilter({ filter, component: (() => null) as never }))).toBe("filter_shape");
+    expect(code(withFilter({ filter: { ...filter, defaultOrder: "changed" } }))).toBe("filter_order_unknown");
+    expect(code(withFilter({ filter: { ...filter, groups: [...filter.groups, { name: "kind", label: "Again" }] } }))).toBe("filter_collision");
+    expect(code(withFilter({ filter: { ...filter, orders: [...filter.orders, { id: "title", label: "Again", by: "label-descending" }] } }))).toBe("filter_collision");
+  });
+
   it("gives a kind's default view that kind, and a further view the kinds it names", () => {
     const shared = view("context");
     const registry = buildRegistry(

@@ -824,6 +824,47 @@ describe.skipIf(!configured)("documents over CCGW", () => {
     ok(await answerDocumentProposal({ itemId: moving.items[0]?.itemId ?? "", answer: "rejected" }));
   });
 
+  it("Given a plain and a recorded document, Then the listing answers each kind, and a rename or a revise moves last changed and never created (DO_0038_003)", async () => {
+    type Listed = readonly { documentId: string; record?: string; changedAt?: number; createdAt?: number }[];
+    const entry = async (id: string) => ok<Listed>(await listDocuments()).find((candidate) => candidate.documentId === id);
+    const plain = ok<{ documentId: string; blockId: string }>(await createDocument({ title: "Times plain" }));
+    const recorded = ok<{ documentId: string }>(await createDocument({ title: "Times source", record: "source" }));
+
+    const first = await entry(plain.documentId);
+    expect(first?.record).toBeUndefined();
+    expect((await entry(recorded.documentId))?.record).toBe("source");
+    expect(first?.createdAt).toBeGreaterThan(0);
+    expect(first?.changedAt).toBeGreaterThanOrEqual(first?.createdAt ?? 0);
+
+    await settle();
+    const document = ok<{ revisionId: string; blocks: readonly BlockView[] }>(await readDocument(plain.documentId));
+    const renamed = ok<{ revisionId: string }>(
+      await renameDocument({ documentId: plain.documentId, baseRevisionId: document.revisionId, title: "Times plain, renamed" }),
+    );
+    const afterRename = await entry(plain.documentId);
+    expect(afterRename?.createdAt).toBe(first?.createdAt);
+    expect(afterRename?.changedAt).toBeGreaterThan(first?.changedAt ?? 0);
+
+    await settle();
+    const block = document.blocks.find((candidate) => candidate.blockId === plain.blockId) as { revisionId: string } | undefined;
+    ok(
+      await reviseTextBlock({
+        documentId: plain.documentId,
+        blockId: plain.blockId,
+        baseRevisionId: block?.revisionId ?? "",
+        runs: [{ text: "A typed line" }],
+      }),
+    );
+    const afterRevise = await entry(plain.documentId);
+    expect(afterRevise?.createdAt).toBe(first?.createdAt);
+    expect(afterRevise?.changedAt).toBeGreaterThan(afterRename?.changedAt ?? 0);
+
+    await settle();
+    ok(await deleteDocument({ documentId: plain.documentId, baseRevisionId: renamed.revisionId }));
+    const source = ok<{ revisionId: string }>(await readDocument(recorded.documentId));
+    ok(await deleteDocument({ documentId: recorded.documentId, baseRevisionId: source.revisionId }));
+  });
+
   it("Given a rename and a delete, Then the listing follows and history stays", async () => {
     const document = ok<{ revisionId: string }>(await readDocument(documentId));
     await settle();
@@ -890,11 +931,17 @@ describe.skipIf(!configured)("documents over CCGW", () => {
 
     type Listed = readonly { documentId: string; title: string; proposed?: { group: string; proposer: unknown } }[];
     const listed = ok<Listed>(await listDocuments());
-    expect(listed.find((entry) => entry.documentId === started.startedId)).toEqual({
+    const listedStarted = listed.find((entry) => entry.documentId === started.startedId) as
+      | (Listed[number] & { changedAt?: number; createdAt?: number })
+      | undefined;
+    expect(listedStarted).toMatchObject({
       documentId: started.startedId,
       title: "Started checklist",
       proposed: { group: started.groupId, proposer },
     });
+    // Nobody has established it: both times are its candidate's. DO_0038_003
+    expect(listedStarted?.createdAt).toBeGreaterThan(0);
+    expect(listedStarted?.changedAt).toBe(listedStarted?.createdAt);
     // An established document lists as it did, with nothing proposed.
     expect(listed.find((entry) => entry.documentId === documentId)?.proposed).toBeUndefined();
 

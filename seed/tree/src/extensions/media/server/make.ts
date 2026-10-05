@@ -1,5 +1,6 @@
 import { call } from "~/server/kernel/client";
 import { createProcess, moveProcess } from "~/server/processes";
+import { describeError, inBackground } from "~/server/background";
 import { putBlob, blobHash, readBlob } from "~/server/ccgw/blobs";
 import { withBranch } from "~/server/ccgw/branch-scope";
 import { readSession } from "~/server/session";
@@ -220,14 +221,15 @@ export async function remakeGeneration(input: {
     return { ok: true, processId: process.id };
   }
   await moveProcess(process.id, { state: "running", step: `job ${job.id}`, error: null });
-  void follow({
+  const following = {
     processId: process.id,
     jobId: job.id,
     // Its own group: a second picture is a second proposal to answer.
     group: `node:media-again-${job.id}`,
     documentId: input.documentId,
     blockId: input.blockId,
-  });
+  };
+  void inBackground("media generation", job.id, () => follow(following));
   return { ok: true, processId: process.id, blockId: input.blockId };
 }
 
@@ -326,13 +328,16 @@ export async function makeGeneration(input: MakeRequest): Promise<Making> {
   // Followed after the answer is sent: handing over the goal is quick and the
   // making is not, and the reader watches the process rather than a held
   // request. The same posture the agent run takes.
-  void follow({
+  // Through the shell's background helper, so a failure is logged naming the
+  // job and never ends the server. ME_0003_003
+  const following = {
     processId: process.id,
     jobId: job.id,
     group: proposed.group,
     documentId: input.documentId,
     blockId: proposed.blockId,
-  });
+  };
+  void inBackground("media generation", job.id, () => follow(following));
 
   return { ok: true, processId: process.id, group: proposed.group, blockId: proposed.blockId };
 }
@@ -360,17 +365,47 @@ const PACE: Pace = { patienceMs: 15 * 60 * 1000, betweenMs: 5000 };
  * nothing while a first sleep costs everyone the wait.
  */
 export async function follow(work: Following, pace: Pace = PACE): Promise<void> {
+  try {
+    await followJob(work, pace);
+  } catch (error) {
+    // Whatever ends the follow — storing included — ends its process in
+    // words, with the job id that collects a paid job again, rather than
+    // leaving it running for good. ME_0003_002
+    await moveProcess(work.processId, {
+      state: "failed",
+      step: null,
+      error: `${describeError(error)} (job ${work.jobId})`,
+    });
+  }
+}
+
+interface Held {
+  readonly state?: string;
+  readonly result?: { readonly error?: { readonly message?: unknown } };
+}
+
+/** One look at the job: its record, or null when the kernel did not answer one. */
+async function poll(jobId: string): Promise<Held | null> {
+  try {
+    const response = await call(`/__kernel/media/generations/${encodeURIComponent(jobId)}`, { method: "GET" });
+    if (!response.ok) return null;
+    return (await response.json()) as Held;
+  } catch {
+    // A kernel that cannot be reached — restarting, a reset connection — is
+    // a look that found nothing, as an error answer is: the job is still the
+    // generator's, so the follow waits on through the outage. ME_0003_001
+    return null;
+  }
+}
+
+async function followJob(work: Following, pace: Pace): Promise<void> {
   const until = Date.now() + pace.patienceMs;
   let first = true;
   while (Date.now() < until) {
     if (!first) await new Promise((wake) => setTimeout(wake, pace.betweenMs));
     first = false;
-    const response = await call(`/__kernel/media/generations/${encodeURIComponent(work.jobId)}`, { method: "GET" });
-    if (!response.ok) continue;
-    const held = (await response.json()) as {
-      state?: string;
-      result?: { error?: { message?: unknown } };
-    };
+    const held = await poll(work.jobId);
+    if (held === null) continue;
     if (held.state === "running") continue;
     if (held.state !== "completed") {
       // What the generator said, which is the whole of what a reader can act

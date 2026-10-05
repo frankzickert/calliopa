@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ReadNode } from "~/server/ccgw/client";
-import { proposedWorksCited } from "./proposed-works";
+import { proposedWorksCited, startedDocumentMembers } from "./proposed-works";
 
 /** The sources a proposed sentence carries into its acceptance (`BO_0291_036`, `BO_0313_030`). */
 const node = (id: string, content: Record<string, unknown>, status = "candidate"): ReadNode => ({
@@ -42,5 +42,28 @@ describe("proposedWorksCited", () => {
     expect(proposedWorksCited([...nodes, ...citing], ["node:blk-u"], group)).toEqual([]);
     expect(proposedWorksCited([...nodes, ...citing], ["node:blk-v"], group)).toEqual([]);
     expect(proposedWorksCited(nodes, ["node:blk-s"], "node:run-2")).toEqual([]);
+  });
+});
+
+/** What deleting a started document rejects of its run's group (`DO_0040_001`). */
+describe("startedDocumentMembers", () => {
+  const grouped = new Set(["node:wrk-new", "node:blk-notes", "node:fld-new", "node:adm", "node:blk-in", "node:blk-s", "node:wrk-other", "node:blk-other"]);
+  const edges = [
+    { type: "CONTAINS", fromNodeId: "node:wrk-new", toId: "blk-notes" },
+    { type: "CONTAINS", fromNodeId: "node:wrk-new", toId: "adm" },
+    { type: "CONTAINS", fromNodeId: "node:adm", toId: "blk-in" },
+    { type: "fieldsOf", fromNodeId: "node:fld-new", toId: "wrk-new" },
+    { type: "CONTAINS", fromNodeId: "node:doc-anchor", toId: "blk-s" },
+    { type: "CONTAINS", fromNodeId: "node:wrk-other", toId: "blk-other" },
+    { type: "CONTAINS", fromNodeId: "node:wrk-new", toId: "blk-held" },
+  ];
+
+  it("answers the document's blocks, the blocks they contain, and Source's values on it, without the document", () => {
+    expect(startedDocumentMembers("node:wrk-new", grouped, edges)).toEqual(["node:blk-notes", "node:adm", "node:blk-in", "node:fld-new"]);
+  });
+
+  it("leaves the rest of the group — a sentence citing it, another source — and a block outside the group to themselves", () => {
+    const members = startedDocumentMembers("node:wrk-new", grouped, edges);
+    for (const other of ["node:blk-s", "node:wrk-other", "node:blk-other", "node:blk-held", "node:wrk-new"]) expect(members).not.toContain(other);
   });
 });

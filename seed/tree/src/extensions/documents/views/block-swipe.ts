@@ -48,6 +48,9 @@ interface Gesture {
   readonly pointerId: number;
   readonly pointerType: string;
   readonly row: HTMLElement;
+  /** Every row the finger moves: the row itself, or each row of the folded
+   * card it is part of. BO_0350_002 */
+  readonly rows: readonly HTMLElement[];
   /** What the release commits against: a block of the document, or the
    * proposal the swipe answers. BO_0315_010 */
   readonly swiped: Swiped;
@@ -105,11 +108,22 @@ export function rowOf(target: EventTarget | null): HTMLElement | null {
  * threshold. The strip is a sliver at that point, so the chip is not clipped
  * by it. BO_0272_007 BO_0272_016
  */
+/** The box the moving rows take together: a card's rows from the top of its
+ * first to the bottom of its last. */
+function boxOf(rows: readonly HTMLElement[]): { top: number; left: number; width: number; height: number } {
+  const boxes = rows.map((row) => row.getBoundingClientRect());
+  const top = Math.min(...boxes.map((box) => box.top));
+  const bottom = Math.max(...boxes.map((box) => box.top + box.height));
+  const left = Math.min(...boxes.map((box) => box.left));
+  const right = Math.max(...boxes.map((box) => box.left + box.width));
+  return { top, left, width: right - left, height: bottom - top };
+}
+
 function paintReveal(gesture: Gesture, offset: number): void {
   const reveal = gesture.reveal;
   if (reveal === null) return;
   const { action, armed } = swipeReveal(gesture.subject, offset, gesture.limits);
-  const box = gesture.row.getBoundingClientRect();
+  const box = boxOf(gesture.rows);
   const travel = Math.abs(offset);
   reveal.dataset.direction = offset < 0 ? "left" : "right";
   reveal.dataset.action = action ?? "";
@@ -121,7 +135,7 @@ function paintReveal(gesture: Gesture, offset: number): void {
 }
 
 function openReveal(page: Document, gesture: Gesture): void {
-  const box = gesture.row.getBoundingClientRect();
+  const box = boxOf(gesture.rows);
   const reveal = page.createElement("div");
   reveal.className = "block-swipe-reveal";
   reveal.setAttribute("aria-hidden", "true");
@@ -134,16 +148,18 @@ function openReveal(page: Document, gesture: Gesture): void {
   reveal.append(page.createElement("span"));
   page.body.append(reveal);
   gesture.reveal = reveal;
-  gesture.row.dataset.swiping = "true";
+  for (const row of gesture.rows) row.dataset.swiping = "true";
 }
 
 function settle(gesture: Gesture): void {
-  const { row, reveal } = gesture;
-  row.style.transition = `transform ${SPRING_MS}ms ease-out`;
-  row.style.transform = "";
-  delete row.dataset.swiping;
+  const { rows, reveal } = gesture;
+  for (const row of rows) {
+    row.style.transition = `transform ${SPRING_MS}ms ease-out`;
+    row.style.transform = "";
+    delete row.dataset.swiping;
+  }
   setTimeout(() => {
-    row.style.transition = "";
+    for (const row of rows) row.style.transition = "";
     reveal?.remove();
   }, SPRING_MS + 40);
 }
@@ -152,7 +168,28 @@ function settle(gesture: Gesture): void {
  * the release answers. BO_0315_010 */
 export type Swiped =
   | { readonly kind: "block"; readonly blockId: string }
-  | { readonly kind: "proposal"; readonly itemId: string };
+  | { readonly kind: "proposal"; readonly itemId: string }
+  | { readonly kind: "card"; readonly groupId: string; readonly itemIds: readonly string[] };
+
+/**
+ * The rows a swipe on a row moves, and what it answers: on a folded card,
+ * every row of the card, answering its group; anywhere else, the row alone.
+ * BO_0350_002
+ */
+export function swipedRows(page: Document, row: HTMLElement): { readonly rows: readonly HTMLElement[]; readonly groupId: string | null } {
+  const groupId = row.getAttribute("data-card-group");
+  if (groupId === null || row.getAttribute("data-card-folded") !== "true") return { rows: [row], groupId: null };
+  // The card's own place: a group the reading order splits is a card in each
+  // place, and a swipe moves and answers the one it is on. BO_0351_024
+  const segment = row.getAttribute("data-card-segment");
+  const rows = [...page.querySelectorAll<HTMLElement>("[data-card-group]")].filter(
+    (other) =>
+      other.getAttribute("data-card-group") === groupId &&
+      other.getAttribute("data-card-folded") === "true" &&
+      other.getAttribute("data-card-segment") === segment,
+  );
+  return { rows: rows.length > 0 ? rows : [row], groupId };
+}
 
 /**
  * Installs the swipe on a page; answers the uninstall. `commit` hears a
@@ -177,14 +214,18 @@ export function installSwipe(
     if (startsAtEdge(event.clientX, frame.innerWidth)) return;
     if (page.getSelection()?.isCollapsed === false) return;
     const itemId = row.getAttribute("data-proposal-id") ?? undefined;
+    const card = swipedRows(page, row);
     gesture = {
       pointerId: event.pointerId,
       pointerType: event.pointerType,
       row,
+      rows: card.rows,
       swiped:
         itemId === undefined
           ? { kind: "block", blockId: row.dataset.blockId ?? "" }
-          : { kind: "proposal", itemId },
+          : card.groupId !== null
+            ? { kind: "card", groupId: card.groupId, itemIds: card.rows.map((one) => one.getAttribute("data-proposal-id") ?? "").filter((id) => id !== "") }
+            : { kind: "proposal", itemId },
       subject:
         itemId === undefined
           ? { kind: "block", standing: readStanding(row.getAttribute("data-standing")) }
@@ -228,7 +269,7 @@ export function installSwipe(
     if (elapsed > 0) live.velocity = (event.clientX - live.lastX) / elapsed;
     live.lastX = event.clientX;
     live.lastAt = event.timeStamp;
-    live.row.style.transform = `translateX(${Math.round(dx)}px)`;
+    for (const row of live.rows) row.style.transform = `translateX(${Math.round(dx)}px)`;
     paintReveal(live, dx);
   };
 

@@ -20,6 +20,7 @@
 - [Block Document Model](./documents/block-document-model.md) — documents, blocks, the block vocabulary, ordering, containment, retirement and structural operations.
 - [Block Editor View](./documents/block-editor.md) — reading presentation, in-place editing, saving, structural gestures and the action surfaces.
 - [Proposed Changes](./documents/proposed-changes.md) — what a run stages into a document and how a person answers it in place.
+- [The Documents Section](./documents/documents-section.md) — the library's list of documents, its filter and its order.
 - [Document Panel](./documents/document-panel.md) — the document's facts, its sessions, its deletion and what it shows.
 - [Command Mode](./documents/command-mode.md) — passages, references and the standing a reader gives a block.
 - [Schema Evolution](./documents/schema-evolution.md) — how the vocabulary changes.

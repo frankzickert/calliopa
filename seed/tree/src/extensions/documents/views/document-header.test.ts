@@ -44,7 +44,8 @@ describe("the document's header", () => {
     const header = view.root.querySelector("[data-document-header]");
     expect(header?.tagName.toLowerCase()).toBe("header");
     const parts = Array.from(header?.children ?? [])
-      .filter((child) => !child.classList.contains("visually-hidden"))
+      // The drop mark stands out of the flow and draws nothing at rest. BO_0349_011
+      .filter((child) => !child.classList.contains("visually-hidden") && !child.hasAttribute("data-shape-mark"))
       .map((child) => child.getAttribute("data-document-route") !== null ? "route" : child.classList.contains("document-title") ? "title" : child.getAttribute("data-document-title-place") !== null ? "place" : child.tagName);
     expect(parts).toEqual(["route", "title", "place"]);
     // The first block is not in the header.
@@ -60,7 +61,8 @@ describe("the document's header", () => {
   it("Then each extension's title contribution is a row of its own, in extension order", async () => {
     const view = await mount();
     const rows = Array.from(view.root.querySelectorAll("[data-document-title-place] [data-title-place-row]")).map((row) => row.getAttribute("data-title-place-row"));
-    expect(rows).toEqual(["structures", "keywords"]);
+    // instructions' row holds the standing instruction; empty, it is hidden (BO_0349_032).
+    expect(rows).toEqual(["structures", "keywords", "instructions"]);
   });
 
   it("Then the compact line is absent at rest, and its anchor stands at the top of the surface, before the header", async () => {

@@ -8,6 +8,8 @@ import { afterSend, optionsOf, ViewBridgeContext, type ViewBar, type ViewBridge 
 
 import type { GrantView, InstructionChoices, InstructionGrants, InstructionTools } from "../lib/instructions";
 import { InstructionChip } from "./chip";
+import { BlockStandingPill, DocumentStandingPill, InstructionsProvider } from "./standing";
+import { EditorSurfaceContext, type EditorSurface } from "~/extensions/documents/views/editor-surface";
 import { InstructionToolsSettings } from "./settings";
 import { InstructionToolsProvider, ToolHeadline } from "./tools";
 
@@ -153,6 +155,20 @@ describe("the instruction in the command chip", () => {
     await fresh.settle(() => options.length > 0);
     expect(fresh.root.querySelector("[data-instruction-toggle]")?.getAttribute("title")).toBe("Instruction: Blog post");
     expect(options[0]).toEqual({ name: "instruction", value: blog.id });
+  });
+
+  it("Given an instruction standing on the block or its document, Then a command carrying nothing starts with it over the person's last, and one carrying a choice keeps it (BO_0349_031)", async () => {
+    vi.stubGlobal("fetch", answering({ reachable: true, isInstruction: false, instructions: [blog, exploration], last: blog.id, standing: exploration.id }));
+    const fresh = await mount(chip({}));
+    await fresh.settle(() => options.length > 0);
+    expect(fresh.root.querySelector("[data-instruction-toggle]")?.getAttribute("title")).toBe("Instruction: Exploration");
+    expect(options[0]).toEqual({ name: "instruction", value: exploration.id });
+    options.length = 0;
+    const kept = await mount(chip({ instruction: blog.id }));
+    await kept.settle(() => kept.root.querySelector("[data-instruction-toggle]") !== null);
+    await kept.settle(() => false);
+    expect(kept.root.querySelector("[data-instruction-toggle]")?.getAttribute("title")).toBe("Instruction: Blog post");
+    expect(options).toEqual([]);
   });
 
   it("draws nothing while the instructions cannot be read, or the instance has none", async () => {
@@ -324,5 +340,43 @@ describe("the chip's size on every pointer (PF_0002_001)", () => {
     expect(css).toMatch(/\n\.instruction-chip__toggle \{[^}]*height:\s*24px;/u);
     expect(css).not.toMatch(/pointer:\s*coarse/u);
     expect(css).not.toMatch(/44px/u);
+  });
+});
+
+// What stands on a block and on a document, drawn as pills (`calliopa-bootstrap`'s
+// `BO_0349_032`): the block's inside the document's decoration provider, the
+// document's under its title, outside it, reading for itself.
+describe("a standing instruction's pills", () => {
+  const standing = { document: { id: blog.id, title: "Blog post" }, blocks: { "blk-1": { id: exploration.id, title: "Exploration" } } };
+  const surfaced = (child: JSXOutput) =>
+    component$(() => {
+      useContextProvider(EditorSurfaceContext, useStore({ loaded: 1 }) as unknown as EditorSurface);
+      return jsx(InstructionsProvider, { documentId: "doc-1", children: child });
+    });
+
+  it("Given an instruction standing on a block, Then its pill shows on the block, and its × takes it off", async () => {
+    const asked: { url: string; body?: unknown }[] = [];
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      asked.push({ url, ...(typeof init?.body === "string" ? { body: JSON.parse(init.body) as unknown } : {}) });
+      if (url.endsWith("/standing") && init?.method === "POST")
+        return new Response(JSON.stringify({ outcome: "success", result: { document: standing.document, blocks: {} } }), { status: 200 });
+      if (url.endsWith("/standing")) return new Response(JSON.stringify({ outcome: "success", result: standing }), { status: 200 });
+      return new Response(JSON.stringify({ instruction: false }), { status: 200 });
+    });
+    const { root, settle, dom } = await mount(jsx(surfaced(jsx(BlockStandingPill, { documentId: "doc-1", blockId: "blk-1", revisionId: "rev-1", active: false })), {}));
+    await settle(() => root.querySelector("[data-instruction-standing]") !== null);
+    expect(root.querySelector("[data-instruction-standing]")?.getAttribute("data-instruction-standing")).toBe(exploration.id);
+    expect(root.querySelector(".instruction-standing__title")?.textContent).toBe("Exploration");
+    await dom.userEvent("[data-instruction-standing-clear]", "click");
+    await settle(() => root.querySelector("[data-instruction-standing]") === null);
+    expect(asked.filter((entry) => entry.body !== undefined)).toEqual([{ url: "/api/x/instructions/documents/doc-1/blocks/blk-1/standing", body: { instruction: null } }]);
+    expect(root.querySelector("[data-instruction-standing]")).toBeFalsy();
+  });
+
+  it("Given an instruction standing on the document, Then its pill shows under the title, read outside the provider", async () => {
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ outcome: "success", result: standing }), { status: 200 }));
+    const { root, settle } = await mount(jsx(DocumentStandingPill, { documentId: "doc-1" }));
+    await settle(() => root.querySelector("[data-instruction-standing]") !== null);
+    expect(root.querySelector("[data-instruction-standing]")?.getAttribute("data-instruction-standing")).toBe(blog.id);
   });
 });

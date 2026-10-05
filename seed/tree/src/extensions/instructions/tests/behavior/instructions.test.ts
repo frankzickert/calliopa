@@ -9,8 +9,10 @@ import { readGraphEnv } from "~/server/ccgw/env";
 import { nodeRef } from "~/server/ccgw/nodes";
 import { call, jsonInit } from "~/server/kernel/client";
 
-import { INSTRUCTION_STRUCTURE, type GrantView, type InstructionChoices } from "../../lib/instructions";
+import { APPLY_A_STRUCTURE, BUILTIN_INSTRUCTIONS, EXTEND_A_STRUCTURE, FILL_A_FIELD_INSTRUCTION, SHAPE_AN_INSTRUCTION, INSTRUCTION_STRUCTURE, type GrantView, type InstructionChoices } from "../../lib/instructions";
 import { choicesFor, createInstruction, forward, instructionInTheChip, instructionRecord } from "../../server/instructions";
+import { builtinInstructions } from "../../server/builtins";
+import { setStanding } from "../../server/standing";
 
 /**
  * `instructions` over the one graph and the kernel (`calliopa-bootstrap`'s
@@ -182,4 +184,57 @@ describe.skipIf(!configured)("instructions over CCGW", () => {
     expect(ok<{ id: string } | null>(await instructionSummary(before))?.id).toBe(before);
     expect(Object.values(ok<{ parameters: Record<string, unknown> }>(await instructionRecord()).parameters)).not.toContain(nodeRef(before));
   });
+
+  it("Given the built-in instructions migration, Then Fill a field stands as an instruction using Instruction under its fixed id, with the release's words, and a second run makes nothing (BO_0349_033)", async () => {
+    await settle();
+    const first = ok<{ statement: string; parameters: Record<string, unknown> }>(await builtinInstructions());
+    if (first.statement !== "") await migrate(first, "the built-in instructions");
+    // Fill a field (BO_0349_033), Shape an instruction (BO_0349_014) and
+    // Extend a structure (BO_0349_036).
+    for (const release of BUILTIN_INSTRUCTIONS) {
+      expect(ok<{ id: string; title: string } | null>(await instructionSummary(release.id))).toMatchObject({ id: release.id, title: release.title });
+      expect(await carrying()).toContain(release.id);
+      const read = ok<{ blocks: readonly { runs?: readonly { text: string }[] }[] }>(await readDocument(release.id));
+      expect(read.blocks.map((block) => (block.runs ?? []).map((run) => run.text).join(""))).toEqual(release.words);
+    }
+    expect(BUILTIN_INSTRUCTIONS.map((release) => release.id)).toEqual([FILL_A_FIELD_INSTRUCTION, SHAPE_AN_INSTRUCTION, EXTEND_A_STRUCTURE, APPLY_A_STRUCTURE]);
+    expect(ok<{ statement: string }>(await builtinInstructions()).statement).toBe("");
+  });
+
+  it("Given an instruction stood on a block and another on its document, Then each stands, a new one replaces the one standing, the chip starts with the block's over the document's, and taking it off leaves the document's (BO_0349_030, BO_0349_031)", async () => {
+    const page = ok<{ documentId: string; blockId: string }>(await createDocument({ title: "A page with standing instructions" }));
+    const first = ok<{ documentId: string }>(await createInstruction("Short and plain")).documentId;
+    const second = ok<{ documentId: string }>(await createInstruction("Long and warm")).documentId;
+    await settle();
+    ok(await retried(() => setStanding({ documentId: page.documentId, instruction: first }) as never));
+    await settle();
+    ok(await retried(() => setStanding({ documentId: page.documentId, blockId: page.blockId, instruction: first }) as never));
+    await settle();
+    const replaced = ok<{ document: { id: string } | null; blocks: Record<string, { id: string; title: string }> }>(
+      await retried(() => setStanding({ documentId: page.documentId, blockId: page.blockId, instruction: second }) as never),
+    );
+    expect(replaced.document?.id).toBe(first);
+    expect(replaced.blocks[page.blockId]).toMatchObject({ id: second, title: "Long and warm" });
+    expect(ok<InstructionChoices>(await choicesFor(page.documentId, page.blockId)).standing).toBe(second);
+    await settle();
+    const off = ok<{ document: { id: string } | null; blocks: Record<string, unknown> }>(
+      await retried(() => setStanding({ documentId: page.documentId, blockId: page.blockId, instruction: null }) as never),
+    );
+    expect(off.blocks[page.blockId]).toBeUndefined();
+    expect(ok<InstructionChoices>(await choicesFor(page.documentId, page.blockId)).standing).toBe(first);
+    // A document that is no instruction, and a block not in the reading order, are refused.
+    const refusedAs = (outcome: { outcome: string; failures?: readonly { rule: string }[] }) => outcome.failures?.[0]?.rule;
+    expect(refusedAs(await setStanding({ documentId: page.documentId, instruction: page.documentId }))).toBe("notAnInstruction");
+    expect(refusedAs(await setStanding({ documentId: page.documentId, blockId: "00000000-0000-4000-8000-000000000000", instruction: first }))).toBe("unknownBlock");
+  }, 60_000);
+
+  it("Given a built-in instruction, Then deleting it is refused in words (BO_0349_035)", async () => {
+    await settle();
+    const read = ok<{ revisionId: string }>(await readDocument(FILL_A_FIELD_INSTRUCTION));
+    const refused = await deleteDocument({ documentId: FILL_A_FIELD_INSTRUCTION, baseRevisionId: read.revisionId });
+    expect(refused.outcome).not.toBe("success");
+    expect(JSON.stringify(refused)).toContain("Fill a field is built in");
+    expect(ok<{ id: string } | null>(await instructionSummary(FILL_A_FIELD_INSTRUCTION))?.id).toBe(FILL_A_FIELD_INSTRUCTION);
+  });
 });
+

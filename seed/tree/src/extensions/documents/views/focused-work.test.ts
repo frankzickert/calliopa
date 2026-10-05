@@ -135,6 +135,25 @@ describe("focused work in the block editor", () => {
     expect(view.record.routed[0]?.route.map((entry) => entry.itemId)).toEqual(["doc-1", "doc-b"]);
   });
 
+  it("Given focused work whose blocks say something, Then the face lists their first words under the block, one line each, and opens the child (BO_0349_019)", async () => {
+    const view = await mount({
+      focused: {
+        "blk-b": {
+          itemId: "doc-b",
+          title: "Request-local caching could reduce repeated checks.",
+          face: null,
+          lines: ["The hook lands here.", "And the second one."],
+        },
+      },
+    });
+    const face = view.row("blk-b")?.querySelector('[data-block-face="doc-b"]');
+    expect([...(face?.querySelectorAll("[data-block-face-line]") ?? [])].map((line) => line.textContent)).toEqual([
+      "The hook lands here.",
+      "And the second one.",
+    ]);
+    expect(face?.getAttribute("aria-label")).toBe("Open Request-local caching could reduce repeated checks.");
+  });
+
   it("A slow initial faces read does not hold block activation, and the face appears when the read answers", async () => {
     let release = () => {};
     const focusedHeld = new Promise<void>((resolve) => {

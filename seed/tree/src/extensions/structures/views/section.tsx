@@ -4,7 +4,8 @@ import { Icon } from "~/components/shell/icons";
 import { ViewBridgeContext } from "~/components/shell/view-bridge";
 import type { SectionProps } from "~/contract";
 
-import { inOrder, UNNAMED_STRUCTURE, type StructuresListing, type StructureView } from "../lib/structures";
+import { inOrder, INSTRUCTION_STRUCTURE, STRUCTURE_STRUCTURE, UNNAMED_STRUCTURE, type StructuresListing, type StructureView } from "../lib/structures";
+import { INSTRUCTION_DRAG_KIND, STRUCTURE_DRAG_KIND } from "./drops";
 
 /**
  * The Structures section (`BO_0299_012`, `BO_0309_015`): the structures, the built-ins
@@ -152,6 +153,16 @@ export const StructuresSection = component$<SectionProps>(({ data, activeItemId 
                     data-current={current ? "true" : undefined}
                     aria-current={current ? "true" : undefined}
                     onClick$={() => open$(structure)}
+                    // A structure is dragged out of the sheet onto a block or a
+                    // document's header, where it is used; *Structure* is never
+                    // used by hand. BO_0349_002
+                    onPointerDown$={(event: PointerEvent) => {
+                      if (structure.id === STRUCTURE_STRUCTURE || event.button !== 0) return;
+                      void bridge.startDrag$(
+                        { itemId: structure.id, kind: STRUCTURE_DRAG_KIND, source: "library", operations: ["link"], preview: structure.name },
+                        event,
+                      );
+                    }}
                   >
                     <span class="library-entry__label">{structure.name}</span>
                     {structure.builtin && <span class="structures-row__builtin">built in</span>}
@@ -191,6 +202,21 @@ export const StructuresSection = component$<SectionProps>(({ data, activeItemId 
                             onClick$={() =>
                               bridge.openTarget$({ kind: "documents:document", itemId: document.id, title: document.title })
                             }
+                            // An instruction, listed under *Instruction*, is dragged
+                            // onto a block or a header, where it stands; `instructions`
+                            // says what its kind means there (BO_0349_011). A structure,
+                            // listed under *Structure*, drags as the structure it is, as
+                            // its own row does (found in the walk at pin 4805).
+                            onPointerDown$={(event: PointerEvent) => {
+                              if (event.button !== 0) return;
+                              const kind =
+                                structure.id === INSTRUCTION_STRUCTURE ? INSTRUCTION_DRAG_KIND : structure.id === STRUCTURE_STRUCTURE ? STRUCTURE_DRAG_KIND : null;
+                              if (kind === null) return;
+                              void bridge.startDrag$(
+                                { itemId: document.id, kind, source: "library", operations: ["link"], preview: document.title },
+                                event,
+                              );
+                            }}
                           >
                             <span class="library-entry__label">{document.title === "" ? "Untitled" : document.title}</span>
                           </button>

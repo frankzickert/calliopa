@@ -25,12 +25,14 @@ export const onGet: RequestHandler = (event) =>
 export const onPost: RequestHandler = (event) =>
   api(event, async () => {
     const itemId = event.params["item"] ?? "";
-    const body = (await event.request.json()) as { kind?: unknown; blockId?: unknown };
+    const body = (await event.request.json()) as { kind?: unknown; blockId?: unknown; blank?: unknown };
     const kind = typeof body.kind === "string" ? body.kind : "";
     const blockId = typeof body.blockId === "string" ? body.blockId : "";
     if (blockId === "") {
       event.json(400, { error: "focused work names the block it opens" });
       return;
     }
-    event.json(200, await openFocusedWork({ kind, targetId: itemId, blockId }));
+    // A nest asks for a child with no blocks: the block it moves in is the
+    // work's first. BO_0349_019
+    event.json(200, await openFocusedWork({ kind, targetId: itemId, blockId, ...(body.blank === true ? { blank: true } : {}) }));
   });

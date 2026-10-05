@@ -1,5 +1,5 @@
 import {
-  isAgentId,
+  isCommandAgent,
   type AgentId,
   type AgentStatus,
   type RuntimeStatus,
@@ -131,11 +131,7 @@ export type RunnerHealth = string | null;
  * the choice is never of an unnamed thing. BO_0225_004 BO_0228_009
  */
 export async function selectableRuntimes(runner: RunnerHealth = null): Promise<readonly SelectableRuntime[]> {
-  const [reported, model, stamped] = await Promise.all([
-    runtimeStatuses(),
-    apiKeyModelConfigured(),
-    agentStatus(),
-  ]);
+  const reported = await runtimeStatuses();
   const signedIn = (id: string, label: string): string | null => {
     const status = reported[id] ?? null;
     if (status === null || !status.installed) return `${label} is not installed in the agent container.`;
@@ -153,22 +149,9 @@ export async function selectableRuntimes(runner: RunnerHealth = null): Promise<r
     signedIn("claude-code", "Claude Code") ??
     (runner === null || runner === "ok" ? null : "The Claude runner in the agent container is not answering.");
 
-  const hermesModel = stamped?.hermesModel ?? "subscription";
-  const hermesName = stamped?.hermesModelName;
-  const hermesReason =
-    hermesModel === "provider"
-      ? model
-        ? null
-        : "Hermes is set to the API-key model, and none is configured."
-      : signedIn("codex", "Codex") === null
-        ? null
-        : "Hermes reasons on the ChatGPT subscription, and Codex is not signed in.";
-
-  return [
-    agent("codex", "Codex", signedIn("codex", "Codex")),
-    agent("claude-code", "Claude Code", claudeReason),
-    agent("hermes", hermesName ? `Hermes · ${hermesName}` : "Hermes", hermesReason),
-  ];
+  // Hermes is no command agent: it prepares in the background, and the menu
+  // offers the two that work. BO_0350_021
+  return [agent("codex", "Codex", signedIn("codex", "Codex")), agent("claude-code", "Claude Code", claudeReason)];
 }
 
 /**
@@ -177,7 +160,9 @@ export async function selectableRuntimes(runner: RunnerHealth = null): Promise<r
  */
 export async function chosenAgent(): Promise<AgentId | null> {
   const choice = await readJson<{ agent?: unknown }>("agent-choice.json");
-  return isAgentId(choice?.agent) ? choice.agent : null;
+  // A choice of Hermes, stored before it stopped taking commands, reads as
+  // none: the menu opens on the first agent that can run. BO_0350_021
+  return isCommandAgent(choice?.agent) ? choice.agent : null;
 }
 
 /**

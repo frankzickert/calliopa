@@ -76,13 +76,33 @@ export const BlockFace = component$<{
   itemId: string;
   title: string;
   face: readonly Run[] | null;
+  /** The first words of the blocks the work holds: listed under the block in
+   * place of its title, so what was nested shows where it was put.
+   * BO_0349_019 */
+  lines?: readonly string[] | undefined;
   open$: QRL<() => void>;
-}>(({ itemId, title, face, open$ }) => (
-  <button type="button" class="block-face" data-block-face={itemId} onClick$={() => open$()}>
-    {face === null
-      ? title
-      : face.map((run, index) => (
-          <Marked key={index} text={run.text} marks={run.marks ?? []} {...(run.link === undefined ? {} : { link: run.link })} />
+}>(({ itemId, title, face, lines, open$ }) => (
+  <button
+    type="button"
+    class={["block-face", lines !== undefined && lines.length > 0 ? "block-face--lines" : ""]}
+    data-block-face={itemId}
+    aria-label={`Open ${title}`}
+    onClick$={() => open$()}
+  >
+    {lines !== undefined && lines.length > 0 ? (
+      <span class="block-face__lines">
+        {lines.map((line, index) => (
+          <span key={index} class="block-face__line" data-block-face-line>
+            {line}
+          </span>
         ))}
+      </span>
+    ) : face === null ? (
+      title
+    ) : (
+      face.map((run, index) => (
+        <Marked key={index} text={run.text} marks={run.marks ?? []} {...(run.link === undefined ? {} : { link: run.link })} />
+      ))
+    )}
   </button>
 ));

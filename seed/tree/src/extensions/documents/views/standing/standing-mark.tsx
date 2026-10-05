@@ -10,6 +10,7 @@ import { StandingContext, standingOf } from "./use-standing";
 const ICON: Readonly<Partial<Record<CardMark, IconName>>> = {
   prompt: "terminal-window",
   removed: "archive",
+  deferred: "clock",
 };
 
 /**

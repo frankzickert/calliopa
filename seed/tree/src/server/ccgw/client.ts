@@ -221,6 +221,11 @@ export interface TouchedSet {
    * established at (`calliopa-bootstrap`'s `BO_0315_001`). */
   readonly rejected?: boolean;
   readonly rejectedAt?: Readonly<Record<string, number>>;
+  /** The person's deferral of the group, and whether a node it touches was
+   * revised since, which brings the card back (`calliopa-bootstrap`'s
+   * `BO_0350_041`). */
+  readonly deferred?: { readonly by: string; readonly at: string };
+  readonly returned?: boolean;
 }
 
 export async function touchedSet(proposal: string): Promise<GraphOutcome<TouchedSet>> {
@@ -405,6 +410,24 @@ export async function decideGroup(decision: Decision, proposal: string, rational
     return { outcome: "refused", detail: `this gather needs the kernel's confirmation: ${envelope.confirmUrl ?? ""}` };
   }
   if (status === 409 || status === 422) return { outcome: "refused", detail: describe(envelope, "the kernel refused the gather") };
+  return { outcome: "storageError", detail: describe(envelope, `the kernel answered ${status}`) };
+}
+
+/**
+ * The person's deferral of a whole group, or taking it back, through the
+ * kernel's review bridge: the group's mark, a person's own, with no
+ * confirmation (`calliopa-bootstrap`'s `BO_0350_041`).
+ */
+export async function markDeferred(proposal: string, deferred: boolean): Promise<GraphOutcome<{ readonly deferred: boolean }>> {
+  let answer;
+  try {
+    answer = await post(port.kernel, `/__kernel/review/${deferred ? "defer" : "undefer"}`, { proposal });
+  } catch (error) {
+    return { outcome: "storageError", detail: `the kernel is unreachable: ${String(error)}` };
+  }
+  const { status, envelope } = answer;
+  if (status === 200 && envelope.status === "success") return { outcome: "success", result: { deferred } };
+  if (status === 400 || status === 409 || status === 422) return { outcome: "refused", detail: describe(envelope, "the kernel refused the deferral") };
   return { outcome: "storageError", detail: describe(envelope, `the kernel answered ${status}`) };
 }
 

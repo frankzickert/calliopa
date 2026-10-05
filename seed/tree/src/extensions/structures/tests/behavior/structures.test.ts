@@ -46,6 +46,7 @@ import {
   readStructure,
   reviseStructure,
   structuresOf,
+  setFieldChild,
   setStructure,
   setValues,
 } from "../../server/structures";
@@ -470,6 +471,47 @@ describe.skipIf(!configured)("structures over CCGW", () => {
     expect(under.blocks[0]!.takeable).not.toContain(line.id);
   });
 
+  it("Given a block nested into a structured block, Then a field holds it, reads as its words, refuses a block not nested there, and returns the typed value once it is taken out (BO_0349_020)", async () => {
+    const page = ok<{ documentId: string; blockId: string }>(await createDocument({ title: "A structured block's fields" }));
+    const article = ok<StructureView>(await createStructure({ name: "Article" }));
+    await settle();
+    await addField(article.id, "Lead", { type: "Text" });
+    await addField(article.id, "When", { type: "Date" });
+    const fields = ok<StructureView>(await readStructure(article.id)).fields;
+    const lead = fields.find((field) => field.name === "Lead")!.key;
+    const when = fields.find((field) => field.name === "When")!.key;
+    ok(await setStructure({ documentId: page.documentId, blockId: page.blockId, structure: article.id, taken: true }));
+    await settle();
+    ok(await setValues({ documentId: page.documentId, blockId: page.blockId, structure: article.id, values: { [lead]: "Typed lead" } }));
+    const work = ok<{ itemId: string }>(await openFocusedWork({ kind: DOCUMENT_TARGET_KIND, targetId: page.documentId, blockId: page.blockId })).itemId;
+    await settle();
+    const opening = ok<{ blocks: readonly { blockId: string }[] }>(await readDocument(work)).blocks[0]!.blockId;
+    const child = ok<{ blockId: string }>(
+      await insertBlock({ documentId: work, block: { kind: "text", runs: [{ text: "The nested lead." }] }, placement: { after: opening } }),
+    ).blockId;
+    await settle();
+    const subject = { documentId: page.documentId, blockId: page.blockId, structure: article.id };
+    const held = ok<DocumentStructuresView>(await retried(() => setFieldChild({ ...subject, field: lead, child, put: true }) as never));
+    const taken = held.blocks[0]!.structures.find((structure) => structure.id === article.id)!;
+    expect(taken.children?.[lead]).toMatchObject([{ blockId: child, words: "The nested lead.", documentId: work }]);
+    expect(taken.values[lead]).toBe("The nested lead.");
+    await settle();
+    // A field of another kind keeps the child beside its own value.
+    const dated = ok<DocumentStructuresView>(await retried(() => setFieldChild({ ...subject, field: when, child, put: true }) as never));
+    expect(dated.blocks[0]!.structures.find((structure) => structure.id === article.id)!.children?.[when]).toMatchObject([{ blockId: child, words: "The nested lead." }]);
+    // A block not nested there, and a field the structure does not declare, are refused.
+    expect(refusedAs(await setFieldChild({ ...subject, field: lead, child: second, put: true }))).toBe("notNested");
+    expect(refusedAs(await setFieldChild({ ...subject, field: "nothing", child, put: true }))).toBe("unknownField");
+    expect(refusedAs(await setFieldChild({ documentId: page.documentId, structure: article.id, field: lead, child, put: true }))).toBe("notABlock");
+    await settle();
+    const out = ok<DocumentStructuresView>(await retried(() => setFieldChild({ ...subject, field: lead, child, put: false }) as never));
+    const after = out.blocks[0]!.structures.find((structure) => structure.id === article.id)!;
+    expect(after.children?.[lead]).toBeUndefined();
+    expect(after.values[lead]).toBe("Typed lead");
+    // Taken out of the field, the block stays in the focused work.
+    expect(ok<{ blocks: readonly { blockId: string }[] }>(await readDocument(work)).blocks.map((block) => block.blockId)).toContain(child);
+  }, 60_000);
+
   it("Given a structure for documents alone, Then no block uses it while the document does, a block carrying it keeps it and says so, and the built-ins are the document's alone", async () => {
     const page = ok<{ documentId: string; blockId: string }>(await createDocument({ title: "Document structures" }));
     await settle();
@@ -590,6 +632,35 @@ describe.skipIf(!configured)("structures over CCGW", () => {
     const made = ok<StructureView[]>(await listStructures()).find((structure) => structure.name === "Video beat");
     expect(made?.id).toBe(started.documentId);
     expect(made?.fields.map((each) => each.name)).toEqual(["Duration"]);
+  }, 30_000);
+
+  it("Given a structure that stands, When a run adds a block to its document and proposes Field there with a type, Then nothing changes until the group is accepted, and then the structure has the new field of that type (BO_0349_023)", async () => {
+    const group = `node:run-bo0349-${Date.now()}`;
+    const standing = ok<StructureView>(await createStructure({ name: "Release" }));
+    await settle();
+    const head = ok<{ resolvedDataRevision: number }>(
+      await query({ statement: "MATCH (d) RETURN GRAPH d ROOT d", roots: [nodeRef(standing.id)], purpose: "test" }),
+    );
+    const run = { id: "arun-bo0349", group, pin: head.resolvedDataRevision };
+    const last = ok<{ blocks: readonly { blockId: string }[] }>(await readDocument(standing.id)).blocks.at(-1)!.blockId;
+    const field = ok<{ blockId: string }>(
+      await withBranch(group, () => insertBlock({ documentId: standing.id, block: { kind: "text", runs: [{ text: "Launch date" }] }, placement: { after: last } })),
+    ).blockId;
+    await settle();
+    const answer = await asRun({ pin: run.pin, overlay: group }, () =>
+      proposeStructuresTool({ input: { document: standing.id, block: field, use: [FIELD_STRUCTURE], values: { [FIELD_STRUCTURE]: { type: "Date" } } }, run }),
+    );
+    for (const each of (answer as { stage?: readonly { statement: string; parameters: Record<string, unknown>; rationale: string }[] }).stage ?? [])
+      ok(await stage(group, each.statement, each.parameters, each.rationale));
+    await settle();
+    expect(ok<StructureView>(await readStructure(standing.id)).fields.map((each) => each.name)).not.toContain("Launch date");
+    const touched = ok<{ touchedNodes: readonly string[]; carryForwardNodes?: readonly string[] }>(await touchedSet(group));
+    for (const node of touched.touchedNodes.filter((each) => !(touched.carryForwardNodes ?? []).includes(each))) ok(await decide("accept", group, node, "the run's field"));
+    const left = await touchedSet(group);
+    for (const relation of left.outcome === "success" ? left.result.stagedRelations : []) ok(await decide("accept", group, relation.id, "the run's field"));
+    await settle();
+    const extended = ok<StructureView>(await readStructure(standing.id)).fields.find((each) => each.name === "Launch date");
+    expect(extended?.type).toBe("date");
   }, 30_000);
 
   it("Given a run in one document that started a structure, Then the chip names it a structure and Accept all there makes it one (DO_0034_008, DO_0034_004)", async () => {

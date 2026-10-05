@@ -427,6 +427,25 @@ Each of these arrives as its own change, adding its model and validation before 
 
 - Under `BO_0251`, transferred 2026-09-16, the editor opens a document a run started before any of it is truth ([Proposed Changes](./proposed-changes.md), `BO_0251_009`).
 - A started document is drawn as its run's proposal (`BO_0251_010`, landed 2026-09-16). When the document read answers `proposed`, `shownProposals` holds every item whatever the toggle holds, the blank page is never offered, and the headline carries `StartedBy` under the title — the proposer's face as `faceOf` gives it and *Proposed by «proposer»* (`proposerName`), `data-document-proposed` with the proposer's tone — while the title keeps the caret. The document stops being started by the reads that already follow an answer: an accepted item re-reads the document (`answerProposal$`, `activate$`, `reviseAccepted$`), and a retitle that took it reads the document and its proposals again in `rename$`. When the last item is rejected the re-read answers `noResult` and the tab shows the unknown document's words, as a document deleted elsewhere does. `.document-title__proposed` and `.document-title__face` in `block-editor.css` use semantic tokens only. `views/proposals/started-document.test.ts` presses it in the render harness, whose `documentsApi` now takes a started document the way the server does (an acceptance or a rename drops `proposed`, the last rejection answers the read `noResult`): the blocks drawn as proposals with no toggle pressed, no blank page, the headline naming Claude Code with its face; an item accepted leaving the ordinary headline and the block; a retitle sent on the started revision leaving the ordinary headline with the blocks still proposals; both items rejected leaving the unknown document's words. Each case was shown to fail when what it checks was taken out.
+- Under `DO_0040` (`docs/changes/completed/DO_0040_FIX_deleting-a-proposed-document.md`), set to draft by
+  the user on 2026-10-05 and transferred here the same day, *Delete* works on a started document;
+  what it rejects is [Block Document Model](./block-document-model.md#deleting-a-started-document).
+  Reported by the user, 2026-10-05: "i am trying to delete a source proposed by an agent. but
+  clicking the trash can has no effect".
+- *Delete* on a started document (`DO_0040_002`, landed 2026-10-05): for a document whose read
+  answers `proposed`, the confirmation says *This document is a proposal. Deleting it rejects it,
+  and the rest of what was proposed with it stays open.* Confirmed, `deleteDocument$` sends `delete`
+  on the started revision and closes its tabs through `bridge.targetGone$`, as for any document. A
+  refused delete, of any document, is raised as a message, *“«title»” was not deleted* with the
+  refusal's words, as well as standing in the notice above the title.
+  `views/proposals/started-document.test.ts` presses both in the render harness, whose bridge
+  records the bodies of raised messages and `targetGone$` and presses a raised message's answer
+  (`[data-harness-message-answer]`), and whose `documentsApi` takes `refuseDelete`; each case fails
+  on the editor before the change.
+- Walked on the instance by the user on 2026-10-05, after the change was accepted at pin 4690
+  (`DO_0040_003`): a source an agent proposed, deleted with the trash can, left its tab and the
+  library while the sentence citing it stayed proposed. The release line stands under *Fixed* in
+  `calliopa-bootstrap`'s `docs/release-notes/unreleased.md`.
 
 ## Separation Of Duties
 
@@ -1382,6 +1401,8 @@ to it.
   it. The reveal names *Remove*. User decision, 2026-09-30.
 * The right swipe keeps. A block of the document is fixated, as it is today. A proposed rewrite, insert or move is
   accepted, and the block it becomes stays kept with no mark. User decision, 2026-09-30.
+* On a folded card, either swipe answers the whole card — every item of its group — as
+  [An Inbox Of Decisions](#an-inbox-of-decisions) says. User decision, 2026-10-05 (`BO_0350_Q11`).
 * The bar at the top of the editor no longer carries *Retire*, for one block or for several marked blocks. User
   decision, 2026-09-30.
 * While reading, Delete or Backspace removes the active block, a fixated block at once. While a text selection marks
@@ -1469,7 +1490,7 @@ Under `calliopa-bootstrap`'s `BO_0322` (`docs/changes/BO_0322_FEAT_a-pinch-deepe
 * Zooming out on a block starts one run, with no choice offered. It rewrites the block into a summary and gathers into its focused work the neighbours that fit, outward in both directions, stopping in a direction at the first that does not. It sends consolidate + understand. User decisions, 2026-09-30 (`BO_0322_Q17`, `BO_0322_Q22`).
 * A pinch runs with the agent and speed of the block's command line; its mode is the pinch's own, and *Keep as content* does not apply, because the block sends no words. User decision, 2026-09-30 (`BO_0322_Q6`, `BO_0322_Q10`).
 * While the fingers close, the block's neighbours tighten on screen toward it, as a drawn hint only; what is gathered comes from the run. User decision, 2026-09-30 (`BO_0322_Q15`).
-- The adapter starts the runs (`BO_0322_010`, landed 2026-10-01; `views/block-pinch.ts`, `pinch$` in `views/block-editor.tsx`). Zooming in past the threshold with the midpoint on a reading row sends the deepen pinch for that block, and zooming out the gather pinch, each through the view bridge's `sendPinch$` with the block, no words and the pinch's own mode (`PINCH_MODE` in `lib/working-mode.ts`: explore + create in, consolidate + understand out); the shell sends its chosen agent and speed, the ones the command line shows. A pinch off a reading row or on a proposal (`[data-proposal-id]`) does nothing, and a refusal is said in the document's notice. The row under the fingers carries `data-pinch` (`zooming-in`, `zooming-out`, and `in` or `out` once armed) and `--pinch`, and takes the accent ring when armed either way; the surface no longer draws back, and *Back* takes no ring. `views/block-pinch.test.ts` proves both sends with their mode, the armed state, the clearing on release, and nothing sent off a row, on a proposal or short of the threshold.
+- The adapter starts the runs (`BO_0322_010`, landed 2026-10-01; `views/block-pinch.ts`, `pinch$` in `views/block-editor.tsx`). Zooming in past the threshold with the midpoint on a reading row sends the deepen pinch for that block, and zooming out the gather pinch, each through the view bridge's `sendPinch$` with the block, no words and the pinch's own mode (`PINCH_MODE` in `lib/working-mode.ts`: explore + create in, consolidate + understand out); the shell sends its chosen agent and speed, the ones the command line shows. A pinch off a reading row or on a proposal that is no card's (`[data-proposal-id]`) does nothing, and on a card it folds or unfolds it (`BO_0350_003`), and a refusal is said in the document's notice. The row under the fingers carries `data-pinch` (`zooming-in`, `zooming-out`, and `in` or `out` once armed) and `--pinch`, and takes the accent ring when armed either way; the surface no longer draws back, and *Back* takes no ring. `views/block-pinch.test.ts` proves both sends with their mode, the armed state, the clearing on release, and nothing sent off a row, on a proposal or short of the threshold.
 - The hint while zooming out (`BO_0322_011`, landed 2026-10-01). The rows around the row under the fingers, as far as its section runs — up to the nearest heading each way, a heading being a reading element whose `data-role` is `h1`–`h6` — carry `data-pinch-neighbour` (`above` or `below`) and `--pinch` while the fingers close, and draw toward it by up to `0.75rem`; they clear when the fingers spread again and on release, and reduced motion keeps the ring and drops the movement. Proven in `views/block-pinch.test.ts`: the section's rows marked on each side, the heading and the rows beyond it not.
 - Verified over a real CCGW and a real kernel on 2026-10-01 (`BO_0322_014`): `tests/behavior/gather.test.ts`, run by `TestShellDocumentsOverCCGW` with the kernel's `BO_0322` half, stages a gather as the kernel's `gather` item compiles it, reads it as one item on its block with the block it moves, accepts it whole — the summary on the block, the focused work holding the moved block and the original words in order — then rejects a second gather into that focused work, leaving the document as it was, and accepts a third, which lands after the focused work's last block. The behaviour project's other failures in that run are the ones an untouched checkout of the same head fails.
 - Walked by the user on the promoted build at pin 3530 on 2026-10-01 (`BO_0322_015`): zooming in and zooming out on a block each started its run, and each run did its job.
@@ -1675,3 +1696,305 @@ Under `calliopa-bootstrap`'s `BO_0322` (`docs/changes/BO_0322_FEAT_a-pinch-deepe
 - Walked by the user on the served build at pin 4504, 2026-10-03, "works" (`DO_0031_006`): no
   *Standing* in the bar with a block focused, edited or several marked; *Fixate* from the block bar
   on a row turned to and on the block being edited; a revealed prompt kept as content and taken back.
+
+## Curation By Drop
+
+- `calliopa-bootstrap`'s `BO_0349` is the originating change (`docs/changes/completed/BO_0349_FEAT_curation-by-drop.md`,
+  promoted to draft by the user on 2026-10-05 and transferred here the same day). `structures` carries
+  the structure rows and the field ([Curation By Drop](../../../../structures/docs/system/system.md#curation-by-drop)),
+  `instructions` the standing instruction and the built-in instructions
+  ([An Instruction Stands On A Block Or A Document](../../../../instructions/docs/system/system.md#an-instruction-stands-on-a-block-or-a-document)),
+  and the shell the red mark and the drag out of the library
+  ([Drag And Drop](../../../../../../docs/system/workspace/drag-and-drop.md), Curation By Drop).
+* The dragged item is the actor and the drop target is what changes: dropping A on B shapes B by A,
+  and the pair of types decides what that means. A drop opens no choice except one: a block dropped
+  on a structured block offers that block's fields. User decision, 2026-10-05.
+* The drop that shapes is the one on a block's middle, the nest of *Dragging Into Blocks And Other
+  Documents*, extended; the upper and lower edges keep placing a block before and after, and
+  reordering is untouched. User decision, 2026-10-05 (`BO_0349_Q1`).
+* A drop that starts a run lights its target red, not with the nesting light; *use structure*, *use
+  instruction* and a nest are the person's own writes and keep the nesting light. User decision,
+  2026-10-05 (`BO_0349_Q8`).
+* What each pair does:
+  - A block on a block's middle nests, as today. When the target uses a structure, the drop offers
+    its fields and the nested block becomes the child for the chosen one (`structures`).
+  - A structure on a block's middle, or on a document's header or structures line, is used there, at
+    once. A structure on the document's body or a passage is applied: a run proposes which part fills
+    which field, and the drop lights red (`BO_0349_Q11`).
+  - An instruction on a block's middle, or on a document's header, stands there (`instructions`).
+  - A block or a passage on an instruction's header starts a run proposing the revision of that
+    instruction which would have produced it; on a structure's header, a run proposing the fields the
+    structure lacks. Both light red. The dragged material stays where it is: it is the run's
+    reference, not a move.
+  - Structure onto structure and instruction onto instruction are not draggable pairs.
+* A drop reaches from the *Structures* sheet into the editor, and across open tabs as `CA_0072` holds
+  a drag over a tab. No equivalent without dragging is part of this change. User decision,
+  2026-10-05 (`BO_0349_Q5`).
+* Block onto block into a field is built first. User decision, 2026-10-05 (`BO_0349_Q7`).
+- An item's type is read from the document it is: a document defining a structure is a structure, a
+  document carrying `record: instruction` is an instruction, anything else is a block or a passage.
+- A structure dropped anywhere in the body that is not a block's middle applies it to the document,
+  since for a structure the gaps between rows place nothing; a structure dropped on a marked passage
+  applies it to that passage. Technical reading of `BO_0349_Q11`.
+- The middle takes a field (`BO_0349_010`, landed 2026-10-05; `views/block-editor.tsx`): a nest that
+  succeeded sets `nested` — the target, the nested block and the focused work it now stands in — and
+  the target's row draws `ui.shell`'s `nested` place under it (`data-nested-place`) until the place
+  says it is finished (`nestDone$`) or the next nest replaces it. What the place asks is the
+  contributing extension's: `structures` offers the target's fields there
+  ([Curation By Drop](../../../../structures/docs/system/system.md#curation-by-drop)), and a tree
+  without it draws nothing and the nest is all the drop meant. Proven in `views/nesting.test.ts`;
+  walked with `BO_0349_016`.
+- A nest shows what was nested (`BO_0349_019`, landed 2026-10-05; `server/focus.ts`, `views/block-controls.tsx`):
+  found in the walk of `BO_0349_010` at pin 4622, where a block dropped on *What is the story telling
+  the reader* went into focused work titled with those words and opened on an empty block, so the
+  target's face said its own words again and the dragged block was nowhere to be seen. The work a
+  nest opens is planned blank — the document alone, no first block — so the dragged block is its
+  first; and a document child's face lists the first words of its blocks that have any, one line
+  each, at most `FACE_LINES` (5) and then *+N more*, cut at 80 characters (`faceLine`), drawn by
+  `BlockFace` (`data-block-face-line`) under the block in place of the title, which stays the
+  button's name. A child holding no words still shows its title. User decision, 2026-10-05.
+- A drag saves what is typed first (`BO_0349_027`, landed 2026-10-05; `startBlockDrag$`): a drag
+  started from the handle of the block being edited saves its words at once, so no drop meets words
+  still waiting for the pause. Before it a drag saved nothing, the likely way the walk at pin 4622 lost
+  a block's typed words; `views/nest-keeps-the-words.test.ts` fails without it.
+- A field whose kind is not text starts a run (`BO_0349_018`, landed 2026-10-05; `structures`'
+  `views/nested.tsx`): in the field choice it is red (`nested-fields__field--acts`,
+  `data-nested-acts="run"`, `"none"` on a text field, titled *Starts a run that reads the value off the block*). Choosing it puts the
+  nested block in, then starts an instructed run through the shell's `sendInstructed$` in the
+  target's document under *Fill a field* (`instructions`' `BO_0349_033`): the goal *Fill the field
+  "«name»" («kind») of «structure» on #1 from #2, the block put into it.* (`fillGoal`), #1 the
+  structured block and #2 the nested block in its focused work. Its run chip stands in the
+  document and its proposal is answered there. A refused run is said in the choice, which stays.
+  Proven in `structures`' `views/views.test.ts`. Walked by the user on the served build at pin 4679,
+  2026-10-05, "works": *Fill a field* listed and open, a date field red, a block put into it and the
+  run proposing its date, accepted from the run's chip, and a text field starting none — with the
+  dev kernel still without `BO_0349_052`, so the run had only the goal's words.
+- The middle and the header take a structure (`BO_0349_011`, the structure's half, landed 2026-10-05;
+  `views/block-editor.tsx`, `views/decorations.tsx` `dropOnDocument`): a text row's middle accepts
+  `move link` (`data-middle-accepts`), and the document's header is the target `header:<document>`,
+  accepting `link`, and `move link` on an instruction. A `link` drop on a middle or the header is
+  handed to the first decorating extension declaring the dragged kind in `drops`, with the item, the
+  document and the block — none for the header — and its refusal stands on the notice; a library item
+  dropped between rows means nothing. A drop that is not refused reads the document again, as after
+  any write, so every decoration reading with it — the structures' pills and lines, a standing
+  instruction's pill — draws what it did at once. Found in the walk at pin 4805, where a structure
+  used by a drop showed only after a reload; `views/structure-drop-redraw.test.ts` fails without it. The header's mark lights as the nest's does for a library item
+  and red for a block on an instruction (`HeaderMark`, `data-drop-active` `true` or `acts`). Proven in
+  `views/structure-drop.test.ts` and `views/shape-instruction.test.ts`.
+- The middle and the header take an instruction too (`BO_0349_011`, the instruction's half, landed
+  2026-10-05): an instruction dragged out of the *Structures* sheet is handed to `instructions`, which
+  stands it on the block or the document. Proven in `views/structure-drop.test.ts`.
+- A structure between the rows is applied to the document (`BO_0349_012`, landed 2026-10-05): every
+  row's edges, a slot and the end accept `move link`, and a library item dropped there reaches its
+  extension's `drops` with `body` set and a `startRun` that sends an instructed run on the bridge in this
+  document. `structures` applies a structure so: a run under *Apply a structure* (`instructions`'
+  `APPLY_A_STRUCTURE`), *Apply the structure #1 to this document: propose it with the values the
+  document's words hold.*, #1 the structure's document. Nothing is used at once. While a library item
+  is held between rows the body lights red (`.document-flow[data-applying]`) and no mark between rows
+  does; an instruction there means nothing. Proven in `views/structure-drop.test.ts`. Walked by the
+  user on the served build at pin 4864, 2026-10-05, "worked": *Apply a structure* listed, a structure
+  held between rows lit the body red, the drop started a run proposing the structure with the
+  document's values, accepted into the header, and a structure on a block's middle still used at once.
+- A structure dropped on a marked passage applies to those words alone (`BO_0349_038`, landed
+  2026-10-05; `views/passages/passage-numbers.tsx`, `views/block-editor.tsx` `passageAt`): in command
+  mode a marked passage's number is the drop target `passage:<block>:<number>`, accepting `link`, and
+  a library item dropped there reaches its extension's `drops` with `passage` set — the block and the
+  passage's words — and a `startRun` in this document. `structures` applies a structure so: a run
+  under *Apply a structure*, *Apply the structure #1 to the passage #2 alone: propose it on the block
+  holding #2, with the values #2's words hold.*, #1 the structure's document and #2 the passage
+  (`ViewInstructedRun`'s `passage` reference). The number lights red while a kind that acts on words
+  (`Decorations.actsOnBody`) is held over it; the body lights red between rows only for such a kind
+  too. Proven in `views/structure-drop.test.ts`, the first test that paints a passage of the view's
+  own document: the painter now finds its row by `data-block-id` and paints nothing on a page that
+  makes no ranges, as the test DOM does. Walked by the user on the served build at pin 4897,
+  2026-10-05, "all worked", with `BO_0349_013`.
+- A marked passage can be dragged (`BO_0349_013`, landed 2026-10-05): pressed and held, a passage's
+  number drags the passage, `documents:passage` naming its block and number with its words as the
+  preview, linked and never moved; a press without moving still takes it back. The number is the
+  handle, not the selection, since a press on selected words extends or ends the selection. Dropped on
+  an instruction's or a structure's header in another document it is the example a run shapes it by,
+  as a block is (`shape$`), the run told of the passage by its words — #1 a `passage` reference —
+  and the header lights red for it; on any other header and anywhere else it lands on nothing. Proven
+  in `views/shape-instruction.test.ts`. Walked by the user at pin 4897, 2026-10-05, "all worked": a
+  passage's number dragged onto an instruction's and a structure's header lit it red and started the
+  run, and a press without moving took the passage back.
+- An instruction's header takes an example (`BO_0349_014`, landed 2026-10-05; `views/block-editor.tsx`
+  `shape$`, `ShapeMark`): on a document carrying `record: instruction` the header is the drop target
+  `shape:<document>`, accepting `move`, and `ShapeMark` lights it red — `--error`, out of the flow —
+  while a drop there is what a release would do. A block dropped there from another document starts an
+  instructed run through `sendInstructed$` in the instruction under *Shape an instruction*
+  (`instructions`' `SHAPE_AN_INSTRUCTION`): *Revise this instruction so that, followed, it would
+  produce material like #1, the block dropped on it.*, #1 the block in its own document. The block is
+  not moved. A block of the instruction itself, a proposal and a retired row start nothing, and a
+  refused run is said on the notice. The kernel tells a run aimed at an instruction that its words are
+  to be improved, never applied, so the revision is proposed into the instruction and answered there.
+  Any other document's header is no target. Proven in `views/shape-instruction.test.ts`.
+- A structure's header takes an example (`BO_0349_036`, landed 2026-10-05; `shape$`): the view's read
+  answers what an extension names the document (`named`, from `kindOfDocument`), and on a document
+  `structures` names a *structure* the header accepts `move link` as an instruction's does. A block
+  from another document dropped there starts an instructed run in the structure under *Extend a
+  structure* (`instructions`' `EXTEND_A_STRUCTURE`): *Propose the fields this structure lacks, read off
+  #1, the block dropped on it.*, #1 the block, which is not moved. The header's mark lights only where
+  the drop would land (`ViewDragState.operation`), red where it starts a run: a block over a plain
+  document's header, which takes none, lights nothing — the mark lit red there before, from the walk's
+  build at pin 4795 on. Proven in `views/shape-instruction.test.ts`. Walked by the user on the served
+  build at pin 4829, 2026-10-05, "worked": *Extend a structure* listed, a block held over a structure's
+  header lit it red, the drop started a run proposing new fields, the block stayed, and a plain
+  document's header lit nothing.
+- A drop-started run is a run like any other (`BO_0349_015`, landed 2026-10-05): its run chip stands
+  in the target document and its proposals are answered there, as the user found for each kind —
+  *Fill a field*, *Shape an instruction*, *Extend a structure*, *Apply a structure*, the document and
+  a passage — on the served builds from pin 4679 to 4897. Proven by those walks, not by a harness test
+  per kind: the kernel half (`BO_0349_052`) is proven in `calliopa-bootstrap`'s
+  `internal/kernel/agentbridge/instruction_test.go` and the views' halves in the tests named above.
+- Walked by the user on the served build on a desktop and a phone (`BO_0349_016`, 2026-10-05, "all
+  tested", after the walks at pins 4654, 4679, 4776, 4820, 4829, 4864 and 4897): a block into a field
+  and a non-text field, a structure and an instruction from the *Structures* sheet onto a block and a
+  document's header, a structure onto the body and onto a marked passage, material onto an
+  instruction and a structure in another tab, the red mark before each release that starts a run.
+- `calliopa-bootstrap`'s `docs/release-notes/unreleased.md` carries the change under *Added*, what a
+  drop does by what is dropped on what, and a *Fixed* line for the typed words a dragged block lost
+  (`BO_0349_017`).
+
+
+## A Selection Made By Touch
+
+- Under `DO_0039` (`docs/changes/completed/DO_0039_FIX_formatting-a-selection-on-a-phone.md`), set to
+  draft by the user on 2026-10-05 and transferred here the same day.
+* On a phone, words selected by touch in the block being edited are what *Bold*, *Italic*,
+  *Strikethrough*, *Code*, *Link*, *Cite* and the inline equation act on, as a mouse or keyboard
+  selection is on a desktop, and the *Format* toggles show the marks of the selected words.
+  Reported by the user, 2026-10-05: "text formatting does not work on mobile, bold italics".
+- The block being edited follows the selection (`DO_0039_001`, landed 2026-10-05;
+  `views/block-editor.tsx`, `ActiveBlockText`): while it is mounted it listens for
+  `selectionchange` on its own document and, when the selection is a range whose two ends fall
+  inside its element, reads it through `select$` into `editor.start`, `editor.end`,
+  `editor.marks` and `editor.link`. A selection made by touch fires no `keyup` and no `mouseup`,
+  so before this the *Format* controls acted on the collapsed caret the tap had left. A collapsed
+  caret is still read on `keyup` and `mouseup` alone, which a tap fires: read from
+  `selectionchange` it could land between an input and `input$`'s read of it, and the read judges
+  the edit against the width of the range it replaced (`couldBeOneEdit`).
+- A tap on a *Format* control keeps the selection with no change to it (`DO_0039_002`, checked
+  2026-10-05): preventing the default of `mousedown` (`keepsSelection`,
+  `components/shell/inspector.tsx`) is enough under touch. Measured in Chromium emulating a 390px
+  touch phone, on a `contenteditable` with a word selected and a button below it: with the
+  `mousedown` guard the tap's click finds the word still selected and the text still focused;
+  without it the button takes the focus. A phone's own browser is the user's walk below.
+- `views/touch-selection.test.ts` proves it in the render harness: the page's selection moved over
+  a word with no key and no mouse event, `selectionchange` dispatched, *Bold* and *Italic* pressed
+  in the shell's bar, the word drawn `strong` with both toggles pressed and the saved runs carrying
+  both marks on it alone; a range outside the block leaves the block's own. The first fails
+  without the listener.
+- The release line stands under *Fixed* in `calliopa-bootstrap`'s
+  `docs/release-notes/unreleased.md`, and the user walked it on a phone at pin 4642, 2026-10-05:
+  words selected by touch in a block being edited took *Bold*, then *Italic*, and both were kept
+  after a reload (`DO_0039_003`).
+
+## An Inbox Of Decisions
+
+- `calliopa-bootstrap`'s `BO_0350` is the originating change (`docs/changes/completed/BO_0350_FEAT_an-inbox-of-decisions.md`,
+  promoted to draft by the user on 2026-10-05 and transferred here the same day): the person decides
+  on cards by gesture, and Hermes, in the background, prepares the likely next ones and arranges what
+  is drawn. The shell carries the edge pile, the agent menu without Hermes and the right panel's
+  category of what Hermes learned ([Drag And Drop](../../../../../../docs/system/workspace/drag-and-drop.md),
+  An Inbox Of Decisions). The kernel's half — the prepared run and its claim, the act feed, the
+  arrangement and one group per place — is `calliopa-bootstrap`'s `docs/system/ui-kernel.md`, *An
+  Inbox Of Decisions*; the `prepared` and `deferred` marks are its `docs/system/ccgw.md`. A line here
+  replaces the lines of [Swipe Removes Or Keeps](#swipe-removes-or-keeps) and
+  [A Pinch Deepens Or Gathers](#a-pinch-deepens-or-gathers) that it contradicts.
+* This change adds no button and no menu. Every new act is a gesture — swipe, pinch, drag, or typing
+  — and the controls that stand today stay until experience shows they can go. User decision,
+  2026-10-05.
+* A card is one decision. It stands in one place: a run stages one proposal group for each place it
+  works on, and each group is a card drawn where it applies. One swipe answers all of it — right
+  puts it into the body, left dismisses it with a trace. User decisions, 2026-10-05 (`BO_0350_Q11`).
+* A pinch on a card changes how finely the person decides: zooming in splits it into its items, each
+  answered on its own as items are today, and zooming out draws the card again. On a block the pinch
+  keeps deepening and gathering, and no pinch navigates. On a desktop a trackpad pinch over a card
+  does the same, and so does a key pair on the active card. User decisions, 2026-10-05
+  (`BO_0350_Q10`).
+* The person defers a card by dragging it onto the pile at the screen's edge, shown only while a card
+  is dragged. Deferring asks for no reason. A deferred card comes back when its block changes, and
+  *Show proposed changes* draws the deferred cards in place, marked deferred. User decisions,
+  2026-10-05 (`BO_0350_Q1`, `BO_0350_Q5`, `BO_0350_Q12`).
+* A card names the run it came from — the agent, the command and the block it was given from. There
+  is no path strip. User decisions, 2026-10-05 (`BO_0350_Q3`, `BO_0350_Q9`).
+* Hermes chooses which cards are drawn, at most seven, and what is collapsed or dimmed; the
+  document's order and content change only by the person's gestures. User decision, 2026-10-05
+  (`BO_0350_Q7`).
+* Zooming in on a card that holds one item deepens it: a run refines that proposal with more detail,
+  and the refined proposal stands as the card. Hermes may prepare it like any pinch. User decision,
+  2026-10-05 (`BO_0350_Q15`).
+- A card is an open group drawn collapsed. A swipe on it answers through `answerGroup$`, as *Accept
+  all* and *Reject all* do; the items' ✓ and ✗ and the run chip's answers stay as they are.
+- The card (`BO_0350_001`, landed 2026-10-05; `views/cards.ts`). `cardPlaces` reads the drawn rows: the
+  rewrites, inserts, moves and gathers of one group drawn next to each other are one card, any other
+  row between them ends it, and a group the reading order splits is a card in each place. Each row
+  carries `data-card-group`, `data-card-edge` (`only`, `first`, `middle`, `last`) and
+  `data-card-folded`. A folded card's rows share a 4px leading edge, and a connector draws that edge
+  across the room between them; unfolded, each row is drawn as before. The panel's count of
+  unanswered items is unchanged.
+- The swipe answers a card (`BO_0350_002`, landed 2026-10-05; `views/block-swipe.ts`). On a folded card,
+  `swipedRows` takes every row of the card: the finger moves them together, the reveal spans them, and
+  the release answers the group through `answerGroup$`. Unfolded, the row moves and is answered
+  alone, as before. Delete or Backspace on a row of a folded card rejects the whole group.
+- The pinch on a card (`BO_0350_003`, landed 2026-10-05; `views/block-pinch.ts`). A pinch whose midpoint
+  is on a card folds or unfolds it and sends no run: zooming in unfolds, zooming out folds (`refold`),
+  held per tab in `unfoldedCards` and never stored. A pinch on a block still sends its run.
+- The desktop's pinch (`BO_0350_004`, landed 2026-10-05). A `wheel` with `ctrlKey` over a card — a
+  trackpad's pinch — is kept from zooming the page, its steps' scale (`exp(-deltaY / 100)` each)
+  multiplied until the fingers rest 200 ms and read by `pinchOutcome`. While reading, `+` unfolds and
+  `-` folds the card the row turned to belongs to. A wheel off a card stays the browser's.
+- Proven (`BO_0350_001`–`BO_0350_004`) in `views/proposals/cards.test.ts`: a deepen's rewrite and added
+  block as one card and another group's row as its own, a split group as a card in each place, the
+  rows' attributes in the render harness, `swipedRows` taking a folded card's rows and an unfolded
+  row alone, Delete rejecting the group with no single answer, `+`, `-` and Delete on one unfolded
+  item, a touch pinch folding and unfolding with no run sent, and a trackpad's pinch unfolding with
+  the page kept from zooming. The Delete case was shown to bite. The unit project: 227 files,
+  1933 tests.
+- The arrangement drawn (`BO_0350_005`, landed 2026-10-05; `lib/arrangement.ts`, `server/arrangement.ts`).
+  The view reads the reader's arrangement (`GET d/[id]/arrangement`, which reads the kernel's
+  `/__kernel/arrangement`) beside every read of the proposals; one that cannot be read is none.
+  `drawnGroups` decides which shown groups are drawn: the arrangement's cards in its order, or with
+  none arranged the first seven in the order they stand, and a group the reader showed on their
+  own — a chip pressed, their run staging — whatever the arrangement says. The other open groups
+  are counted and not drawn. A block the arrangement collapses or dims carries `data-arranged`
+  (`collapsed`, `dimmed`) until it is focused or edited.
+- Deferring (`BO_0350_006`, landed 2026-10-05). A proposal is dragged by its face offering `move` and
+  `defer`, so the shell's edge pile shows for it (`BO_0350_020`); a drop on the pile (`overId`
+  `later`, operation `defer`) sends `deferGroup {groupId, deferred: true}` for the card's whole
+  group, which the server forwards to the kernel's `review/defer` (`markDeferred`), and the
+  proposals are read again. The proposals read answers `deferred` on a group the reader deferred
+  that has not come back; a deferral whose block was revised since reads as not deferred, so the
+  card returns to the flow.
+- *Show proposed changes* draws the deferred cards (`BO_0350_007`, landed 2026-10-05): a deferred group
+  leaves the flow and is drawn while the toggle is on, its rows labelled *deferred* on their top
+  border (`CardLabel`, the `clock` glyph, `data-proposal-deferred`) and answered by the same swipe.
+- A prepared pinch (`BO_0350_008`, landed 2026-10-05). Every pinch sent reads the proposals again at
+  once, so a run Hermes prepared — which has staged already — is drawn as its card in that read
+  rather than when the run reports. The run chip follows the claimed run like any other.
+- A card names its run (`BO_0350_013`, landed 2026-10-05; `cardOrigin` in `views/cards.ts`). The first
+  row of a card carries, after what the proposal does, the first line of the command that made it
+  and the block it was given from by its first words — *Tighten the opening — from “Opening
+  paragraph…”* — read from the document's runs list (`id`, `goal`, `group`, `source`); a group no
+  listed run staged names none.
+- A pinch on a card of one proposal (`BO_0350_014`, landed 2026-10-05). Zooming in on a card of one
+  item, which has nothing to unfold, sends the pinch with that proposal as the reader saw it —
+  `proposal: {group, item, revisionId}` on the bridge's `sendPinch$`, carried by the runs route
+  (`readPinchTarget`) as a block reference with `target: proposal` — and the kernel deepens it
+  (`calliopa-bootstrap`'s `BO_0350_058`).
+- Proven (`BO_0350_005`–`BO_0350_008`, `BO_0350_013`, `BO_0350_014`) in
+  `views/proposals/inbox.test.ts`: the first seven drawn and a group the reader showed besides, an
+  arrangement's cards in its order, a deferred group out of the flow and drawn by the toggle, a
+  malformed arrangement read as none; a card's origin; the pile shown for a card and not a block
+  and a pinch target naming a proposal; in the render harness only the arranged card drawn with a
+  dimmed block, a card dropped on the pile deferred and drawn deferred, and a one-proposal card's
+  pinch sent as the proposal deepened. The arrangement's cap was shown to bite. The unit project:
+  231 files, 1957 tests.
+- A rename tells Hermes what the work is (`BO_0350_065`, landed 2026-10-05). Once the server's
+  `rename` command has written the title, it posts `{kind: "title", artifact, words}` to the
+  kernel's `/__kernel/acts` as the signed-in person (`recordTitle` in `server/arrangement.ts`); a
+  post the kernel does not take never fails the rename.
+- The release line stands under *Added* in `calliopa-bootstrap`'s `docs/release-notes/unreleased.md`
+  (`BO_0350_012`): cards answered whole by a swipe, a pinch showing a card's parts or deepening it, a
+  card kept for later by dragging it aside, and Hermes preparing in the background.

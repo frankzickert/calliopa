@@ -2,6 +2,8 @@ import { contributions as declare, type ViewContribution } from "~/contract";
 
 import { BlockStructureControl, TitleStructureControl } from "./views/control";
 import { StructureLabel } from "./views/label";
+import { NestedFieldChoice } from "./views/nested";
+import { STRUCTURE_DRAG_KIND, useDroppedStructure } from "./views/drops";
 import { StructuresProvider } from "./views/provider";
 import { FormerStructurePage } from "./views/former-page";
 import { StructuresSection } from "./views/section";
@@ -42,8 +44,13 @@ export const contributions = declare({
   decorations: {
     document: {
       provider: StructuresProvider,
-      places: { headline: StructureLabel, underCommand: BlockStructureControl },
+      places: { headline: StructureLabel, underCommand: BlockStructureControl, nested: NestedFieldChoice },
       documentPlaces: { title: TitleStructureControl },
+      // A structure dragged out of the Structures sheet, used where it lands.
+      // BO_0349_011
+      drops: { [STRUCTURE_DRAG_KIND]: useDroppedStructure },
+      // Between the rows a structure is applied by a run. BO_0349_012
+      actsOnBody: [STRUCTURE_DRAG_KIND],
     },
   },
 });

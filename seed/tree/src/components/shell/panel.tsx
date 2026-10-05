@@ -142,6 +142,11 @@ export const SectionHeader = component$<{
   createLabel?: string | undefined;
   onToggle$: QRL<() => void>;
   onCreate$: QRL<() => void>;
+  /** The funnel of a section declaring a filter: whether its row shows,
+   * whether the choice differs from the default or a search is typed, and the
+   * press that shows or hides the row. Absent draws no funnel. DO_0038_002 */
+  filter?: { readonly open: boolean; readonly filtered: boolean } | undefined;
+  onFilter$?: QRL<() => void>;
 }>((props) => {
   const state = sectionState(props.layout, props.sectionKey);
   return (
@@ -176,6 +181,20 @@ export const SectionHeader = component$<{
           onClick$={() => props.onCreate$()}
         >
           <Icon name="plus" />
+        </button>
+      )}
+      {props.filter !== undefined && (
+        <button
+          type="button"
+          class="library-action library-action--icon"
+          aria-label={`Filter ${props.title}`}
+          aria-pressed={props.filter.open}
+          aria-controls={`${props.elementId}-filter`}
+          data-filter-section={props.name}
+          data-filtered={props.filter.filtered ? "true" : undefined}
+          onClick$={() => props.onFilter$?.()}
+        >
+          <Icon name="funnel" />
         </button>
       )}
     </div>

@@ -8,6 +8,7 @@ import type {
 } from "../server/documents";
 import type { DocumentView, BlockView } from "../server/assemble";
 import type { WorkingMode } from "../lib/working-mode";
+import type { Arrangement } from "../lib/arrangement";
 import type { GraphOutcome } from "~/server/outcome";
 import type { BlobReference } from "~/server/ccgw/blobs";
 
@@ -255,18 +256,46 @@ export const answerProposal = async (
     }),
   );
 
+/** Keeps a card for later, or takes it back: the person's mark on the whole
+ * group. BO_0350_006 */
+export const deferGroup = async (
+  id: string,
+  groupId: string,
+  deferred: boolean,
+): Promise<GraphOutcome<{ readonly deferred: boolean }>> =>
+  readOutcome<{ readonly deferred: boolean }>(
+    await fetch(`/api/x/documents/d/${id}/commands`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(withBranchBody({ command: "deferGroup", groupId, deferred }, id)),
+    }),
+  );
+
+/** What Hermes arranged on the document for the reader. An arrangement that
+ * cannot be read is none: the document draws its own first seven, and the
+ * proposals read beside it goes on. BO_0350_005 */
+export const readArrangement = async (id: string): Promise<GraphOutcome<Arrangement>> => {
+  try {
+    return await readOutcome<Arrangement>(await fetch(`/api/x/documents/d/${id}/arrangement`));
+  } catch (error) {
+    return { outcome: "storageError", detail: `The arrangement could not be read: ${String(error)}` };
+  }
+};
+
 /** Answers every item of one group at once, *Accept all* or *Reject all*;
  * answers the items it answered and what stays standing. BO_0343_012 */
 export const answerGroup = async (
   id: string,
   groupId: string,
   answer: "accepted" | "rejected",
+  itemIds?: readonly string[],
 ): Promise<GraphOutcome<{ readonly answered: readonly string[]; readonly notice?: string }>> =>
   readOutcome<{ readonly answered: readonly string[]; readonly notice?: string }>(
     await fetch(`/api/x/documents/d/${id}/commands`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(withBranchBody({ command: "answerGroup", groupId, answer }, id)),
+      // One card of the group when its items are named. BO_0351_024
+      body: JSON.stringify(withBranchBody({ command: "answerGroup", groupId, answer, ...(itemIds === undefined ? {} : { itemIds }) }, id)),
     }),
   );
 

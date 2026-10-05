@@ -490,11 +490,30 @@ runner=$!
 ) &
 codexrunner=$!
 
+# Hermes in the background: the kernel hands it each person's rested acts and
+# it answers what to prepare and how to arrange it, keeping what it learns of
+# the person in Honcho when the memory service runs. Under the gateway's
+# bearer, on the port after the image runner's. BO_0350_060 BO_0350_061
+(
+  child=""
+  trap 'kill "$child" 2>/dev/null; exit 0' TERM INT
+  while true; do
+    HERMES_HOME="$HERMES_HOME" HONCHO_BASE_URL="${HONCHO_BASE_URL:-}" \
+      python3 /usr/local/bin/calliopa-orchestrator &
+    child=$!
+    wait "$child" || true
+    echo "the orchestrator stopped; starting it again"
+    sleep 2
+  done
+) &
+orchestrator=$!
+
 pid=""
 shutdown() {
   kill "$broker" 2>/dev/null || true
   kill "$runner" 2>/dev/null || true
   kill "$codexrunner" 2>/dev/null || true
+  kill "$orchestrator" 2>/dev/null || true
   if [ -n "$pid" ]; then
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true

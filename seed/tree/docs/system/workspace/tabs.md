@@ -90,3 +90,17 @@
 ## A Held Drag Opens A Tab
 
 - A tab and a tab edge are spring-loaded places for a dragged block (`CA_0072_003`, [Drag And Drop](./drag-and-drop.md), Holding Over A Place Opens It): each tab carries `data-spring="tab:<id>"` and becomes active after the hold (`selectTab`); each `TabEdge` carries `tab-edge:before` or `tab-edge:after` and steps to the neighbouring tab through `stepTab$`, once per hold, again after another. A tab dragged over a tab keeps reordering as it did, since a tab's payload never springs. `TabEdge` takes the shell's drag store for its hold mark. `header-menu.test.ts` presses a hold over an edge in the render harness: the edge after carries the mark and names what it opens, the edge before carries none.
+
+## Hermes Brings Work Forward
+
+- Under `calliopa-bootstrap`'s `BO_0350`, the cards stand only in the work they apply to, and Hermes
+  decides which work to bring forward (user decision, 2026-10-05, `BO_0350_Q2`).
+* Hermes brings work forward by marking it: the tab that holds the document, or its library entry
+  when it is not open. Opening a tab stays the person's act. User decision, 2026-10-05
+  (`BO_0350_Q16`).
+- The forward mark (`BO_0350_024`, landed 2026-10-05; `src/lib/forward.ts`). The shell reads what Hermes
+  puts forward (`GET /api/hermes/forward`, from the reader's arrangement in the kernel) as it opens
+  and whenever the active tab changes, and marks each such document with an accent dot named
+  *Hermes puts this forward*: on the tab that holds it, and on its library entry while no tab does.
+  A document the reader opens is no longer marked for the session. Nothing opens a tab. Proven in
+  `learned.test.ts`: an opened document unmarked, and an entry marked only while no tab holds it.

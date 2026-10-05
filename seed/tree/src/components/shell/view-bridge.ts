@@ -38,6 +38,14 @@ export interface ViewDrop {
 export interface ViewDragState {
   /** The target under the pointer, so a view can show its own drop indicator. */
   readonly overId: string | null;
+  /** What is being dragged, so a view's indicator can say what a release
+   * would do with it — a block on an instruction's header starts a run, a
+   * structure there does not (calliopa-bootstrap's BO_0349_011). */
+  readonly payload?: DragPayload | null;
+  /** What a release over the target would do, or null when the target takes
+   * nothing of what is dragged, so a mark lights only where the drop would
+   * land (`BO_0349_036`). */
+  readonly operation?: DragOperation | null;
   readonly drop: ViewDrop | null;
 }
 
@@ -579,6 +587,29 @@ export interface ViewGesture {
 }
 
 /**
+ * A run whose words the view writes and an instruction guides
+ * (`calliopa-bootstrap`'s `BO_0349_052`): a drop that starts work — a block put
+ * into a field whose value a run reads off it. It is written in no block, so
+ * the view names the blocks it is about as references, numbered as its words
+ * name them.
+ */
+export interface ViewInstructedRun {
+  /** The tab's target, which the run proposes into. */
+  readonly itemId: string;
+  /** What the run is asked, in the view's words. */
+  readonly goal: string;
+  /** The instruction's document id. */
+  readonly instruction: string;
+  /** The blocks the words name, `#n` each; `document` when a block stands in
+   * another document. */
+  readonly references: readonly (
+    | { readonly number: number; readonly blockId: string; readonly document?: string }
+    | { readonly number: number; readonly kind: "document"; readonly document: string }
+    | { readonly number: number; readonly kind: "passage"; readonly blockId: string; readonly quote: string; readonly document?: string }
+  )[];
+}
+
+/**
  * A pinch on a block of the view's target (`BO_0322`): a command with no
  * words, zooming in or out on one block. What each direction asks for is the
  * base skill's convention, which the kernel names to the run; the view says
@@ -590,6 +621,9 @@ export interface ViewPinch {
   readonly blockId: string;
   readonly pinch: "in" | "out";
   readonly mode: WorkingMode;
+  /** The proposal a pinch in on a card of one item deepens, as the reader saw
+   * it. BO_0350_014 */
+  readonly proposal?: { readonly group: string; readonly item: string; readonly revisionId: string };
 }
 
 /** What sending a command answered: the run it started, or the refusal in
@@ -789,6 +823,12 @@ export interface ViewBridge {
    * BO_0322_016
    */
   readonly sendPinch$: QRL<(pinch: ViewPinch) => Promise<SentCommand>>;
+  /**
+   * Starts a run whose words the view wrote, under the instruction it names,
+   * on the chosen agent and speed, proposing into the target, followed as a
+   * command's is. BO_0349_052
+   */
+  readonly sendInstructed$: QRL<(run: ViewInstructedRun) => Promise<SentCommand>>;
   /**
    * Opens a document reached along a route — going back to a crumb — in a tab
    * of its own beside the active one, or makes the tab already showing it

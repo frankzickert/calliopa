@@ -10,6 +10,7 @@ import {
   startBridgeRun,
 } from "./bridge";
 import type { RunEvent } from "./run-events";
+import { port } from "../port";
 import { readSession } from "../session";
 
 /**
@@ -134,31 +135,79 @@ export const pinchName = (pinch: "in" | "out"): string => (pinch === "in" ? "Dee
 export const firstLine = (words: string): string => words.trim().split("\n")[0]?.trim() ?? "";
 
 /**
+ * When a dropped stream is followed again, and how long reconnecting may keep
+ * failing before the run is given up: 1s, 5s, then every 15s, for five
+ * minutes. Injectable so a suite need not wait them out. CA_0080_002
+ */
+export interface FollowTiming {
+  readonly delays: readonly number[];
+  readonly every: number;
+  readonly bound: number;
+}
+
+export const FOLLOW_TIMING: FollowTiming = { delays: [1_000, 5_000], every: 15_000, bound: 5 * 60_000 };
+
+/**
+ * The abandoned outcome `run-lifecycle.md` fixes: the run is failed with an
+ * error saying the application stopped following it and the agent may have
+ * finished the work, not that the run itself failed. CA_0080_002
+ */
+export const ABANDONED_RUN_ERROR =
+  "The application stopped following this run; the agent may have finished the work.";
+
+/**
  * Follows a run to its end through the bridge's stream and keeps the process
  * current: the step while it works, the terminal state when it ends. A
  * stream that ends with no terminal event fails the process rather than
  * leaving it running forever.
  */
-export async function followRun(processId: string, runId: string): Promise<void> {
+export async function followRun(processId: string, runId: string, timing: FollowTiming = FOLLOW_TIMING): Promise<void> {
   await moveProcess(processId, { state: "running", step: "Started", error: null });
   let ended = false;
-  const followed = await followBridgeEvents(runId, async (event) => {
-    if (event.kind === "runCompleted") {
-      ended = true;
-      await moveProcess(processId, { state: "completed", step: "Done", error: null });
-    } else if (event.kind === "runFailed") {
-      ended = true;
-      await moveProcess(processId, { state: "failed", step: null, error: event.error });
-    } else if (event.kind === "runCancelled") {
-      ended = true;
-      await moveProcess(processId, { state: "cancelled", step: "Cancelled", error: null });
-    } else if (!ended) {
-      await moveProcess(processId, { state: "running", step: stepFor(event), error: null });
-    }
-  });
+  let received = 0;
+  const follow = () =>
+    followBridgeEvents(runId, async (event) => {
+      received += 1;
+      if (event.kind === "runCompleted") {
+        ended = true;
+        await moveProcess(processId, { state: "completed", step: "Done", error: null });
+      } else if (event.kind === "runFailed") {
+        ended = true;
+        await moveProcess(processId, { state: "failed", step: null, error: event.error });
+      } else if (event.kind === "runCancelled") {
+        ended = true;
+        await moveProcess(processId, { state: "cancelled", step: "Cancelled", error: null });
+      } else if (!ended) {
+        await moveProcess(processId, { state: "running", step: stepFor(event), error: null });
+      }
+    });
+  let followed = await follow();
   if (!followed.ok) {
     await moveProcess(processId, { state: "failed", step: null, error: followed.detail });
     return;
+  }
+  // A stream that broke while the run goes on is followed again: the run
+  // keeps showing running, and the bridge answers a reconnect with the run's
+  // buffered events first, so an end that came meanwhile still arrives. A
+  // reconnect that delivers events has recovered; only one that keeps
+  // failing for the bound gives the run up, as abandoned. CA_0080_002
+  let failingSince: number | null = null;
+  let attempt = 0;
+  while (!ended && (!followed.ok || followed.value === "dropped")) {
+    const now = port.now().getTime();
+    failingSince ??= now;
+    if (now - failingSince >= timing.bound) {
+      await moveProcess(processId, { state: "failed", step: null, error: ABANDONED_RUN_ERROR });
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, timing.delays[attempt] ?? timing.every));
+    attempt += 1;
+    const before = received;
+    followed = await follow();
+    if (received > before) {
+      failingSince = null;
+      attempt = 0;
+    }
   }
   // A run that concluded without proposing — a silence an extension's tool
   // recorded — says so in its detail. BO_0264_017

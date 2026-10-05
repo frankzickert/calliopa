@@ -42,7 +42,9 @@ export const LibraryRow = component$<{
   onMark$?: QRL<(document: string, title: string) => void> | undefined;
   /** A dragged block is held over the row: it carries the hold mark. */
   held?: boolean | undefined;
-}>(({ item, current, onOpen$, pointing, onMark$, held }) => {
+  /** Hermes puts the entry's document forward and no tab holds it. BO_0350_024 */
+  forward?: boolean | undefined;
+}>(({ item, current, onOpen$, pointing, onMark$, held, forward }) => {
   const open = item.open;
   const parts = (
     <>
@@ -89,6 +91,7 @@ export const LibraryRow = component$<{
       // active tab. CA_0072_004
       data-spring={`library:${item.id}`}
       data-spring-hold={held === true ? "true" : undefined}
+      data-forward={forward === true ? "true" : undefined}
       data-reference={marking && pointing.number !== null ? pointing.number : undefined}
       aria-current={current ? "true" : undefined}
       onClick$={() => onOpen$(open)}
@@ -98,6 +101,11 @@ export const LibraryRow = component$<{
           above already says the same thing, so naming the marker too would
           append it to the entry's name. */}
       {current && <span class="library-entry__marker" aria-hidden="true" />}
+      {forward === true && (
+        <span class="forward-mark" data-forward-mark>
+          <span class="visually-hidden">, Hermes puts this forward</span>
+        </span>
+      )}
     </button>
   );
   if (!marking) return row;

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { MIGRATIONS as ROLE_MIGRATIONS } from "~/extensions/structures/server/migrations";
 import { documentsCarrying, structuresOf } from "~/extensions/structures/server/structures";
-import { createDocument, deleteDocument, insertBlock, listDocuments, readDocument } from "~/extensions/documents/server/documents";
+import { createDocument, deleteDocument, insertBlock, listDocuments, proposeDocumentChanges, readDocument, readDocumentProposals } from "~/extensions/documents/server/documents";
 import { decideGroup, query, stage, write } from "~/server/ccgw/client";
 import { asRun } from "~/server/ccgw/branch-scope";
 import { proposeWork, readWorks } from "../../server/tools";
@@ -206,6 +206,40 @@ describe.skipIf(!configured)("sources are documents", () => {
     const titles = (answer: { result: unknown }) => (answer.result as { works: { record: { title: string } }[] }).works.map((work) => work.record.title);
     expect(titles(await asRun({ pin, overlay: group }, () => readWorks({ input: {}, run })))).toContain(title);
     expect(titles(await readWorks({ input: {}, run }))).not.toContain(title);
+    ok(await decideGroup("reject", group, "the suite's run"));
+  });
+
+  it("Given a source a run proposed with a sentence citing it, When the source is deleted, Then the source's members are rejected and the sentence stays proposed (DO_0040_001)", async () => {
+    const anchor = ok<{ documentId: string }>(await createDocument({ title: `Where the deleted source was cited ${stamp}` }));
+    made.push(anchor.documentId);
+    await settle();
+    const pin = ok<{ dataRevision?: number }>(await readDocument(anchor.documentId)).dataRevision ?? 0;
+    const title = `A source deleted while proposed ${stamp}`;
+    const proposed = await asRun({ pin }, () =>
+      proposeWork({ input: { record: { title, kind: "webpage", URL: `https://example.org/deleted-${stamp}`, author: [{ literal: "River Trust" }] } }, run: { id: "arun-do0040", group: "", pin } }),
+    );
+    const workId = (proposed.result as { workId: string }).workId;
+    const group = ok<{ groupId: string }>(
+      await proposeDocumentChanges({
+        documentId: anchor.documentId,
+        items: [{ kind: "insert", block: { kind: "text", runs: [{ text: "As " }, { text: "", cite: { work: workId } }, { text: " found." }] }, placement: { at: "end" } }] as never,
+        request: { by: "the behaviour suite" },
+      }),
+    ).groupId;
+    for (const each of proposed.stage ?? []) ok(await stage(group, each.statement, each.parameters, each.rationale));
+    await settle();
+
+    const started = ok<{ revisionId: string; proposed?: { group: string } }>(await readDocument(workId));
+    expect(started.proposed?.group).toBe(group);
+    const before = ok<readonly { documentId: string }[]>(await listDocuments());
+    expect(before.some((entry) => entry.documentId === workId)).toBe(true);
+    ok(await deleteDocument({ documentId: workId, baseRevisionId: started.revisionId }));
+
+    expect((await readDocument(workId)).outcome).toBe("noResult");
+    const listed = ok<readonly { documentId: string }[]>(await listDocuments());
+    expect(listed.some((entry) => entry.documentId === workId)).toBe(false);
+    const left = ok<{ groups: readonly { groupId: string; items: readonly unknown[] }[] }>(await readDocumentProposals(anchor.documentId));
+    expect(left.groups.find((one) => one.groupId === group)?.items).toHaveLength(1);
     ok(await decideGroup("reject", group, "the suite's run"));
   });
 });

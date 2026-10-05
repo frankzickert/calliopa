@@ -3,7 +3,7 @@ import { $, component$, useStore, useVisibleTask$ } from "@builder.io/qwik";
 import { Icon } from "~/components/shell/icons";
 import type { BlockDecorationProps } from "~/contract";
 
-import { orderedChoices, INSTRUCTION_OPTION, NO_INSTRUCTION_OPTION, type InstructionChoice, type InstructionChoices } from "../lib/instructions";
+import { orderedChoices, startingInstruction, INSTRUCTION_OPTION, NO_INSTRUCTION_OPTION, type InstructionChoice, type InstructionChoices } from "../lib/instructions";
 import "./instructions.css";
 
 /**
@@ -51,9 +51,11 @@ export const InstructionChip = component$<BlockDecorationProps>(({ documentId, b
       state.chosen = held;
       return;
     }
-    if (commandOptions?.[NO_INSTRUCTION_OPTION] !== undefined) return;
-    const last = choices?.last ?? null;
-    if (last !== null && choices?.instructions.some((instruction) => instruction.id === last) === true) await choose$(last);
+    if (commandOptions?.[NO_INSTRUCTION_OPTION] !== undefined || choices === null) return;
+    // A command carrying none starts with the instruction standing on its
+    // block or its document, else the person's last. BO_0349_031
+    const start = startingInstruction(choices);
+    if (start !== null) await choose$(start);
   });
 
   const choices = state.choices;

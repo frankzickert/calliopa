@@ -40,6 +40,29 @@ export class RegistryError extends Error {
   }
 }
 
+/** A section's filter, refused by name when the shell could not draw it as
+ * declared: on a component section, which draws its own; with a default
+ * order it does not declare; or with two groups or orders of one name.
+ * DO_0038_001 */
+function checkFilter(key: string, section: LibrarySection): void {
+  const filter = section.filter;
+  if (filter === undefined) return;
+  if (section.component !== undefined) {
+    throw new RegistryError("filter_shape", `section ${key} is a component and draws its own filter`);
+  }
+  if (!filter.orders.some((order) => order.id === filter.defaultOrder)) {
+    throw new RegistryError("filter_order_unknown", `section ${key}'s filter defaults to ${filter.defaultOrder}, which it does not declare`);
+  }
+  const names = filter.groups.map((group) => group.name);
+  const ids = filter.orders.map((order) => order.id);
+  for (const list of [names, ids]) {
+    const twice = list.find((name, index) => list.indexOf(name) !== index);
+    if (twice !== undefined) {
+      throw new RegistryError("filter_collision", `section ${key}'s filter names ${twice} twice`);
+    }
+  }
+}
+
 /** The frame's own contributions are not an extension's: their names stay bare. */
 export const HOST = "host";
 
@@ -189,6 +212,7 @@ export function buildRegistry(
       if (section.kind !== undefined && section.opens !== undefined) {
         throw new RegistryError("section_opens", `section ${key} names both a kind of its own and one it opens`);
       }
+      if (section.filter !== undefined) checkFilter(key, section);
       sections.push({
         ...section,
         key,

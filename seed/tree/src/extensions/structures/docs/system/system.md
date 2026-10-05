@@ -1030,3 +1030,96 @@ model); this extension says what stays and returns the built-ins to the release.
   structure a person added to *Keyword* gone, its release fields and their blocks standing, a
   person's structure and a legacy `blockRole` gone from every read, and the guard still refusing an
   ordinary deletion of a built-in.
+
+## Curation By Drop
+
+Under `calliopa-bootstrap`'s `BO_0349` (`documents`' `docs/changes/completed/BO_0349_FEAT_curation-by-drop.md`,
+promoted to draft by the user on 2026-10-05 and transferred here the same day). This extension's
+half: a structure dropped on a block or a document, a block nested into a field, and a run that
+proposes the fields a structure lacks. The drop itself is `documents`'
+[Curation By Drop](../../../documents/docs/system/documents/block-editor.md#curation-by-drop).
+
+* A structure dropped on a block's middle, or on a document's header or its structures line, is used
+  there, written as the person's truth at once, as taking it from the typeahead is. It is a fourth way
+  a structure reaches a block, under the same rule: only a structure the subject can use where it
+  stands, any other refused at the drop with the reason. The structure then opens on its fields, so
+  its unfilled required fields are the next thing to do. User decision, 2026-10-05.
+* A block dropped on the middle of a block that uses a structure is nested there and offered that
+  block's fields, grouped under each structure's name. The chosen field holds the nested child
+  itself: editing the child is editing the field's value, and nothing is copied. Every field is
+  offered; a field whose kind is not text — a number, a date, a choice, a file — keeps the child too,
+  and a run proposes the value read off it. A field may hold several children, in order, and a new
+  one lands after those there. User decisions, 2026-10-05 (`BO_0349_Q9`, `BO_0349_Q10`,
+  `BO_0349_Q12`).
+- A field holds children (`BO_0349_020`, landed 2026-10-05; `lib/children.ts`, `server/structures.ts`):
+  `roleFields` permits `children`, keyed by field `key`, each an ordered list of block ids, an additive
+  vocabulary change staged with the code through `kernel commit --members`. `…/structures/[structureId]/fields`
+  on a block takes `{field, child}` and puts the block at the end of the field, or `{field, child, put:
+  false}` and takes it out (`parseFieldChild` in `contributions.server.ts`); a body naming no `child`
+  stores values as before. `setFieldChild` refuses, in words, a document as the subject
+  (`notABlock`), a structure the block does not use, a key the structure does not declare
+  (`unknownField`), and a block that is not in the block's focused work (`notNested`), found by
+  `childrenOf` and that work's own read. `structuresOf` answers a used structure's `children`, each
+  `{blockId, words}`, read where they stand: one `childrenOf` for the blocks holding any, then each
+  focused work's read, so a child moved out or retired drops from the read. `valuesWithChildren`
+  makes a text field read as its children's words in order, a long text field as paragraphs, and a
+  reference as the list of them; a value typed before stays stored and is read again once the last
+  child is taken out. A field of another kind keeps its own value beside its children
+  (`startsRun`). A block taken out of a field stays where it is. The harness's vocabulary copy
+  follows (`calliopa-bootstrap`'s `ui-kernel.md`, `BO_0349_050`). Proven in `lib/children.test.ts`,
+  in `server/api.test.ts` for the body, and under the kernel harness in
+  `tests/behavior/structures.test.ts`: a block nested into an *Article* block put into *Lead* and
+  *When*, *Lead* reading as its words, each refusal, and the typed value back once it is taken out.
+- The popover shows a field's children (`BO_0349_021`, landed 2026-10-05; `views/control.tsx`): under an
+  unfolded structure, a field holding blocks lists them by their first words
+  (`data-field-children`, `firstWords`, 60 characters), each with a × (`data-take-child`) that takes
+  it out. A text, long text or reference field holding blocks draws no input, since the blocks are
+  where it is edited; a field of another kind draws its input with the list under it. Proven in
+  `views/views.test.ts`.
+- A child in the popover opens (`BO_0349_024`, landed 2026-10-05): a field's child carries the focused
+  work it stands in and its title (`FieldChild.documentId`, `documentTitle`), and pressing its words
+  (`data-open-child`) opens that work in a tab of its own along the route — the parent's with the
+  block the field stands on — landing on the child (`openAlongRoute$`). Proven in `views/views.test.ts`.
+- The field choice after a nest is this extension's `nested` place (`BO_0349_022`, landed 2026-10-05;
+  `views/nested.tsx`, `NestedFieldChoice`): `ui.shell`'s contract draws the place under a block a drop
+  has just nested a block into, handed the nested block and the focused work it now stands in, and
+  `documents` draws it ([Curation By Drop](../../../documents/docs/system/documents/block-editor.md#curation-by-drop)).
+  The place reads the block's structures from this extension's provider: each structure it uses,
+  not merely proposed and declaring a field, a group under its name (`fieldGroups`), each field a
+  button (`data-nested-field`) that posts `{field, child}`; *Just nest it* (`data-nested-skip`),
+  `Escape` or a press outside finishes the place and leaves the plain nest, and a refusal is said in
+  the route's words (`data-nested-refusal`) with the choice kept. A block using no structure with a
+  field is asked nothing and the place finishes at once. It stands in the row's flow under the block,
+  never over it, and the first field takes the focus. Proven in `views/views.test.ts`.
+- A structure used from a drop (`BO_0349_025`, landed 2026-10-05; `views/drops.ts`
+  `useDroppedStructure`, contributed as `drops["structures:structure"]`): it posts `{structure, taken:
+  true}` to the block's or the document's structures route, so the drop is refused exactly as the
+  typeahead is, and announces the document's structures it answers (`STRUCTURES_CHANGED`) so every
+  pill and control on the page draws them. The section's rows start the drag
+  (`views/section.tsx`, `STRUCTURE_DRAG_KIND`), and so do the documents listed under *Structure*, which
+  are the structures themselves (found in the walk at pin 4805; walked by the user at pin 4820,
+  2026-10-05, "works": a structure from its row onto a block and from under *Structure* onto a header,
+  each shown at once); the documents listed under *Instruction* drag as
+  `instructions:instruction` (`INSTRUCTION_DRAG_KIND`, named as a word, since this extension does not
+  depend on `instructions`), which `instructions` stands where it lands. Proven in `views/views.test.ts`
+  and `documents`' `views/structure-drop.test.ts`.
+- Between the rows a dropped structure is applied, not used (`BO_0349_012`, landed 2026-10-05;
+  `applyDroppedStructure`): a drop with `body` starts, through the drop's `startRun`, a run under
+  *Apply a structure* in the document, #1 the structure's document, and writes nothing at once.
+  A drop on a marked passage (`BO_0349_038`, landed 2026-10-05) starts the same run told to apply the
+  structure to that passage alone, #2 the passage. The structure's kind is in `actsOnBody`, so the
+  editor lights the body and a passage's number red for it.
+- A structure used from a drop opens on its fields (`BO_0349_037`, landed 2026-10-05): the drop leaves
+  its opening in this extension's module (`takeOpening`), and the editor, which reads the document
+  again after the drop with the block it landed on edited, lets the provider — or, for the header,
+  the title's control, reading again on the new data revision — take it into `opening`, so the
+  structure's chip opens on its fields. A value in the module rather than an event: the read the drop
+  causes is what the provider already follows. Proven in `documents`' `views/structure-drop-redraw.test.ts`.
+- A run proposes fields for a structure (`BO_0349_023`, landed 2026-10-05) with the tools that stand:
+  it inserts a block into the structure's document, its words the field's name, and proposes *Field*
+  on it through `propose_structures` with the field's `type` and options among Field's values, which
+  read what the run staged (`BO_0344`). Nothing changes until the person accepts the group, and then
+  the structure has the field, its key minted from its name. *Extend a structure* (`instructions`'
+  `BO_0349_036`) is what asks for it. Proven under the kernel harness in
+  `tests/behavior/structures.test.ts`: a *Release* structure gaining *Launch date* as a date.
+

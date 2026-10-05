@@ -166,3 +166,27 @@ receives the replay through the view bridge and plays what the schedule says.
   `tests/behavior/replay.test.ts` over the kernel harness (the document at the pin after a rewrite
   and an insert were accepted, both read as staged with the note, and a rejected rewrite read as
   staged).
+
+## One Card Per Place
+
+- `calliopa-bootstrap`'s `BO_0351` is the originating change (`docs/changes/completed/BO_0351_FEAT_one-card-per-place.md`,
+  promoted to ready by the user on 2026-10-05 and completed the same day): a run's work is one card
+  for each place it works on. The kernel and the core are unchanged — a run keeps one group — and a
+  card is a place of it ([Block Editor](./block-editor.md#an-inbox-of-decisions), the card).
+* A place is the rows that stand together: a block the run rewrites or removes and the blocks it
+  adds directly beside it, with no untouched block between them. User decision, 2026-10-05
+  (`BO_0351_Q1`).
+* A run's chip answers the whole run: *Accept all* and *Reject all* answer every card it made, and a
+  swipe answers one card. User decision, 2026-10-05 (`BO_0351_Q2`).
+- A card is answered on its own (`BO_0351_024`, landed 2026-10-05). `cardPlaces` counts a group's places
+  in reading order as `segment` (`data-card-segment`); a swipe on a folded card moves only the rows
+  of its own place, and the release answers that card's items through `answerGroup$` with their ids
+  — Delete on the card turned to answers the same items (`cardItems`). The server's `answerGroup`
+  takes `itemIds` and decides only those members, in the one batch it decides a whole group in;
+  taking a started document and answering the run's work elsewhere stay the whole answer's. The run
+  chip's *Accept all* and *Reject all* name no items and answer the run. Proven in
+  `views/proposals/cards.test.ts`: a group in two places counted as two segments, a swipe moving
+  only its own card, and Delete on one card rejecting that card's items alone while the other
+  stands, shown to bite.
+- The release line stands under *Changed* in `calliopa-bootstrap`'s `docs/release-notes/unreleased.md`
+  (`BO_0351_022`).

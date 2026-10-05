@@ -288,11 +288,25 @@ export type RunShape =
   | { readonly ok: true; readonly gesture: false; readonly pinch?: undefined }
   | { readonly ok: true; readonly gesture: true; readonly intention: string; readonly pinch?: undefined }
   | { readonly ok: true; readonly gesture: false; readonly pinch: "in" | "out" }
+  | { readonly ok: true; readonly gesture: false; readonly instructed: true; readonly pinch?: undefined }
   | { readonly ok: false; readonly error: string };
 
-export function readRunShape(body: { readonly goal?: unknown; readonly intention?: unknown; readonly pinch?: unknown }): RunShape {
+export function readRunShape(body: {
+  readonly goal?: unknown;
+  readonly intention?: unknown;
+  readonly pinch?: unknown;
+  readonly instructed?: unknown;
+}): RunShape {
   const goal = typeof body.goal === "string" ? body.goal.trim() : "";
   const intention = typeof body.intention === "string" ? body.intention.trim() : "";
+  // A run whose words a view wrote and that an instruction guides — a drop on
+  // a structured block (`calliopa-bootstrap`'s `BO_0349_052`): its goal is the
+  // view's words, it is written in no block and asks no extension.
+  if (body.instructed === true) {
+    if (goal === "") return { ok: false, error: "An instructed run carries the words the view wrote as its goal." };
+    if (intention !== "" || body.pinch !== undefined) return { ok: false, error: "An instructed run asks no intention and is no pinch." };
+    return { ok: true, gesture: false, instructed: true };
+  }
   // A pinch is a command with no words and no question: zooming in or out
   // on one block. BO_0322_016
   if (body.pinch !== undefined) {
@@ -328,15 +342,46 @@ export function readGestureTarget(body: { readonly artifact?: unknown }): ReadTa
 }
 
 /**
+ * An instructed run's target (`BO_0349_052`): the document it proposes into
+ * and the blocks the view names, in its own numbering, with no source, since
+ * the run is written nowhere.
+ */
+export function readInstructedTarget(body: { readonly artifact?: unknown; readonly references?: unknown }): ReadTarget {
+  const artifact = typeof body.artifact === "string" ? body.artifact.trim() : "";
+  if (artifact === "") return { ok: false, error: "An instructed run names the document it proposes into." };
+  const listed = body.references ?? [];
+  if (!Array.isArray(listed)) return { ok: false, error: MALFORMED_REFERENCES };
+  const references: SentReference[] = [];
+  for (const entry of listed as unknown[]) {
+    const reference = readReference(entry);
+    if (typeof reference === "string") return { ok: false, error: reference };
+    references.push(reference);
+  }
+  return { ok: true, target: { artifact, delivery: "propose", references } };
+}
+
+/**
  * A pinch's target (`BO_0322`): the document it was made in, which its run
  * proposes into, and the one block it was made on, as its one reference. It
  * names no source, because a pinch is written nowhere. BO_0322_016
  */
-export function readPinchTarget(body: { readonly artifact?: unknown; readonly block?: unknown }): ReadTarget {
+export function readPinchTarget(body: { readonly artifact?: unknown; readonly block?: unknown; readonly proposal?: unknown }): ReadTarget {
   const artifact = typeof body.artifact === "string" ? body.artifact.trim() : "";
   const block = typeof body.block === "string" ? body.block.trim() : "";
   if (artifact === "" || block === "") {
     return { ok: false, error: "A pinch names the document and the block it was made on." };
+  }
+  // A pinch on a card of one proposal names that proposal as the person saw
+  // it, and deepens it (`calliopa-bootstrap`'s `BO_0350_058`). BO_0350_014
+  if (body.proposal !== undefined) {
+    const proposal = body.proposal as Record<string, unknown> | null;
+    const group = typeof proposal?.["group"] === "string" ? proposal["group"].trim() : "";
+    const item = typeof proposal?.["item"] === "string" ? proposal["item"].trim() : "";
+    const revisionId = typeof proposal?.["revisionId"] === "string" ? proposal["revisionId"].trim() : "";
+    if (group === "" || item === "" || revisionId === "") {
+      return { ok: false, error: "A pinch on a proposal names its group, its item and the revision seen." };
+    }
+    return { ok: true, target: { artifact, delivery: "propose", references: [{ kind: "block", number: 1, blockId: block, target: "proposal", group, item, revisionId }] } };
   }
   return { ok: true, target: { artifact, delivery: "propose", references: [{ kind: "block", number: 1, blockId: block }] } };
 }

@@ -74,7 +74,10 @@ async function mount() {
 describe("every drawn row has a place", () => {
   it("Given the rows revealed, Then a proposed insert, a removed row and a fixated block are drop targets and a rewrite is not one of its own", async () => {
     const view = await mount();
-    const targets = Array.from(view.root.querySelectorAll("[data-drop-target]")).map((element) => element.getAttribute("data-drop-target"));
+    // The rows' places; the header is a target of its own (BO_0349_011).
+    const targets = Array.from(view.root.querySelectorAll("[data-drop-target]"))
+      .map((element) => element.getAttribute("data-drop-target"))
+      .filter((target) => !(target ?? "").startsWith("header:"));
     expect(targets).toEqual([
       "block:blk-a",
       "block:blk-r",

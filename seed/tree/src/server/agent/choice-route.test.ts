@@ -62,13 +62,15 @@ describe("remembering the composer's choice", () => {
   it("Given anything else, Then it is refused in words and nothing is written", async () => {
     for (const body of [
       JSON.stringify({ agent: "provider" }),
+      // Hermes takes no command. BO_0350_021
+      JSON.stringify({ agent: "hermes" }),
       JSON.stringify({}),
       "not json",
     ]) {
       const answer = await put(body);
       expect(answer.status).toBe(400);
       expect(answer.body).toEqual({
-        error: "agent must be codex, claude-code or hermes",
+        error: "agent must be codex or claude-code",
       });
     }
     expect(await written()).toBeNull();

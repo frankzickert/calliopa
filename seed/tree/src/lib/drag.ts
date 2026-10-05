@@ -7,6 +7,8 @@ export const DRAG_OPERATIONS = [
   "open-in-tab",
   "attach-to-command",
   "process-input",
+  // A card kept for later, dropped on the edge pile. BO_0350_020
+  "defer",
 ] as const;
 export type DragOperation = (typeof DRAG_OPERATIONS)[number];
 
@@ -52,6 +54,15 @@ export function resolveOperation(
  * CA_0068_008
  */
 export const PANEL_ICON_KIND = "panel-icon";
+
+/**
+ * The pile a card is kept for later on (BO_0350_020): drawn at the work's
+ * trailing edge only while something that offers `defer` is dragged — a
+ * view's card — and gone when the drag ends. A drop on it is the view's,
+ * handed over as every drop on a target the shell does not own.
+ */
+export const LATER_TARGET = "later";
+export const showsLater = (payload: DragPayload | null): boolean => payload?.operations.includes("defer") === true;
 export const PANEL_ICON_TARGET = "panel-icon:";
 
 /** The operation a drop over `target` performs: `resolveOperation`, once the
@@ -71,7 +82,22 @@ export function resolveDrop(payload: DragPayload, target: DropTarget): DragOpera
  */
 export const SPRING_HOLD_MS = 600;
 
-export const springs = (payload: DragPayload | null): boolean => payload?.source === "workspace";
+export const springs = (payload: DragPayload | null): boolean =>
+  payload !== null &&
+  (payload.source === "workspace" ||
+    // A structure or an instruction dragged out of the library opens a tab
+    // held over it too, so it reaches a document not shown (calliopa-bootstrap's
+    // BO_0349_003); a library icon only moves.
+    (payload.source === "library" && payload.kind !== PANEL_ICON_KIND));
+
+/**
+ * Whether a drag out of the library closes the phone's library sheet
+ * (`BO_0349_003`): once the pointer leaves the sheet, so the work beneath it,
+ * where the item is dropped, is reached. The sheet stays while the pointer is
+ * over it, and nothing else closes it here.
+ */
+export const leavesSheet = (sheet: string | null, payload: DragPayload | null, overSheet: boolean): boolean =>
+  sheet === "left" && payload !== null && payload.source === "library" && payload.kind !== PANEL_ICON_KIND && !overSheet;
 
 /** A hold under way: the place and when the pointer arrived there. `since` is
  * `null` once the hold has opened its place, so it opens once per arrival. */

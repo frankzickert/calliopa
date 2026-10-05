@@ -1,8 +1,9 @@
 import type { RequestHandler } from "@builder.io/qwik-city";
 import { api } from "~/server/api";
-import { readAttachments, readCommandTarget, readGestureTarget, readMode, readPinchTarget, readRunShape } from "~/lib/command-target";
+import { readAttachments, readCommandTarget, readGestureTarget, readInstructedTarget, readMode, readPinchTarget, readRunShape } from "~/lib/command-target";
 import { writeAttachments } from "~/server/agent/attachments";
 import { conductRun, followRun } from "~/server/agent/conductor";
+import { inBackground } from "~/server/background";
 import { isRecordId } from "~/server/uuid";
 
 /**
@@ -44,6 +45,7 @@ export const onPost: RequestHandler = (event) =>
       commandOptions?: unknown;
       pinch?: unknown;
       block?: unknown;
+      instructed?: unknown;
     };
     const goal = typeof body.goal === "string" ? body.goal.trim() : "";
     // The shape decides which target is read: a gesture names the document it
@@ -58,7 +60,15 @@ export const onPost: RequestHandler = (event) =>
     }
     // A pinch names the document and its one block, and nothing it was
     // written in. BO_0322_016
-    const target = shape.gesture ? readGestureTarget(body) : shape.pinch !== undefined ? readPinchTarget(body) : readCommandTarget(body);
+    // An instructed run names the document and the blocks the view chose, and
+    // nothing it was written in. BO_0349_052
+    const target = shape.gesture
+      ? readGestureTarget(body)
+      : shape.pinch !== undefined
+        ? readPinchTarget(body)
+        : "instructed" in shape
+          ? readInstructedTarget(body)
+          : readCommandTarget(body);
     if (!target.ok) {
       event.json(400, { error: target.error });
       return;
@@ -83,6 +93,10 @@ export const onPost: RequestHandler = (event) =>
       !shape.gesture && commandOptions !== null && typeof commandOptions === "object" ? (commandOptions as Record<string, unknown>)["instruction"] : undefined;
     if (chosenInstruction !== undefined && (typeof chosenInstruction !== "string" || !isRecordId(chosenInstruction))) {
       event.json(400, { error: "a command's instruction is an instruction's id" });
+      return;
+    }
+    if ("instructed" in shape && chosenInstruction === undefined) {
+      event.json(400, { error: "an instructed run names the instruction that guides it" });
       return;
     }
     // The variation of the instruction's format chosen beside Send; the kernel
@@ -121,7 +135,7 @@ export const onPost: RequestHandler = (event) =>
       return;
     }
 
-    void followRun(started.process.id, started.runId);
+    void inBackground("follow run", started.runId, () => followRun(started.process.id, started.runId));
     event.json(201, {
       runId: started.runId,
       processId: started.process.id,

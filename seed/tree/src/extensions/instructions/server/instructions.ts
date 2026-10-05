@@ -10,6 +10,8 @@ import { documentsCarrying, structuresOf, setStructure } from "~/extensions/stru
 import { HAS_BLOCK_STRUCTURE } from "~/extensions/structures/lib/structures";
 
 import { INSTRUCTION_STRUCTURE, type InstructionChoices } from "../lib/instructions";
+import { builtinInstructions } from "./builtins";
+import { standingOf } from "./standing";
 
 /**
  * What `instructions`' routes are made of (`calliopa-bootstrap`'s `BO_0311`):
@@ -49,7 +51,7 @@ async function lastInstruction(documentId: string): Promise<string | null> {
  * document's own chip, which starts at *No instruction* (`BO_0298_Q9`).
  */
 export async function choicesFor(documentId: string, blockId: string): Promise<GraphOutcome<InstructionChoices>> {
-  const [listed, own, roles] = await Promise.all([listInstructions(), instructionSummary(documentId), structuresOf(documentId)]);
+  const [listed, own, roles, standing] = await Promise.all([listInstructions(), instructionSummary(documentId), structuresOf(documentId), standingOf(documentId)]);
   if (listed.outcome !== "success") return listed as GraphOutcome<never>;
   if (own.outcome !== "success") return own as GraphOutcome<never>;
   const taken = new Set<string>();
@@ -71,6 +73,11 @@ export async function choicesFor(documentId: string, blockId: string): Promise<G
       isInstruction,
       instructions: listed.result.map((instruction) => ({ ...instruction, matches: matching.has(instruction.id) })),
       last: isInstruction ? null : await lastInstruction(documentId),
+      // A block's standing instruction wins over its document's. BO_0349_031
+      standing:
+        isInstruction || standing.outcome !== "success"
+          ? null
+          : (standing.result.blocks[blockId]?.id ?? standing.result.document?.id ?? null),
     },
   };
 }
@@ -140,6 +147,8 @@ export const MIGRATIONS: Readonly<Record<string, () => ReturnType<typeof instruc
   "profile-in-the-chip": instructionInTheChip,
   "profile-record": instructionRecord,
   "instructions-from-profiles": instructionsFromProfiles,
+  // The built-in instructions the drops run under. BO_0349_033
+  "builtin-instructions": builtinInstructions,
 };
 
 /** A new instruction: a document carrying the record, with one empty block,

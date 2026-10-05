@@ -30,6 +30,8 @@ import {
 } from "../lib/structures";
 import { BlockStructureControl, fittingPills, TitleStructureControl } from "./control";
 import { StructureLabel } from "./label";
+import { NestedFieldChoice } from "./nested";
+import { FILL_A_FIELD_INSTRUCTION } from "~/extensions/documents/lib/instruction";
 import { StructuresProvider, STRUCTURES_CHANGED } from "./provider";
 import { StructuresSection } from "./section";
 import { contributions } from "../contributions";
@@ -121,6 +123,9 @@ const view = (
 });
 
 const opened: { kind: string; itemId: string; title: string }[] = [];
+const instructedRuns: unknown[] = [];
+const drags: unknown[] = [];
+const routed: unknown[] = [];
 const hosted = (child: JSXOutput) =>
   component$(() => {
     const decorationBar = useStore<ViewBar>({ groups: [] });
@@ -129,10 +134,21 @@ const hosted = (child: JSXOutput) =>
       openTarget$: $((target: { kind: string; itemId: string; title: string }) => {
         opened.push({ kind: target.kind, itemId: target.itemId, title: target.title });
       }),
+      startDrag$: $((payload: unknown) => {
+        drags.push(payload);
+      }),
+      openAlongRoute$: $((target: unknown) => {
+        routed.push(target);
+      }),
+      sendInstructed$: $(async (run: unknown) => {
+        instructedRuns.push(run);
+        return { ok: true, runId: "arun-i1" };
+      }),
     } as unknown as ViewBridge;
     useContextProvider(ViewBridgeContext, bridge);
     const surface = useStore({
       documentId,
+      tab: { id: "tab-1", kind: "documents:document", itemId: documentId, title: "A story", viewType: "documents", selection: null, drawerContext: "documents:document", unsaved: false },
       document: null,
       activeBlockId: first,
       focusedBlockId: null,
@@ -198,6 +214,9 @@ const control = (active = true) =>
 
 afterEach(() => {
   opened.length = 0;
+  instructedRuns.length = 0;
+  drags.length = 0;
+  routed.length = 0;
   vi.unstubAllGlobals();
 });
 
@@ -232,6 +251,38 @@ describe("the Structures section", () => {
     await dom.userEvent("[data-carrying-document]", "click");
     await settle(() => opened.length > 0);
     expect(opened).toEqual([{ kind: "documents:document", itemId: documentId, title: "Quantum computing" }]);
+  });
+
+  it("starts a drag carrying the structure when a row is pressed, and none for Structure itself (BO_0349_002)", async () => {
+    const withStructure: StructuresListing = { reachable: true, structures: [...listing.structures, structure(STRUCTURE_STRUCTURE, "Structure", { builtin: true, order: 0 })] };
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify(withStructure), { status: 200 }));
+    const { dom } = await mount(section(withStructure));
+    await dom.userEvent(`[data-structure-row="${BLOG}"]`, "pointerdown", { button: 0 });
+    expect(drags).toEqual([{ itemId: BLOG, kind: "structures:structure", source: "library", operations: ["link"], preview: "Blog post" }]);
+    await dom.userEvent(`[data-structure-row="${STRUCTURE_STRUCTURE}"]`, "pointerdown", { button: 0 });
+    expect(drags).toHaveLength(1);
+  });
+
+  it("drags a document listed under Structure as the structure it is, one under Instruction as an instruction, and one under any other built-in not at all (walk at pin 4805)", async () => {
+    vi.stubGlobal("fetch", async () =>
+      new Response(JSON.stringify({ outcome: "success", result: [{ id: BLOG, title: "Blog post" }] }), { status: 200 }),
+    );
+    const withBuiltins: StructuresListing = {
+      reachable: true,
+      structures: [
+        ...listing.structures,
+        structure(STRUCTURE_STRUCTURE, "Structure", { builtin: true, order: 0 }),
+      ],
+    };
+    const { root, settle, dom } = await mount(section(withBuiltins));
+    await dom.userEvent(`[data-unfold-structure="${STRUCTURE_STRUCTURE}"]`, "click");
+    await settle(() => root.querySelector(`[data-carrying="${STRUCTURE_STRUCTURE}"] [data-carrying-document]`) != null);
+    await dom.userEvent(`[data-carrying="${STRUCTURE_STRUCTURE}"] [data-carrying-document]`, "pointerdown", { button: 0 });
+    expect(drags).toEqual([{ itemId: BLOG, kind: "structures:structure", source: "library", operations: ["link"], preview: "Blog post" }]);
+    await dom.userEvent(`[data-unfold-structure="${KEYWORD}"]`, "click");
+    await settle(() => root.querySelector(`[data-carrying="${KEYWORD}"] [data-carrying-document]`) != null);
+    await dom.userEvent(`[data-carrying="${KEYWORD}"] [data-carrying-document]`, "pointerdown", { button: 0 });
+    expect(drags).toHaveLength(1);
   });
 
   it("says when there are none, and when they could not be read", async () => {
@@ -901,5 +952,170 @@ describe("fields that suggest and references by title (calliopa-bootstrap's BO_0
     await dom.userEvent(`[data-field-chosen="${OTHER}"] button`, "click");
     await settle(() => posted(asked).length > 1);
     expect(posted(asked)[1]?.body).toEqual({ values: { allows: [] } });
+  });
+});
+
+// A block dropped on a structured block's middle nests, and the target offers
+// its fields (`calliopa-bootstrap`'s `BO_0349_010`, `BO_0349_021`).
+describe("the field choice after a nest", () => {
+  const nestedBlock = "8a8a8a8a-8a8a-4a8a-8a8a-8a8a8a8a8a8a";
+  const work = "9b9b9b9b-9b9b-4b9b-8b9b-9b9b9b9b9b9b";
+  const article = structure("aaaaaaaa-0000-4000-8000-000000000001", "Article", {
+    order: 8,
+    fields: [
+      { key: "lead", name: "Lead", type: "text", required: true },
+      { key: "when", name: "When", type: "date", required: false },
+    ],
+  });
+  const choice = (finished: { count: number }, blockId = first) =>
+    jsx(StructuresProvider, {
+      documentId,
+      children: jsx(NestedFieldChoice, {
+        documentId,
+        blockId,
+        revisionId: "rev:1",
+        active: false,
+        nested: { blockId: nestedBlock, documentId: work },
+        done$: $(() => {
+          finished.count += 1;
+        }),
+      }),
+    });
+
+  it("Given a block using structures with fields, Then the fields grouped under each structure's name, and a press puts the nested block into one", async () => {
+    const asked: Asked[] = [];
+    const finished = { count: 0 };
+    vi.stubGlobal("fetch", api(asked, view([taken(hook), taken(article), taken(big, { proposed: "structure" })])));
+    const { root, settle, dom } = await mount(choice(finished));
+    await settle(() => root.querySelector("[data-nested-fields]") !== null);
+    const groups = Array.from(root.querySelectorAll("[data-nested-structure]")).map((group) => ({
+      name: group.querySelector(".nested-fields__structure")?.textContent,
+      fields: Array.from(group.querySelectorAll("[data-nested-field]")).map((field) => field.textContent?.trim()),
+    }));
+    expect(groups).toEqual([{ name: "Article", fields: ["Lead", "When"] }]);
+    await dom.userEvent('[data-nested-field="lead"]', "click");
+    await settle(() => finished.count > 0);
+    expect(posted(asked)).toEqual([
+      {
+        url: `/api/x/structures/documents/${documentId}/blocks/${first}/structures/${article.id}/fields`,
+        body: { field: "lead", child: nestedBlock },
+      },
+    ]);
+    expect(finished.count).toBe(1);
+  });
+
+  it("Given a field whose kind is not text, Then it is marked red, and choosing it puts the block in and starts a run under Fill a field naming both blocks (BO_0349_018)", async () => {
+    const asked: Asked[] = [];
+    const finished = { count: 0 };
+    vi.stubGlobal("fetch", api(asked, view([taken(article)])));
+    const { root, settle, dom } = await mount(choice(finished));
+    await settle(() => root.querySelector("[data-nested-field]") !== null);
+    expect(root.querySelector('[data-nested-field="when"]')?.getAttribute("data-nested-acts")).toBe("run");
+    expect(root.querySelector('[data-nested-field="lead"]')?.getAttribute("data-nested-acts")).toBe("none");
+    await dom.userEvent('[data-nested-field="when"]', "click");
+    await settle(() => finished.count > 0);
+    expect(posted(asked).map((entry) => entry.body)).toEqual([{ field: "when", child: nestedBlock }]);
+    expect(instructedRuns).toEqual([
+      {
+        itemId: documentId,
+        goal: 'Fill the field "When" (Date) of Article on #1 from #2, the block put into it.',
+        instruction: FILL_A_FIELD_INSTRUCTION,
+        references: [
+          { number: 1, blockId: first },
+          { number: 2, blockId: nestedBlock, document: work },
+        ],
+      },
+    ]);
+  });
+
+  it("Given a text field, Then choosing it starts no run", async () => {
+    const finished = { count: 0 };
+    vi.stubGlobal("fetch", api([], view([taken(article)])));
+    const { root, settle, dom } = await mount(choice(finished));
+    await settle(() => root.querySelector("[data-nested-field]") !== null);
+    await dom.userEvent('[data-nested-field="lead"]', "click");
+    await settle(() => finished.count > 0);
+    expect(instructedRuns).toEqual([]);
+  });
+
+  it("Given a field holding a block, When the block is pressed in the popover, Then its focused work opens at that block along the route (BO_0349_024)", async () => {
+    const holding = taken(article, {
+      values: { lead: "The first words." },
+      missing: [],
+      children: { lead: [{ blockId: nestedBlock, words: "The first words.", documentId: work, documentTitle: "The lead" }] },
+    });
+    vi.stubGlobal("fetch", api([], view([holding])));
+    const { root, settle, dom } = await mount(control());
+    await settle(() => root.querySelector(`[data-chip-structure="${article.id}"]`) !== null);
+    await dom.userEvent(`[data-chip-structure="${article.id}"]`, "click");
+    await settle(() => root.querySelector(`[data-open-child="${nestedBlock}"]`) != null);
+    await dom.userEvent(`[data-open-child="${nestedBlock}"]`, "click");
+    await settle(() => routed.length > 0);
+    expect(routed).toEqual([
+      {
+        itemId: work,
+        title: "The lead",
+        route: [
+          { itemId: documentId, title: "A story", blockId: first },
+          { itemId: work, title: "The lead" },
+        ],
+        focus: nestedBlock,
+      },
+    ]);
+  });
+
+  it("Given a block using no structure with a field, Then nothing is asked and the place is finished", async () => {
+    const finished = { count: 0 };
+    vi.stubGlobal("fetch", api([], view([taken(hook)])));
+    const { root, settle } = await mount(choice(finished));
+    await settle(() => finished.count > 0);
+    expect(root.querySelector("[data-nested-fields]")).toBeFalsy();
+    expect(finished.count).toBe(1);
+  });
+
+  it("Given Just nest it, Then nothing is posted and the plain nest stands", async () => {
+    const asked: Asked[] = [];
+    const finished = { count: 0 };
+    vi.stubGlobal("fetch", api(asked, view([taken(article)])));
+    const { root, settle, dom } = await mount(choice(finished));
+    await settle(() => root.querySelector("[data-nested-skip]") !== null);
+    await dom.userEvent("[data-nested-skip]", "click");
+    await settle(() => finished.count > 0);
+    expect(posted(asked)).toEqual([]);
+  });
+
+  it("Given a refusal, Then it is said and the choice stays", async () => {
+    const finished = { count: 0 };
+    vi.stubGlobal("fetch", api([], view([taken(article)]), view([taken(article)]), true));
+    const { root, settle, dom } = await mount(choice(finished));
+    await settle(() => root.querySelector("[data-nested-field]") !== null);
+    await dom.userEvent('[data-nested-field="lead"]', "click");
+    await settle(() => root.querySelector("[data-nested-refusal]") !== null);
+    expect(root.querySelector("[data-nested-refusal]")?.textContent).toContain("Hook is offered by Story");
+    expect(finished.count).toBe(0);
+  });
+
+  it("Given a field holding blocks, Then the popover shows them by their words in place of a text input, and a × takes one out", async () => {
+    const asked: Asked[] = [];
+    const holding = taken(article, {
+      values: { lead: "The first words." },
+      missing: [],
+      children: { lead: [{ blockId: nestedBlock, words: "The first words." }] },
+    });
+    vi.stubGlobal("fetch", api(asked, view([holding])));
+    const { root, settle, dom } = await mount(control());
+    await settle(() => root.querySelector(`[data-chip-structure="${article.id}"]`) !== null);
+    await dom.userEvent(`[data-chip-structure="${article.id}"]`, "click");
+    await settle(() => root.querySelector('[data-field-children="lead"]') !== null);
+    expect(root.querySelector(`[data-field-child="${nestedBlock}"]`)?.textContent).toContain("The first words.");
+    expect(root.querySelector('[data-structure-fields] input[name="lead"], [data-structure-fields] [data-field="lead"]')).toBeFalsy();
+    await dom.userEvent(`[data-take-child="${nestedBlock}"]`, "click");
+    await settle(() => posted(asked).length > 0);
+    expect(posted(asked)).toEqual([
+      {
+        url: `/api/x/structures/documents/${documentId}/blocks/${first}/structures/${article.id}/fields`,
+        body: { field: "lead", child: nestedBlock, put: false },
+      },
+    ]);
   });
 });

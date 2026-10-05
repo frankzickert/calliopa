@@ -82,6 +82,15 @@ describe("a block dragged into a block", () => {
     await view.idle();
   });
 
+  it("When a block is nested, Then the nested place stands under the target, naming the block and the focused work it now stands in (BO_0349_010)", async () => {
+    const view = await mount();
+    expect(view.root.querySelector("[data-nested-place]")).toBeFalsy();
+    await drop(view, "blk-a", "nest:blk-b");
+    await view.settle(() => view.root.querySelector('[data-nested-place="blk-b"]') !== null);
+    expect(view.root.querySelectorAll("[data-nested-place]").length).toBe(1);
+    await view.idle();
+  });
+
   it("When a block is dropped on its own middle, Then nothing is asked and nothing moves", async () => {
     const view = await mount();
     view.record.drop = { itemId: "blk-b", overId: "nest:blk-b" };

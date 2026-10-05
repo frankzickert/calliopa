@@ -62,10 +62,13 @@ kernel's half is `ui-kernel.md`, *The Instruction In The Command, With Tools*, a
   lists the instructions (`BO_0308_Q5`, `BO_0308_Q11`).
 * The instruction choice is an icon in the active block's command chip, a dropdown opened by a press
   like the agent selector. The document bar's selector goes. The chosen instruction belongs to the
-  command. Nothing is stored on the document, and nothing is shared. A new command starts with the
-  instruction the person last sent with in this document, remembered for that person alone
-  (`BO_0308_Q7`, reversing `BO_0298_Q1` and `BO_0298_Q8`). A document's attached instruction is dropped
-  on upgrade, so every chip starts at *No instruction* (`BO_0311_Q1`).
+  command. A new command starts with the instruction standing on its block, else on its document
+  (*An Instruction Stands On A Block Or A Document*, below), else with the instruction the person
+  last sent with in this document, remembered for that person alone (`BO_0308_Q7`, reversing
+  `BO_0298_Q1` and `BO_0298_Q8`; the standing instruction is `calliopa-bootstrap`'s `BO_0349_Q2`,
+  user decision 2026-10-05, reversing `BO_0308_Q7`'s *nothing is stored on the document*). A
+  document's attached instruction was dropped on upgrade, so every chip started at *No instruction*
+  (`BO_0311_Q1`).
 * A code block in an instruction is a tool the agent can use; the instruction's words say how, but nothing
   requires them to. Without the owner's grant a call runs off every network. Only the owner
   grants, an accepted edit to a code block voids its grant, and credentials are the owner's named
@@ -257,3 +260,93 @@ opened again, and *Send* carried the last instead.
   the run naming it; *No instruction* chosen over a remembered last, kept the same way.
 - The change document stands in `docs/changes/completed/` at `Status: completed`; the
   *Fixed* line stands in `calliopa-bootstrap`'s `docs/release-notes/unreleased.md`.
+
+## An Instruction Stands On A Block Or A Document
+
+Under `calliopa-bootstrap`'s `BO_0349` (`documents`' `docs/changes/completed/BO_0349_FEAT_curation-by-drop.md`,
+promoted to draft by the user on 2026-10-05 and transferred here the same day): the dragged item
+shapes the drop target. This extension's half is an instruction dropped on a block or a document,
+which then stands there, and the built-in instructions behind the drops that start a run. The drop
+itself is `documents`' [Curation By Drop](../../../documents/docs/system/documents/block-editor.md#curation-by-drop).
+
+* An instruction dropped on a block or a document stands there and is the default for commands:
+  every command in that block, or anywhere in that document, starts with it in the chip, and the
+  person may still choose another for one command. A block's instruction wins over its document's.
+  It shows as a pill on its target and is removed there. Dropping it runs nothing. User decisions,
+  2026-10-05 (`BO_0349_Q2`), reversing `BO_0308_Q7` and `BO_0311_Q1`.
+* The instructions behind the drops that start a run are built in: shipped as instruction documents
+  the way *Keyword* and *Instruction* are, and each can be shaped by dropping material on it like any
+  instruction. User decision, 2026-10-05 (`BO_0349_Q4`).
+- The standing instruction is stored (`BO_0349_030`, landed 2026-10-05; `server/standing.ts`): the
+  relation `usesInstruction`, declared by this extension, from a `document` or a block in its reading
+  order to an instruction's document, at most one per subject — a new one closes the one standing in
+  the same script. `POST …/documents/[id]/standing` and `…/blocks/[block]/standing` take `{instruction}`,
+  or `null` to take it off, written as the person's truth outside any branch, refused in words for a
+  document that is no instruction (`notAnInstruction`) and a block not in the reading order
+  (`unknownBlock`); `GET …/documents/[id]/standing` answers the document's and each block's, by title.
+  The harness's vocabulary copy carries it (`calliopa-bootstrap`'s `BO_0349_051`). Proven under the
+  kernel harness in `tests/behavior/instructions.test.ts`.
+- The chip starts from the standing instruction (`BO_0349_031`, landed 2026-10-05; `choicesFor`'s
+  `standing`, `startingInstruction`): a command carrying neither `instruction` nor `no-instruction`
+  starts with its block's standing instruction, else its document's, else the person's last, each only
+  while it is still an instruction; a command's own choice is never set over (`PF_0001`). Proven in
+  `lib/instructions.test.ts`, `views/views.test.ts` and under the kernel harness.
+- A standing instruction shows as a pill (`BO_0349_032`, landed 2026-10-05; `views/standing.tsx`): on a
+  block in its `headline` place, beside a code block's tool (`HeadlineMarks`), and on a document in its
+  header's `title` place, the compass and the title, its × taking it off. The header's title rows stand
+  outside the document's decoration provider, so the document's pill reads what stands for itself;
+  a pill's × applies the answer at once and announces it on its own page. Found in the walk at pin
+  4795, 2026-10-05, where an instruction dropped on a header stood but showed nowhere. Proven in
+  `views/views.test.ts`. Walked by the user on the served build at pin 4805, 2026-10-05, "works":
+  an instruction dragged from the sheet onto a block and onto three documents' headers, each shown as
+  a pill, a pill's × taking it off at once, and a block's chip starting with the document's standing
+  instruction. `InstructionsProvider` reads
+  what stands once per document, inside the tools' provider, and takes every write's answer announced
+  on the page (`instruction-standing-changed`). An instruction listed under *Instruction* in the
+  *Structures* sheet is dragged out as `instructions:instruction` and, dropped on a block's middle or a
+  document's header, stands there (`drops`, `standDroppedInstruction`).
+- *Fill a field* is built in (`BO_0349_033`, landed 2026-10-05; `lib/instructions.ts`
+  `BUILTIN_INSTRUCTIONS`, `server/builtins.ts`): an instruction document under the fixed id
+  `FILL_A_FIELD_INSTRUCTION` — named in `documents`' `lib/instruction.ts`, so `structures`, which
+  starts its run, names it without depending on this extension — titled *Fill a field*, carrying
+  `record: instruction` and *Instruction*, its four paragraphs the release's: read a non-text field's
+  value off the block put into it (#2) and propose it on the structured block (#1) with
+  `propose_structures` for that field alone, written as the kind takes it, a file never; propose
+  nothing else, and nothing with a sentence why when #2 says nothing that fits. The member
+  `migration-bo-0349-builtin-instructions` (route `kernel/migrations/builtin-instructions`, after
+  `structures`' `structures-as-documents` and this extension's `instructions-from-profiles`) makes it
+  once per instance where none stands (`builtinInstructionsStatement`, pure); nothing of the release
+  is written over it again, so it is revised like any instruction. Proven in
+  `server/builtins.test.ts` and under the kernel harness in `tests/behavior/instructions.test.ts`.
+- *Shape an instruction* is built in (`BO_0349_014`, landed 2026-10-05): the second of
+  `BUILTIN_INSTRUCTIONS`, under `SHAPE_AN_INSTRUCTION` (named in `documents`' `lib/instruction.ts`),
+  its four paragraphs the release's: read the instruction and the dropped block (#1), find what #1
+  does that the instruction does not ask for and what it contradicts, propose revisions to the
+  instruction's own blocks so it would produce material like #1 — teaching #1's manner, never its
+  subject — propose nothing outside the instruction and never change #1, and propose nothing with a
+  sentence why when the instruction already would. The member `migration-bo-0349-shape-instruction`,
+  after `-builtin-instructions`, runs the same route, which makes every built-in an instance does not
+  hold. Proven in `server/builtins.test.ts` and under the kernel harness.
+- *Extend a structure* is built in (`BO_0349_036`, landed 2026-10-05): the third of
+  `BUILTIN_INSTRUCTIONS`, under `EXTEND_A_STRUCTURE` (named in `documents`' `lib/instruction.ts`), its
+  four paragraphs the release's: read the structure's fields and the dropped block (#1), and for each
+  thing #1 says that no field holds, insert a block naming the field into the structure's document and
+  propose *Field* on it with its type and options; only fields the structure lacks, named as a reader
+  of the structure would, never #1's words or values, no standing field changed, and nothing with a
+  sentence why when every thing has a field. The member `migration-bo-0349-extend-structure`, after
+  `-shape-instruction`, runs the same route.
+- *Apply a structure* is built in (`BO_0349_034`, landed 2026-10-05 with `documents`' `BO_0349_012`): the
+  fourth of `BUILTIN_INSTRUCTIONS`, under `APPLY_A_STRUCTURE` (named in `documents`' `lib/instruction.ts`),
+  its four paragraphs the release's: propose the structure (#1) on the document with
+  `propose_structures` and each field's value its words answer, written as the kind takes it; never
+  rewrite, add or remove a block or invent a value, a required field left unanswered said in a
+  sentence; only the missing values where the document already uses it, and nothing with a sentence
+  why where it cannot be used. The member `migration-bo-0349-apply-structure`, after
+  `-extend-structure`, runs the same route. An instruction dropped between rows means nothing
+  (`standDroppedInstruction`).
+- A built-in instruction is never deleted (`BO_0349_035`, landed 2026-10-05; `builtinGuard`, registered
+  with `documents`' `guardDocuments`): deleting one is refused in words — *«title» is built in: the
+  drops that start work run under it, so revise it rather than deleting it.* — and a run's removal of
+  it is refused as it is accepted, as for a structure's document. Its words stay revisable. Proven in
+  `server/builtins.test.ts` and under the kernel harness.
+

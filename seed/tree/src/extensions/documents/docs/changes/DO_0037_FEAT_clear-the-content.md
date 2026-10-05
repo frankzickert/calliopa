@@ -1,11 +1,11 @@
 # DO_0037_FEAT_clear-the-content
 
-Status: draft
+Status: ready
 
 Requested: 2026-10-03, by the user: "from my dev instance, remove all docs and structures (except
 for the builtins)", then "in fact, give me a settings functions that does that". Shaped as
 `settings`' `CA_0080`; it belongs to `documents`, whose code and subject it is, and keeps its
-section in Settings the way `instructions` does. Set to draft by the user, 2026-10-03.
+section in Settings the way `instructions` does. Set to draft and then to ready by the user, 2026-10-03.
 
 ## What Is Asked
 

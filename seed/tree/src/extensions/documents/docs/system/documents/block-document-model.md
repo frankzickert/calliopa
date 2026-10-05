@@ -103,6 +103,29 @@
 - Recovery is real in the store and absent from the model. Nothing brings a deleted document back until a change adds an operation for it.
 - Deleting is the one operation over a document that no undo covers. What that costs the reader, and the confirmation that guards it, belong to [Block Editor View](./document-panel.md).
 
+### Deleting A Started Document
+
+- Under `DO_0040` (`docs/changes/completed/DO_0040_FIX_deleting-a-proposed-document.md`), set to draft by the
+  user on 2026-10-05 and transferred here the same day.
+* Deleting a started document — a source or any other document a run started and nobody has taken
+  ([Starting A Document From A Command](#starting-a-document-from-a-command)) — rejects what the run
+  proposed of that document, and only that: the document node, the blocks it `CONTAINS` in the
+  group, and the relations staged on them, a source's `roleFields` among them. Everything else in
+  the run's group stays open: its other sources and documents, and a proposed sentence citing this
+  source, which, accepted later, draws the citation as missing. User decision, 2026-10-05.
+- Deleting a started document (`DO_0040_001`, landed 2026-10-05): `deleteDocument`
+  (`server/documents.ts`) falls to `deleteStarted` when the truth read answers `noResult` and
+  `startedIn` names the document's group. The started revision stands in as the base, another is a
+  conflict, and a guard is asked as for any delete. The members `startedDocumentMembers`
+  (`server/proposed-works.ts`) gathers from the group's touched set — the blocks the document
+  `CONTAINS` in the group, the blocks those contain, and the `roleFields` whose `fieldsOf` reaches
+  it — are rejected in one `decideMembers` batch, then the document node through `decide`, so no
+  block is left in the group without its document. A member that does not reject refuses the delete
+  as `documentNotDeleted` with the kernel's words, the document node left standing. Proven in
+  `server/proposed-works.test.ts`, and under the kernel harness in bibliography's
+  `tests/behavior/works.test.ts`: a run's source and a sentence citing it in one group; deleting the
+  source leaves it `noResult` and out of the listing, and the sentence's item still open.
+
 ## Clearing The Content
 
 Under `DO_0037` (`docs/changes/DO_0037_FEAT_clear-the-content.md`), set to draft by the user on
@@ -323,8 +346,8 @@ Under `calliopa-bootstrap`'s `BO_0288`, promoted to ready by the user on 2026-09
 - `src/server/documents/vocabulary.ts` carries the run primitives — the permitted role and mark sets, run normalization, and the split that keeps every character — and the content validators the command parser applies before a request reaches the graph. The graph's own declarations (`BO_0207_011`) are what a write is validated against; the TypeScript fragment it still registers into `calliopaGraphSchema` serves the production module alone until `BO_0207_019`. Normalization drops empty runs, orders marks, and joins adjacent runs carrying the same marks and link, so two edits meaning the same thing compare equal (`CA_0007_002`).
 - `src/server/documents/assemble.ts` turns a CCGW read into an ordered document. It is pure, so ordering, role defaulting, and the treatment of a stored type this build does not know are settled without a graph. Identity crosses there once: CCGW names a node `node:<id>` and the API hands out the bare id the shell minted, so every document and block id a caller holds is unchanged by `BO_0207` (`BO_0207_012`). Only an active relation places a block; a closed containment the read still carries is history. A block whose type or content this build cannot read comes back as unsupported content, and one carrying no usable order key sorts after the placed blocks by identity rather than vanishing (`CA_0007_004`).
 - `src/server/documents/documents.ts` holds the operations the editor works through: create, read the ordered document or a range or one block, insert, revise runs and role, split, merge, move, retire, list retired, and restore. Each structural gesture compiles into one mutation script carried by the kernel bridge's `write` verb — `CREATE` with `status: "established"` for a new block, a content `SET` for a revision, `RELATE` for containment and retirement, `CLOSE` for the containment a merge, retire or restore detaches, `RETIRE` for a deleted document — so a refusal leaves the document exactly as it was and the core decides what the shell may establish (`CA_0007_003`, `CA_0007_005`–`CA_0007_008`, `BO_0207_012`). A close always travels with the document as an endpoint of the same script, which is what lets the kernel's gate verify it against content it can see. The bridge answers only the data revision it landed at, so the revision the next write must name is read back at that pin. A stale base is the shell's check before it writes: CCGW's direct truth write replaces whatever stands, so the operation compares the base the caller names with the revision the read found and answers a conflict without writing; the window between that read and the write is the one this module always had (`CA_0007_011`).
-- `listDocuments` in `src/server/documents/documents.ts` answers the library's listing. It matches every `document` node in one unbounded read, reads those identities for their titles without assembling any document's blocks, drops any document an active `contains` points at, and sorts by title. Titles compare case-insensitively by code unit rather than by locale, because locale collation answers differently on different runtimes and this order is read back by tests and by two form factors that must agree. The sort is stable over creation-ordered roots, so documents sharing a title keep the order they were created in (`CA_0011_002`).
-- `GET /api/x/ui.shell/documents` is the listing's transport, alongside the create already on that route. It answers identity and title per document and nothing else, so the drawer never pays for block content it does not render (`CA_0011_003`).
+- `listDocuments` in `src/server/documents/documents.ts` answers the library's listing. It matches every `document` node in one unbounded read, reads those identities for their titles without assembling any document's blocks, drops any document an active `contains` points at, and sorts by title; each entry also carries its record and its times for the Documents section's filter ([The Documents Section](./documents-section.md), `DO_0038_003`). Titles compare case-insensitively by code unit rather than by locale, because locale collation answers differently on different runtimes and this order is read back by tests and by two form factors that must agree. The sort is stable over creation-ordered roots, so documents sharing a title keep the order they were created in (`CA_0011_002`).
+- `GET /api/x/ui.shell/documents` is the listing's transport, alongside the create already on that route. It answers identity, title, record and times per document and no block content, so the drawer never pays for content it does not render (`CA_0011_003`, `DO_0038_003`).
 - `src/server/documents/content.ts` is the single crossing between stored JSON and the shapes this model works in.
 - `src/server/ccgw/client.ts` is the shell's side of the one graph: `query` posts a rooted, bounded, pinned statement to CCGW at `CALLIOPA_CCGW_URL` and answers the assembled graph; `write`, `stage`, and `decide` post to the kernel bridge at `CALLIOPA_KERNEL_URL` — `/__kernel/review/write`, `stage`, `accept` and `reject` — and translate its answers into the outcome vocabulary of `src/server/outcome.ts`: a refusal into a validation failure naming the kernel's code, a parked confirmation into `refused` carrying its address, a member drift conflict into `conflict` naming the member. Both addresses are handed to the tree by the kernel (`ui-kernel.md`, `BO_0207_001`), and the shell's server side passes the bridge's same-origin rule as the non-browser caller it is (`BO_0207_012`).
 - Reads are bounded by relation type and one hop, so a document read never walks into the rest of the graph.

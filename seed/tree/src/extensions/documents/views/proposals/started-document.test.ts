@@ -41,9 +41,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const mount = async () => {
+const mount = async (refuseDelete?: string) => {
   const sent: SentCommand[] = [];
-  vi.stubGlobal("fetch", documentsApi(started, sent, { proposals }));
+  vi.stubGlobal("fetch", documentsApi(started, sent, { proposals, ...(refuseDelete === undefined ? {} : { refuseDelete }) }));
   const view = await mountEditor(started);
   // No toggle is pressed: a started document shows its proposals regardless.
   await view.settle(() => view.root.querySelector(`[data-proposal-id="${second}"]`) != null);
@@ -100,5 +100,30 @@ describe("a started document in the block editor", () => {
     await view.userEvent(`[data-proposal-reject="${second}"]`, "click");
     await view.waitFor(() => view.root.querySelector("[data-block-error]") != null);
     expect(view.root.querySelector("[data-block-error]")?.textContent).toContain("deleted");
+  });
+
+  it("Given Delete pressed and confirmed, Then the confirmation says it is a proposal, the delete is sent on the started revision, and its tab goes", async () => {
+    const view = await mount();
+    await view.userEvent('[data-bar-action="delete-document"]', "click");
+    await view.waitFor(() => (view.record.messages?.length ?? 0) === 1);
+    expect(view.record.messages).toEqual(["Delete \u201cOnboarding checklist\u201d?"]);
+    expect(view.record.messageBodies?.[0]).toContain("This document is a proposal. Deleting it rejects it");
+    view.record.messageAnswer = "delete";
+    await view.userEvent("[data-harness-message-answer]", "click");
+    await view.waitFor(() => (view.record.gone ?? 0) === 1);
+    const deleted = view.sent.filter((command) => command.body["command"] === "delete");
+    expect(deleted.map((command) => command.body["baseRevisionId"])).toEqual(["rev-started"]);
+  });
+
+  it("Given a delete refused, Then its words are raised as a message and the tab stays", async () => {
+    const view = await mount("This proposed document could not be deleted: proposal_not_open");
+    await view.userEvent('[data-bar-action="delete-document"]', "click");
+    await view.waitFor(() => (view.record.messages?.length ?? 0) === 1);
+    view.record.messageAnswer = "delete";
+    await view.userEvent("[data-harness-message-answer]", "click");
+    await view.waitFor(() => (view.record.messages?.length ?? 0) === 2);
+    expect(view.record.messages?.[1]).toBe("\u201cOnboarding checklist\u201d was not deleted");
+    expect(view.record.messageBodies?.[1]).toContain("could not be deleted: proposal_not_open");
+    expect(view.record.gone ?? 0).toBe(0);
   });
 });

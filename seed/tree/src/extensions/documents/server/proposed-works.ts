@@ -62,3 +62,31 @@ export function proposedWorksCited(nodes: readonly ReadNode[], members: readonly
   }
   return out;
 }
+
+/**
+ * What a run proposed of one document it started (`DO_0040_001`): the blocks
+ * the document `CONTAINS` in the group, and the blocks they contain in turn,
+ * and the values *Source* holds on it — the members deleting the started
+ * document rejects, and only those, so the rest of the run's group stays open.
+ * User decision, 2026-10-05. The document node is not among them: it is
+ * rejected last, so no block is left in the group without its document.
+ *
+ * `grouped` are the group's member node refs; `edges` its staged relations.
+ */
+export function startedDocumentMembers(documentRef: string, grouped: ReadonlySet<string>, edges: readonly StagedEdge[]): string[] {
+  const out: string[] = [];
+  const holders = [documentRef];
+  for (let at = 0; at < holders.length; at += 1) {
+    for (const edge of edges) {
+      if (edge.type !== CONTAINS || edge.fromNodeId !== holders[at]) continue;
+      const block = nodeRef(edge.toId);
+      if (!grouped.has(block) || block === documentRef || out.includes(block)) continue;
+      out.push(block);
+      holders.push(block);
+    }
+  }
+  for (const edge of edges) {
+    if (edge.type === FIELDS_OF && nodeRef(edge.toId) === documentRef && grouped.has(edge.fromNodeId) && !out.includes(edge.fromNodeId)) out.push(edge.fromNodeId);
+  }
+  return out;
+}

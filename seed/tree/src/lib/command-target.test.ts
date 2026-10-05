@@ -10,6 +10,7 @@ import {
   revealFor,
   revealTarget,
   type PointedReference,
+  readInstructedTarget,
   readRunShape,
   readGestureTarget,
   readPinchTarget,
@@ -551,5 +552,34 @@ describe("a pinch is a command with no words (BO_0322_016)", () => {
     });
     expect(readPinchTarget({ artifact: "doc-1" })).toEqual({ ok: false, error: "A pinch names the document and the block it was made on." });
     expect(readPinchTarget({ block: "blk-a" })).toEqual({ ok: false, error: "A pinch names the document and the block it was made on." });
+  });
+});
+
+// A run whose words a view wrote, guided by an instruction: a drop on a
+// structured block (`calliopa-bootstrap`'s `BO_0349_052`).
+describe("an instructed run is its own shape (BO_0349_052)", () => {
+  it("takes the view's words as its goal, with no intention and no pinch", () => {
+    expect(readRunShape({ instructed: true, goal: "Fill When from #2." })).toEqual({ ok: true, gesture: false, instructed: true });
+  });
+
+  it("refuses one with no words, or with an intention or a pinch beside it", () => {
+    expect(readRunShape({ instructed: true })).toEqual({ ok: false, error: "An instructed run carries the words the view wrote as its goal." });
+    expect(readRunShape({ instructed: true, goal: "g", intention: "demo.intention" })).toEqual({ ok: false, error: "An instructed run asks no intention and is no pinch." });
+    expect(readRunShape({ instructed: true, goal: "g", pinch: "in" })).toEqual({ ok: false, error: "An instructed run asks no intention and is no pinch." });
+  });
+
+  it("names the document it proposes into and the blocks the view chose, and no source", () => {
+    expect(readInstructedTarget({ artifact: "doc-1", references: [{ number: 1, blockId: "blk-a" }, { number: 2, blockId: "blk-b", document: "doc-2" }] })).toEqual({
+      ok: true,
+      target: {
+        artifact: "doc-1",
+        delivery: "propose",
+        references: [
+          { kind: "block", number: 1, blockId: "blk-a" },
+          { kind: "block", number: 2, blockId: "blk-b", document: "doc-2" },
+        ],
+      },
+    });
+    expect(readInstructedTarget({ references: [] })).toEqual({ ok: false, error: "An instructed run names the document it proposes into." });
   });
 });

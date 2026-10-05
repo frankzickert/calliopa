@@ -17,6 +17,7 @@ import {
   springDue,
   springRepeats,
   springs,
+  leavesSheet,
   SWIPE_LOCK_PX,
   BACK_GESTURE_EDGE_PX,
   TAB_SWIPE_PX,
@@ -215,6 +216,16 @@ describe("a held drag opens the place it is held over", () => {
     preview: "A block",
     from: "doc-1",
   };
+
+  it("springs for a structure or an instruction dragged out of the library, which closes the phone's sheet once it leaves it (BO_0349_003)", () => {
+    const item = { itemId: "s-1", kind: "structures:structure", source: "library" as const, operations: ["link" as const], preview: "Blog post" };
+    expect(springs(item)).toBe(true);
+    expect(leavesSheet("left", item, false)).toBe(true);
+    expect(leavesSheet("left", item, true)).toBe(false);
+    expect(leavesSheet(null, item, false)).toBe(false);
+    expect(leavesSheet("left", { ...item, kind: PANEL_ICON_KIND }, false)).toBe(false);
+    expect(leavesSheet("left", block, false)).toBe(false);
+  });
 
   it("springs for what is dragged out of a view, never for a tab or a library icon", () => {
     expect(springs(block)).toBe(true);

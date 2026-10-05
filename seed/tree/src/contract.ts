@@ -64,6 +64,46 @@ export interface LibraryItem {
    * and the tab. The contributing extension decides, because the words are
    * its own; the frame never recognises them. DO_0012_007 */
   readonly unnamed?: boolean;
+  /** The value the item carries for each group of its section's filter, keyed
+   * by the group's name; an item carrying none for a group is never hidden by
+   * it. DO_0038_001 */
+  readonly facets?: Readonly<Record<string, LibraryFacet>>;
+  /** The number the item orders by for each of its section's key orders,
+   * keyed by the order's id; an item carrying none sorts last. DO_0038_001 */
+  readonly orderKeys?: Readonly<Record<string, number>>;
+}
+
+/** One value of a filter group as an item carries it: the value stored, the
+ * words its toggle is named by, and the icon drawn for it, the words standing
+ * in when there is none. DO_0038_001 */
+export interface LibraryFacet {
+  readonly value: string;
+  readonly label: string;
+  readonly icon?: IconName;
+}
+
+/** How an order arranges the rows: by label either way, or by the number each
+ * item carries for it, highest or lowest first. DO_0038_001 */
+export type LibraryOrderBy = "label-ascending" | "label-descending" | "key-descending" | "key-ascending";
+
+/**
+ * A filter an item section declares and the shell draws over its rows: a
+ * search over the labels, toggle groups over the values the items carry, the
+ * orders, the default, and what the body says when every row is hidden. The
+ * choice is stored in the section's `Layout.filters` entry as the values hidden,
+ * `<group>:<value>`, and `order:<id>` (`src/lib/library-filter.ts`). The typed
+ * search is never stored. DO_0038_001
+ */
+export interface LibraryFilter {
+  /** The search field's accessible name; absent means the row has no search. */
+  readonly search?: string;
+  readonly groups: readonly { readonly name: string; readonly label: string }[];
+  readonly orders: readonly { readonly id: string; readonly label: string; readonly by: LibraryOrderBy }[];
+  readonly defaultOrder: string;
+  /** The values hidden while nothing is stored, as `<group>:<value>`. */
+  readonly defaultHidden?: readonly string[];
+  /** What the body says when the filter hides every row. */
+  readonly noMatch: string;
 }
 
 /** What a section contributed as a component receives from the shell. */
@@ -110,6 +150,9 @@ export interface LibrarySection {
   /** Creates one item and answers what to open, or `null` when nothing was made. */
   readonly create$?: QRL<() => Promise<OpenTarget | null>>;
   readonly component?: Component<SectionProps>;
+  /** A filter the shell draws over an item section's rows; refused on a
+   * component section, which draws its own (`filter_shape`). DO_0038_001 */
+  readonly filter?: LibraryFilter;
 }
 
 /**
@@ -411,6 +454,10 @@ export interface ChildFace {
   readonly itemId: string;
   readonly title: string;
   readonly face: readonly Run[] | null;
+  /** The first words of each block the child holds that has any, in reading
+   * order, for a view that lists what was put into the work rather than
+   * naming it (`calliopa-bootstrap`'s `BO_0349_019`). */
+  readonly lines?: readonly string[];
 }
 
 /**
@@ -433,6 +480,10 @@ export interface FocusedWorkContribution {
   readonly plan: (input: {
     readonly targetId: string;
     readonly blockId: string;
+    /** The child is made with no blocks, because what opens it is about to
+     * put one in: a block nested by a drop becomes the work's first block
+     * (`calliopa-bootstrap`'s `BO_0349_019`). */
+    readonly blank?: boolean;
   }) => Promise<GraphOutcome<ChildPlan>>;
   /** What each of these children says for itself, for the parents' faces. */
   readonly faces: (itemIds: readonly string[]) => Promise<GraphOutcome<readonly ChildFace[]>>;
@@ -466,9 +517,20 @@ export interface LibraryGlyph {
  * block being edited and the prompt pointed from — and the chip is drawn only
  * when some extension contributes it (RO_0002_001); `run` stands beneath a
  * code block's source, where the extension that runs code draws its send
- * (BO_0289_019).
+ * (BO_0289_019); `nested` stands under a block the moment another block has
+ * been nested into it by a drop, so an extension may ask what the nest means
+ * — `structures` offers the target's fields (`calliopa-bootstrap`'s
+ * `BO_0349_010`) — and is drawn until the place calls `done$` or the reader
+ * acts elsewhere.
  */
-export type BlockPlace = "headline" | "below" | "command" | "underCommand" | "run";
+export type BlockPlace = "headline" | "below" | "command" | "underCommand" | "run" | "nested";
+
+/** In the `nested` place: the block just nested and the focused work it now
+ * stands in. BO_0349_010 */
+export interface NestedBlock {
+  readonly blockId: string;
+  readonly documentId: string;
+}
 
 /** What a decoration is handed: the block it decorates, and whether the
  * reader is editing it. Everything else it reads for itself — the document
@@ -498,6 +560,11 @@ export interface BlockDecorationProps {
    * `media`'s variation follows the profile the chip chose. BO_0336_051
    */
   readonly commandOptions?: Readonly<Record<string, string>>;
+  /** In the `nested` place alone: the block just nested into this one. */
+  readonly nested?: NestedBlock;
+  /** In the `nested` place alone: the place is finished, and is drawn no
+   * more. BO_0349_010 */
+  readonly done$?: QRL<() => void>;
 }
 
 /** What a provider is handed: the document its decorations draw on. */
@@ -550,6 +617,45 @@ export interface Decorations {
   /** Places drawn once on the document, merged in extension order as the
    * block places are. BO_0291_031 */
   readonly documentPlaces?: Readonly<Partial<Record<DocumentPlace, Component<DocumentPlaceProps>>>>;
+  /**
+   * What a drop of an item this extension knows means on the presented
+   * content, by the dragged item's kind (`calliopa-bootstrap`'s
+   * `BO_0349_011`): the view hands it the item and where it landed — a block,
+   * or the document's header when `blockId` is absent — and shows the refusal
+   * it answers, or nothing. The view knows neither the kind nor the act.
+   */
+  readonly drops?: Readonly<Record<string, (drop: DecorationDrop) => Promise<string | null>>>;
+  /** The dragged kinds whose drop on the body, between the rows, starts work,
+   * so the view lights the body red while one is held there
+   * (`calliopa-bootstrap`'s `BO_0349_012`). */
+  readonly actsOnBody?: readonly string[];
+}
+
+/** A drop handed to the extension that knows the dragged kind. BO_0349_011 */
+export interface DecorationDrop {
+  /** The dragged item's identity. */
+  readonly itemId: string;
+  readonly documentId: string;
+  /** The block it landed on; absent for the document's header and body. */
+  readonly blockId?: string;
+  /** It landed on the document's body, between its rows, rather than on a
+   * block's middle or the header (`calliopa-bootstrap`'s `BO_0349_012`). */
+  readonly body?: true;
+  /** It landed on words the reader marked in command mode: their block and
+   * the words, so a drop may act on that passage alone (`BO_0349_038`). */
+  readonly passage?: { readonly blockId: string; readonly quote: string };
+  /** Starts a run whose words the extension writes, under the instruction it
+   * names, in the document, as the view's bridge does: what a drop that
+   * starts work calls (`BO_0349_012`). The refusal in words, or null. */
+  readonly startRun?: (run: {
+    readonly goal: string;
+    readonly instruction: string;
+    readonly references: readonly (
+      | { readonly number: number; readonly blockId: string; readonly document?: string }
+      | { readonly number: number; readonly kind: "document"; readonly document: string }
+      | { readonly number: number; readonly kind: "passage"; readonly blockId: string; readonly quote: string; readonly document?: string }
+    )[];
+  }) => Promise<string | null>;
 }
 
 /** Typing helpers, so an entrypoint's export is checked against the contract. */

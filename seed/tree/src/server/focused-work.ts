@@ -36,6 +36,8 @@ export interface FocusedChild {
   readonly title: string;
   /** The words the child currently says for itself, when it says any. */
   readonly face: readonly Run[] | null;
+  /** The first words of the child's blocks, when the kind answers them. BO_0349_019 */
+  readonly lines?: readonly string[];
 }
 
 /** Each block of a target that has focused work, by block identity. */
@@ -130,7 +132,12 @@ export async function facesOf(kind: string, targetId: string): Promise<GraphOutc
   const work: Record<string, FocusedChild> = {};
   for (const [blockId, child] of entries) {
     const face = byItem.get(child.itemId);
-    work[blockId] = { itemId: child.itemId, title: face?.title ?? child.title, face: face?.face ?? null };
+    work[blockId] = {
+      itemId: child.itemId,
+      title: face?.title ?? child.title,
+      face: face?.face ?? null,
+      ...(face?.lines === undefined ? {} : { lines: face.lines }),
+    };
   }
   return { outcome: "success", result: work };
 }
@@ -162,6 +169,8 @@ export async function openFocusedWork(input: {
   readonly kind: string;
   readonly targetId: string;
   readonly blockId: string;
+  /** A new child is made with no blocks: a nest puts the first one in. BO_0349_019 */
+  readonly blank?: boolean;
 }): Promise<GraphOutcome<OpenedFocusedWork>> {
   const contribution = await contributionFor(input.kind);
   if (contribution === undefined) return unsupported(input.kind);
@@ -174,6 +183,7 @@ export async function openFocusedWork(input: {
   const planned = await contribution.plan({
     targetId: input.targetId,
     blockId: input.blockId,
+    ...(input.blank === true ? { blank: true } : {}),
   });
   if (planned.outcome !== "success") return planned as GraphOutcome<never>;
   const plan: ChildPlan = planned.result;

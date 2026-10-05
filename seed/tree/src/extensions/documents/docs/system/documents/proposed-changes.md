@@ -242,8 +242,9 @@ Under `calliopa-bootstrap`'s `BO_0322` (`docs/changes/BO_0322_FEAT_a-pinch-deepe
   started elsewhere is discarded with its items here. User decision, 2026-10-03.
 * Before the press, the chip names what the run proposes outside this document — *also creates the
   structure video-beat* — each name opening that document. User decision, 2026-10-03.
-* An item's ✓ and ✗ answer that item alone; only *Accept all* and *Reject all* reach the run's work
-  elsewhere. User decision, 2026-10-03.
+* An item's ✓ and ✗ answer that item alone; only a group's answer — *Accept all*, *Reject all*, or a
+  swipe or Delete on its folded card ([Block Editor](./block-editor.md#an-inbox-of-decisions)) — reaches
+  the run's work elsewhere. User decisions, 2026-10-03 and 2026-10-05 (`BO_0350_Q11`).
 - The whole group answered (`DO_0034_001`, landed 2026-10-03; `server/documents.ts`
   `answerElsewhere`). After the document's own items, as before, `answerDocumentGroup` reads the
   group's touched set and its candidates once and sends every node it still stages outside this

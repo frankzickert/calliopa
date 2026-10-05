@@ -180,7 +180,8 @@ export interface Layout {
   sections: Record<string, SectionState>;
   /**
    * A section's stored filter, keyed like `sections`: the values it lists,
-   * in its own vocabulary — the Extensions section's change statuses. A key
+   * in its own vocabulary — the Extensions section's change statuses, an item
+   * section's filter the values it hides and its order (DO_0038_001). A key
    * absent means the section's default; a stored empty set lists nothing.
    * Preserved for a section nothing contributes, as `sections` is. BO_0222_006
    */

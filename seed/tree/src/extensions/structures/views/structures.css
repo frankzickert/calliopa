@@ -482,3 +482,121 @@
   cursor: pointer;
 }
 
+
+/* The field choice under a structured block a drop has just nested a block
+ * into (`calliopa-bootstrap`'s `BO_0349_010`): in the row's flow, under the
+ * block, so it never covers the block it asks about. */
+.nested-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  box-sizing: border-box;
+  max-width: min(28rem, 100%);
+  margin: 0.25rem 0 0.5rem;
+  padding: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+}
+
+.nested-fields__heading,
+.nested-fields__structure {
+  color: var(--text-muted);
+}
+
+.nested-fields__group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.nested-fields__fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.nested-fields__field,
+.nested-fields__skip {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+  min-height: 2rem;
+  cursor: pointer;
+}
+
+.nested-fields__field:hover,
+.nested-fields__field:focus-visible,
+.nested-fields__skip:hover,
+.nested-fields__skip:focus-visible {
+  border-color: var(--accent);
+}
+
+/* A field whose choice starts a run is red, as every drop that starts work
+ * is (`BO_0349_Q8`), so the person sees it before choosing. */
+.nested-fields__field--acts {
+  color: var(--error);
+  border-color: var(--error);
+}
+
+.nested-fields__field--acts:hover,
+.nested-fields__field--acts:focus-visible {
+  border-color: var(--error);
+  background: color-mix(in srgb, var(--error) 10%, transparent);
+}
+
+.nested-fields__skip {
+  align-self: flex-start;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.nested-fields__refusal {
+  color: var(--error);
+}
+
+/* A field's children in the popover (`BO_0349_021`): each block it holds by
+ * its first words, with a × that takes it out of the field. */
+.structure-control__field-children {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.structure-control__children {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.structure-control__child {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.structure-control__child-words {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A field's child opens its focused work at itself (BO_0349_024). */
+.structure-control__child-open {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}

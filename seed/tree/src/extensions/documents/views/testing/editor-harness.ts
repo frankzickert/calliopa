@@ -16,6 +16,7 @@ import {
   type ViewInspector,
   type ViewCommand,
   type ViewGesture,
+  type ViewInstructedRun,
   type ViewPinch,
   type SentCommand as ViewSent,
   type ViewComposeBlock,
@@ -36,12 +37,14 @@ import {
   commandKey,
   withOption,
   type RunChip,
+  type Message,
 } from "~/components/shell/view-bridge";
 import type { DocumentActivity } from "~/server/agent/run-events";
 import { ViewBarPanel } from "~/components/shell/view-bar";
 import { openAlongRoute, type Tab, type TabsState } from "~/lib/tabs";
 import type { Pointing, RevealTarget, WorkingMode } from "~/lib/command-target";
 import type { Standing } from "../../lib/disposition";
+import { NO_ARRANGEMENT, type Arrangement } from "../../lib/arrangement";
 import type { FocusedWork } from "~/server/focused-work";
 import type { BlockView, DocumentView, TextBlockView } from "../../server/assemble";
 import type { DocumentProposals, ProposedChange, ReplayDocument } from "../../server/documents";
@@ -114,12 +117,36 @@ export interface BridgeRecord {
   mode?: WorkingMode | null;
   /** The headlines of the messages the view raised, in order. CA_0053_007 */
   messages?: string[];
+  /** The answer the next press on `[data-harness-message-answer]` gives the
+   * last message raised, as a press in the shell's message does. DO_0040_002 */
+  messageAnswer?: string;
+  /** The bodies of the messages the view raised, in order. DO_0040_002 */
+  messageBodies?: string[];
+  /** How often the view told the shell its document is gone. DO_0040_002 */
+  gone?: number;
   /** What the next press on `[data-harness-drop]` drops, and where, as the
    * shell's drag model hands a view a drop. BO_0263_002 */
-  drop?: { readonly itemId: string; readonly overId: string; readonly from?: string };
+  drop?: {
+    readonly itemId: string;
+    readonly overId: string;
+    readonly from?: string;
+    /** An item of another kind, linked rather than moved: a structure out of
+     * the library. BO_0349_011 */
+    readonly kind?: string;
+    /** The dragged item's preview — a passage's words. BO_0349_013 */
+    readonly preview?: string;
+    /** A card dropped on the edge pile, kept for later. BO_0350_006 */
+    readonly operation?: "move" | "defer";
+  };
   /** What the next press on `[data-harness-over]` puts under the pointer, as
    * the shell's drag model does while a drag moves. CA_0072_007 */
   over?: string | null;
+  /** What a release over `over` would do, as the shell resolves it; a move
+   * unless said. BO_0349_036 */
+  overOperation?: string | null;
+  /** The kind of what is held over `over`, as the shell's payload carries
+   * it; none unless said. BO_0349_013 */
+  overKind?: string | null;
   /** The run chips the view last reported. BO_0265_014 */
   chips?: readonly RunChip[];
   /** What the next press on `[data-harness-activity]` hands the view as the
@@ -143,6 +170,8 @@ export interface BridgeRecord {
   commands?: ViewCommand[];
   /** The gestures a view asked, in press order. BO_0258_006 */
   gestures?: ViewGesture[];
+  /** The instructed runs a view started, in order. BO_0349_052 */
+  instructed?: ViewInstructedRun[];
   /** The pinches sent, in order. BO_0322_010 */
   pinches?: ViewPinch[];
   sendAnswer?: ViewSent;
@@ -206,6 +235,9 @@ export function documentsApi(
     readonly writeDelayMs?: number;
     /** Refuses every split as a conflict. CA_0045_005 */
     readonly refuseSplits?: boolean;
+    /** Refuses a delete with these words, as the server refuses one it
+     * cannot carry out. DO_0040_002 */
+    readonly refuseDelete?: string;
     /** Refuses the first `times` of a command as the kernel's per-node floor
      * does, `write_too_frequent`, and lands the ones after. DO_0015_002 */
     readonly refuseByFloor?: { readonly command: string; readonly times: number };
@@ -214,6 +246,9 @@ export function documentsApi(
     readonly replay?: ReplayDocument;
     /** Every read of the document itself, recorded. CA_0045_003 */
     readonly reads?: string[];
+    /** What `GET d/[id]/arrangement` answers: Hermes's arrangement of the
+     * document for the reader, or none. BO_0350_005 */
+    readonly arrangement?: Arrangement;
     /** How long a read of the document takes to answer. CA_0045_003 */
     readonly readDelayMs?: number;
     /** Every read of the branch standing, recorded. CA_0046 */
@@ -326,6 +361,12 @@ export function documentsApi(
           JSON.stringify({ outcome: "validationFailure", failures: [{ operation: null, rule: "write_too_frequent", detail: `node:${String(body["blockId"])} was written less than 250ms ago; coalesce edits in the editor — every save archives a revision into permanent history` }] }),
           { status: 429, headers: { "content-type": "application/json" } },
         );
+      }
+      if (options.refuseDelete !== undefined && body["command"] === "delete") {
+        return new Response(JSON.stringify({ outcome: "refused", detail: options.refuseDelete }), {
+          status: 409,
+          headers: { "content-type": "application/json" },
+        });
       }
       if (options.refuseTruthSaves === true && body["command"] === "revise" && (body["branch"] === undefined || body["branch"] === null)) {
         return new Response(
@@ -542,8 +583,24 @@ export function documentsApi(
       }
       // A whole group answered at once, each item as its own answer lands.
       // BO_0343_012
+      // A card kept for later or taken back: the group carries the mark, and
+      // reads deferred until taken back. BO_0350_006
+      if (body["command"] === "deferGroup") {
+        proposals = {
+          ...proposals,
+          groups: proposals.groups.map((group) =>
+            group.groupId === body["groupId"] ? { ...group, ...(body["deferred"] === true ? { deferred: true } : { deferred: false }) } : group,
+          ),
+        };
+        return answer({ deferred: body["deferred"] === true });
+      }
       if (body["command"] === "answerGroup") {
-        const items = proposals.groups.find((group) => group.groupId === body["groupId"])?.items ?? [];
+        // One card's items when the answer names them, as the server answers.
+        // BO_0351_024
+        const named = Array.isArray(body["itemIds"]) ? (body["itemIds"] as string[]) : null;
+        const items = (proposals.groups.find((group) => group.groupId === body["groupId"])?.items ?? []).filter(
+          (item) => named === null || named.includes(item.itemId),
+        );
         const answered: string[] = [];
         for (const item of items) {
           if (options.refuseAnswer?.(item.itemId) !== undefined || options.refuseAnswers === true) continue;
@@ -640,6 +697,7 @@ export function documentsApi(
       if (options.focusedHeld !== undefined) await options.focusedHeld;
       return answer(focused);
     }
+    if (url === `${base}/arrangement`) return answer(options.arrangement ?? NO_ARRANGEMENT);
     if (url === `${base}/mode`) {
       if (init?.method === "PUT") {
         const body = JSON.parse(String(init.body ?? "{}")) as { field: string; work: string };
@@ -681,7 +739,7 @@ export const tabFor = (document: DocumentView): Tab => ({
  */
 export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: RevealTarget) =>
   component$(() => {
-    const drag = useStore({ overId: null, drop: null });
+    const drag = useStore({ overId: null, drop: null, operation: null, payload: null });
     const inspector = useStore<ViewInspector>({
       text: null,
       facts: [],
@@ -726,6 +784,8 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
         ? { itemId: null, blockId: null, seq: 0 }
         : { itemId: tab.itemId, blockId: record.focusOn, seq: 1 },
     );
+    /** The last message raised, as the shell holds it. DO_0040_002 */
+    const raised = useStore<{ current: Message | null }>({ current: null });
     const noop = $(() => undefined);
     const bridge: ViewBridge = {
       workspaceId: "harness-workspace",
@@ -762,9 +822,13 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
       }),
       setTitle$: noop,
       setSaveState$: noop,
-      targetGone$: noop,
-      raiseMessage$: $((message: { headline: string }) => {
+      targetGone$: $(() => {
+        record.gone = (record.gone ?? 0) + 1;
+      }),
+      raiseMessage$: $((message: Message) => {
         (record.messages ??= []).push(message.headline);
+        (record.messageBodies ??= []).push(message.body);
+        raised.current = message;
       }),
       openTarget$: $((target: { kind: string; itemId: string; title: string }) => {
         (record.opened ??= []).push({ kind: target.kind, itemId: target.itemId, title: target.title });
@@ -818,6 +882,12 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
         (record.pinches ??= []).push(pinch);
         return record.sendAnswer ?? { ok: true, runId: `arun-p${record.pinches.length}` };
       }),
+      // An instructed run the harness records, so a drop that starts work can
+      // be read back. BO_0349_052
+      sendInstructed$: $(async (instructed: ViewInstructedRun): Promise<ViewSent> => {
+        (record.instructed ??= []).push(instructed);
+        return record.sendAnswer ?? { ok: true, runId: `arun-i${record.instructed.length}` };
+      }),
       // What the shell's own does: the document opens in a tab of its own
       // beside the active one, or its open tab becomes active. CA_0073_002
       openAlongRoute$: $((target: { itemId: string; title: string; route: readonly { itemId: string; title: string; blockId?: string }[]; focus?: string }) => {
@@ -842,7 +912,8 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
         const answered = await fetch(`/api/focused-work/${itemId}`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ kind: "documents:document", blockId }),
+          // A nest's child is made with no blocks, as the shell asks. BO_0349_019
+          body: JSON.stringify({ kind: "documents:document", blockId, blank: true }),
         });
         const outcome = (await answered.json()) as
           | { outcome: "success"; result: { itemId: string } }
@@ -909,8 +980,18 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
           onClick$: $(() => {
             if (record.drop === undefined) return;
             (drag as { drop: ViewDrop | null }).drop = {
-              payload: { itemId: record.drop.itemId, kind: "documents:document", source: "workspace", operations: ["move"], preview: null, from: record.drop.from },
-              operation: "move",
+              payload:
+                record.drop.kind === undefined
+                  ? { itemId: record.drop.itemId, kind: "documents:document", source: "workspace", operations: ["move", "defer"], preview: null, from: record.drop.from }
+                  : {
+                      itemId: record.drop.itemId,
+                      kind: record.drop.kind,
+                      source: "library",
+                      operations: ["link"],
+                      preview: record.drop.preview ?? null,
+                      ...(record.drop.from === undefined ? {} : { from: record.drop.from }),
+                    },
+              operation: record.drop.kind === undefined ? (record.drop.operation ?? "move") : "link",
               overId: record.drop.overId,
               seq: ((drag.drop as ViewDrop | null)?.seq ?? 0) + 1,
             };
@@ -923,6 +1004,9 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
           "data-harness-over": "",
           onClick$: $(() => {
             (drag as { overId: string | null }).overId = record.over ?? null;
+            // What a release there would do, as the shell resolves it. BO_0349_036
+            (drag as { operation: string | null }).operation = record.overOperation !== undefined ? record.overOperation : record.over == null ? null : "move";
+            (drag as { payload: unknown }).payload = record.overKind == null ? null : { itemId: "held", kind: record.overKind, source: "library" };
           }),
           children: "over",
         }),
@@ -971,6 +1055,18 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
             proposed.seq += 1;
           }),
           children: "proposed",
+        }),
+        // A press on the last raised message's answer, as the shell's message
+        // takes it. DO_0040_002
+        jsx("button", {
+          type: "button",
+          "data-harness-message-answer": "",
+          onClick$: $(async () => {
+            const answer = raised.current?.answers.find((one) => one.id === record.messageAnswer);
+            raised.current = null;
+            await answer?.run$?.();
+          }),
+          children: "message answer",
         }),
         // A run chip's Reject all or Accept all, as the shell writes it.
         // BO_0265_014

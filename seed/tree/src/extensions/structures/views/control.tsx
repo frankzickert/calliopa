@@ -24,12 +24,17 @@ import {
   type StructureView,
   type TakenStructure,
 } from "../lib/structures";
+import { startsRun } from "../lib/children";
 import { StructureActs } from "./structure-acts";
 import { placePopover, type Box } from "../lib/placement";
 import { offerDistance, suggestStructures } from "../lib/suggest";
 import { valuesLine } from "../lib/values";
 import { pillNote, pillTitle } from "./label";
 import { adopt, postStructures, readStructures, StructuresContext, STRUCTURES_CHANGED, type StructuresState } from "./provider";
+import { takeOpening } from "./drops";
+import { ViewBridgeContext } from "~/components/shell/view-bridge";
+import { EditorSurfaceContext } from "~/extensions/documents/views/editor-surface";
+import { routeOf } from "~/lib/tabs";
 import "./structures.css";
 
 /**
@@ -94,6 +99,16 @@ function wordsAt(place: Place, host: Element | undefined): string {
 
 /** The page a control stands on: where a write's answer is announced. */
 const windowOf = (host: Element | undefined): EventTarget | null => host?.ownerDocument ?? null;
+
+/** How long a child's words run in its field: enough to tell one from another. */
+const CHILD_WORDS = 60;
+
+/** A block a field holds, by its first words; a block with none says so. */
+export const firstWords = (words: string): string => {
+  const flat = words.replace(/\s+/gu, " ").trim();
+  if (flat === "") return "A block with no words";
+  return flat.length > CHILD_WORDS ? `${flat.slice(0, CHILD_WORDS - 1).trimEnd()}…` : flat;
+};
 
 /** How far the sheet's handle is swiped down before the sheet closes. */
 const SHEET_CLOSES = 80;
@@ -597,6 +612,8 @@ const FieldInput = component$<{
 /** The control itself, for a block or for the document. */
 export const StructureControl = component$<{ place: Place; editing: boolean }>(({ place, editing }) => {
   const state = useContext(StructuresContext);
+  const bridge = useContext(ViewBridgeContext, null);
+  const surface = useContext(EditorSurfaceContext, null);
   const local = useStore({ open: false, expanded: "", query: "", refusal: "", suggested: [] as string[], from: -1, drag: 0 });
   const sheet = useSignal<HTMLElement>();
   const host = useSignal<Element>();
@@ -645,6 +662,23 @@ export const StructureControl = component$<{ place: Place; editing: boolean }>((
 
   const refuse$ = $((refusal: string) => {
     local.refusal = refusal;
+  });
+
+  // A field's child opens in its focused work's tab, landing on it, the
+  // route the parent's with the block the field stands on. BO_0349_024
+  const openChild$ = $(async (itemId: string, title: string, blockId: string) => {
+    if (bridge === null || surface === null || itemId === "") return;
+    const route = routeOf(surface.tab);
+    const parent = route[route.length - 1];
+    if (parent !== undefined && place.blockId !== "") route[route.length - 1] = { ...parent, blockId: place.blockId };
+    route.push({ itemId, title });
+    await bridge.openAlongRoute$({ itemId, title, route, focus: blockId });
+  });
+
+  // A block taken out of a field stays where it is, in the focused work. BO_0349_021
+  const takeChild$ = $(async (structure: string, key: string, child: string) => {
+    const refusal = await postStructures(state, `${base(place)}/structures/${encodeURIComponent(structure)}/fields`, { field: key, child, put: false }, windowOf(host.value));
+    local.refusal = refusal ?? "";
   });
 
   // On a phone the popover is a sheet from the bottom of the screen
@@ -920,7 +954,56 @@ export const StructureControl = component$<{ place: Place; editing: boolean }>((
                     </span>
                     {expanded && structure.fields.length > 0 && structure.proposed !== "structure" && (
                       <div class="structure-control__fields" data-structure-fields={structure.id}>
-                        {structure.fields.map((field) => (
+                        {structure.fields.map((field) => {
+                          const children = structure.children?.[field.key] ?? [];
+                          // A field holding blocks reads as them; a text field
+                          // is edited in them, so it draws no input while they
+                          // stand, and a value typed before returns once the
+                          // last is taken out (BO_0349_021).
+                          const list = children.length === 0 ? null : (
+                            <ul key={`${field.key}:children`} class="structure-control__children" data-field-children={field.key} aria-label={`${field.name}: the blocks it holds`}>
+                              {children.map((child) => (
+                                <li key={child.blockId} class="structure-control__child" data-field-child={child.blockId}>
+                                  {child.documentId === undefined ? (
+                                    <span class="structure-control__child-words">{firstWords(child.words)}</span>
+                                  ) : (
+                                    // A child opens its focused work at itself, in a
+                                    // tab of its own along the route. BO_0349_024
+                                    <button
+                                      type="button"
+                                      class="structure-control__child-words structure-control__child-open"
+                                      data-open-child={child.blockId}
+                                      title={`Open ${child.documentTitle ?? "its focused work"} at this block`}
+                                      preventdefault:mousedown
+                                      onClick$={() => openChild$(child.documentId ?? "", child.documentTitle ?? "", child.blockId)}
+                                    >
+                                      {firstWords(child.words)}
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    class="structure-control__clear"
+                                    aria-label={`Take it out of ${field.name}`}
+                                    title={`Take it out of ${field.name}`}
+                                    data-take-child={child.blockId}
+                                    preventdefault:mousedown
+                                    disabled={state.busy}
+                                    onClick$={() => takeChild$(structure.id, field.key, child.blockId)}
+                                  >
+                                    <Icon name="x" />
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          );
+                          if (list !== null && !startsRun(field))
+                            return (
+                              <div key={field.key} class="structure-control__field-children">
+                                <span class="structure-control__heading">{field.name}</span>
+                                {list}
+                              </div>
+                            );
+                          return [
                           <FieldInput
                             key={field.key}
                             field={field}
@@ -932,8 +1015,10 @@ export const StructureControl = component$<{ place: Place; editing: boolean }>((
                             titles={state.view?.referenceTitles ?? {}}
                             onValue$={(value) => value$(structure.id, field.key, value)}
                             onRefusal$={refuse$}
-                          />
-                        ))}
+                          />,
+                          list,
+                          ];
+                        })}
                       </div>
                     )}
                   </li>
@@ -1133,7 +1218,7 @@ export const ValuesLine = component$<{ structures: readonly TakenStructure[]; ti
  * so this place holds its own state, read when it is first shown, and keeps
  * it and the provider's current through the announced answer of every write.
  */
-export const TitleStructureControl = component$<DocumentPlaceProps>(({ documentId, form }) => {
+export const TitleStructureControl = component$<DocumentPlaceProps>(({ documentId, form, dataRevision }) => {
   const state = useStore<StructuresState>({
     loaded: false,
     reachable: false,
@@ -1147,7 +1232,12 @@ export const TitleStructureControl = component$<DocumentPlaceProps>(({ documentI
   // eslint-disable-next-line qwik/no-use-visible-task -- read in the browser with the person's session, once the line is shown
   useVisibleTask$(async ({ track }) => {
     const id = track(() => documentId);
+    // Read again as the document changes, and open on a structure a drop on
+    // the header just used. BO_0349_037
+    track(() => dataRevision);
     await readStructures(state, id);
+    const opening = takeOpening(id, true);
+    if (opening !== null) state.opening = opening;
   });
 
   useOnDocument(

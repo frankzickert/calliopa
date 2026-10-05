@@ -216,6 +216,10 @@ services:
       CALLIOPA_AGENT_TOOLS_BEARER_FILE: /run/secrets/calliopa/agent_tools_bearer
       CALLIOPA_KERNEL_TOOLS_URL: http://kernel:8090/__kernel/agent-tools
       CALLIOPA_AGENT_CONFIG_DIR: /var/lib/calliopa/agent-config
+      # Where Hermes keeps what it learns of each person; the memory service
+      # runs only with its key stored, and Hermes decides without it
+      # otherwise. BO_0350_061
+      HONCHO_BASE_URL: http://honcho:8000
     volumes:
       - hermes-data:/var/lib/hermes
       - agent-config:/var/lib/calliopa/agent-config
@@ -464,6 +468,7 @@ services:
       # BO_0089_012
       CALLIOPA_HERMES_URL: http://hermes:8642
       CALLIOPA_CLAUDE_RUNNER_URL: http://hermes:8643
+      CALLIOPA_ORCHESTRATOR_URL: http://hermes:8645
       CALLIOPA_HERMES_BEARER_FILE: /run/secrets/calliopa/hermes_api_key
       CALLIOPA_AGENT_TOOLS_BEARER_FILE: /run/secrets/calliopa/agent_tools_bearer
       CALLIOPA_AGENT_CONFIG_DIR: /var/lib/calliopa/agent-config

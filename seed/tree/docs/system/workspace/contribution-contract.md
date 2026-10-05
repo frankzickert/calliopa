@@ -87,6 +87,24 @@
   of the block being edited stand in a chip of their own beside the command chip
   ([Structures](../../../src/extensions/structures/docs/system/system.md#the-structures-chip)). The chip
   names no extension, as the `command` place does not.
+- A decorating extension may say what a drop of a kind it knows means (`calliopa-bootstrap`'s
+  `BO_0349_011`, landed 2026-10-05; `Decorations.drops`, `DecorationDrop`): by the dragged item's kind,
+  a function handed the item, the document and the block it landed on — none for the header — that
+  answers a refusal in words or null. The presenting view hands a drop to the first extension declaring
+  the kind and shows the refusal; it knows neither the kind nor the act. A drop on the body, between the rows, says
+  so (`body`), and every drop carries `startRun`, which starts an instructed run in the document on the
+  view's bridge, so an extension whose drop starts work need not reach the bridge itself
+  (`BO_0349_012`). A drop on a marked passage's number carries `passage` — its block and its words —
+  and no block (`BO_0349_038`). An extension names in `Decorations.actsOnBody` the kinds whose drop
+  on the body or on a passage acts, so the view lights those red and no other.
+- `nested` is one more `BlockPlace` (`calliopa-bootstrap`'s `BO_0349_010`, landed 2026-10-05;
+  `src/contract.ts`): drawn under a block the moment a drop has nested another block into it,
+  handed the usual `{documentId, blockId, revisionId, active}` and, in this place alone, `nested` —
+  the block just nested and the focused work it now stands in (`NestedBlock`) — and `done$`, which
+  the contribution calls when it has nothing more to ask, so the place is drawn no more. What
+  draws it is `documents`'
+  ([Curation By Drop](../../../src/extensions/documents/docs/system/documents/block-editor.md#curation-by-drop));
+  what fills it is `structures`' field choice.
 - `underCommand` is one more `BlockPlace` (`RO_0002_001`, landed 2026-10-01; `src/contract.ts`):
   drawn in a chip of its own in the command chip's row, wherever the command chip is drawn —
   the block being edited and the prompt pointed from — handed the same `{documentId, blockId,
@@ -261,3 +279,31 @@ identifier and route, and `doc-block-roles` and `profiles` become `structures` a
   and refused; the extensions' behaviour suites under the kernel harness prove the reads
   (`structures` `BO_0344_007`, `keywords` `BO_0344_008`, `bibliography` `BO_0344_009`,
   `manuscripts` `BO_0344_010`).
+
+## A Filter On An Item Section
+
+Under `documents`' `DO_0038` (2026-10-05,
+[the change](../../../src/extensions/documents/docs/changes/completed/DO_0038_FEAT_filter-and-order-the-documents-list.md)):
+an item section may declare a filter, and the shell draws it over the uniform rows, so a section
+keeps the rows' opening, marking, hold and drop behaviour rather than turning into a component to
+filter them. `documents`' Documents section is the first to declare one
+([The Documents Section](../../../src/extensions/documents/docs/system/documents/documents-section.md)).
+
+- An item section may declare a filter (`DO_0038_001`): `LibrarySection.filter` (`LibraryFilter` in
+  `src/contract.ts`) names the search field when the row searches the labels, its toggle groups by
+  name and label, its orders — an id, a label and how it arranges the rows (`LibraryOrderBy`: by
+  label either way, or by the number each item carries for it, highest or lowest first) — the
+  default (`defaultOrder`, and `defaultHidden` as `<group>:<value>`), and the words said when every
+  row is hidden (`noMatch`). An item carries its value per group in `LibraryItem.facets`
+  (`LibraryFacet`: the value, the words, an optional icon) and its number per key order in
+  `LibraryItem.orderKeys`; an item carrying no value for a group is never hidden by it, and one
+  carrying no number sorts last. The choice is stored through the existing `Layout.filters` under
+  the section's key in the section's own vocabulary — each value hidden as `<group>:<value>`, the
+  order as `order:<id>` — so nothing stored reads the default, a hidden value no item carries any
+  more is kept, and an order the filter no longer declares reads as the default. `buildRegistry`
+  refuses a filter on a component section (`filter_shape`), a default order the filter does not
+  declare (`filter_order_unknown`) and two groups or two orders of one name (`filter_collision`).
+  The pure rules — the choice read back and stored, a toggle, a change applied
+  (`changedFilter`), the values the listed items carry, the rows a choice and a search keep in its
+  order, and whether the choice is the default — are `src/lib/library-filter.ts`, proven in
+  `src/lib/library-filter.test.ts`; `src/registry.test.ts` proves the three refusals.

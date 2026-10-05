@@ -13,12 +13,13 @@ import {
 
 import type { DragPayload } from "~/lib/drag";
 import { patternImageSource, type PatternImage } from "~/lib/attachments";
+import { EXTEND_A_STRUCTURE, INSTRUCTION_RECORD, SHAPE_AN_INSTRUCTION } from "../lib/instruction";
 import { step, type Standing } from "../lib/disposition";
 import { anchorAt } from "~/lib/passage";
 import { passagesIn, passageState, proposalReferenceFor, referenceFor } from "../lib/references";
 import { isUnnamed, shownTitle, unnamedTitle } from "../lib/naming";
 import { proposedFor, revealFor, type AttachmentDescriptor } from "~/lib/command-target";
-import type { SentCommand } from "~/components/shell/view-bridge";
+import type { SentCommand, ViewInstructedRun } from "~/components/shell/view-bridge";
 import { CommandControl } from "./command/command-control";
 import { attachFiles, uploadFile, type AttachmentHolder } from "~/lib/attachments";
 
@@ -76,7 +77,7 @@ import {
 import type { ViewProps } from "~/components/shell/view-host";
 import type { ChangeSummary } from "../server/documents";
 import { Icon, type IconName } from "~/components/shell/icons";
-import { BlockDecorations } from "./decorations";
+import { actsOnBody, BlockDecorations, dropOnDocument } from "./decorations";
 import { EquationBlock } from "./equation-block";
 import { EquationPopover } from "./equation-popover";
 import { typesetInline, typesetMissing } from "./typeset-client";
@@ -128,6 +129,8 @@ import {
   fetchDocument,
   fetchReplay,
   fetchProposals,
+  readArrangement,
+  deferGroup,
   reopenProposal,
   fetchRetired,
   sendCommand,
@@ -139,6 +142,8 @@ import {
 import { declineNotice } from "../lib/declines";
 import { installSwipe, swipeJustEnded, SWIPEABLE_PROPOSALS } from "./block-swipe";
 import { installPinch } from "./block-pinch";
+import { cardItems, cardOrigin, cardPlaces, refold } from "./cards";
+import { drawnGroups, NO_ARRANGEMENT, type Arrangement } from "../lib/arrangement";
 import { routeOf } from "~/lib/tabs";
 import {
   chordDirection,
@@ -152,7 +157,7 @@ import { RowMarks, rowMarkAttributes, rowMarkingName, rowNumbers } from "./marki
 import { openingWords } from "../lib/pointing";
 import type { Marked as MarkedTarget } from "../lib/references";
 import { PassageAffordance } from "./passages/passage-affordance";
-import { PassageNumbers } from "./passages/passage-numbers";
+import { PASSAGE_DRAG_KIND, passageBlock, PassageNumbers } from "./passages/passage-numbers";
 import { revealedPassage, showArea } from "./reveal";
 import { selectedWords } from "./passages/selection";
 import { PassagesContext, usePassages } from "./passages/use-passages";
@@ -182,6 +187,7 @@ import { CardLabel, StandingMark } from "./standing/standing-mark";
 import { FIRST_MODE, PINCH_MODE, switched, type WorkingMode } from "../lib/working-mode";
 import { commandChoiceKey, readStoredChoice, resolveChoice, storedChoice, type CommandChoice, type SentRun } from "../lib/command-choices";
 import type { FocusedChild, FocusedWork } from "~/server/focused-work";
+import type { NestedBlock } from "~/contract";
 import { BlockFace } from "./block-controls";
 import { BlockBar } from "./block-bar";
 import { StandingContext, standingOf, useStanding, type RestorePlacement } from "./standing/use-standing";
@@ -493,9 +499,13 @@ const shownProposalsOf = (state: DocumentState, ownBranch: string | null): Propo
       : // Each change is shown or hidden on its own: the toggle sets them all,
         // a run chip flips one, and the reader's run starts shown as it
         // stages. CA_0055_006 BO_0265_012
-        (state.proposals?.groups.flatMap((group) =>
-          group.items.filter(() => groupShown(group.groupId, state)),
-        ) ?? [])
+        // Of those, the arrangement's cards or the first seven, and a
+        // deferred card only while *Show proposed changes* is on.
+        // BO_0350_005 BO_0350_007
+        ((groups) => {
+          const drawn = drawnGroups(groups, (groupId) => groupShown(groupId, state), state.shownGroups, state.proposalsOpen, state.arrangement);
+          return groups.flatMap((group) => (drawn.has(group.groupId) ? group.items : []));
+        })(state.proposals?.groups ?? [])
   ).filter((item) => item.groupId !== ownBranch);
 
 /** The blocks a standing gather moves into another block's focused work.
@@ -610,6 +620,10 @@ export interface DocumentState {
    * is what a stored tab naming a deleted document arrives as. */
   missing: boolean;
   notice: string | null;
+  /** The block a drop has just nested into another, while the `nested` place
+   * stands under the target: an extension asks there what the nest means.
+   * BO_0349_010 */
+  nested: { readonly targetId: string; readonly blockId: string; readonly documentId: string } | null;
   /** How often this document has changed and when it last did, as the panel
    * reports them. Read separately from the document so a save can refresh the
    * count without paying to read every block again. */
@@ -661,6 +675,12 @@ export interface DocumentState {
    * tab's, never kept across a reload. CA_0055_006 */
   shownGroups: string[];
   hiddenGroups: string[];
+  /** The cards the reader unfolded with a pinch in, each row then answered on
+   * its own; held per tab and never stored. BO_0350_003 */
+  unfoldedCards: string[];
+  /** What Hermes arranged on the document for the reader: the cards drawn,
+   * the blocks collapsed and dimmed. Read with the proposals. BO_0350_005 */
+  arrangement: Arrangement;
   toggleRunSeen: number;
   /** The person's proposal sessions as the branch component keeps them: the
    * one the tab works in, whether someone else accepts, the open ones, and
@@ -807,6 +827,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     status: "loading",
     missing: false,
     notice: null,
+    nested: null,
     changes: null,
     saveState: null,
     activeBlockId: null,
@@ -828,6 +849,8 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     answerAllSeen: bridge.answerAll.seq,
     shownGroups: [],
     hiddenGroups: [],
+    unfoldedCards: [],
+    arrangement: NO_ARRANGEMENT,
     toggleRunSeen: bridge.toggleRun.seq,
     branchGroup: null,
     branchRequired: false,
@@ -1168,6 +1191,9 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
           if (outcome.outcome !== "success" || read !== proposalEdit.reads) break;
           if (changes === proposalEdit.changes && proposalEdit.settling.length === 0) {
             state.proposals = withoutItems(outcome.result, proposalEdit.answered);
+            // What Hermes arranged is read beside what it arranges. BO_0350_005
+            const arranged = await readArrangement(documentId);
+            if (arranged.outcome === "success") state.arrangement = arranged.result;
             break;
           }
         }
@@ -1530,6 +1556,27 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     if (documentId === null) return { ok: false, error: "The document is not open." };
     const sent = await bridge.sendPinch$({ itemId: documentId, blockId, pinch, mode: PINCH_MODE[pinch] });
     if (!sent.ok) state.notice = sent.error;
+    // A pinch Hermes prepared for is answered by a run that has staged
+    // already: its card is read at once rather than when the run reports.
+    // BO_0350_008
+    else void reloadProposals$();
+    return sent;
+  });
+
+  /** A pinch in on a card of one proposal: the proposal deepened, as the
+   * reader saw it. BO_0350_014 */
+  const pinchProposal$ = $(async (item: ProposedChange): Promise<SentCommand> => {
+    if (documentId === null) return { ok: false, error: "The document is not open." };
+    const revisionId = item.block?.revisionId ?? "";
+    const sent = await bridge.sendPinch$({
+      itemId: documentId,
+      blockId: item.blockId,
+      pinch: "in",
+      mode: PINCH_MODE.in,
+      proposal: { group: item.groupId, item: item.itemId, revisionId },
+    });
+    if (!sent.ok) state.notice = sent.error;
+    else void reloadProposals$();
     return sent;
   });
 
@@ -3233,18 +3280,19 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
    * then the document read once. An item under an edit is the edit's to
    * settle, so a group holding one is answered item by item as before.
    * BO_0343_012 */
-  const answerGroup$ = $(async (groupId: string, answer: "accepted" | "rejected") => {
+  const answerGroup$ = $(async (groupId: string, answer: "accepted" | "rejected", itemIds?: readonly string[]) => {
     if (documentId === null) return;
     const group = state.proposals?.groups.find(
       (candidate) => candidate.groupId === groupId,
     );
-    const items = group?.items ?? [];
+    // One card's items when named, or the whole group. BO_0351_024
+    const items = (group?.items ?? []).filter((item) => itemIds === undefined || itemIds.includes(item.itemId));
     if (items.length === 0) return;
     if (items.some((item) => proposalEdit.settling.includes(item.itemId) || proposalEdit.accepted.includes(item.itemId) || proposalEdit.pending?.itemId === item.itemId)) {
       for (const item of items) await answerProposal$(item.itemId, answer);
       return;
     }
-    const outcome = await answerGroup(documentId, groupId, answer);
+    const outcome = await answerGroup(documentId, groupId, answer, itemIds);
     if (outcome.outcome !== "success") {
       state.notice = describeOutcome(outcome);
     } else {
@@ -3378,6 +3426,20 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     },
   );
 
+  /** Keeps the card an item belongs to for later: the person's mark on its
+   * whole group, after which the card leaves the flow. BO_0350_006 */
+  const defer$ = $(async (itemId: string) => {
+    if (documentId === null) return;
+    const group = state.proposals?.groups.find((candidate) => candidate.items.some((item) => item.itemId === itemId));
+    if (group === undefined) return;
+    const outcome = await deferGroup(documentId, group.groupId, true);
+    if (outcome.outcome !== "success") {
+      state.notice = describeOutcome(outcome);
+      return;
+    }
+    await reloadProposals$();
+  });
+
   /** Drags a proposal by its face, as a block is dragged by its grip. BO_0233_007 */
   const startProposalDrag$ = $(
     (itemId: string, preview: string, event: PointerEvent) =>
@@ -3386,7 +3448,9 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
           itemId: `proposal:${itemId}`,
           kind: "documents:document",
           source: "workspace",
-          operations: ["move"],
+          // A card is moved among the rows or kept for later on the edge
+          // pile. BO_0350_006
+          operations: ["move", "defer"],
           preview,
         },
         event,
@@ -3473,6 +3537,13 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     });
     if (outcome.outcome !== "success") {
       state.notice = describeOutcome(outcome);
+      // Said where the press is seen too: the notice stands above the title,
+      // out of sight at the foot of a long document. DO_0040_002
+      void bridge.raiseMessage$({
+        headline: `\u201c${doc.title}\u201d was not deleted`,
+        body: state.notice,
+        answers: [{ id: "ok", label: "OK" }],
+      });
       return;
     }
     // Every tab in this workspace showing it closes, so the reader is not left
@@ -3482,6 +3553,11 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
 
   const startBlockDrag$ = $(
     (blockId: string, preview: string, event: PointerEvent) => {
+      // What is typed in the block being dragged is saved as the drag starts,
+      // so no drop meets words still waiting for the pause. Found in the walk
+      // of BO_0349 at pin 4622, where a block typed into and dragged reached
+      // its focused work empty. BO_0349_027
+      if (editor.blockId === blockId) void save$();
       const payload: DragPayload = {
         itemId: blockId,
         kind: "documents:document",
@@ -4198,9 +4274,14 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
           // The title is read as the control is pressed rather than as the
           // contribution is built, so the question names what the document is
           // called now.
+          // A document a run started is a proposal, and deleting it rejects
+          // what the run proposed of it. DO_0040_002
           void bridge.raiseMessage$({
             headline: `Delete \u201c${current.title}\u201d?`,
-            body: "This removes the document from the product and cannot be undone.",
+            body:
+              current.proposed === undefined
+                ? "This removes the document from the product and cannot be undone."
+                : "This document is a proposal. Deleting it rejects it, and the rest of what was proposed with it stays open.",
             answers: [
               { id: "cancel", label: "Cancel" },
               {
@@ -4248,8 +4329,52 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       placement: { at: "end" },
     });
     state.notice = outcome.outcome === "success" ? null : describeOutcome(outcome);
+    // The nest stands; what it means beyond that is asked under the target,
+    // by whichever extension has something to ask. BO_0349_010
+    state.nested = outcome.outcome === "success" ? { targetId, blockId, documentId: child.itemId } : null;
     await readBack$(null);
     state.faces = await bridge.faces$(documentId);
+  });
+
+  const nestDone$ = $(() => {
+    state.nested = null;
+  });
+
+  /**
+   * A block dropped on this instruction's header (`BO_0349_014`): a run under
+   * *Shape an instruction* proposes the revision of this instruction that
+   * would have produced it, answered here as every proposal is. The block is
+   * the run's reference and is not moved. A block of the instruction itself
+   * is no example of it, and a proposal or a retired row is no block.
+   */
+  const shape$ = $(async (payload: DragPayload) => {
+    const doc = state.document;
+    if (documentId === null || doc === null) return;
+    const instruction = doc.record === INSTRUCTION_RECORD;
+    // A structure's header takes a block as an example of what the
+    // structure should hold: a run under *Extend a structure* proposes the
+    // fields it lacks. BO_0349_036
+    const structure = doc.named === "structure";
+    if (!instruction && !structure) return;
+    const from = payload.from ?? documentId;
+    // A marked passage is the example as its words; a block as itself.
+    // BO_0349_013
+    const passageIn = payload.kind === PASSAGE_DRAG_KIND ? passageBlock(payload.itemId) : null;
+    const blockId = passageIn ?? payload.itemId;
+    if ((passageIn === null && blockId.includes(":")) || from === documentId) return;
+    const example =
+      passageIn !== null && payload.preview !== null && payload.preview !== ""
+        ? ({ number: 1, kind: "passage", blockId: passageIn, quote: payload.preview, document: from } as const)
+        : ({ number: 1, blockId, document: from } as const);
+    const sent = await bridge.sendInstructed$({
+      itemId: documentId,
+      goal: instruction
+        ? "Revise this instruction so that, followed, it would produce material like #1, the block dropped on it."
+        : "Propose the fields this structure lacks, read off #1, the block dropped on it.",
+      instruction: instruction ? SHAPE_AN_INSTRUCTION : EXTEND_A_STRUCTURE,
+      references: [example],
+    });
+    state.notice = sent.ok ? null : sent.error;
   });
 
   // A visible task for the counts task's reason: a drop awaits its write.
@@ -4265,7 +4390,61 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     // own on its first run. CA_0072_002
     if (drop.seq <= dropsSeen.seq) return;
     dropsSeen.seq = drop.seq;
+    // A card dropped on the edge pile is kept for later: its whole group,
+    // which leaves the flow. BO_0350_006
+    if (drop.operation === "defer" && drop.overId === "later" && drop.payload.itemId.startsWith("proposal:")) {
+      await defer$(drop.payload.itemId.slice("proposal:".length));
+      return;
+    }
+    // A structure or an instruction out of the library, on a block's middle
+    // or the header: the extension that knows its kind says what it means
+    // there. BO_0349_011
+    if (drop.operation === "link") {
+      if (documentId === null) return;
+      // A marked passage dropped on an instruction's or a structure's header
+      // is the example a run shapes it by. BO_0349_013
+      if (drop.payload.kind === PASSAGE_DRAG_KIND) {
+        if (drop.overId.startsWith("header:")) await shape$(drop.payload);
+        return;
+      }
+      // A library item on a marked passage acts on those words alone. BO_0349_038
+      const onPassage = drop.overId.startsWith("passage:") ? passageAt(marking.store.marking, drop.overId) : null;
+      if (onPassage !== null) {
+        const startPassageRun = async (run: { goal: string; instruction: string; references: ViewInstructedRun["references"] }) => {
+          const sent = await bridge.sendInstructed$({ itemId: documentId, ...run });
+          return sent.ok ? null : sent.error;
+        };
+        state.notice = await dropOnDocument(drop.payload, documentId, null, startPassageRun, false, onPassage);
+        return;
+      }
+      const body = drop.overId.startsWith("block:");
+      const on = drop.overId.startsWith("nest:") ? drop.overId.slice("nest:".length) : drop.overId.startsWith("header:") || body ? null : undefined;
+      if (on === undefined) return;
+      // What the drop starts runs on the bridge, in this document. BO_0349_012
+      const startRun = async (run: { goal: string; instruction: string; references: ViewInstructedRun["references"] }) => {
+        const sent = await bridge.sendInstructed$({ itemId: documentId, ...run });
+        return sent.ok ? null : sent.error;
+      };
+      const refusal = await dropOnDocument(drop.payload, documentId, on, startRun, body);
+      state.notice = refusal;
+      // The document is read again, as after any write, so every decoration
+      // that reads with it — the structures' pills and lines, a standing
+      // instruction's pill — draws what the drop did at once. Found in the
+      // walk at pin 4805: the use stood, and showed only after a reload.
+      // BO_0349_025
+      // A drop on a block leaves the block edited, so the chip under it
+      // stands and opens on what the drop put there. BO_0349_037
+      if (refusal === null) await readBack$(on === null ? null : { blockId: on, offset: "end" });
+      return;
+    }
     if (drop.operation !== "move") return;
+    // Onto an instruction's header: the block is an example the instruction
+    // is shaped by; onto a structure's, an example the structure is extended
+    // by. It stays where it is. BO_0349_014 BO_0349_036
+    if (drop.overId.startsWith("header:")) {
+      await shape$(drop.payload);
+      return;
+    }
     // Onto a block's middle: the block is taken into it, as its focused
     // work. CA_0072_007
     if (drop.overId.startsWith("nest:")) {
@@ -4367,6 +4546,15 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     // the document because the shortcut opens the mode from wherever the reader
     // is on the page, including a dock collapsed to its handle.
     const view = root.value ?? null;
+    /** The card the row turned to is part of, by its group: a rewrite, an
+     * insert, a move or a gather of an open group. BO_0350_004 */
+    const focusedCard = (): string | null => {
+      const itemId = state.focusedItemId;
+      if (itemId === null) return null;
+      const group = (state.proposals?.groups ?? []).find((candidate) => candidate.items.some((item) => item.itemId === itemId));
+      const item = group?.items.find((candidate) => candidate.itemId === itemId);
+      return group !== undefined && item !== undefined && SWIPEABLE_PROPOSALS.includes(item.kind) ? group.groupId : null;
+    };
     const keys = (event: KeyboardEvent) => {
       // A surface holding the floor has made this frame inert, and nothing
       // inert may act on a key. That is what keeps `Escape` the message's
@@ -4384,6 +4572,23 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
         const keep = choiceIn(commandChoices.byBlock, state.runs, state.document, prompt, state.mode).keep;
         void sendBlock$(prompt, !keep, []);
         return;
+      }
+      // `+` unfolds the card turned to and `-` folds it, while reading, as a
+      // pinch in and out do. BO_0350_004
+      if (
+        (event.key === "+" || event.key === "-") &&
+        !event.ctrlKey && !event.metaKey && !event.altKey &&
+        marking.store.marking.mode === "reading" &&
+        editor.blockId === null &&
+        state.editingItemId === null &&
+        !typesHere(event.target)
+      ) {
+        const card = focusedCard();
+        if (card !== null) {
+          event.preventDefault();
+          state.unfoldedCards = [...refold(state.unfoldedCards, card, event.key === "+" ? "in" : "out")];
+          return;
+        }
       }
       // Delete or Backspace while reading removes: every row a selection
       // marks, else the row turned to — a fixated block at once, a proposal
@@ -4405,7 +4610,13 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
         const open = state.focusedItemId !== null && (state.proposals?.groups ?? []).some((group) => group.items.some((item) => item.itemId === state.focusedItemId));
         if (open && state.focusedItemId !== null) {
           event.preventDefault();
-          void answerProposal$(state.focusedItemId, "rejected");
+          // On a folded card the key rejects the whole card. BO_0350_002
+          const card = focusedCard();
+          // The card turned to, one place of its group. BO_0351_024
+          if (card !== null && !state.unfoldedCards.includes(card) && state.document !== null) {
+            const places = cardPlaces(drawnRows(state, state.document, branchOf(documentId, tab.id)), state.unfoldedCards);
+            void answerGroup$(card, "rejected", cardItems(places, state.focusedItemId));
+          } else void answerProposal$(state.focusedItemId, "rejected");
           return;
         }
         if (state.focusedBlockId !== null && state.document?.blocks.some((block) => block.blockId === state.focusedBlockId) === true) {
@@ -4533,13 +4744,34 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
         else void standing.setStanding$(swiped.blockId, action === "fixate" ? "fixate" : "keep");
         return;
       }
+      // A folded card is one decision: the swipe answers its whole group.
+      // BO_0350_002
+      if (swiped.kind === "card") {
+        // The card it moved, one place of the group. BO_0351_024
+        void answerGroup$(swiped.groupId, action === "remove" ? "rejected" : "accepted", swiped.itemIds);
+        return;
+      }
       void answerProposal$(swiped.itemId, action === "remove" ? "rejected" : "accepted");
     });
     // The pinch, on touch: zooming in on a row deepens the block, zooming
     // out gathers its neighbours into its focused work. BO_0322_010
-    const uninstallPinch = installPinch(page, (pinch, blockId) => {
-      void pinch$(pinch, blockId);
-    });
+    const uninstallPinch = installPinch(
+      page,
+      (pinch, blockId) => {
+        void pinch$(pinch, blockId);
+      },
+      // On a card the pinch unfolds or folds it; zooming in on a card of one
+      // proposal, with nothing to unfold, deepens the proposal. BO_0350_003
+      // BO_0350_014
+      (pinch, groupId) => {
+        const items = state.proposals?.groups.find((group) => group.groupId === groupId)?.items ?? [];
+        if (pinch === "in" && items.length === 1 && items[0] !== undefined) {
+          void pinchProposal$(items[0]);
+          return;
+        }
+        state.unfoldedCards = [...refold(state.unfoldedCards, groupId, pinch)];
+      },
+    );
     cleanup(() => {
       uninstallSwipe();
       uninstallPinch();
@@ -5050,6 +5282,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   // re-numbers under the caret. BO_0302_006
   const codeFirstLines = doc === null ? {} : resolveFirstLines(doc.blocks, state.codeLines);
   const drawn = doc === null ? [] : drawnRows(state, doc, ownBranch);
+  const cards = cardPlaces(drawn, state.unfoldedCards);
   const places = drawn.flatMap((row) => {
     const position = positionOf(row);
     return position === null ? [] : [position];
@@ -5059,7 +5292,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   // target the shell's drag model finds under the pointer, and the mark that
   // lights while it is there. BO_0263_002
   const dropSlot = (id: string, row: JSXOutput, key = `slot:${id}`) => (
-    <div class="drop-slot" key={key} data-drop-target={`block:${id}`} data-accepts="move">
+    <div class="drop-slot" key={key} data-drop-target={`block:${id}`} data-accepts="move link">
       <DropMark id={id} drag={bridge.drag} />
       {row}
     </div>
@@ -5171,12 +5404,34 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                 the rows' still collapse into one another as they always
                 have; the surface is a column only so that what follows it
                 can take the height the document leaves. DO_0028_001 */}
-            <div class="document-flow">
+            {/* Between its rows the body takes a structure dropped from the
+                library, applied to the whole document by a run, and lights red
+                while that is what a release would do. BO_0349_012 */}
+            <div
+              class="document-flow"
+              data-applying={
+                bridge.drag.operation === "link" && (bridge.drag.overId ?? "").startsWith("block:") && actsOnBody(bridge.drag.payload?.kind ?? "")
+                  ? "true"
+                  : undefined
+              }
+            >
               {/* The document's header: the route, the title, and the lines
                   the extensions draw under it — the roles, their values, a
                   keyword's mentions — one unit with one spacing, its left edge
                   on the blocks' text. DO_0030_002 */}
-              <header ref={documentHeader} class="document-header" data-document-header>
+              <header
+                ref={documentHeader}
+                class="document-header"
+                data-document-header
+                data-drop-target={`header:${documentId ?? ""}`}
+                data-accepts={doc.record === INSTRUCTION_RECORD || doc.named === "structure" ? "move link" : "link"}
+              >
+                {/* The header takes a structure or an instruction dragged out
+                    of the library, used on the document (BO_0349_011); an
+                    instruction's header also takes a block dropped on it as an
+                    example to shape the instruction by, red while that is what
+                    a release would do, since it starts a run (BO_0349_014). */}
+                <HeaderMark id={documentId ?? ""} drag={bridge.drag} examples={doc.record === INSTRUCTION_RECORD || doc.named === "structure"} />
                 {routeOf(tab).length > 1 && (
                   <nav class="document-route" data-document-route aria-label="Route">
                     <button
@@ -5320,7 +5575,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                     // area below the last block is on a page that has some.
                     // Found in the CA_0072 walk.
                     data-drop-target="block:end"
-                    data-accepts="move"
+                    data-accepts="move link"
                     onClick$={() => startWriting$()}
                   >
                     <DropMark id="end" drag={bridge.drag} />
@@ -5386,6 +5641,9 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                             withdrawal={withdrawerOf(entry.item, state.runActivities)}
                             withdrawing={withdrawnCountOf(entry.item.itemId, state.proposals)}
                             successor$={revealSuccessor$}
+                            card={cards.get(entry.item.itemId)}
+                            deferred={state.proposalsOpen && groupOf(entry.item.groupId)?.deferred === true}
+                            origin={cards.get(entry.item.itemId)?.edge === "first" || cards.get(entry.item.itemId)?.edge === "only" ? cardOrigin(entry.item.groupId, state.runs, doc.blocks) : null}
                             destination={destinationFor(entry.item)}
                             answer$={answerProposal$}
                             settle$={settleProposal$}
@@ -5449,6 +5707,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                               : entry.block.revisionId
                           }`}
                           block={entry.block}
+                          arranged={state.arrangement.collapsed.includes(entry.block.blockId) ? "collapsed" : state.arrangement.dimmed.includes(entry.block.blockId) ? "dimmed" : undefined}
                           equationNumbers={state.document?.equationNumbers}
                           codeFirstLines={codeFirstLines}
                           lines$={reportCodeLines$}
@@ -5471,6 +5730,8 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                           blocks={doc.blocks}
                           documentId={documentId ?? ""}
                           face={state.faces?.[entry.block.blockId] ?? null}
+                          nested={state.nested?.targetId === entry.block.blockId ? { blockId: state.nested.blockId, documentId: state.nested.documentId } : null}
+                          nestDone$={nestDone$}
                           pressControl$={pressBlockControl$}
                           pressing={pressing}
                           editor={editor}
@@ -5563,7 +5824,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                       class="document-append"
                       data-document-append
                       data-drop-target="block:end"
-                      data-accepts="move"
+                      data-accepts="move link"
                       aria-label="Write below the last block"
                       onClick$={() => startWriting$()}
                     />
@@ -5586,7 +5847,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
               class="document-rest"
               data-document-rest
               data-drop-target="block:end"
-              data-accepts="move"
+              data-accepts="move link"
               tabIndex={-1}
               aria-hidden="true"
               onClick$={() => startWriting$()}
@@ -5617,10 +5878,33 @@ const DropMark = component$<{ id: string; drag: ViewDragState }>(
     <span
       class="drop-mark"
       data-drop-mark={id}
-      data-drop-active={drag.overId === `block:${id}` ? "true" : undefined}
+      data-drop-active={drag.overId === `block:${id}` && drag.operation !== "link" ? "true" : undefined}
     />
   ),
 );
+
+/**
+ * An instruction's header lit red while a block dropped there would start a
+ * run shaping the instruction by it (`calliopa-bootstrap`'s `BO_0349_014`,
+ * `BO_0349_Q8`): out of the flow, as the nest mark is.
+ */
+const HeaderMark = component$<{ id: string; drag: ViewDragState; examples: boolean }>(({ id, drag, examples }) => {
+  const over = drag.overId === `header:${id}` && drag.operation != null;
+  // A passage is taken as an example only where the header takes examples;
+  // anywhere else it lands on nothing. BO_0349_013
+  const passage = drag.payload?.kind === PASSAGE_DRAG_KIND;
+  const active = !over || (passage && !examples) ? "false" : drag.operation === "move" || passage ? "acts" : "true";
+  return <span class="shape-mark" data-shape-mark={id} data-drop-active={active} aria-hidden="true" />;
+});
+
+/** The marked passage a drop target names (`passage:<block>:<number>`): its
+ * block and its words, or null when it is not marked any more. BO_0349_038 */
+function passageAt(marking: Parameters<typeof passagesIn>[0], target: string): { blockId: string; quote: string } | null {
+  const [, blockId, number] = target.split(":");
+  if (blockId === undefined || number === undefined) return null;
+  const passage = passagesIn(marking, blockId).find((each) => each.number === Number(number));
+  return passage === undefined ? null : { blockId, quote: passage.anchor.quote };
+}
 
 /**
  * The whole row lit while a dropped block would be taken into it as focused
@@ -5705,6 +5989,10 @@ const BlockRow = component$<{
   /** The focused work this block has, when it has one: the shell's answer,
    * drawn as this view's face. CA_0065_010 */
   face: FocusedChild | null;
+  /** The block a drop has just nested into this one, while the `nested`
+   * place asks what the nest means. BO_0349_010 */
+  nested: NestedBlock | null;
+  nestDone$: QRL<() => void>;
   /** Presses one of the shell's own block controls. CA_0065_009 */
   pressControl$: QRL<(control: string, blockId: string) => void>;
   /** A pointer press under way, so the focus it takes is left to the click. */
@@ -5773,8 +6061,12 @@ const BlockRow = component$<{
   pasteGrid$: QRL<(text: string) => Promise<void>>;
   /** Creates a top-level paragraph immediately after this row. */
   createParagraphAfter$: QRL<() => Promise<void>>;
+  /** How Hermes's arrangement draws the row: collapsed to its first line or
+   * dimmed, undone while the block is focused. BO_0350_005 */
+  arranged?: "collapsed" | "dimmed" | undefined;
 }>(
   ({
+    arranged,
     block,
     index,
     first,
@@ -5835,6 +6127,8 @@ const BlockRow = component$<{
     uploadImage$,
     pasteGrid$,
     createParagraphAfter$,
+    nested,
+    nestDone$,
   }) => {
     const position = index + 1;
     /** The pause before a hovered row reveals its depth, so a pointer
@@ -5906,6 +6200,7 @@ const BlockRow = component$<{
         data-focused={focused && !active && !marking ? "true" : undefined}
         data-reference={marking && reference !== null ? reference : undefined}
         data-standing={standing}
+        data-arranged={arranged !== undefined && !focused && !active ? arranged : undefined}
         data-pointing-from={pointingFrom ? "true" : undefined}
         data-prompted={promptsOpen && prompted && standing !== "prompt" ? "true" : undefined}
         data-drop-target={`block:${block.blockId}`}
@@ -5913,7 +6208,10 @@ const BlockRow = component$<{
         // as its focused work; its edges still place before and after it.
         // CA_0072_007
         data-drop-middle={isText(block) ? `nest:${block.blockId}` : undefined}
-        data-accepts="move"
+        data-accepts="move link"
+        // Its middle also takes a structure or an instruction dragged out of
+        // the library, which the extension knowing it uses there. BO_0349_011
+        data-middle-accepts={isText(block) ? "move link" : undefined}
         {...markable}
         {...reachable}
         onFocusIn$={() => {
@@ -6057,7 +6355,7 @@ const BlockRow = component$<{
             remove$={remove$}
           />
         )}
-        <PassageNumbers block={block} />
+        <PassageNumbers block={block} documentId={documentId} />
 
         {/* Every row's handle while reading: drawn on hover on a desktop and on
          * the focused row on a phone, dragging without editing. Its arrows are
@@ -6320,8 +6618,25 @@ const BlockRow = component$<{
             itemId={face.itemId}
             title={face.title}
             face={face.face}
+            lines={face.lines}
             open$={$(() => pressControl$("focused-work", block.blockId))}
           />
+        )}
+
+        {/* Under a block another was just nested into: what the nest means,
+            asked by whichever extension has something to ask. BO_0349_010 */}
+        {nested !== null && (
+          <div class="block-nested-place" data-nested-place={block.blockId}>
+            <BlockDecorations
+              at="nested"
+              documentId={documentId}
+              blockId={block.blockId}
+              revisionId={block.revisionId}
+              active={active}
+              nested={nested}
+              done$={nestDone$}
+            />
+          </div>
         )}
 
         {/* What else is said below a block, by whichever extension has
@@ -6500,6 +6815,27 @@ const ActiveBlockText = component$<{
   });
   // Whether the surface points from this block, read at the key. BO_0267_023
   const pointingFrom = useContext(MarkingContext).store;
+
+  // A selection made by touch — a long press, then the handles — fires no
+  // keyup and no mouseup; the browser says it only through `selectionchange`.
+  // A range is read from there so the Format controls act on the words the
+  // reader chose. A collapsed caret is left to keyup and mouseup, which a tap
+  // fires: read here it could land between an input and the read of that
+  // input, which judges the edit against the width of the range it replaced.
+  // DO_0039_001
+  useVisibleTask$(({ cleanup }) => {
+    const element = host.value;
+    if (element === undefined) return;
+    const page = element.ownerDocument;
+    const changed = () => {
+      const selection = page.getSelection();
+      if (selection === null || selection.isCollapsed) return;
+      if (!element.contains(selection.anchorNode) || !element.contains(selection.focusNode)) return;
+      void select$(element);
+    };
+    page.addEventListener("selectionchange", changed);
+    cleanup(() => page.removeEventListener("selectionchange", changed));
+  });
 
   useVisibleTask$(({ track }) => {
     track(() => editor.paint);

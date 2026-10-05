@@ -1,5 +1,5 @@
 import type { RequestHandler } from "@builder.io/qwik-city";
-import { isAgentId } from "~/lib/connections";
+import { isCommandAgent } from "~/lib/connections";
 import { api } from "~/server/api";
 import { chooseAgent } from "~/server/agent/adapters";
 
@@ -17,8 +17,8 @@ export const onPut: RequestHandler = (event) =>
       body = null;
     }
     const agent = body?.agent;
-    if (!isAgentId(agent)) {
-      event.json(400, { error: "agent must be codex, claude-code or hermes" });
+    if (!isCommandAgent(agent)) {
+      event.json(400, { error: "agent must be codex or claude-code" });
       return;
     }
     await chooseAgent(agent);

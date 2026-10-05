@@ -36,15 +36,15 @@ describe("the runtimes a command may be given to", () => {
     "claude-code": { installed: true, version: "2.1.251", authenticated: true, billing: "subscription" },
   });
 
-  it("Given both subscriptions signed in and no model, Then all three agents can be chosen", async () => {
+  it("Given both subscriptions signed in, Then Codex and Claude Code can be chosen, and Hermes is not offered", async () => {
     await configured({ "adapters.json": signedIn });
 
     const runtimes = await selectableRuntimes("ok");
 
+    // Hermes prepares in the background and takes no command. BO_0350_021
     expect(runtimes.map((runtime) => [runtime.id, runtime.selectable, runtime.reason])).toEqual([
       ["codex", true, null],
       ["claude-code", true, null],
-      ["hermes", true, null],
     ]);
   });
 
@@ -53,13 +53,13 @@ describe("the runtimes a command may be given to", () => {
 
     const runtimes = await selectableRuntimes("unreachable: connection refused");
 
-    expect(runtimes.map((runtime) => runtime.selectable)).toEqual([true, false, true]);
+    expect(runtimes.map((runtime) => runtime.selectable)).toEqual([true, false]);
     expect(runtimes[1]?.reason).toBe("The Claude runner in the agent container is not answering.");
     // A kernel that said nothing about a runner is not read as a runner that is down.
     expect((await selectableRuntimes(null))[1]?.selectable).toBe(true);
   });
 
-  it("Given Codex signed out, Then Hermes on the subscription cannot run either, and says why", async () => {
+  it("Given Codex signed out, Then Codex says why and Claude Code is unaffected by it", async () => {
     await configured({
       "adapters.json": JSON.stringify({
         codex: { installed: true, version: "", authenticated: false, billing: "" },
@@ -71,32 +71,7 @@ describe("the runtimes a command may be given to", () => {
     expect(runtimes[0]).toMatchObject({ id: "codex", selectable: false });
     expect(runtimes[0]?.reason).toContain("not signed in");
     expect(runtimes[1]?.reason).toContain("not installed");
-    expect(runtimes[2]?.reason).toBe("Hermes reasons on the ChatGPT subscription, and Codex is not signed in.");
-  });
-
-  it("Given Hermes set to the API-key model, Then it needs one configured and its label names the model", async () => {
-    const stamp = JSON.stringify({
-      runtime: "codex",
-      hermesModel: "provider",
-      hermesModelName: "anthropic/claude-sonnet-5",
-      kernelCredential: true,
-      kernelToolset: true,
-    });
-    await configured({ "adapters.json": signedIn, "active-runtime.json": stamp });
-    const without = await selectableRuntimes("ok");
-    expect(without[2]).toMatchObject({
-      id: "hermes",
-      label: "Hermes · anthropic/claude-sonnet-5",
-      selectable: false,
-      reason: "Hermes is set to the API-key model, and none is configured.",
-    });
-
-    await configured({
-      "adapters.json": signedIn,
-      "active-runtime.json": stamp,
-      "provider.env": "CALLIOPA_AGENT_MODEL=anthropic/claude-sonnet-5\n",
-    });
-    expect((await selectableRuntimes("ok"))[2]).toMatchObject({ selectable: true, reason: null });
+    expect(runtimes).toHaveLength(2);
   });
 
   it("Given a choice, Then it is remembered for the instance, and a file naming no agent reads as none", async () => {
@@ -109,6 +84,9 @@ describe("the runtimes a command may be given to", () => {
     expect(JSON.parse(await readFile(join(dir, "agent-choice.json"), "utf8"))).toMatchObject({ agent: "claude-code" });
 
     await writeFile(join(dir, "agent-choice.json"), JSON.stringify({ agent: "provider" }));
+    expect(await chosenAgent()).toBeNull();
+    // A choice of Hermes, stored before it stopped taking commands. BO_0350_021
+    await writeFile(join(dir, "agent-choice.json"), JSON.stringify({ agent: "hermes" }));
     expect(await chosenAgent()).toBeNull();
     await writeFile(join(dir, "agent-choice.json"), "{not json");
     expect(await chosenAgent()).toBeNull();

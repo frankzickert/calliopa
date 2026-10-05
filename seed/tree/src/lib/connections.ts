@@ -257,6 +257,14 @@ export const isAgentId = (value: unknown): value is AgentId =>
   typeof value === "string" && (AGENTS as readonly string[]).includes(value);
 
 /**
+ * An agent a person sends a command to: Codex or Claude Code. Hermes prepares
+ * in the background and takes no command (`calliopa-bootstrap`'s
+ * `BO_0350_056`); its runs stay its own to show. BO_0350_021
+ */
+export const isCommandAgent = (value: unknown): value is Exclude<AgentId, "hermes"> =>
+  isAgentId(value) && value !== "hermes";
+
+/**
  * The party whose sign-in the running runtime reasons on. Hermes's own loop
  * is not a runtime anything reports on: on the subscription it reasons on
  * Codex's ChatGPT sign-in, and on the API-key model on no sign-in at all.

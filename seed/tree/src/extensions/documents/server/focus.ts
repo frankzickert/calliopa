@@ -48,6 +48,7 @@ export function childTitle(blockWords: string): string {
 async function planDocumentChild(input: {
   readonly targetId: string;
   readonly blockId: string;
+  readonly blank?: boolean;
 }): Promise<GraphOutcome<ChildPlan>> {
   const parent = await readDocument(input.targetId);
   if (parent.outcome !== "success") return parent as GraphOutcome<never>;
@@ -58,24 +59,52 @@ async function planDocumentChild(input: {
   const documentId = port.uuid();
   const blockId = port.uuid();
   const parameters: Record<string, unknown> = { cd: nodeRef(documentId), cb: nodeRef(blockId) };
-  const statements = [
-    `CREATE (d:${DOCUMENT_TYPE} {${properties("d", { id: documentId, title }, parameters)}})`,
-    `CREATE (b:text {${properties("b", { id: blockId, order: orderBetween("", ""), runs: [] }, parameters)}})`,
-    `RELATE cd -[c:${CONTAINS}]-> cb`,
-  ];
+  // A child a nest opens holds no block of its own: the dragged block moves
+  // in as its first, so the work never starts with an empty one above it.
+  // BO_0349_019
+  const statements =
+    input.blank === true
+      ? [`CREATE (d:${DOCUMENT_TYPE} {${properties("d", { id: documentId, title }, parameters)}})`]
+      : [
+          `CREATE (d:${DOCUMENT_TYPE} {${properties("d", { id: documentId, title }, parameters)}})`,
+          `CREATE (b:text {${properties("b", { id: blockId, order: orderBetween("", ""), runs: [] }, parameters)}})`,
+          `RELATE cd -[c:${CONTAINS}]-> cb`,
+        ];
+  if (input.blank === true) {
+    delete parameters["cd"];
+    delete parameters["cb"];
+  }
   return { outcome: "success", result: { itemId: documentId, title, statements, parameters } };
+}
+
+/** How many of a child's blocks its face lists, and how far each runs. */
+export const FACE_LINES = 5;
+const FACE_WORDS = 80;
+
+/** A block's first words as a face lists them: one line, cut. */
+export function faceLine(words: string): string {
+  const flat = words.replace(/\s+/gu, " ").trim();
+  return flat.length > FACE_WORDS ? `${flat.slice(0, FACE_WORDS - 1).trimEnd()}…` : flat;
 }
 
 /**
  * What each of these documents says for itself on the block it focuses: its
- * title. A document child wears no face of its words. CA_0065_008
+ * title, and the first words of the blocks it holds, so the parent shows what
+ * was put into the work under the block it came from rather than the block's
+ * own words again (`calliopa-bootstrap`'s `BO_0349_019`, user decision from the
+ * walk, 2026-10-05). An empty block is left out; past `FACE_LINES` the rest is
+ * counted. CA_0065_008
  */
 async function documentFaces(itemIds: readonly string[]): Promise<GraphOutcome<readonly ChildFace[]>> {
   const faces: ChildFace[] = [];
   for (const itemId of itemIds) {
     const read = await readDocument(itemId);
     if (read.outcome !== "success") continue;
-    faces.push({ itemId, title: read.result.title, face: null });
+    const said = read.result.blocks
+      .map((block) => faceLine(block.kind === "text" ? runsText(block.runs) : ""))
+      .filter((line) => line !== "");
+    const lines = said.length > FACE_LINES ? [...said.slice(0, FACE_LINES), `+${said.length - FACE_LINES} more`] : said;
+    faces.push({ itemId, title: read.result.title, face: null, lines });
   }
   return { outcome: "success", result: faces };
 }

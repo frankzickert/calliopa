@@ -270,6 +270,10 @@ export interface DocumentView {
   /** The record slot — `profile` for a profile — so the headline paints the
    * minted name the document was given (`BO_0298_014`). */
   readonly record?: string;
+  /** What an extension names the document — `structure` for a structure's —
+   * as the view's read answers it, so its header says before a drop what a
+   * block dropped there would start (`calliopa-bootstrap`'s `BO_0349_036`). */
+  readonly named?: string;
   readonly blocks: readonly BlockView[];
   /** What a guard another extension registered fixes on the document — its
    * deletion, its title, blocks that stay — answered by the read the editor

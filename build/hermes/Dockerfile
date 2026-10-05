@@ -275,8 +275,10 @@ COPY entrypoint.sh /usr/local/bin/hermes-entrypoint
 COPY login_broker.py /usr/local/bin/hermes-login-broker
 COPY claude_runner.py /usr/local/bin/calliopa-claude-runner
 COPY codex_image_runner.py /usr/local/bin/calliopa-codex-image-runner
-RUN chmod +x /usr/local/bin/hermes-entrypoint /usr/local/bin/hermes-login-broker /usr/local/bin/calliopa-claude-runner /usr/local/bin/calliopa-codex-image-runner
+# Hermes in the background: what to prepare and how to arrange it. BO_0350_060
+COPY orchestrator.py /usr/local/bin/calliopa-orchestrator
+RUN chmod +x /usr/local/bin/hermes-entrypoint /usr/local/bin/hermes-login-broker /usr/local/bin/calliopa-claude-runner /usr/local/bin/calliopa-codex-image-runner /usr/local/bin/calliopa-orchestrator
 
-EXPOSE 8642 8643 8644
+EXPOSE 8642 8643 8644 8645
 
 ENTRYPOINT ["/usr/local/bin/hermes-entrypoint"]

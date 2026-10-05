@@ -16,6 +16,7 @@ import {
   handleRetiredRead,
   unknownDocument,
   handleWorkingMode,
+  handleArrangementRead,
   handleBranchRead,
   handlePolicyRead,
   handleStandingRead,
@@ -121,6 +122,12 @@ const routes: readonly ApiRoute[] = [
     method: "GET",
     path: "d/[id]/retired",
     handle: document(handleRetiredRead),
+  },
+  {
+    /** What Hermes arranged on the document for the signed-in person. BO_0350_005 */
+    method: "GET",
+    path: "d/[id]/arrangement",
+    handle: document(handleArrangementRead),
   },
   {
     /** The signed-in person's working mode on the document. BO_0306_011 */

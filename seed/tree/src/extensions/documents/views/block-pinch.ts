@@ -5,7 +5,8 @@ import { midpoint, pinchOutcome, pinchProgress, spread, type Point } from "~/lib
  * two fingers on a reading row, and the release decides. Zooming in past the
  * threshold deepens that block; zooming out gathers its neighbours into its
  * focused work. Each is a run with no words, which `pinched` sends; a pinch
- * off a reading row or on a proposal does nothing, and no pinch opens or leaves focused work.
+ * off a reading row or on a proposal that is no card's does nothing, and no
+ * pinch opens or leaves focused work.
  * Every decision about a release is `~/lib/pinch`'s; this reads the touches.
  * The surface's `touch-action` keeps the browser's own zoom off it, and every
  * two-finger move takes the default besides, so the page never zooms under
@@ -19,10 +20,21 @@ import { midpoint, pinchOutcome, pinchProgress, spread, type Point } from "~/lib
  * `data-pinch-neighbour` and draw toward it: a hint only, since what is
  * gathered is the run's to say. Everything is cleared on release.
  * BO_0322_011
+ *
+ * On a card the pinch changes how finely the reader decides, and starts no
+ * run: zooming in unfolds the card into its items, zooming out folds it again
+ * (`carded`). On a desktop a trackpad's pinch reaches a card the same way: the
+ * browser sends it as a `wheel` with `ctrlKey`, whose scale this adds up until
+ * `pinchOutcome` reads it as in or out. A wheel off a card is the browser's.
+ * BO_0350_003 BO_0350_004
  */
-export function installPinch(page: Document, pinched: (pinch: "in" | "out", blockId: string) => void): () => void {
+export function installPinch(
+  page: Document,
+  pinched: (pinch: "in" | "out", blockId: string) => void,
+  carded: (pinch: "in" | "out", groupId: string) => void = () => undefined,
+): () => void {
   type Neighbour = { readonly row: HTMLElement; readonly side: "above" | "below" };
-  let start: { spread: number; row: HTMLElement | null; neighbours: Neighbour[] } | null = null;
+  let start: { spread: number; row: HTMLElement | null; card: string | null; neighbours: Neighbour[] } | null = null;
 
   const points = (event: TouchEvent): [Point, Point] | null => {
     const touches = event.touches as TouchList | undefined;
@@ -42,7 +54,11 @@ export function installPinch(page: Document, pinched: (pinch: "in" | "out", bloc
     typeof (element as HTMLElement).style === "object" &&
     element.matches("[data-block-id]") &&
     element.querySelector("[data-block-reading]") !== null;
-  // A proposal is answered, not pinched: a pinch on one does nothing.
+  /** The card under a point, by its group. BO_0350_003 */
+  const cardAt = (at: Point): string | null =>
+    page.elementFromPoint(at.x, at.y)?.closest("[data-card-group]")?.getAttribute("data-card-group") ?? null;
+  // A proposal that is not a card's is answered, not pinched: a pinch on one
+  // does nothing.
   const rowAt = (at: Point): HTMLElement | null => {
     const under = page.elementFromPoint(at.x, at.y);
     if (under === null || under.closest("[data-proposal-id]") !== null) return null;
@@ -79,8 +95,10 @@ export function installPinch(page: Document, pinched: (pinch: "in" | "out", bloc
   const began = (event: TouchEvent) => {
     const pair = points(event);
     if (pair === null) return;
-    const row = rowAt(midpoint(pair[0], pair[1]));
-    start = { spread: spread(pair[0], pair[1]), row, neighbours: row === null ? [] : neighboursOf(row) };
+    const at = midpoint(pair[0], pair[1]);
+    const card = cardAt(at);
+    const row = card === null ? rowAt(at) : null;
+    start = { spread: spread(pair[0], pair[1]), row, card, neighbours: row === null ? [] : neighboursOf(row) };
     last = start.spread;
   };
   const moved = (event: TouchEvent) => {
@@ -113,15 +131,49 @@ export function installPinch(page: Document, pinched: (pinch: "in" | "out", bloc
     if (start === null) return;
     const outcome = pinchOutcome(start.spread, last);
     const blockId = start.row?.getAttribute("data-block-id") ?? null;
+    const card = start.card;
     clearAll();
     start = null;
-    if (outcome !== null && blockId) pinched(outcome, blockId);
+    if (outcome !== null && card !== null) carded(outcome, card);
+    else if (outcome !== null && blockId) pinched(outcome, blockId);
+  };
+  // The trackpad's pinch over a card: each event's scale multiplied in, the
+  // sum read once the fingers rest. A wheel event's `deltaY` under `ctrlKey`
+  // is the browser's zoom step, negative zooming in.
+  const WHEEL_REST_MS = 200;
+  let wheel: { card: string; scale: number; timer: ReturnType<typeof setTimeout> } | null = null;
+  const wheeled = (event: WheelEvent) => {
+    if (!event.ctrlKey) return;
+    const card = cardAt({ x: event.clientX, y: event.clientY });
+    if (card === null) return;
+    // The page must not zoom while the reader works a card.
+    if (event.cancelable) event.preventDefault();
+    if (wheel !== null && wheel.card !== card) {
+      clearTimeout(wheel.timer);
+      wheel = null;
+    }
+    const scale = (wheel?.scale ?? 1) * Math.exp(-event.deltaY / 100);
+    if (wheel !== null) clearTimeout(wheel.timer);
+    wheel = {
+      card,
+      scale,
+      timer: setTimeout(() => {
+        const held = wheel;
+        wheel = null;
+        if (held === null) return;
+        const outcome = pinchOutcome(1, held.scale);
+        if (outcome !== null) carded(outcome, held.card);
+      }, WHEEL_REST_MS),
+    };
   };
   page.addEventListener("touchstart", began, { passive: true });
   page.addEventListener("touchmove", moved, { passive: false });
   page.addEventListener("touchend", ended);
   page.addEventListener("touchcancel", ended);
+  page.addEventListener("wheel", wheeled, { passive: false });
   return () => {
+    page.removeEventListener("wheel", wheeled);
+    if (wheel !== null) clearTimeout(wheel.timer);
     page.removeEventListener("touchstart", began);
     page.removeEventListener("touchmove", moved);
     page.removeEventListener("touchend", ended);

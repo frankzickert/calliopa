@@ -1,3 +1,6 @@
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { describeRunEvent } from "~/lib/runs";
@@ -120,6 +123,56 @@ describe("parsing the bridge's stream", () => {
   it("Given data that is not JSON, Then the frame is kept with no data rather than dropped", () => {
     const [frame] = parseSseFrames("event: odd\ndata: not json\n\n");
     expect(frame).toEqual({ event: "odd", data: null });
+  });
+
+  it("Given the kernel's keep-alive comment between frames, Then it yields no frame and the frames around it are kept (CA_0080_001, BO_0348_003)", () => {
+    const frames = parseSseFrames(
+      'event: run.started\ndata: {"type":"run.started","at":5}\n\n: keep-alive\n\nevent: end\ndata: {}\n\n',
+    );
+    expect(frames).toEqual([
+      { event: "run.started", data: { type: "run.started", at: 5 } },
+      { event: "end", data: {} },
+    ]);
+    expect(parseSseFrames(": keep-alive\n\n")).toEqual([]);
+  });
+});
+
+/**
+ * A stream that breaks after it opened is answered as `dropped`, never
+ * thrown: on 2026-10-04 the rejected read of a quiet run's stream reached no
+ * handler and ended the shell's server. A real HTTP server cuts the body
+ * after its first frame. CA_0080_001
+ */
+describe("a stream that breaks after it opened", () => {
+  let server: Server | undefined;
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await new Promise<void>((resolve) => (server === undefined ? resolve() : server.close(() => resolve())));
+    server = undefined;
+  });
+
+  it("Given a body cut after the first frame, Then the follow answers dropped with the reason, after delivering that frame", async () => {
+    server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write('event: run.started\ndata: {"type":"run.started","at":1}\n\n', () => {
+        setTimeout(() => response.socket?.destroy(), 20);
+      });
+    });
+    await new Promise<void>((resolve) => server?.listen(0, "127.0.0.1", resolve));
+    const { port: listening } = server.address() as AddressInfo;
+    vi.stubEnv("CALLIOPA_CCGW_URL", "http://127.0.0.1:1");
+    vi.stubEnv("CALLIOPA_KERNEL_URL", `http://127.0.0.1:${listening}`);
+
+    const events: string[] = [];
+    const followed = await followBridgeEvents("arun-1", (event) => {
+      events.push(event.kind);
+    });
+
+    expect(events).toEqual(["runStarted"]);
+    expect(followed.ok).toBe(true);
+    expect(followed.ok && followed.value).toBe("dropped");
+    expect(followed.ok && followed.value === "dropped" ? followed.detail : "").not.toBe("");
   });
 });
 

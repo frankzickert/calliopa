@@ -20,8 +20,9 @@ import {
   type ReadRelation,
 } from "~/server/ccgw/client";
 import { bareId, nodeRef, typeOf } from "~/server/ccgw/nodes";
-import { focusOf } from "~/server/focused-work";
+import { childrenOf, focusOf } from "~/server/focused-work";
 import { commit } from "~/server/ccgw/script";
+import { childrenFrom, valuesWithChildren } from "../lib/children";
 import type { GraphOutcome } from "~/server/outcome";
 import type { Fixed } from "~/extensions/documents/lib/fixed";
 
@@ -39,6 +40,7 @@ import {
   HAS_BLOCK_STRUCTURE,
   STRUCTURE_FIELDS_TYPE,
   UNNAMED_STRUCTURE,
+  type FieldChild,
   declaredFor,
   defaultsOf,
   fieldFromBlock,
@@ -484,6 +486,8 @@ interface StoredFields {
   readonly subject: string;
   readonly values: Record<string, FieldValue>;
   readonly files: readonly BlobReference[];
+  /** The blocks put into each field, by key (`BO_0349_020`). */
+  readonly children: Record<string, string[]>;
 }
 
 /** Where the structures and values of a set of subjects stand. */
@@ -572,6 +576,7 @@ async function readStanding(subjects: readonly string[]): Promise<GraphOutcome<S
         subject: relation.to.nodeId,
         values: valuesFrom(content["values"]),
         files: Array.isArray(content["files"]) ? (content["files"] as BlobReference[]) : [],
+        children: childrenFrom(content["children"]),
       });
       fields.set(relation.to.nodeId, held);
     }
@@ -627,9 +632,25 @@ const takenView = (
   stored: StoredFields | undefined,
   proposed: "structure" | "values" | undefined,
   onBlock: boolean,
+  childWords: ReadonlyMap<string, string> = new Map(),
+  work?: { readonly itemId: string; readonly title: string },
 ): TakenStructure => {
-  const values = stored?.values ?? {};
-  const fields = declaredFor(structure.id, structure.fields, values);
+  const own = stored?.values ?? {};
+  const fields = declaredFor(structure.id, structure.fields, own);
+  // A field's children are read where they stand: a block no longer in the
+  // focused work drops from the read (BO_0349_020).
+  const children: Record<string, FieldChild[]> = {};
+  for (const [key, ids] of Object.entries(stored?.children ?? {})) {
+    const standing = ids
+      .filter((id) => childWords.has(id))
+      .map((id) => ({
+        blockId: id,
+        words: childWords.get(id) ?? "",
+        ...(work === undefined ? {} : { documentId: work.itemId, documentTitle: work.title }),
+      }));
+    if (standing.length > 0) children[key] = standing;
+  }
+  const values = valuesWithChildren(fields, own, stored?.children ?? {}, childWords);
   return {
     id: structure.id,
     name: structure.name,
@@ -641,6 +662,7 @@ const takenView = (
     fields,
     values,
     missing: missingOf(fields, values),
+    ...(Object.keys(children).length === 0 ? {} : { children }),
     blocks: structure.blocks,
     ...(proposed === undefined ? {} : { proposed }),
     ...(structure.sendWithPrompt === undefined ? {} : { sendWithPrompt: structure.sendWithPrompt }),
@@ -686,6 +708,7 @@ async function readStructures(
   for (const held of standing.result.fields.values())
     for (const stored of held.values())
       fieldNodes.set(stored.nodeId, { subject: stored.subject, structure: stored.structure });
+  const childWords = await readChildWords(standing.result);
   const proposed = withProposals
     ? await readProposed(subjects, fieldNodes)
     : { structures: new Map<string, ReadonlySet<string>>(), values: new Map<string, ReadonlySet<string>>() };
@@ -722,6 +745,8 @@ async function readStructures(
           stored?.get(structure.id),
           isTaken ? (valuing.has(structure.id) ? "values" : undefined) : "structure",
           onBlock,
+          childWords.get(node)?.words,
+          childWords.get(node)?.work,
         ),
       );
     }
@@ -760,6 +785,37 @@ async function readStructures(
       referenceTitles: await referenceTitles([...documentView.structures, ...structuredBlocks.flatMap((block) => block.structures)]),
     },
   };
+}
+
+/**
+ * The words of the blocks each subject's fields hold, per subject node: only
+ * a block that stands in the subject's focused work, read in the same read as
+ * that work, so a child moved out or retired drops from the field (`BO_0349_020`).
+ */
+async function readChildWords(
+  standing: Standing,
+): Promise<ReadonlyMap<string, { readonly words: ReadonlyMap<string, string>; readonly work: { readonly itemId: string; readonly title: string } }>> {
+  const holding = [...standing.fields.entries()]
+    .filter(([, held]) => [...held.values()].some((stored) => Object.keys(stored.children).length > 0))
+    .map(([subject]) => bareId(subject));
+  const words = new Map<string, { words: Map<string, string>; work: { itemId: string; title: string } }>();
+  if (holding.length === 0) return words;
+  const works = await childrenOf(DOCUMENT_KIND, holding);
+  if (works.outcome !== "success") return words;
+  await Promise.all(
+    [...works.result.entries()].map(async ([subject, work]) => {
+      const document = await readDocument(work.itemId);
+      if (document.outcome !== "success") return;
+      const read = new Map<string, string>();
+      const add = (block: BlockView) => read.set(block.blockId, block.kind === "text" ? runsText(block.runs) : "");
+      for (const block of document.result.blocks) {
+        add(block);
+        if (block.kind === "admonition") for (const child of block.children) add(child);
+      }
+      words.set(nodeRef(subject), { words: read, work: { itemId: work.itemId, title: document.result.title } });
+    }),
+  );
+  return words;
 }
 
 /** Longest a block's words run as a reference's title. */
@@ -1317,6 +1373,100 @@ export async function setValues(input: Subject & {
   const situation = await situationOf(input);
   if (situation.outcome !== "success") return situation as GraphOutcome<never>;
   const staged = await valuesStatement(situation.result, input, input.structure, input.values);
+  if (staged.outcome !== "success") return staged as GraphOutcome<never>;
+  if (staged.result !== null) {
+    const written = await writeTruth(staged.result);
+    if (written.outcome !== "success") return written as GraphOutcome<never>;
+  }
+  return structuresOf(input.documentId);
+}
+
+/**
+ * The statement that puts a block into a field of a structure a block uses,
+ * or takes it out (`calliopa-bootstrap`'s `BO_0349_020`): the block must stand
+ * in the subject's focused work, where the drop nested it, and the field must
+ * be one the structure declares. A block put in again moves to the end; one
+ * taken out stays where it is, in the focused work. Null when nothing changes.
+ */
+async function childStatement(
+  situation: Situation,
+  subject: Subject,
+  structureId: string,
+  key: string,
+  child: string,
+  put: boolean,
+): Promise<GraphOutcome<Staged | null>> {
+  if (subject.blockId === undefined)
+    return refuse("notABlock", "Only a block's fields hold blocks: a document has no focused work to nest them in.");
+  const structure = situation.catalogue.byId.get(structureId);
+  if (structure === undefined) return refuse("unknownStructure", `Structure ${structureId} is not here.`);
+  if (!situation.taken.includes(structure.id))
+    return refuse("structureNotTaken", `This block does not use ${structure.name}.`);
+  const stored = situation.standing.fields.get(nodeRef(situation.node))?.get(structure.id);
+  const fields = declaredFor(structure.id, structure.fields, stored?.values ?? {});
+  const field = fields.find((candidate) => candidate.key === key);
+  if (field === undefined) return refuse("unknownField", `${structure.name} has no field ${key}.`);
+  const held = stored?.children[key] ?? [];
+  if (put) {
+    const works = await childrenOf(DOCUMENT_KIND, [subject.blockId]);
+    if (works.outcome !== "success") return works as GraphOutcome<never>;
+    const work = works.result.get(subject.blockId);
+    const document = work === undefined ? undefined : await readDocument(work.itemId);
+    const nested =
+      document !== undefined &&
+      document.outcome === "success" &&
+      document.result.blocks.some(
+        (block) => block.blockId === child || (block.kind === "admonition" && block.children.some((inner) => inner.blockId === child)),
+      );
+    if (!nested)
+      return refuse("notNested", `Block ${child} is not in the focused work of block ${subject.blockId}, so ${field.name} cannot hold it.`);
+  } else if (!held.includes(child)) return { outcome: "success", result: null };
+  const children: Record<string, string[]> = { ...(stored?.children ?? {}) };
+  const rest = held.filter((one) => one !== child);
+  if (put) children[key] = [...rest, child];
+  else if (rest.length > 0) children[key] = rest;
+  else delete children[key];
+  const parameters: Record<string, unknown> = { f_children: children };
+  let statement: string;
+  if (stored === undefined) {
+    const id = port.uuid();
+    Object.assign(parameters, {
+      f_id: id,
+      f_structure: structure.id,
+      fref: nodeRef(id),
+      sref: nodeRef(situation.node),
+      rref: nodeRef(structure.id),
+    });
+    statement = [
+      `CREATE (f:${STRUCTURE_FIELDS_TYPE} {id: $f_id, role: $f_structure, values: {}, files: [], children: $f_children, status: "established"})`,
+      `RELATE fref -[fo:${FIELDS_OF}]-> sref`,
+      `RELATE fref -[ff:${FIELDS_FOR}]-> rref`,
+    ].join("; ");
+  } else {
+    parameters["fNodeId"] = stored.nodeId;
+    statement = "SET f.children = $f_children";
+  }
+  return {
+    outcome: "success",
+    result: {
+      statement,
+      parameters,
+      rationale: `${put ? "a block put into" : "a block taken out of"} ${field.name} of ${structure.name} on ${subjectName(subject)}`,
+    },
+  };
+}
+
+/** The person puts a block nested into a structured block into one of its
+ * fields, or takes it out, as truth at once (`BO_0349_020`). */
+export async function setFieldChild(input: Subject & {
+  readonly structure: string;
+  readonly field: string;
+  readonly child: string;
+  readonly put: boolean;
+}): Promise<GraphOutcome<DocumentStructuresView>> {
+  const situation = await situationOf(input);
+  if (situation.outcome !== "success") return situation as GraphOutcome<never>;
+  const staged = await childStatement(situation.result, input, input.structure, input.field, input.child, input.put);
   if (staged.outcome !== "success") return staged as GraphOutcome<never>;
   if (staged.result !== null) {
     const written = await writeTruth(staged.result);
