@@ -25,7 +25,7 @@ import docker
 from docker.errors import DockerException
 
 from .caps import Caps
-from .runtimes import KEEP_ALIVE, LABEL, SCOPE_LABEL, Refused, Runtimes
+from .runtimes import KEEP_ALIVE, LABEL, SCOPE_LABEL, Refused, Runtimes, owns
 
 NETWORKS = ("none", "runtimes")
 DRIVER = "/opt/calliopa/code/lib/calldriver.py"
@@ -49,7 +49,7 @@ class Calls:
     def containers(self) -> list[Any]:
         return [
             c for c in self.client.containers.list(all=True, filters={"label": f"{LABEL}=call"})
-            if c.labels.get(SCOPE_LABEL) == self.runtimes.scope
+            if owns(self.runtimes.scope, c.labels.get(SCOPE_LABEL))
         ]
 
     def reap(self) -> int:
@@ -57,7 +57,7 @@ class Calls:
         gone = 0
         for kind in ("call", "call-driver"):
             for container in self.client.containers.list(all=True, filters={"label": f"{LABEL}={kind}"}):
-                if container.labels.get(SCOPE_LABEL) != self.runtimes.scope:
+                if not owns(self.runtimes.scope, container.labels.get(SCOPE_LABEL)):
                     continue
                 try:
                     container.remove(force=True)

@@ -69,6 +69,11 @@ const Host = component$<{ workspaceId: string }>(({ workspaceId }) => {
     pressBlockControl$: $(async () => null),
     faces$: $(async () => ({})),
     focusedChild$: $(async () => ({ refusal: "no focused work here" })),
+    emptied: useStore({ byParent: {} }),
+    focusedWorkEmptied$: $(async () => undefined),
+    takeEmptied$: $(() => null),
+    bringBack$: $(async () => ({ refusal: "no focused work here" })),
+    adoptChild$: $(async () => ({ refusal: "no focused work here" })),
   };
   useContextProvider(ViewBridgeContext, bridge);
   return jsx(Reader, {});

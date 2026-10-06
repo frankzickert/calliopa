@@ -35,6 +35,32 @@ const pages = http.createServer((request, response) => {
       return html(`<p>partly here</p><script src="/hang"></script>`, "Slow");
     case "/hang":
       return; // never answers, so the page never settles
+    case "/busy":
+      // A request kept open after load, as analytics and long polls do: the
+      // network never goes idle, the text is still at once. BO_0354_001
+      response.writeHead(200, { "content-type": "text/html" });
+      return html(`<p>all the words are here</p><script>fetch("/hang")</script>`, "Busy");
+    case "/late":
+      response.writeHead(200, { "content-type": "text/html" });
+      return html(
+        `<p>first words</p><script>setTimeout(() => document.body.insertAdjacentHTML("beforeend", "<p>the late words</p>"), 600)</script>`,
+        "Late",
+      );
+    case "/restless":
+      response.writeHead(200, { "content-type": "text/html" });
+      return html(`<p id="n">0</p><script>let n = 0; setInterval(() => { document.getElementById("n").textContent = String(++n); }, 100)</script>`, "Restless");
+    case "/challenge":
+      // The interstitial's shape: its title, and a request to the platform.
+      // BO_0354_002
+      response.writeHead(403, { "content-type": "text/html" });
+      return html(`<p>Checking the browser before accessing the site.</p><script>fetch("/hang")</script>`, "Just a moment...");
+    case "/challenge-request":
+      response.writeHead(200, { "content-type": "text/html" });
+      return html(`<p>a page that looks ordinary</p><script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script>`, "Ordinary");
+    case "/platform-script":
+      // An ordinary page that loads the platform's script, as opus.pro does.
+      response.writeHead(200, { "content-type": "text/html" });
+      return html(`<p>${"a whole article of words ".repeat(80)}</p><script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>`, "Article");
     case "/download":
       response.writeHead(200, { "content-type": "application/octet-stream", "content-disposition": "attachment; filename=x.bin" });
       return response.end("bytes");
@@ -97,6 +123,52 @@ test("a page that does not settle within the cap is answered as far as it got an
   assert.equal(record.settled, false);
   assert.match(record.text, /partly here/);
   assert.ok(record.files.pdf.bytes, "the PDF of what loaded");
+});
+
+test("a page whose network never goes idle settles on its still text, long before the load cap", async () => {
+  const record = await createCapturer({ browser, resolve, dial, caps: { loadMs: 15000 } }).capture("http://public.test/busy");
+  assert.equal(record.settled, true);
+  assert.match(record.text, /all the words are here/);
+  assert.ok(record.elapsed < 5000, `answered in ${record.elapsed} ms`);
+  assert.ok(record.files.pdf.bytes, "the PDF");
+});
+
+test("text that arrives within the quiet window after load is waited for", async () => {
+  const record = await capturer().capture("http://public.test/late");
+  assert.equal(record.settled, true);
+  assert.match(record.text, /the late words/);
+});
+
+test("text that never stops changing is answered at the settle bound, unsettled", async () => {
+  const record = await createCapturer({ browser, resolve, dial, caps: { loadMs: 15000, settleMs: 2000 } }).capture("http://public.test/restless");
+  assert.equal(record.settled, false);
+  assert.ok(record.elapsed < 6000, `answered in ${record.elapsed} ms`);
+});
+
+test("a bot challenge is recognised by its title and stopped at at once, with no files", async () => {
+  const record = await createCapturer({ browser, resolve, dial, caps: { loadMs: 15000 } }).capture("http://public.test/challenge");
+  assert.match(record.challenged, /bot challenge \(Just a moment\.\.\.\)/);
+  assert.equal(record.settled, false);
+  assert.deepEqual(record.files, {});
+  assert.ok(record.elapsed < 3000, `answered in ${record.elapsed} ms`);
+});
+
+test("a bot challenge is recognised by its request to the challenge platform", async () => {
+  const record = await createCapturer({ browser, resolve, dial, caps: { loadMs: 15000 } }).capture("http://public.test/challenge-request");
+  assert.match(record.challenged, /challenge platform/);
+  assert.deepEqual(record.files, {});
+});
+
+test("a page with its text that loads the challenge platform's script is no challenge", async () => {
+  const record = await capturer().capture("http://public.test/platform-script");
+  assert.equal(record.challenged, undefined);
+  assert.equal(record.settled, true);
+  assert.ok(record.files.pdf.bytes, "the PDF");
+});
+
+test("an ordinary page carries no challenge", async () => {
+  const record = await capturer().capture("http://public.test/page");
+  assert.equal(record.challenged, undefined);
 });
 
 test("a download is not followed", async () => {
@@ -228,6 +300,17 @@ test("the server: /v1/pages captures both ways, keeps the better text with the s
     assert.match(nothing.ways[0].refusal, /a private address/);
     assert.match(nothing.ways[1].refusal, /a private address/);
     assert.deepEqual(nothing.files, {});
+
+    // A challenge on the render way is a refusal saying so, its files are
+    // not kept, and the plain fetch's text still is. BO_0354_002
+    const met = await fetch(`${base}/v1/pages`, { method: "POST", headers: auth, body: JSON.stringify({ url: "http://public.test/challenge-request" }) });
+    const challenged = await met.json();
+    assert.match(challenged.challenged, /challenge platform/);
+    assert.equal(challenged.kept, "fetch");
+    assert.match(challenged.text, /a page that looks ordinary/);
+    assert.match(challenged.ways.find((way) => way.way === "render").refusal, /^challenged: /);
+    assert.equal(challenged.id, null);
+    assert.deepEqual(challenged.files, {});
   } finally {
     await service.close();
   }

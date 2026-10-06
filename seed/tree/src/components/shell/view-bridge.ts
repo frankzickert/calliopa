@@ -483,6 +483,20 @@ export interface ViewAcross {
  * its depth. Page-only, never the workspace record — focus is never
  * persisted (`CA_0046_001`). CA_0047_004
  */
+/**
+ * A focused work a write removed once its last block left (`CA_0083`), as the
+ * view that wrote it reports it: the child, the block it focused, the target
+ * that block stands in, what the kind kept for bringing it back, and the
+ * blocks that left it last — removed, or moved into `wentTo`. CA_0083_002
+ */
+export interface EmptiedWork {
+  readonly itemId: string;
+  readonly blockId: string;
+  readonly parent: { readonly itemId: string; readonly title: string } | null;
+  readonly kept: Readonly<Record<string, unknown>>;
+  readonly left: { readonly blockIds: readonly string[]; readonly wentTo: string | null };
+}
+
 export interface ViewFocus {
   itemId: string | null;
   blockId: string | null;
@@ -833,9 +847,11 @@ export interface ViewBridge {
    * Opens a document reached along a route — going back to a crumb — in a tab
    * of its own beside the active one, or makes the tab already showing it
    * active; the tab pressed in keeps its target and route. `focus` names the
-   * block to land on. CA_0073_002
+   * block to land on. `fromBlock` says the document is a block's focused work
+   * opened from that block, so a tab already showing it takes this route
+   * rather than keeping its own. CA_0073_002 CA_0084_001
    */
-  readonly openAlongRoute$: QRL<(target: { itemId: string; title: string; route: readonly RouteEntry[]; focus?: string }) => void>;
+  readonly openAlongRoute$: QRL<(target: { itemId: string; title: string; route: readonly RouteEntry[]; focus?: string; fromBlock?: boolean }) => void>;
   /** The block to focus once the opened or retargeted view shows. CA_0047_004 */
   readonly focus: ViewFocus;
   /**
@@ -859,6 +875,17 @@ export interface ViewBridge {
    * Answers the child's identity, or the refusal in words. CA_0072_005
    */
   readonly focusedChild$: QRL<(itemId: string, blockId: string) => Promise<{ itemId: string } | { refusal: string }>>;
+  /**
+   * Adopts an existing child — a document dragged in from its tab or the
+   * library — as the focused work of a new block of the target, without
+   * leaving it: at the placement, in the target kind's own terms, or, with
+   * `into`, at the end of that block's focused work, opened if it has none.
+   * The faces are read again, so the new block's face is ready to draw.
+   * Answers the new block, or the refusal in words. `documents`' DO_0043_004
+   */
+  readonly adoptChild$: QRL<
+    (itemId: string, childId: string, at: { readonly placement: unknown } | { readonly into: string }) => Promise<{ blockId: string } | { refusal: string }>
+  >;
   readonly pressBlockControl$: QRL<
     (control: string, target: { itemId: string; blockId: string; title: string; route: readonly RouteEntry[] }) => Promise<string | null>
   >;
@@ -870,6 +897,25 @@ export interface ViewBridge {
    * CA_0065_005
    */
   readonly faces$: QRL<(itemId: string) => Promise<FocusedWork>>;
+  /**
+   * A focused work went (`CA_0083_002`): every tab showing it turns to the
+   * parent and lands on the parent block, or closes where the parent is open
+   * in another tab, which becomes active; and *Take back* is held for the
+   * parent's view, under `emptied`, until it takes it.
+   */
+  readonly focusedWorkEmptied$: QRL<(emptied: EmptiedWork) => Promise<void>>;
+  /** The removals held for a parent's *Take back*, by parent. CA_0083_006 */
+  readonly emptied: { byParent: Record<string, EmptiedWork> };
+  /** Takes the removal held for a parent, which the parent's view then
+   * offers; answers it, or `null` when none is held. CA_0083_006 */
+  readonly takeEmptied$: QRL<(parentId: string) => EmptiedWork | null>;
+  /**
+   * Brings an emptied focused work back on its parent block from what its
+   * kind kept, and reads the parent's faces again: the new child's identity,
+   * or the refusal in words. The view puts the block that left back into it.
+   * CA_0083_006
+   */
+  readonly bringBack$: QRL<(emptied: EmptiedWork) => Promise<{ itemId: string } | { refusal: string }>>;
 }
 
 export const ViewBridgeContext = createContextId<ViewBridge>(

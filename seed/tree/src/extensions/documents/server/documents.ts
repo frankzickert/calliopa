@@ -22,6 +22,7 @@ import { atDataRevision, branchGroupOf, currentBranch, outsideBranch } from "~/s
 import { readBridgeRun, recordedEvents } from "~/server/agent/bridge";
 import type { DocumentActivity } from "~/server/agent/run-events";
 import type { GraphOutcome, NonEmpty } from "~/server/outcome";
+import type { AdoptionPlan } from "~/contract";
 import { assembleDocument, assembleRetired, blocksOf, CONTAINS, RETIRED, formatsCode, placeCodeLines, toBlock, type BlockView, type DocumentView } from "./assemble";
 import { formatSource } from "./format";
 import { guessLanguage } from "~/extensions/documents/lib/highlight";
@@ -47,7 +48,7 @@ import { FORMER_INSTRUCTION_RECORD, INSTRUCTION_RECORD, type InstructionSummary 
 import { FORMER_UNNAMED_INSTRUCTION, UNNAMED_INSTRUCTION } from "../lib/naming";
 import { DOCUMENT_TARGET_KIND } from "./focus";
 import { FOCUSES, gatherOf, reachesDocument } from "./reach";
-import { firstFixed, fixedOf, kindOfDocument } from "./guards";
+import { firstFixed, fixedOf, kindOfDocument, namesOfDocuments } from "./guards";
 import {
   DOCUMENT_TYPE,
   normalizeRuns,
@@ -787,7 +788,9 @@ export async function listDocuments(): Promise<GraphOutcome<readonly ListedDocum
       ...(typeof record === "string" && record !== "" ? { record } : {}),
     });
   }
-  const times = await listingTimes();
+  // What other extensions name the listed documents, beside their times, each
+  // in reads over the whole list. DO_0042_002
+  const [times, names] = await Promise.all([listingTimes(), namesOfDocuments()]);
 
   // The documents runs started that nobody has taken: every document with a
   // candidate and no established revision, in one read with candidates, and
@@ -855,7 +858,9 @@ export async function listDocuments(): Promise<GraphOutcome<readonly ListedDocum
 
   const timed = summaries.map((entry) => {
     const time = times.get(nodeRef(entry.documentId));
-    return entry.proposed !== undefined || time === undefined ? entry : { ...entry, ...time };
+    const named = names.get(entry.documentId);
+    const withName = named === undefined ? entry : { ...entry, named };
+    return entry.proposed !== undefined || time === undefined ? withName : { ...withName, ...time };
   });
   return { outcome: "success", result: timed.sort(byTitle) };
 }
@@ -2042,16 +2047,26 @@ const FOCUSED_WORK_DEPTH = 32;
  * when the move is free of that. CA_0072_006
  */
 async function withinFocusedWorkOf(blockId: string, documentId: string): Promise<GraphOutcome<never> | null> {
-  let blocks = [blockId];
+  const below = await belowAlongFocuses([blockId], documentId);
+  if (below === true) return refuse("insideItsOwnWork", "A block cannot move into its own focused work.");
+  return below;
+}
+
+/**
+ * Whether `documentId` is the focused work of one of these blocks or lies
+ * below them along `focuses`: `true`, `null` when it does not, or the read
+ * that failed. The walk a block's move and a document's adoption share.
+ * CA_0072_006 DO_0043_003
+ */
+async function belowAlongFocuses(seeds: readonly string[], documentId: string): Promise<GraphOutcome<never> | true | null> {
+  let blocks = [...seeds];
   const seen = new Set<string>();
   for (let depth = 0; depth < FOCUSED_WORK_DEPTH && blocks.length > 0; depth += 1) {
     const children = await childrenOf(DOCUMENT_TARGET_KIND, blocks);
     if (children.outcome !== "success") return children as GraphOutcome<never>;
     const next: string[] = [];
     for (const child of children.result.values()) {
-      if (child.itemId === documentId) {
-        return refuse("insideItsOwnWork", "A block cannot move into its own focused work.");
-      }
+      if (child.itemId === documentId) return true;
       if (seen.has(child.itemId)) continue;
       seen.add(child.itemId);
       const loaded = await loadDocument(child.itemId);
@@ -2061,6 +2076,72 @@ async function withinFocusedWorkOf(blockId: string, documentId: string): Promise
     blocks = next;
   }
   return null;
+}
+
+/**
+ * Whether a document may be adopted as focused work anywhere in a target
+ * (`DO_0043_003`): refused in words when the target is the document itself or
+ * lies below it along `focuses`, where the document would come to contain
+ * itself; `null` when it is free of that, and a document that answers nothing
+ * is refused as such.
+ */
+export async function adoptionRefused(targetId: string, documentId: string): Promise<GraphOutcome<never> | null> {
+  if (targetId === documentId) return refuse("intoItself", "A document cannot become a block of itself.");
+  const dragged = await loadDocument(documentId);
+  if (!dragged.ok) return dragged.outcome;
+  const below = await belowAlongFocuses(blockIdsOf(dragged.document.blocks), targetId);
+  if (below === true) return refuse("insideItsOwnWork", "A document cannot become a block of its own focused work.");
+  return below;
+}
+
+/** Where an adopted document's block may land: between two drawn rows' keys,
+ * before a block, or at the end. Anything else is not a placement a drop makes. DO_0043_003 */
+const adoptionPlacement = (placement: unknown): Placement | null => {
+  if (placement === undefined) return { at: "end" };
+  if (typeof placement !== "object" || placement === null) return null;
+  if ("at" in placement && placement.at === "end") return { at: "end" };
+  // Before a row with no key of its own, as `dropPlacement` names one.
+  if ("before" in placement && typeof placement.before === "string") return { before: placement.before };
+  if ("between" in placement && Array.isArray(placement.between) && placement.between.length === 2) {
+    const [low, high] = placement.between as unknown[];
+    const key = (value: unknown) => value === null || typeof value === "string";
+    if (key(low) && key(high)) return { between: [low as string | null, high as string | null] };
+  }
+  return null;
+};
+
+/**
+ * The block a document is adopted by when it is dropped into another
+ * (`DO_0043_003`, user decisions 2026-10-06): a `text` block of the target
+ * carrying the dropped document's title as it reads at the drop, minted at
+ * the placement as a drop within a document is, or at the end. Planned as
+ * statements the shell commits with the `focuses` edge onto it, never
+ * committed here; the dropped document keeps its identity, its blocks and its
+ * title.
+ */
+export async function composeAdoption(input: {
+  readonly targetId: string;
+  readonly childId: string;
+  readonly placement?: unknown;
+}): Promise<GraphOutcome<AdoptionPlan>> {
+  const placement = adoptionPlacement(input.placement);
+  if (placement === null) return refuse("unknownPlacement", "A document lands between two rows or at the end.");
+  const refused = await adoptionRefused(input.targetId, input.childId);
+  if (refused !== null) return refused;
+  const target = await loadDocument(input.targetId);
+  if (!target.ok) return target.outcome;
+  const dragged = await loadDocument(input.childId);
+  if (!dragged.ok) return dragged.outcome;
+  const order = orderFor(target.document.blocks, placement);
+  if ("failure" in order) return order.failure;
+  const blockId = port.uuid();
+  const parameters: Record<string, unknown> = { adDocument: nodeRef(input.targetId), adBlock: nodeRef(blockId) };
+  const title = dragged.document.title;
+  const statements = [
+    `CREATE (ab:text {${properties("ab", { id: blockId, ...blockContentFor({ kind: "text", runs: title === "" ? [] : [{ text: title }] }, order.order) }, parameters, true)}})`,
+    `RELATE adDocument -[ac:${CONTAINS}]-> adBlock`,
+  ];
+  return { outcome: "success", result: { blockId, statements, parameters } };
 }
 
 /** The callout that holds a block, or `null` for a block the document holds. */

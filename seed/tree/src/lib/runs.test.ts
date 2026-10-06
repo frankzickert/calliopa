@@ -568,3 +568,31 @@ describe("a named keyword", () => {
     expect("failure" in readRuns([{ text: "x", keyword: "kw-q", math: true }])).toBe(true);
   });
 });
+
+describe("a prompt's reference to what was marked (BO_0352_006)", () => {
+  const heading = { number: 1, kind: "block", blockId: "blk-h", words: "The Method" } as const;
+
+  it("Given a markRef, Then it is one atom kept with no text, read back as it was, and told apart by what it names", () => {
+    const runs = normalizeRuns([{ text: "See " }, { text: "", markRef: heading }, { text: "." }]);
+    expect(runs).toEqual([{ text: "See " }, { text: "", markRef: heading }, { text: "." }]);
+    expect(runsLength(runs)).toBe(6);
+    expect(readRuns(runs)).toEqual({ runs });
+    expect(sameRuns(runs, [{ text: "See " }, { text: "", markRef: { words: "The Method", blockId: "blk-h", kind: "block", number: 1 } }, { text: "." }])).toBe(true);
+    expect(sameRuns(runs, [{ text: "See " }, { text: "", markRef: { ...heading, blockId: "blk-x" } }, { text: "." }])).toBe(false);
+  });
+
+  it("Given a markRef the model does not hold, Then it is refused by name", () => {
+    const refused = (markRef: unknown, extra: Record<string, unknown> = {}) => {
+      const read = readRuns([{ text: "", markRef, ...extra }]);
+      return "failure" in read ? read.failure : "";
+    };
+    expect(refused({ kind: "block", blockId: "blk-h" })).toContain("names no number");
+    expect(refused({ number: 1, blockId: "blk-h" })).toContain("names no kind");
+    expect(refused({ number: 1, kind: "block" })).toContain("names no marked block");
+    expect(refused({ number: 1, kind: "passage", blockId: "blk-h" })).toContain("passage's block and words");
+    expect(refused({ number: 1, kind: "document", document: "doc-2", blockId: "blk-h" })).toContain("a document marked whole and a block");
+    expect(refused({ ...heading, colour: "red" })).toContain("carries colour");
+    expect(refused(heading, { text: "#1" })).toContain("carrying text of its own");
+    expect(refused(heading, { blockRef: "blk-h" })).toContain("never two at once");
+  });
+});

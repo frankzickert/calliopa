@@ -1,4 +1,5 @@
 import type { PointedReference } from "./command-target";
+import type { MarkRef, Run } from "./runs";
 
 /**
  * Naming a reference by typing `#` in a block being written as a command.
@@ -89,4 +90,69 @@ export function danglingNumbers(
   return namedNumbers(text).filter(
     (number) => !references.some((reference) => reference.number === number),
   );
+}
+
+/** What a mark is, as a prompt's reference, a reported mark and a stored one
+ * all say it: its kind and what it names, and the number it goes by. */
+export interface MarkLike {
+  readonly number: number;
+  readonly kind: string;
+  readonly document?: string | undefined;
+  readonly blockId?: string | undefined;
+  readonly quote?: string | undefined;
+  readonly target?: string | undefined;
+  readonly group?: string | undefined;
+  readonly item?: string | undefined;
+}
+
+/** A mark's identity: what it names, never its number, which is only an
+ * alias. */
+const markKey = (mark: Omit<MarkLike, "number">): string =>
+  [mark.kind, mark.document ?? "", mark.blockId ?? "", mark.quote ?? "", mark.target ?? "", mark.group ?? "", mark.item ?? ""].join("\u0000");
+
+/**
+ * The mark standing on what a prompt's reference names, matched by what was
+ * marked rather than by the number written, so a mark taken back and another
+ * given its number is never taken for it. `BO_0352_007`
+ */
+export function standingMark<T extends MarkLike>(reference: MarkRef, references: readonly T[]): T | undefined {
+  const key = markKey(reference);
+  return references.find((standing) => markKey(standing) === key);
+}
+
+/**
+ * The words a command sends: the block's text with each prompt's reference
+ * as `#<n>`, the number of the mark standing on its target now — the number
+ * the run is told the reference by. One with no mark standing keeps the
+ * number it was written with; the send refuses it first (`unboundMarks`).
+ * `BO_0352_007`
+ */
+export function commandWords(
+  runs: readonly Run[],
+  references: readonly MarkLike[],
+): string {
+  return runs
+    .map((entry) =>
+      entry.markRef === undefined
+        ? entry.text
+        : `#${standingMark(entry.markRef, references)?.number ?? entry.markRef.number}`,
+    )
+    .join("");
+}
+
+/**
+ * The prompt's references no mark stands on any more, by the number each
+ * was written with: a command carrying one would name nothing, as a dangling
+ * `#n` does. `BO_0352_007`
+ */
+export function unboundMarks(
+  runs: readonly Run[],
+  references: readonly MarkLike[],
+): readonly number[] {
+  const numbers: number[] = [];
+  for (const entry of runs) {
+    if (entry.markRef === undefined || standingMark(entry.markRef, references) !== undefined) continue;
+    if (!numbers.includes(entry.markRef.number)) numbers.push(entry.markRef.number);
+  }
+  return numbers;
 }

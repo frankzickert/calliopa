@@ -1,4 +1,5 @@
-import type { RevealTarget } from "~/lib/command-target";
+import { DOCUMENT_KIND, type RevealTarget } from "~/lib/command-target";
+import type { ViewBridge } from "~/components/shell/view-bridge";
 import { passageState, type Marking } from "../lib/references";
 import { runsText } from "~/lib/runs";
 import type { BlockView } from "../server/assemble";
@@ -114,4 +115,31 @@ export function showArea(
   };
   const timer = setTimeout(end, REVEAL_MS);
   return end;
+}
+
+/**
+ * Asks for what a reference points at to be shown, from a view showing
+ * `documentId`: a chip on the command line and a chip in a prompt's words
+ * alike (`BO_0352_012`). In this document, the view reveals it. In another
+ * document (`BO_0304_009`), the shell brings that document forward first —
+ * its open tab, or a new one — and the reveal is aimed there: the view that
+ * mounts acts on a reveal aimed at its document that no view has consumed. A
+ * document marked whole is brought forward and nothing more.
+ */
+export async function askReveal(
+  bridge: Pick<ViewBridge, "openTarget$" | "reveal">,
+  documentId: string,
+  target: RevealTarget,
+): Promise<void> {
+  if (target.kind === "document") {
+    await bridge.openTarget$({ kind: DOCUMENT_KIND, itemId: target.document, title: target.documentTitle ?? target.document });
+    return;
+  }
+  const where = target.kind === "takeBack" || target.document === undefined ? documentId : target.document;
+  if (where !== documentId && target.kind !== "takeBack") {
+    await bridge.openTarget$({ kind: DOCUMENT_KIND, itemId: where, title: target.documentTitle ?? where });
+  }
+  bridge.reveal.itemId = where;
+  bridge.reveal.target = target;
+  bridge.reveal.seq += 1;
 }

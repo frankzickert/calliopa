@@ -522,7 +522,20 @@ shutdown() {
 }
 trap shutdown TERM INT
 
+# A gateway starts with no `codex app-server` of a previous one standing: every
+# app-server is a run's, and a gateway that ended took its runs with it. The
+# image has no pkill, so the processes are read from /proc. BO_0353_005
+end_stray_app_servers() {
+  for cmdline in /proc/[0-9]*/cmdline; do
+    proc="${cmdline%/cmdline}"
+    if tr '\0' ' ' < "$cmdline" 2>/dev/null | grep -q 'codex.* app-server'; then
+      kill "${proc#/proc/}" 2>/dev/null || true
+    fi
+  done
+}
+
 while true; do
+  end_stray_app_servers
   current="$(stamp)"
   # Agent configuration written by the settings surface (runtime.env) and the
   # kernel bridge's provider selection (provider.env): sourced into the

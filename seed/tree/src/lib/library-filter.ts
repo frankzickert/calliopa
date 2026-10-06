@@ -11,6 +11,10 @@ import type { LibraryFacet, LibraryFilter, LibraryItem } from "~/contract";
  * `<group>:<value>` and the order as `order:<id>`. A hidden value no item
  * carries any more is kept, since the item that carried it may come back;
  * an order the filter no longer declares reads as its default.
+ *
+ * A value the filter hides by default is stored only when the person shows
+ * it, as `shown:<group>:<value>`, so a set stored before the filter declared
+ * the default reads it hidden too. DO_0042_001
  */
 
 export interface FilterChoice {
@@ -20,6 +24,7 @@ export interface FilterChoice {
 }
 
 const ORDER = "order:";
+const SHOWN = "shown:";
 
 export const facetKey = (group: string, value: string): string => `${group}:${value}`;
 
@@ -28,17 +33,25 @@ export function filterChoiceOf(filter: LibraryFilter, stored: readonly string[] 
   if (stored === null || stored === undefined) return defaultChoice(filter);
   const named = stored.filter((value) => value.startsWith(ORDER)).map((value) => value.slice(ORDER.length));
   const order = named.find((id) => filter.orders.some((candidate) => candidate.id === id)) ?? filter.defaultOrder;
-  const hidden = stored.filter((value) => !value.startsWith(ORDER));
-  return { hidden: [...new Set(hidden)], order };
+  const shown = stored.filter((value) => value.startsWith(SHOWN)).map((value) => value.slice(SHOWN.length));
+  const hidden = stored.filter((value) => !value.startsWith(ORDER) && !value.startsWith(SHOWN));
+  const hiddenByDefault = (filter.defaultHidden ?? []).filter((value) => !shown.includes(value));
+  return { hidden: [...new Set([...hidden, ...hiddenByDefault])], order };
 }
 
 export function defaultChoice(filter: LibraryFilter): FilterChoice {
   return { hidden: [...(filter.defaultHidden ?? [])], order: filter.defaultOrder };
 }
 
-/** The set a choice is stored as. */
-export function storedChoice(choice: FilterChoice): readonly string[] {
-  return [...choice.hidden, `${ORDER}${choice.order}`];
+/** The set a choice is stored as: the values it hides that the filter does
+ * not hide by default, the defaults it shows, and its order. DO_0042_001 */
+export function storedChoice(filter: LibraryFilter, choice: FilterChoice): readonly string[] {
+  const defaults = filter.defaultHidden ?? [];
+  return [
+    ...choice.hidden.filter((value) => !defaults.includes(value)),
+    ...defaults.filter((value) => !choice.hidden.includes(value)).map((value) => `${SHOWN}${value}`),
+    `${ORDER}${choice.order}`,
+  ];
 }
 
 /** Whether a choice differs from the default, which is when the funnel reads as
@@ -139,5 +152,5 @@ export function changedFilter(
       : "toggle" in change
         ? toggleFacet(current, change.toggle[0], change.toggle[1])
         : { ...current, order: change.order };
-  return storedChoice(next);
+  return storedChoice(filter, next);
 }

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   blockCommand,
+  cutTitle,
+  inlineChipName,
   documentOf,
   DOCUMENT_KIND,
   proposedFor,
@@ -581,5 +583,19 @@ describe("an instructed run is its own shape (BO_0349_052)", () => {
       },
     });
     expect(readInstructedTarget({ references: [] })).toEqual({ ok: false, error: "An instructed run names the document it proposes into." });
+  });
+});
+
+describe("a chip in the words (BO_0352_008)", () => {
+  it("Given a title, Then it is whole when it fits and cut at a word with an ellipsis when it does not", () => {
+    expect(cutTitle("The Method")).toBe("The Method");
+    expect(cutTitle("Results of the second trial")).toBe("Results of the…");
+    expect(cutTitle("Supercalifragilisticexpialidocious")).toBe("Supercalifragilisti…");
+    expect([...cutTitle("A rather long title of a section")].length).toBeLessThanOrEqual(21);
+  });
+
+  it("Given a chip, Then its name says which reference it is, its whole title, and when no mark stands under it", () => {
+    expect(inlineChipName(2, "Introduction", true)).toBe("Reference 2: “Introduction”");
+    expect(inlineChipName(2, "Introduction", false)).toBe("Reference 2: “Introduction”, no mark stands under it");
   });
 });

@@ -38,6 +38,15 @@ def ensure_kernel_image(client: docker.DockerClient) -> None:
         client.images.build(fileobj=io.BytesIO(KERNEL_DOCKERFILE.encode()), tag=KERNEL_IMAGE, rm=True)
 
 
+def remove_network(service) -> None:
+    """The test scope's runtimes' network, gone with the scope: whatever still stands on it is let go first."""
+    network = service.runtimes.network
+    network.reload()
+    for container_id in list(network.attrs.get("Containers") or {}):
+        network.disconnect(container_id, force=True)
+    network.remove()
+
+
 class Api:
     """The service over HTTP, as the kernel would call it."""
 
@@ -125,6 +134,7 @@ class ServiceTest(unittest.TestCase):
                 except docker.errors.NotFound:
                     pass
         cls.service.shutdown()
+        remove_network(cls.service)
 
     # -- the front -----------------------------------------------------------
 

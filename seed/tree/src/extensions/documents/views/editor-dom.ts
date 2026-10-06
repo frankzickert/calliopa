@@ -1,8 +1,9 @@
-import { MARKS, isAtom, normalizeRuns, type Mark, type Run } from "~/lib/runs";
+import { MARKS, isAtom, normalizeRuns, readMarkRef, type Mark, type MarkRef, type Run } from "~/lib/runs";
 
 import { citeLabel } from "../lib/citation-label";
 import { GONE_LABEL, referenceLabel } from "../lib/figure-label";
 import { linePlace, type LinePlace } from "../lib/lines";
+import type { DrawnMark } from "../lib/reference-title";
 
 /**
  * The crossing between a run list and a live `contenteditable`.
@@ -54,6 +55,8 @@ const FIGURE_REF_ATTRIBUTE = "data-figure-ref";
 const TABLE_REF_ATTRIBUTE = "data-table-ref";
 const BLOCK_REF_LABEL_ATTRIBUTE = "data-block-ref-label";
 const BLOCK_REF_ATTRIBUTE = "data-block-ref";
+/** A prompt's reference (`BO_0352_011`): what was marked, as JSON. */
+export const MARK_REF_ATTRIBUTE = "data-mark-ref";
 /** A named keyword's words carry its identity here while edited, and are read
  * back from it (`calliopa-bootstrap`'s `BO_0310_010`). */
 export const KEYWORD_ATTRIBUTE = "data-keyword";
@@ -74,6 +77,43 @@ export interface AtomContent {
    * the read resolved, or nothing when the block is outside the reading
    * order. */
   readonly referenceLabelOf?: (blockId: string) => string | undefined;
+  /** What a prompt's reference is drawn as (`BO_0352_011`): its title and
+   * whether a mark stands on it. */
+  readonly markOf?: (reference: MarkRef) => DrawnMark;
+}
+
+/** The attributes a prompt's reference is drawn with, in the words being
+ * edited and in the reading row alike: the command line's chip, its title
+ * from an attribute (`.chip--inline`), warning when no mark stands on it, its
+ * name and hover saying which reference it is and its whole title.
+ * BO_0352_008 BO_0352_011 */
+export function markChipAttributes(reference: MarkRef, drawn: DrawnMark | undefined): Readonly<Record<string, string>> {
+  const shown = drawn ?? { shown: `#${reference.number}`, title: `#${reference.number}`, name: `Reference ${reference.number}`, standing: true };
+  return {
+    class: "chip chip--inline",
+    [MARK_REF_ATTRIBUTE]: JSON.stringify(reference),
+    "data-chip-title": shown.shown,
+    "data-stale": shown.standing ? "false" : "true",
+    "aria-label": shown.name,
+    title: shown.title,
+  };
+}
+
+/**
+ * The prompt's reference a press on the surface landed on, read back from the
+ * chip as the run it is, or null: the press lands on the one character inside
+ * the chip the caret counts as often as on the chip itself. BO_0352_012
+ */
+export function pressedMark(node: Node | null, surface: Node): MarkRef | null {
+  const from = node !== null && node.nodeType === 1 ? (node as Element) : (node?.parentElement ?? null);
+  const chip = from?.closest(`[${MARK_REF_ATTRIBUTE}]`) ?? null;
+  if (chip === null || !surface.contains(chip)) return null;
+  try {
+    const read = readMarkRef(JSON.parse(chip.getAttribute(MARK_REF_ATTRIBUTE) ?? ""));
+    return "markRef" in read ? read.markRef : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Paints one atom: the element the caret steps over, carrying what it stands
@@ -127,6 +167,10 @@ function paintAtom(
     const label = content.referenceLabelOf?.(entry.blockRef);
     element.className = label === undefined ? "run-block-ref run-block-ref--missing" : "run-block-ref";
     element.setAttribute(BLOCK_REF_LABEL_ATTRIBUTE, label ?? GONE_LABEL);
+  } else if (entry.markRef !== undefined) {
+    for (const [name, value] of Object.entries(markChipAttributes(entry.markRef, content.markOf?.(entry.markRef)))) {
+      element.setAttribute(name, value);
+    }
   } else if (entry.equationRef !== undefined) {
     element.setAttribute(REFERENCE_ATTRIBUTE, entry.equationRef);
     element.className = "run-equation-ref";
@@ -258,6 +302,19 @@ export function runsFrom(element: HTMLElement): Run[] {
     const blockRef = element.getAttribute(BLOCK_REF_ATTRIBUTE);
     if (blockRef !== null) {
       runs.push({ text: "", blockRef });
+      return;
+    }
+    // Read back as the run it was, never from its drawn title. BO_0352_011
+    const markRef = element.getAttribute(MARK_REF_ATTRIBUTE);
+    if (markRef !== null) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(markRef);
+      } catch {
+        return;
+      }
+      const read = readMarkRef(parsed);
+      if ("markRef" in read) runs.push({ text: "", markRef: read.markRef });
       return;
     }
     const citedWork = element.getAttribute(CITE_WORK_ATTRIBUTE);

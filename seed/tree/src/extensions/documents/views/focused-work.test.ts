@@ -48,6 +48,7 @@ const mount = async (options: {
   focused?: FocusedWork;
   focusedHeld?: Promise<void>;
   awaitReads?: boolean;
+  others?: Record<string, DocumentView>;
 } = {}) => {
   const sent: SentCommand[] = [];
   const depthReads: string[] = [];
@@ -57,6 +58,7 @@ const mount = async (options: {
     focusedReads,
     ...(options.focused === undefined ? {} : { focused: options.focused }),
     ...(options.focusedHeld === undefined ? {} : { focusedHeld: options.focusedHeld }),
+    ...(options.others === undefined ? {} : { others: options.others }),
   }));
   const view = await mountEditor(draft, {
     ...(options.route === undefined ? {} : { route: options.route }),
@@ -213,6 +215,44 @@ describe("focused work in the block editor", () => {
     expect(view.record.tabs?.tabs[0]?.itemId).toBe("doc-1");
     expect(view.record.tabs?.tabs[0]?.route).toHaveLength(3);
     expect(view.record.tabs?.tabs.map((tab) => tab.itemId)).toEqual(["doc-1", "doc-0", "doc-r"]);
+  });
+
+  it("Given a crumb whose block moved into another document, Then it is drawn dimmed and opens its document with no block to land on, while a crumb whose block stands lands on it", async () => {
+    const holding = (documentId: string, title: string, blockId: string): DocumentView => ({
+      documentId,
+      revisionId: `rev-${documentId}`,
+      title,
+      blocks: [{ kind: "text", blockId, revisionId: `rev-${blockId}`, containmentId: `c-${blockId}`, order: "a", role: "paragraph", standing: "keep", runs: words(title) }],
+    });
+    const view = await mount({
+      route: [
+        { itemId: "doc-r", title: "Roots", blockId: "blk-r" },
+        { itemId: "doc-0", title: "Old parent", blockId: "blk-moved" },
+        { itemId: "doc-1", title: "Caching" },
+      ],
+      others: {
+        "doc-r": holding("doc-r", "Roots", "blk-r"),
+        // The block the work was opened from stands in another document now.
+        "doc-0": holding("doc-0", "Old parent", "blk-other"),
+      },
+    });
+    const crumb = (id: string) => view.root.querySelector(`[data-route-crumb="${id}"]`);
+    await view.settle(() => crumb("doc-0")?.hasAttribute("data-route-gone") === true);
+    expect(crumb("doc-0")?.classList.contains("document-route__gone")).toBe(true);
+    expect(crumb("doc-r")?.hasAttribute("data-route-gone")).toBe(false);
+    await view.userEvent('[data-route-crumb="doc-0"]', "click");
+    await view.settle(() => view.record.routed.length > 0);
+    expect(view.record.routed[0]).toEqual({
+      itemId: "doc-0",
+      title: "Old parent",
+      route: [
+        { itemId: "doc-r", title: "Roots", blockId: "blk-r" },
+        { itemId: "doc-0", title: "Old parent", blockId: "blk-moved" },
+      ],
+    });
+    await view.userEvent('[data-route-crumb="doc-r"]', "click");
+    await view.settle(() => view.record.routed.length > 1);
+    expect(view.record.routed[1]?.focus).toBe("blk-r");
   });
 
   it("Given the shell asks the view to land on a block, Then that block is focused once the document shows", async () => {

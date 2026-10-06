@@ -15,6 +15,10 @@ export interface ListedDocumentEntry extends DocumentSummary {
    * say. DO_0038_003 */
   readonly changedAt?: number;
   readonly createdAt?: number;
+  /** What an extension names the document — `structure` for a document
+   * using *Structure* — absent when none does (`namesOfDocuments`).
+   * DO_0042_002 */
+  readonly named?: string;
 }
 
 /**
@@ -48,22 +52,31 @@ export function documentItem(entry: ListedDocumentEntry, glyph: LibraryGlyph | u
 /** A plain document's kind, which the filter names as every recorded one. */
 const PLAIN = "document";
 
+/** The word `structures` names a document defining a structure by, and the
+ * filter's group and value for it. DO_0042_003 */
+const STRUCTURE = "structure";
+
 /** What a document carries for the Documents section's filter: its kind, and
- * whether a run started it or it still carries its minted name. DO_0038_004 */
+ * whether a run started it or it still carries its minted name. DO_0038_004
+ * And whether it defines a structure. DO_0042_003 */
 function documentFacets(entry: ListedDocumentEntry): Readonly<Record<string, LibraryFacet>> {
   const kind = entry.record ?? PLAIN;
   return {
     kind: { value: kind, label: kind.charAt(0).toUpperCase() + kind.slice(1) },
     ...(entry.proposed === undefined ? {} : { started: { value: "started", label: "Started by an agent", icon: "robot" } }),
     ...(isUnnamed(entry.title) ? { unnamed: { value: "unnamed", label: "Unnamed" } } : {}),
+    ...(entry.named === STRUCTURE ? { [STRUCTURE]: { value: STRUCTURE, label: "Structures" } } : {}),
   };
 }
 
 /**
  * The Documents section's filter (`DO_0038`): the title search, the kind, the
  * documents a run started that nobody has taken and the unnamed ones, and the
- * four orders, by title by default with nothing hidden, so a workspace that
- * never chose lists what it always listed. DO_0038_004
+ * four orders, by title by default. DO_0038_004
+ *
+ * The documents defining a structure are hidden until the person shows them,
+ * for a choice stored before the group existed too; the group draws nothing
+ * on an instance without `structures`. DO_0042_003
  */
 export const DOCUMENTS_FILTER: LibraryFilter = {
   search: "Search titles",
@@ -71,6 +84,7 @@ export const DOCUMENTS_FILTER: LibraryFilter = {
     { name: "kind", label: "Kind" },
     { name: "started", label: "Started by an agent" },
     { name: "unnamed", label: "Unnamed" },
+    { name: STRUCTURE, label: "Structures" },
   ],
   orders: [
     { id: "title", label: "Title A–Z", by: "label-ascending" },
@@ -79,5 +93,6 @@ export const DOCUMENTS_FILTER: LibraryFilter = {
     { id: "created", label: "Newest first", by: "key-descending" },
   ],
   defaultOrder: "title",
+  defaultHidden: [`${STRUCTURE}:${STRUCTURE}`],
   noMatch: "No documents match",
 };

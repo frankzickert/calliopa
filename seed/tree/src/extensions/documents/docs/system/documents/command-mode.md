@@ -276,3 +276,92 @@ Under `calliopa-bootstrap`'s `BO_0322`, set to draft by the user on 2026-10-01 a
   chip wrapped below the line at 360 (row 156–216, nothing above 156); a line of sixteen buttons
   wrapped with the chip and the list (row 156–242, list 248–482); the list 234px high, where it
   was 10px.
+
+## A Reference Reads As Its Title
+
+- Under `calliopa-bootstrap`'s `BO_0352`, promoted to draft by the user on 2026-10-06 and
+  transferred here the same day, a reference chosen from a prompt's `#` list stops reading as `#n`
+  and reads as what it points at, in a chip like the command control's, pressable as a keyword's
+  mention is. The run kind's words and the chip's face are `ui.shell`'s
+  ([Commands And Runs](../../../../../../docs/system/workspace/commands-and-runs.md#a-reference-reads-as-its-title),
+  `BO_0352_006`–`008`); the run schema is the kernel's (`calliopa-bootstrap`'s `ui-kernel.md`,
+  `BO_0352_001`–`005`). The change document is
+  [BO_0352](../../changes/completed/BO_0352_FEAT_a-reference-reads-as-its-title.md).
+* Only a prompt's references change: the `#n` naming one of its marks. A `blockRef` in any other
+  block stays a link (References From The Hash). User decision, 2026-10-06 (`DO_0041_Q1`).
+* Choosing a mark, or a block it marks, from a prompt's `#` list writes an atom bound to what was
+  marked, not the text `#n`; it carries the target, its revision and its words, so its title is
+  drawn wherever the prompt is read, on any device. User decisions, 2026-10-06 (`DO_0041_Q2`,
+  `BO_0352_Q1`).
+* The chip in the words shows the title alone; the number stays in its hover and accessible name
+  and on the command control's chip. User decision, 2026-10-06 (`DO_0041_Q4`).
+* The title follows the kind: a heading by its words; a figure, table or equation as *Figure 3*,
+  *Table 1*, *(2)*; a paragraph by its label, else its opening words; a passage by its quoted words;
+  another document, or a block or passage in it, by that document's title; a proposal or a retired
+  block by its words, with *proposed* or *retired* beside them. User decision, 2026-10-06
+  (`DO_0041_Q3`).
+* A title longer than about 20 characters is cut at a word boundary with an ellipsis; the whole
+  title stands in the hover and the accessible name. User decision, 2026-10-06 (`DO_0041_Q5`).
+* A press opens, or brings forward, the tab of the document the target lives in and reveals the
+  block or passage there, as the command control's chip reveals it; a target in the prompt's own
+  document is revealed in the tab already open. User decision, 2026-10-06 (`DO_0041_Q6`).
+* A reference whose mark no longer stands is drawn in the chip's stale look with the `warning` icon
+  and named for having no mark under it. User decision, 2026-10-06 (`DO_0041_Q7`).
+* The prompt being edited shows the same chip: one atom, removed with one backspace. User decision,
+  2026-10-06 (`DO_0041_Q8`).
+* Deleting the chip from the words never takes its mark back, and taking the mark back leaves the
+  chip warning until it is deleted or its target is marked again. User decision, 2026-10-06
+  (`BO_0352_Q2`).
+* A prompt written before the change keeps its text `#n`; only references chosen afterwards are
+  atoms, and a `#n` typed by hand stays text. User decision, 2026-10-06 (`BO_0352_Q4`).
+
+- What a reference is drawn as (`BO_0352_009`, landed 2026-10-06; `lib/reference-title.ts`, pure
+  and unit-tested): `drawnMark` resolves a `markRef` against the prompt's marks by what it names
+  (`standingMark`) into standing, with its mark's number now, or unbound, shown as `#n` as written;
+  `markTitle` titles it by the kind rules above, a block of this document as the `#` list names it
+  (`blockTitles` over `referenceChoices`: a heading's words, *Figure 3*, a paragraph's label or its
+  opening words) — the list's own rule, so nothing new is resolved on the server — else by its
+  carried words; `cutTitle` cuts it. `promptMarks` says which marks a prompt's chips are drawn
+  against: the report while it is the prompt pointed from, its marks as the page holds them
+  otherwise (`marksOf`), and none for a prompt whose marks the page has not read, whose chips then
+  stand as its words name them (`BO_0352_013`).
+- Choosing writes the atom (`BO_0352_010`, landed 2026-10-06; `command/command-control.tsx`): a mark
+  chosen from a prompt's `#` list (`choose$`), or a block chosen and marked there
+  (`chooseBlockAsMark$`), replaces the `#` and what was typed with one `markRef` and a space, the
+  caret after the space, through `editRuns$`. `markRefFrom` builds it from the reported mark as the
+  shell sends it, with its words — another document's title for a reference into one; a block
+  marked by the choice is written from what the list shows of it, since its report follows the
+  press.
+- The chip in the words (`BO_0352_011`, landed 2026-10-06): on the editing surface `paintAtom` draws
+  a `markRef` as a `span` carrying `markChipAttributes` — `chip chip--inline`, `data-mark-ref` (the
+  atom as JSON), `data-chip-title`, `data-stale`, its name and its whole title as the hover — one
+  atom wide, so one backspace removes it, and `runsFrom` reads it back from `data-mark-ref`, never
+  from its title. The reading row (`Marked`, `block-text.tsx`) draws the same attributes on a
+  `role="button"` span. `ActiveBlockText` paints the surface once more, keeping the caret, when the
+  block holds a chip and what its prompt's marks name has changed, so a chip warns as soon as its
+  mark is taken back; a repaint on every report would take the caret from under the reader.
+- The press (`BO_0352_012`, landed 2026-10-06): `askReveal` in `views/reveal.ts` is the one request
+  the command line's chips and a chip in the words both make — in this document the view reveals
+  the target, another document is opened or brought forward first. `markReveal` asks for what a
+  standing chip names, as `revealTarget` does for the command line's chip, and nothing for a chip
+  no mark stands on. The reading row's chip presses through `BlockRow`'s `revealMark$`, its click
+  stopped so the row is never marked; the surface's chips are painted, so `ActiveBlockText` hears a
+  press on its element and reads the chip with `pressedMark`, which takes the character inside the
+  chip for the chip.
+- Marks come back from the words (`BO_0352_013`, landed 2026-10-06; `marking/use-marking.ts`): a
+  prompt made the prompt with no marks on the page or the device takes them from its `markRef`
+  atoms, in the order written (`markingFromSent`), and its latest run's `references` replace them
+  when that run carried some and nothing was marked or taken back meanwhile. A send of a prompt
+  whose marks the page has not read tells each reference by the number it was written with.
+- Verified 2026-10-06 (`BO_0352_014`): `command/command-control.test.ts` in the render harness — a
+  mark and a block chosen from `#` written as the atom and drawn as the titled chip with its name,
+  no `#` left in the words; the prompt sent naming `#1`; the mark taken back and the chip warning as
+  `#1`, *Send* refused naming it with nothing sent; the reading row's chip pressed revealing its
+  block with no mark made; a chip into another document read back by `pressedMark` from the chip
+  and from its character, and `runsFrom` reading the atom back; a prompt the page holds no marks for
+  drawn standing. `lib/reference-title.test.ts`: every kind's title, the cut, the number now and the
+  unbound look, `promptMarks`, `markRefFrom` and `markReveal`. Matching by number, the refusal, the
+  warning look, the read-back and the marks from the words were each shown to fail without their
+  code. The unit and behavior projects pass, 2057 tests on the tree at dataRevision 4999, `tsc --noEmit` is clean, and the absence check builds all nine variants. Walked by the user at
+  pin 5002 with the kernel rebuilt (`calliopa-bootstrap`'s `BO_0352_005`, 2026-10-06, "worked"),
+  a press on a chip on the editing surface among it, which the harness could not dispatch.

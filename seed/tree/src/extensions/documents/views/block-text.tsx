@@ -1,12 +1,14 @@
-import { component$, Slot, useContext } from "@builder.io/qwik";
+import { component$, Slot, useContext, type QRL } from "@builder.io/qwik";
 
 import { ViewBridgeContext } from "~/components/shell/view-bridge";
 
-import { citationKey, type Citation, type Mark, type TextRole } from "~/lib/runs";
+import { citationKey, type Citation, type Mark, type MarkRef, type TextRole } from "~/lib/runs";
 
 import { citeLabel } from "../lib/citation-label";
 import { GONE_LABEL, referenceLabel } from "../lib/figure-label";
 import type { Annotation } from "../lib/annotations";
+import type { DrawnMark } from "../lib/reference-title";
+import { markChipAttributes } from "./editor-dom";
 import { CitedWorksContext } from "./cited-works";
 import type { InlineAnnotations } from "./inline-annotations";
 
@@ -88,11 +90,33 @@ export const Marked = component$<{
    * the block it points at. */
   blockRef?: string | undefined;
   refLabel?: string | undefined;
-}>(({ text, marks, link, math, svg, equationRef, number, cite, citeNumber, citeMissing, figureRef, tableRef, refNumber, blockRef, refLabel }) => {
+  /** A prompt's reference (`BO_0352_011`), drawn as the command line's chip
+   * with its title, warning when no mark stands on it, and pressed to show
+   * what it names. */
+  markRef?: MarkRef | undefined;
+  markDrawn?: DrawnMark | undefined;
+  onMark$?: QRL<(reference: MarkRef, drawn: DrawnMark) => void> | undefined;
+}>(({ text, marks, link, math, svg, equationRef, number, cite, citeNumber, citeMissing, figureRef, tableRef, refNumber, blockRef, refLabel, markRef, markDrawn, onMark$ }) => {
   // An atom stands for one thing rather than for its characters, so it is
   // drawn before the marks are peeled: a mark means nothing over an equation.
   if (cite !== undefined) {
     return <CitedRun work={cite.work} locator={cite.locator} fallback={citeLabel(cite, citeNumber, citeMissing === true)} missing={citeMissing === true} />;
+  }
+  if (markRef !== undefined) {
+    return (
+      <span
+        {...markChipAttributes(markRef, markDrawn)}
+        role="button"
+        tabIndex={0}
+        stoppropagation:click
+        onClick$={() => {
+          if (markDrawn !== undefined && onMark$ !== undefined) void onMark$(markRef, markDrawn);
+        }}
+        onKeyDown$={(event: KeyboardEvent) => {
+          if ((event.key === "Enter" || event.key === " ") && markDrawn !== undefined && onMark$ !== undefined) void onMark$(markRef, markDrawn);
+        }}
+      />
+    );
   }
   if (blockRef !== undefined) {
     return (

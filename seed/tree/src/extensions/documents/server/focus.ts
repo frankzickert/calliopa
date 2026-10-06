@@ -1,13 +1,15 @@
 
 import { port } from "~/server/port";
-import type { ChildFace, ChildPlan, FocusedWorkContribution } from "~/contract";
+import type { ChildFace, ChildPlan, EmptiedKept, EmptiedPlan, FocusedWorkContribution } from "~/contract";
 import { orderBetween } from "~/lib/order";
 import { runsText } from "~/lib/runs";
 import { properties } from "~/server/ccgw/script";
 import type { GraphOutcome } from "~/server/outcome";
-import { nodeRef } from "~/server/ccgw/nodes";
-import { CONTAINS } from "./assemble";
-import { readDocument } from "./documents";
+import { query } from "~/server/ccgw/client";
+import { bareId, contentOf, nodeRef, typeOf } from "~/server/ccgw/nodes";
+import { CONTAINS, RETIRED } from "./assemble";
+import { adoptionRefused, composeAdoption, readDocument, readDocumentProposals, readRetiredBlocks } from "./documents";
+import { fixedOf } from "./guards";
 import { DOCUMENT_TYPE } from "./vocabulary";
 
 /**
@@ -116,10 +118,122 @@ async function documentBlocks(targetId: string): Promise<GraphOutcome<readonly s
   return { outcome: "success", result: read.result.blocks.map((block) => block.blockId) };
 }
 
+/** What a removed child keeps for *Take back*: its title and the blocks
+ * retired from it, which no read reaches once the child is retired.
+ * CA_0083_004 */
+export interface KeptChild {
+  readonly title: string;
+  readonly retired: readonly string[];
+}
+
+/** The kept record read back from what a view carried, or `null` when it is
+ * not one this extension wrote. */
+export function keptChild(kept: EmptiedKept): KeptChild | null {
+  const title = kept["title"];
+  const retired = kept["retired"];
+  if (typeof title !== "string" || !Array.isArray(retired) || !retired.every((id) => typeof id === "string")) return null;
+  return { title, retired };
+}
+
+/** How far up a block's containers the parent document is looked for: a
+ * callout's child stands one level below its document. */
+const PARENT_DEPTH = 4;
+
+/** The document a block stands in, through any callout that holds it, or
+ * `null` when it stands in none. */
+async function documentHolding(blockId: string): Promise<GraphOutcome<{ readonly itemId: string; readonly title: string } | null>> {
+  let current = blockId;
+  for (let depth = 0; depth < PARENT_DEPTH; depth += 1) {
+    const read = await query({
+      statement: `MATCH (p)-[c:${CONTAINS}]->(b) RETURN GRAPH p, c, b ROOT b`,
+      roots: [nodeRef(current)],
+      unbounded: true,
+      purpose: "the document a focused block stands in",
+    });
+    if (read.outcome === "noResult") return { outcome: "success", result: null };
+    if (read.outcome !== "success") return read as GraphOutcome<never>;
+    const holding = read.result.relations.find(
+      (relation) => relation.type === CONTAINS && relation.validity.status === "active" && relation.to.nodeId === nodeRef(current),
+    );
+    const holder = read.result.nodes.find((node) => node.id === holding?.fromNodeId);
+    if (holder === undefined) return { outcome: "success", result: null };
+    if (typeOf(holder) === DOCUMENT_TYPE) {
+      const title = contentOf(holder)["title"];
+      return { outcome: "success", result: { itemId: bareId(holder.id), title: typeof title === "string" ? title : "" } };
+    }
+    current = bareId(holder.id);
+  }
+  return { outcome: "success", result: null };
+}
+
+/**
+ * Whether a child document is empty, and what removes it when it is: no block
+ * in its reading order — retired ones do not count — and no pending proposal
+ * that would insert one (user decisions, 2026-10-06). It is retired as a
+ * deleted document is, and its title and retired blocks are kept for *Take
+ * back*, since a retired node answers no read afterwards. A document guarded
+ * against deletion stays. CA_0083_004
+ */
+export async function emptiedDocumentChild(child: {
+  readonly itemId: string;
+  readonly blockId: string;
+}): Promise<GraphOutcome<EmptiedPlan | null>> {
+  const read = await readDocument(child.itemId);
+  if (read.outcome !== "success") return read as GraphOutcome<never>;
+  if (read.result.blocks.length > 0) return { outcome: "success", result: null };
+  const proposals = await readDocumentProposals(child.itemId);
+  if (proposals.outcome !== "success") return proposals as GraphOutcome<never>;
+  const filling = proposals.result.groups.some((group) => group.items.some((item) => item.kind === "insert"));
+  if (filling) return { outcome: "success", result: null };
+  const fixed = await fixedOf(child.itemId);
+  if (fixed.outcome !== "success") return fixed as GraphOutcome<never>;
+  if (fixed.result.undeletable !== undefined) return { outcome: "success", result: null };
+  const retired = await readRetiredBlocks(child.itemId);
+  if (retired.outcome !== "success") return retired as GraphOutcome<never>;
+  const parent = await documentHolding(child.blockId);
+  if (parent.outcome !== "success") return parent as GraphOutcome<never>;
+  const kept: KeptChild = { title: read.result.title, retired: retired.result.map((block) => block.blockId) };
+  return {
+    outcome: "success",
+    result: {
+      statements: ["RETIRE fwGone"],
+      parameters: { fwGoneNodeId: nodeRef(child.itemId) },
+      kept: { ...kept },
+      parent: parent.result,
+    },
+  };
+}
+
+/**
+ * The child an emptied one comes back as: a document under the title it had,
+ * holding the blocks retired from it as retired again, so *Show removed* and
+ * *Restore* reach them as before. The block that left last is put back by the
+ * view's own write once the child stands. CA_0083_006
+ */
+async function bringBackDocumentChild(kept: EmptiedKept): Promise<GraphOutcome<ChildPlan>> {
+  const child = keptChild(kept);
+  if (child === null) return refuse("keptShape", "What was kept of this focused work cannot be read back.");
+  const documentId = port.uuid();
+  const parameters: Record<string, unknown> = { cd: nodeRef(documentId) };
+  const statements = [`CREATE (d:${DOCUMENT_TYPE} {${properties("d", { id: documentId, title: child.title }, parameters)}})`];
+  child.retired.forEach((blockId, index) => {
+    parameters[`rb${index}`] = nodeRef(blockId);
+    statements.push(`RELATE cd -[r${index}:${RETIRED}]-> rb${index}`);
+  });
+  if (child.retired.length === 0) delete parameters["cd"];
+  return { outcome: "success", result: { itemId: documentId, title: child.title, statements, parameters } };
+}
+
 /** What this extension contributes for its one target kind. CA_0065_008 */
 export const documentFocusedWork: FocusedWorkContribution = {
   childType: DOCUMENT_TYPE,
   plan: planDocumentChild,
   faces: documentFaces,
   blocksOf: documentBlocks,
+  emptied: emptiedDocumentChild,
+  bringBack: bringBackDocumentChild,
+  // A document dropped into a document becomes a new block's focused work.
+  // DO_0043_003
+  adopt: composeAdoption,
+  adoptable: async ({ targetId, childId }) => (await adoptionRefused(targetId, childId)) ?? { outcome: "success", result: null },
 };

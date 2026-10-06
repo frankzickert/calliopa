@@ -1,6 +1,7 @@
 import { $, component$, useStore } from "@builder.io/qwik";
 
 import type { LibraryItem, OpenTarget } from "~/contract";
+import type { DragOperation, DragPayload } from "~/lib/drag";
 import { LibraryRow, type RowPointing } from "../library-row";
 
 /**
@@ -16,8 +17,19 @@ export const LibraryRowHost = component$<{
   pointing?: Readonly<Record<string, RowPointing>>;
   /** The row a dragged block is held over, by item. CA_0072_004 */
   held?: string;
+  /** What a dragged row offers, as the shell reads it off the view of the
+   * row's kind; absent, rows do not drag. DO_0043_002 */
+  drags?: readonly DragOperation[];
 }>((props) => {
-  const library = useStore({ items: [] as LibraryItem[], opened: null as OpenTarget | null, marked: null as { document: string; title: string } | null });
+  const library = useStore({
+    items: [] as LibraryItem[],
+    opened: null as OpenTarget | null,
+    marked: null as { document: string; title: string } | null,
+    dragged: null as DragPayload | null,
+  });
+  const drag$ = $((payload: DragPayload) => {
+    library.dragged = payload;
+  });
   const open$ = $((target: OpenTarget) => {
     library.opened = target;
   });
@@ -45,12 +57,15 @@ export const LibraryRowHost = component$<{
               pointing={props.pointing?.[item.id]}
               onMark$={mark$}
               held={props.held === item.id}
+              drags={props.drags}
+              onDrag$={drag$}
             />
           </li>
         ))}
       </ul>
       <output data-opened>{JSON.stringify(library.opened)}</output>
       <output data-marked>{JSON.stringify(library.marked)}</output>
+      <output data-dragged>{JSON.stringify(library.dragged)}</output>
     </div>
   );
 });

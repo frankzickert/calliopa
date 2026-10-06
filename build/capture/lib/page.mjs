@@ -5,6 +5,8 @@
 // (`docs/system/page-capture-service.md`, BO_0284_001). Pure but for the two
 // ways handed in.
 
+import { challengeTitle } from "./capture.mjs";
+
 // How much text one page keeps: some forty pages. The renderer answers up to
 // two million characters; a record that large is more than any reader of it
 // carries, so the text is cut here and `whole` says so.
@@ -158,6 +160,13 @@ function renderedWay(record) {
   };
 }
 
+// A way that reached a bot challenge read nothing of the page: it is a
+// refusal saying so, and the record carries what the challenge was.
+// BO_0354_002
+function challengedWay(way, reason) {
+  return { ok: false, way, refusal: `challenged: ${reason}`, challenged: reason };
+}
+
 // Both ways at once — `plain(target)` answers a way outcome, `capturer`
 // renders — and the comparison over them. The renderer's files ride along
 // whatever the comparison kept: the page as it looked is kept even when the
@@ -172,11 +181,21 @@ export async function capturePage({ target, capturer, plain }) {
       .then((record) => ({ ok: true, record }))
       .catch((error) => ({ ok: false, refusal: error.refused ? `refused: ${error.message}` : error.unreachable ? `the page could not be reached: ${error.message}` : `the rendering failed: ${error.message}` })),
   ]);
-  const renderWay = rendered.ok ? renderedWay(rendered.record) : { ok: false, way: "render", refusal: rendered.refusal };
-  const compared = chooseCapture([plainWay, renderWay]);
+  const renderWay = !rendered.ok
+    ? { ok: false, way: "render", refusal: rendered.refusal }
+    : rendered.record.challenged
+      ? challengedWay("render", rendered.record.challenged)
+      : renderedWay(rendered.record);
+  const fetchWay =
+    plainWay.ok && challengeTitle(plainWay.capture.title)
+      ? challengedWay("fetch", `the page is a bot challenge (${plainWay.capture.title.trim()})`)
+      : plainWay;
+  const compared = chooseCapture([fetchWay, renderWay]);
+  const challenged = [fetchWay, renderWay].find((way) => way.challenged)?.challenged;
   return {
     url: String(target),
     ...compared,
+    ...(challenged ? { challenged } : {}),
     settled: rendered.ok ? rendered.record.settled : undefined,
     blocked: rendered.ok ? rendered.record.blocked : [],
     files: rendered.ok ? rendered.record.files : {},

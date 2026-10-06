@@ -12,6 +12,7 @@ import { createDOM } from "@builder.io/qwik/testing";
 import {
   ViewBridgeContext,
   type ViewBridge,
+  type EmptiedWork,
   type ViewBar,
   type ViewInspector,
   type ViewCommand,
@@ -109,6 +110,15 @@ export interface BridgeRecord {
   blockControls: { control: string; blockId: string }[];
   /** The children a view asked for without leaving its document. CA_0072_005 */
   focusedChildren: { itemId: string; blockId: string }[];
+  /** The emptied focused work the view reported, in order. CA_0083_002 */
+  emptied: EmptiedWork[];
+  /** What the shell holds for a parent's *Take back* as the view mounts, as
+   * a removal in another tab leaves it. CA_0083_006 */
+  held?: EmptiedWork;
+  /** The emptied focused work the view brought back, in order. CA_0083_006 */
+  broughtBack: EmptiedWork[];
+  /** The documents a view asked the shell to adopt into a target. DO_0043_004 */
+  adoptions: { itemId: string; childId: string; at: { placement: unknown } | { into: string } }[];
   /** The drags the view asked the shell to start, by item. BO_0233_012 */
   drags: string[];
   /** The branch the view last said the tab works in. BO_0250 */
@@ -137,6 +147,9 @@ export interface BridgeRecord {
     readonly preview?: string;
     /** A card dropped on the edge pile, kept for later. BO_0350_006 */
     readonly operation?: "move" | "defer";
+    /** A document dragged from its tab or its library row, moved rather than
+     * linked. DO_0043_004 */
+    readonly source?: "tab-strip" | "library";
   };
   /** What the next press on `[data-harness-over]` puts under the pointer, as
    * the shell's drag model does while a drag moves. CA_0072_007 */
@@ -147,6 +160,9 @@ export interface BridgeRecord {
   /** The kind of what is held over `over`, as the shell's payload carries
    * it; none unless said. BO_0349_013 */
   overKind?: string | null;
+  /** Where what is held over `over` was dragged from, and its identity: a
+   * document from its tab or its library row. DO_0043_004 */
+  overSource?: { readonly source: "tab-strip" | "library"; readonly itemId: string } | null;
   /** The run chips the view last reported. BO_0265_014 */
   chips?: readonly RunChip[];
   /** What the next press on `[data-harness-activity]` hands the view as the
@@ -230,6 +246,9 @@ export function documentsApi(
      * does: a stale base is a conflict, a revise lands its runs and a split
      * its tail, under the identity the command names. CA_0045_005 */
     readonly follow?: boolean;
+    /** Refuses every adoption with these words, as the frame refuses a
+     * document dropped into its own focused work. DO_0043_004 */
+    readonly refuseAdoption?: string;
     /** How long a revise or a split takes to answer, as a phone's round trip
      * does. CA_0045_003 */
     readonly writeDelayMs?: number;
@@ -246,6 +265,10 @@ export function documentsApi(
     readonly replay?: ReplayDocument;
     /** Every read of the document itself, recorded. CA_0045_003 */
     readonly reads?: string[];
+    /** Other documents a read answers, as the documents a route names: a
+     * crumb reads its document to know whether its block still stands there.
+     * CA_0084_002 */
+    readonly others?: Readonly<Record<string, DocumentView>>;
     /** What `GET d/[id]/arrangement` answers: Hermes's arrangement of the
      * document for the reader, or none. BO_0350_005 */
     readonly arrangement?: Arrangement;
@@ -263,6 +286,9 @@ export function documentsApi(
     readonly mode?: { field: string; work: string };
     readonly modes?: { field: string; work: string }[];
     readonly modeRefused?: boolean;
+    /** What a command empties, as the server answers `emptied` beside the
+     * write: called with the command's URL and body. CA_0083_005 */
+    readonly emptied?: (url: string, body: Record<string, unknown>) => unknown;
     /** The focused work the document's blocks have, as the focused read
      * answers it; an open of a block not there is answered as created, with
      * the child's id `child-<blockId>`. CA_0047 */
@@ -343,6 +369,15 @@ export function documentsApi(
       // `CA_0065`, not a command of this extension's.
       if (url === `/api/focused-work/${document.documentId}`) {
         const blockId = String(body["blockId"] ?? "");
+        // *Take back* brings an emptied child back under its kept title.
+        // CA_0083_006
+        const kept = body["bringBack"] as { title?: unknown } | undefined;
+        if (kept !== undefined) {
+          const itemId = `back-${blockId}`;
+          const title = typeof kept.title === "string" ? kept.title : "";
+          focused = { ...focused, [blockId]: { itemId, title, face: null } };
+          return answer({ blockId, itemId, title, created: true, dataRevision: "1" });
+        }
         const child = focused[blockId];
         if (child === undefined) {
           const itemId = `child-${blockId}`;
@@ -353,6 +388,18 @@ export function documentsApi(
         return answer(
           { blockId, itemId: child.itemId, title: child.title, created: false, dataRevision: "" },
         );
+      }
+      // A document dropped into a document is the frame's adoption: the new
+      // block, or the refusal. DO_0043_004
+      if (url.startsWith("/api/focused-work/") && url.endsWith("/adopt")) {
+        sent.push({ url, body });
+        if (options.refuseAdoption !== undefined) {
+          return new Response(
+            JSON.stringify({ outcome: "validationFailure", failures: [{ operation: null, rule: "insideItsOwnWork", detail: options.refuseAdoption }] }),
+            { status: 422, headers: { "content-type": "application/json" } },
+          );
+        }
+        return answer({ blockId: `adopted-${String(body["childId"])}`, targetId: url.split("/")[3], dataRevision: "1" });
       }
       sent.push({ url, body });
       if (options.refuseByFloor !== undefined && body["command"] === options.refuseByFloor.command && floorRefusalsLeft > 0) {
@@ -373,6 +420,10 @@ export function documentsApi(
           JSON.stringify({ outcome: "validationFailure", failures: [{ operation: null, rule: "write_refused", detail: "separation_of_duties_requires_proposal: node:x is content of \"documents\" under separation of duties: it changes only through a proposal someone else accepts" }] }),
           { status: 409, headers: { "content-type": "application/json" } },
         );
+      }
+      const emptiedNow = options.emptied?.(url, body);
+      if (emptiedNow !== undefined) {
+        return answer({ blockId: String(body["blockId"] ?? ""), revisionId: `rev-next-${++revisions}`, dataRevision: "1", emptied: emptiedNow });
       }
       const revisionId = `rev-next-${++revisions}`;
       if (options.follow === true && body["command"] === "insertAdmonitionChild") {
@@ -650,6 +701,10 @@ export function documentsApi(
       }
       return answer({ blockId: String(body["blockId"] ?? ""), revisionId });
     }
+    const other = init?.method === undefined || init.method === "GET"
+      ? Object.values(options.others ?? {}).find((entry) => url === `/api/x/documents/d/${entry.documentId}`)
+      : undefined;
+    if (other !== undefined) return answer(other);
     if (url === base) {
       options.reads?.push(url);
       if (options.readDelayMs !== undefined) {
@@ -786,6 +841,10 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
     );
     /** The last message raised, as the shell holds it. DO_0040_002 */
     const raised = useStore<{ current: Message | null }>({ current: null });
+    /** What the shell holds for a parent's *Take back*. CA_0083_006 */
+    const emptied = useStore<{ byParent: Record<string, EmptiedWork> }>(
+      record.held === undefined || record.held.parent === null ? { byParent: {} } : { byParent: { [record.held.parent.itemId]: record.held } },
+    );
     const noop = $(() => undefined);
     const bridge: ViewBridge = {
       workspaceId: "harness-workspace",
@@ -926,6 +985,56 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
         faces.byItem = { ...faces.byItem, [itemId]: faced.outcome === "success" && faced.result !== undefined ? faced.result : {} };
         return { itemId: (outcome as { result: { itemId: string } }).result.itemId };
       }),
+      // What the shell's own does with an emptied focused work, recorded;
+      // the tabs it turns are `tabs.ts`'s, proven there. CA_0083_002
+      emptied,
+      focusedWorkEmptied$: $(async (work: EmptiedWork) => {
+        record.emptied.push(work);
+        if (work.parent !== null) emptied.byParent = { ...emptied.byParent, [work.parent.itemId]: work };
+      }),
+      takeEmptied$: $((parentId: string) => {
+        const held = emptied.byParent[parentId] ?? null;
+        if (held === null) return null;
+        const rest = { ...emptied.byParent };
+        delete rest[parentId];
+        emptied.byParent = rest;
+        return held;
+      }),
+      bringBack$: $(async (work: EmptiedWork) => {
+        record.broughtBack.push(work);
+        if (work.parent === null) return { refusal: "no parent" };
+        const answered = await fetch(`/api/focused-work/${work.parent.itemId}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind: "documents:document", blockId: work.blockId, bringBack: work.kept }),
+        });
+        const outcome = (await answered.json()) as { outcome: string; result?: { itemId: string } };
+        if (outcome.outcome !== "success" || outcome.result === undefined) return { refusal: "refused" };
+        const read = await fetch(`/api/focused-work/${work.parent.itemId}`);
+        const faced = (await read.json()) as { outcome: string; result?: FocusedWork };
+        faces.byItem = { ...faces.byItem, [work.parent.itemId]: faced.outcome === "success" && faced.result !== undefined ? faced.result : {} };
+        return { itemId: outcome.result.itemId };
+      }),
+      // Adopts a dragged document over the frame's route and reads the faces
+      // again, what the shell's own does. DO_0043_004
+      adoptChild$: $(async (itemId: string, childId: string, at: { placement: unknown } | { into: string }) => {
+        record.adoptions.push({ itemId, childId, at });
+        const answered = await fetch(`/api/focused-work/${itemId}/adopt`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ kind: "documents:document", childId, ...at }),
+        });
+        const outcome = (await answered.json()) as
+          | { outcome: "success"; result: { blockId: string } }
+          | { outcome: string; failures?: readonly { detail?: string }[] };
+        if (outcome.outcome !== "success") {
+          return { refusal: (outcome as { failures?: readonly { detail?: string }[] }).failures?.[0]?.detail ?? "refused" };
+        }
+        const read = await fetch(`/api/focused-work/${itemId}`);
+        const faced = (await read.json()) as { outcome: string; result?: FocusedWork };
+        faces.byItem = { ...faces.byItem, [itemId]: faced.outcome === "success" && faced.result !== undefined ? faced.result : {} };
+        return { blockId: (outcome as { result: { blockId: string } }).result.blockId };
+      }),
       blockControls$: $(async (itemId: string, blockId: string) => [
         {
           id: "focused-work",
@@ -981,7 +1090,9 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
             if (record.drop === undefined) return;
             (drag as { drop: ViewDrop | null }).drop = {
               payload:
-                record.drop.kind === undefined
+                record.drop.source !== undefined
+                  ? { itemId: record.drop.itemId, kind: "documents:document", source: record.drop.source, operations: ["move", "open-in-tab"], preview: null }
+                  : record.drop.kind === undefined
                   ? { itemId: record.drop.itemId, kind: "documents:document", source: "workspace", operations: ["move", "defer"], preview: null, from: record.drop.from }
                   : {
                       itemId: record.drop.itemId,
@@ -1006,7 +1117,12 @@ export const editorHarness = (tab: Tab, record: BridgeRecord, pendingReveal?: Re
             (drag as { overId: string | null }).overId = record.over ?? null;
             // What a release there would do, as the shell resolves it. BO_0349_036
             (drag as { operation: string | null }).operation = record.overOperation !== undefined ? record.overOperation : record.over == null ? null : "move";
-            (drag as { payload: unknown }).payload = record.overKind == null ? null : { itemId: "held", kind: record.overKind, source: "library" };
+            (drag as { payload: unknown }).payload =
+              record.overSource != null
+                ? { itemId: record.overSource.itemId, kind: "documents:document", source: record.overSource.source }
+                : record.overKind == null
+                  ? null
+                  : { itemId: "held", kind: record.overKind, source: "library" };
           }),
           children: "over",
         }),
@@ -1197,6 +1313,8 @@ export async function mountEditor(
     readonly drawn?: string;
     /** Mounts the view as a replay's tab, playing this run. BO_0340_008 */
     readonly replay?: { readonly runId: string; readonly block: string };
+    /** A removal the shell holds for this document's *Take back*. CA_0083_006 */
+    readonly held?: EmptiedWork;
   } = {},
 ) {
   // The editor's counts and proposals are read by a visible task, after the
@@ -1222,6 +1340,10 @@ export async function mountEditor(
     routed: [],
     blockControls: [],
     focusedChildren: [],
+    emptied: [],
+    broughtBack: [],
+    ...(options.held === undefined ? {} : { held: options.held }),
+    adoptions: [],
     ...(options.focusOn === undefined ? {} : { focusOn: options.focusOn }),
     ...(options.session === undefined ? {} : { session: options.session }),
     ...(options.replay === undefined

@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { PointedReference } from "./command-target";
 import {
+  commandWords,
   danglingNumbers,
+  standingMark,
+  unboundMarks,
   namedNumbers,
   pendingReference,
   referenceMatches,
@@ -75,5 +78,25 @@ describe("naming a block by typing # and its words", () => {
     expect(pendingBlockReference("see \uFFFC#", 6)).toEqual({ start: 5, typed: "" });
     expect(pendingBlockReference("see \uFFFC#fig", 9)).toEqual({ start: 5, typed: "fig" });
     expect(pendingBlockReference("see # two", 9)).toBeNull();
+  });
+});
+
+describe("the words a command sends of a prompt's references (BO_0352_007)", () => {
+  const standing = (number: number, blockId: string): PointedReference => ({ kind: "block", number, blockId, words: blockId, stale: false });
+  const runs = [
+    { text: "Compare " },
+    { text: "", markRef: { number: 1, kind: "block" as const, blockId: "blk-a" } },
+    { text: " with " },
+    { text: "", markRef: { number: 2, kind: "block" as const, blockId: "blk-b" } },
+  ];
+
+  it("Given each reference's mark standing, Then the words name each by the number its mark has now", () => {
+    expect(commandWords(runs, [standing(4, "blk-a"), standing(5, "blk-b")])).toBe("Compare #4 with #5");
+    expect(unboundMarks(runs, [standing(4, "blk-a"), standing(5, "blk-b")])).toEqual([]);
+  });
+
+  it("Given a mark taken back and its number given to another block, Then the reference is not taken for it and is unbound", () => {
+    expect(standingMark(runs[1]!.markRef!, [standing(1, "blk-c")])).toBeUndefined();
+    expect(unboundMarks(runs, [standing(1, "blk-c"), standing(2, "blk-b")])).toEqual([1]);
   });
 });

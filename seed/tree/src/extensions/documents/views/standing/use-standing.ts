@@ -12,6 +12,7 @@ import { runsText } from "~/lib/runs";
 import type { BlockView } from "../../server/assemble";
 import { afterFloor, describeOutcome, refusedByFloor, sendCommand } from "../documents-client";
 import type { MarkingControls } from "../marking/use-marking";
+import type { EmptiedWork } from "~/components/shell/view-bridge";
 
 /**
  * A block's standing on the disposition scale, as the block editor sets and
@@ -53,8 +54,9 @@ export type RestorePlacement =
 
 /**
  * What the take-back control reverses: a change of standing, which writes the
- * previous one, or the removal of a block, which restores it where it was
- * drawn (`BO_0315_012`). */
+ * previous one, the removal of a block, which restores it where it was
+ * drawn (`BO_0315_012`), or a focused work of this document's that went when
+ * its last block left, which comes back as it was (`CA_0083_006`). */
 export type TakeBack = {
   readonly blockId: string;
   /** What the change said, which is what the control offers to take back. */
@@ -64,6 +66,7 @@ export type TakeBack = {
 } & (
   | { readonly kind: "standing"; readonly to: Standing }
   | { readonly kind: "removal"; readonly placement: RestorePlacement }
+  | { readonly kind: "emptied"; readonly work: EmptiedWork }
 );
 
 export interface StandingControls {
@@ -75,6 +78,9 @@ export interface StandingControls {
   /** Records a removal the reader made, so the take-back control offers to
    * put the block back where it was drawn. BO_0315_012 */
   readonly removed$: QRL<(block: BlockView, placement: RestorePlacement) => void>;
+  /** Offers to bring back a focused work of this document that went when its
+   * last block left. CA_0083_006 */
+  readonly emptied$: QRL<(work: EmptiedWork) => void>;
 }
 
 export const StandingContext = createContextId<StandingControls>(
@@ -115,8 +121,11 @@ export function useStanding(input: {
   /** Restores a removed block at a placement; answers whether it landed.
    * BO_0315_012 */
   readonly restore$?: QRL<(blockId: string, placement: RestorePlacement) => Promise<boolean>>;
+  /** Brings an emptied focused work back with the block that left it;
+   * answers whether it came back. CA_0083_006 */
+  readonly bringBack$?: QRL<(work: EmptiedWork) => Promise<boolean>>;
 }): StandingControls {
-  const { documentId, surface, editor, save$, deactivate$, reload$, restore$ } =
+  const { documentId, surface, editor, save$, deactivate$, reload$, restore$, bringBack$ } =
     input;
   const store = useStore<StandingStore>({ overlay: {}, announcement: "", takeBack: null });
 
@@ -192,17 +201,32 @@ export function useStanding(input: {
     store.takeBack = { kind: "removal", blockId: block.blockId, placement, did: `removing “${words}”`, said: `Restored “${words}”` };
   });
 
-  /** Takes the last change back: the previous standing written, or the removed
-   * block restored where it was drawn. */
+  /** Named by the focused work as it was titled. CA_0083_006 */
+  const emptied$ = $((work: EmptiedWork) => {
+    const title = typeof work.kept["title"] === "string" ? work.kept["title"] : "";
+    store.takeBack = {
+      kind: "emptied",
+      blockId: work.blockId,
+      work,
+      did: "emptied the focused work",
+      said: title === "" ? "Brought the focused work back" : `Brought back “${title}”`,
+    };
+  });
+
+  /** Takes the last change back: the previous standing written, the removed
+   * block restored where it was drawn, or the emptied focused work brought
+   * back. */
   const takeBack$ = $(async () => {
     const offer = store.takeBack;
     if (offer === null) return;
     store.takeBack = null;
     if (offer.kind === "removal") {
       if (restore$ === undefined || !(await restore$(offer.blockId, offer.placement))) return;
+    } else if (offer.kind === "emptied") {
+      if (bringBack$ === undefined || !(await bringBack$(offer.work))) return;
     } else if (!(await write$(offer.blockId, offer.to))) return;
     store.announcement = offer.said;
   });
 
-  return { store, setStanding$, takeBack$, removed$ };
+  return { store, setStanding$, takeBack$, removed$, emptied$ };
 }

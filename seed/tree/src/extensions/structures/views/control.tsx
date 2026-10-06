@@ -665,14 +665,15 @@ export const StructureControl = component$<{ place: Place; editing: boolean }>((
   });
 
   // A field's child opens in its focused work's tab, landing on it, the
-  // route the parent's with the block the field stands on. BO_0349_024
+  // route the parent's with the block the field stands on — the route an
+  // open tab of the child takes too. BO_0349_024 CA_0084_001
   const openChild$ = $(async (itemId: string, title: string, blockId: string) => {
     if (bridge === null || surface === null || itemId === "") return;
     const route = routeOf(surface.tab);
     const parent = route[route.length - 1];
     if (parent !== undefined && place.blockId !== "") route[route.length - 1] = { ...parent, blockId: place.blockId };
     route.push({ itemId, title });
-    await bridge.openAlongRoute$({ itemId, title, route, focus: blockId });
+    await bridge.openAlongRoute$({ itemId, title, route, focus: blockId, fromBlock: true });
   });
 
   // A block taken out of a field stays where it is, in the focused work. BO_0349_021

@@ -1,4 +1,4 @@
-import type { ChildFace, ChildPlan, FocusedWorkContribution } from "~/contract";
+import type { AdoptionPlan, ChildFace, ChildPlan, EmptiedKept, EmptiedPlan, FocusedWorkContribution } from "~/contract";
 import type { Run } from "~/lib/runs";
 import { query } from "~/server/ccgw/client";
 import { bareId, contentOf, nodeRef, typeOf } from "~/server/ccgw/nodes";
@@ -226,4 +226,176 @@ export async function focusOf(
     outcome: "success",
     result: edge === undefined || edge.to.nodeId === undefined ? null : { relationId: edge.id, blockId: bareId(edge.to.nodeId) },
   };
+}
+
+/** An empty focused work the shell removed: the child, the block it focused,
+ * the target that block stands in, and what its kind kept for *Take back*.
+ * CA_0083_001 */
+export interface EmptiedFocusedWork {
+  readonly itemId: string;
+  readonly blockId: string;
+  readonly parent: { readonly itemId: string; readonly title: string } | null;
+  readonly kept: EmptiedKept;
+  readonly dataRevision: string;
+}
+
+export interface AdoptedFocusedWork {
+  /** The new block the adopted child now focuses. */
+  readonly blockId: string;
+  /** The target the block was made in: the one dropped on, or the focused
+   * work of the block a nest landed on. */
+  readonly targetId: string;
+  readonly dataRevision: string;
+}
+
+/**
+ * The script that removes an empty child: the kind's own statements, then the
+ * `focuses` edge closed, so the parent block never points at a child that is
+ * gone and the child never stands without the edge. Pure. CA_0083_001
+ */
+export function emptiedScript(
+  plan: Pick<EmptiedPlan, "statements" | "parameters">,
+  itemId: string,
+  relationId: string,
+): { readonly statements: readonly string[]; readonly parameters: Readonly<Record<string, unknown>> } {
+  return {
+    statements: [...plan.statements, "CLOSE fwEdge"],
+    // The edge's origin, from where the kernel's gate reads the close.
+    parameters: { ...plan.parameters, fwEdgeRelationId: relationId, fwEdgeFrom: nodeRef(itemId) },
+  };
+}
+
+/**
+ * Removes a focused work once it holds nothing: what counts as empty is the
+ * kind's to say, a child that is not focused work or not empty is left as it
+ * stands and answered `null`, and the parent block stays where it is. Called
+ * after every write that can take the last block out of a child, never as a
+ * gesture of its own (user decision, 2026-10-06). CA_0083_001
+ */
+export async function removeEmptyFocusedWork(
+  kind: string,
+  itemId: string,
+): Promise<GraphOutcome<EmptiedFocusedWork | null>> {
+  const contribution = await contributionFor(kind);
+  if (contribution?.emptied === undefined) return { outcome: "success", result: null };
+  const edge = await focusOf(kind, itemId);
+  if (edge.outcome !== "success") return edge as GraphOutcome<never>;
+  if (edge.result === null) return { outcome: "success", result: null };
+  const { blockId, relationId } = edge.result;
+  const planned = await contribution.emptied({ itemId, blockId });
+  if (planned.outcome !== "success") return planned as GraphOutcome<never>;
+  if (planned.result === null) return { outcome: "success", result: null };
+  const plan = planned.result;
+  const { statements, parameters } = emptiedScript(plan, itemId, relationId);
+  return commit(
+    statements.join("; "),
+    parameters,
+    `remove empty focused work ${itemId} of block ${blockId}`,
+    async (dataRevision) => ({ itemId, blockId, parent: plan.parent, kept: plan.kept, dataRevision }),
+  );
+}
+
+/**
+ * Brings an emptied focused work back on the block it focused, from what its
+ * kind kept: *Take back* (user decision, 2026-10-06). A block that has opened
+ * focused work again since is refused in words rather than given a second
+ * child. CA_0083_001
+ */
+export async function bringBackFocusedWork(input: {
+  readonly kind: string;
+  readonly blockId: string;
+  readonly kept: EmptiedKept;
+}): Promise<GraphOutcome<OpenedFocusedWork>> {
+  const contribution = await contributionFor(input.kind);
+  if (contribution?.bringBack === undefined) return unsupported(input.kind);
+  const existing = await childrenOf(input.kind, [input.blockId]);
+  if (existing.outcome !== "success") return existing as GraphOutcome<never>;
+  const child = existing.result.get(input.blockId);
+  if (child !== undefined) {
+    return refuse("focusedWorkStands", `This block has focused work again, “${child.title}”.`);
+  }
+  const planned = await contribution.bringBack(input.kept);
+  if (planned.outcome !== "success") return planned as GraphOutcome<never>;
+  const plan = planned.result;
+  const { statements, parameters } = focusScript(plan, input.blockId);
+  return commit(
+    statements.join("; "),
+    parameters,
+    `bring back focused work of block ${input.blockId}`,
+    async (dataRevision) => ({ blockId: input.blockId, itemId: plan.itemId, title: plan.title, created: true, dataRevision }),
+  );
+}
+
+/**
+ * The one script that adopts an existing child as a new block's focused work:
+ * the extension's statements making the block, the close of the `focuses`
+ * edge the child held at another block, if any, and the edge onto the new
+ * block. A child focuses one block, so it moves rather than doubling. Pure,
+ * so the composition is proven without a graph. DO_0043_001
+ */
+export function adoptScript(
+  plan: AdoptionPlan,
+  childId: string,
+  held: { readonly relationId: string } | null,
+): { readonly statements: readonly string[]; readonly parameters: Readonly<Record<string, unknown>> } {
+  const statements = [...plan.statements];
+  const parameters: Record<string, unknown> = { ...plan.parameters };
+  if (held !== null) {
+    statements.push("CLOSE fwHeld");
+    parameters["fwHeldRelationId"] = held.relationId;
+    // The edge's origin, from where the kernel's gate reads the close.
+    parameters["fwHeldFrom"] = nodeRef(childId);
+  }
+  statements.push(`RELATE fwChild -[f:${FOCUSES}]-> fwBlock`);
+  parameters["fwChild"] = nodeRef(childId);
+  parameters["fwBlock"] = nodeRef(plan.blockId);
+  return { statements, parameters };
+}
+
+/**
+ * Adopts an existing child as the focused work of a new block of a target —
+ * the reverse of opening a block as focused work, a document dropped into a
+ * document (`documents`' `DO_0043`, user decision 2026-10-06). The extension
+ * owning the kind plans the block and says whether the drop is refused; the
+ * shell closes the edge the child held and relates it to the new block, in
+ * one script. With `into`, the drop landed on a block's middle: the drop is
+ * checked against the target first, so a refused nest opens nothing, then the
+ * block's focused work is opened blank, or found, and the new block lands at
+ * its end. A human content write, confirmation-free. DO_0043_001
+ */
+export async function adoptFocusedWork(input: {
+  readonly kind: string;
+  readonly targetId: string;
+  readonly childId: string;
+  readonly placement?: unknown;
+  readonly into?: string;
+}): Promise<GraphOutcome<AdoptedFocusedWork>> {
+  const contribution = await contributionFor(input.kind);
+  if (contribution?.adopt === undefined) return unsupported(input.kind);
+  let targetId = input.targetId;
+  if (input.into !== undefined) {
+    if (contribution.adoptable !== undefined) {
+      const free = await contribution.adoptable({ targetId: input.targetId, childId: input.childId });
+      if (free.outcome !== "success") return free as GraphOutcome<never>;
+    }
+    const opened = await openFocusedWork({ kind: input.kind, targetId: input.targetId, blockId: input.into, blank: true });
+    if (opened.outcome !== "success") return opened as GraphOutcome<never>;
+    targetId = opened.result.itemId;
+  }
+  const planned = await contribution.adopt({
+    targetId,
+    childId: input.childId,
+    ...(input.into === undefined && input.placement !== undefined ? { placement: input.placement } : {}),
+  });
+  if (planned.outcome !== "success") return planned as GraphOutcome<never>;
+  const held = await focusOf(input.kind, input.childId);
+  if (held.outcome !== "success") return held as GraphOutcome<never>;
+  const plan = planned.result;
+  const { statements, parameters } = adoptScript(plan, input.childId, held.result);
+  return commit(
+    statements.join("; "),
+    parameters,
+    `adopt ${input.childId} as the focused work of a new block in ${targetId}`,
+    async (dataRevision) => ({ blockId: plan.blockId, targetId, dataRevision }),
+  );
 }

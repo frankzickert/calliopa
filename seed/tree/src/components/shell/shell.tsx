@@ -57,6 +57,7 @@ import {
   openAlongRoute,
   openTabBeside,
   selectTab,
+  turnFromEmptied,
   updateTab,
   withoutReplays,
   type RouteEntry,
@@ -129,6 +130,7 @@ import type { WorkspaceRecord } from "~/lib/workspace";
 import type { Person } from "~/server/session";
 import { candidates, fetchReleases, parseReleases } from "~/lib/releases";
 import {
+  defaultViewFor,
   preferredView,
   rememberView,
   resolveView,
@@ -207,6 +209,7 @@ import {
   type RunChip,
   type RunChipElsewhere,
   type ViewFocus,
+  type EmptiedWork,
   type ViewReveal,
   type ViewPointing,
   type ViewAcross,
@@ -340,6 +343,11 @@ function scrollerAt(x: number, y: number): HTMLElement {
 
 /** What a row or a tab shows of the pointing that stands: whether one does,
  * and the number this document carries when marked whole. BO_0304_014 */
+/** What a library row of a kind offers when dragged: what the view a tab of
+ * that kind opens with offers, so a document's row drags as its tab does.
+ * `documents`' DO_0043_002 */
+const rowDrags = (kind: string): readonly DragOperation[] => defaultViewFor(REGISTRY, kind).drag;
+
 const rowPointing = (pointing: ViewPointing, document: string | null): RowPointing => ({
   active: pointing.documentId !== null,
   number: document === null ? null : (pointing.documents.find((marked) => marked.document === document)?.number ?? null),
@@ -475,6 +483,8 @@ export const Shell = component$<{
    * to say whether a block already has a child, without a read per block.
    * CA_0065_004 */
   const faces = useStore<{ byItem: Record<string, FocusedWork> }>({ byItem: {} });
+  /** Emptied focused work held for its parent's *Take back*. CA_0083_006 */
+  const emptied = useStore<{ byParent: Record<string, EmptiedWork> }>({ byParent: {} });
   // The instance's last choice when it can run; otherwise what the gateway
   // runs, and a notice saying the choice was not honoured and why.
   // BO_0228_011
@@ -1564,12 +1574,14 @@ export const Shell = component$<{
   /** Opens a document reached along a route — a block's focused work, or a
    * crumb going back — in a tab of its own beside the active one, or makes
    * the tab already showing it active; `focus` lands a block once it shows.
-   * The tab pressed in keeps its target and route. CA_0073_001 CA_0073_002 */
-  const openAlongRoute$ = $(async (target: { itemId: string; title: string; route: readonly RouteEntry[]; focus?: string }) => {
+   * The tab pressed in keeps its target and route. An open from a block
+   * gives a tab already showing the document the route just come by.
+   * CA_0073_001 CA_0073_002 CA_0084_001 */
+  const openAlongRoute$ = $(async (target: { itemId: string; title: string; route: readonly RouteEntry[]; focus?: string; fromBlock?: boolean }) => {
     const from = activeTab(tabs);
     if (from === undefined) return;
     const view = preferredView(REGISTRY, preferred.value, target.itemId, from.kind).id;
-    const next = openAlongRoute(tabs, target, view);
+    const next = openAlongRoute(tabs, target, view, { fromBlock: target.fromBlock === true });
     focus.itemId = target.itemId;
     focus.blockId = target.focus ?? null;
     focus.seq += 1;
@@ -1661,6 +1673,26 @@ export const Shell = component$<{
       await readFaces$(itemId);
       return { itemId: child.itemId };
     }),
+    // A document dropped into a target becomes a new block's focused work,
+    // and the reader stays where they are. DO_0043_001 DO_0043_004
+    adoptChild$: $(async (itemId: string, childId: string, at: { readonly placement: unknown } | { readonly into: string }) => {
+      const kind = kindOf(tabs, itemId);
+      if (kind === null) return { refusal: "This tab takes no document." };
+      const answer = await fetch(`/api/focused-work/${itemId}/adopt`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind, childId, ...at }),
+      });
+      const outcome = (await answer.json()) as
+        | { outcome: "success"; result: { blockId: string } }
+        | { outcome: string; failures?: readonly { detail?: string }[]; error?: string };
+      if (outcome.outcome !== "success") {
+        const failures = (outcome as { failures?: readonly { detail?: string }[] }).failures ?? [];
+        return { refusal: failures[0]?.detail ?? (outcome as { error?: string }).error ?? "That document does not land here." };
+      }
+      await readFaces$(itemId);
+      return { blockId: (outcome as { result: { blockId: string } }).result.blockId };
+    }),
     pressBlockControl$: $(async (control, target) => {
       if (control !== "focused-work") return `The shell has no control ${control}.`;
       const child = await openChild$(target.itemId, target.blockId);
@@ -1673,11 +1705,63 @@ export const Shell = component$<{
       const parent = route[route.length - 1];
       if (parent !== undefined) route[route.length - 1] = { ...parent, blockId: target.blockId };
       route.push({ itemId: child.itemId, title: child.title });
-      await openAlongRoute$({ itemId: child.itemId, title: child.title, route });
+      await openAlongRoute$({ itemId: child.itemId, title: child.title, route, fromBlock: true });
       return null;
     }),
     openAlongRoute$,
     focus,
+    // An emptied focused work went: its tabs turn to the parent, the reader
+    // lands on the parent block, and *Take back* waits for the parent's view.
+    // CA_0083_002 CA_0083_006
+    emptied,
+    focusedWorkEmptied$: $(async (work: EmptiedWork) => {
+      const kind = tabs.tabs.find((tab) => tab.itemId === work.itemId)?.kind ?? null;
+      if (work.parent === null) {
+        let next: TabsState = tabs;
+        for (const tab of tabs.tabs.filter((open) => open.itemId === work.itemId)) next = closeTab(next, tab.id);
+        await applyTabs$(next);
+      } else {
+        emptied.byParent = { ...emptied.byParent, [work.parent.itemId]: work };
+        const turned = turnFromEmptied(tabs, { itemId: work.itemId, parent: work.parent });
+        if (turned.turned) {
+          focus.itemId = work.parent.itemId;
+          focus.blockId = work.blockId;
+          focus.seq += 1;
+        }
+        if (turned.state !== tabs) await applyTabs$(turned.state);
+        await readFaces$(work.parent.itemId);
+      }
+      // The child leaves the library with the focused work.
+      if (kind !== null) await refreshKind$(kind);
+    }),
+    takeEmptied$: $((parentId: string) => {
+      const held = emptied.byParent[parentId] ?? null;
+      if (held === null) return null;
+      const rest = { ...emptied.byParent };
+      delete rest[parentId];
+      emptied.byParent = rest;
+      return held;
+    }),
+    bringBack$: $(async (work: EmptiedWork) => {
+      if (work.parent === null) return { refusal: "This focused work has no parent to come back on." };
+      const kind = kindOf(tabs, work.parent.itemId);
+      if (kind === null) return { refusal: "This tab brings back no focused work." };
+      const answer = await fetch(`/api/focused-work/${work.parent.itemId}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind, blockId: work.blockId, bringBack: work.kept }),
+      });
+      const outcome = (await answer.json()) as
+        | { outcome: "success"; result: { itemId: string } }
+        | { outcome: string; failures?: readonly { detail?: string }[]; error?: string };
+      if (outcome.outcome !== "success") {
+        const failures = (outcome as { failures?: readonly { detail?: string }[] }).failures ?? [];
+        return { refusal: failures[0]?.detail ?? (outcome as { error?: string }).error ?? "The focused work could not be brought back." };
+      }
+      await readFaces$(work.parent.itemId);
+      await refreshKind$(kind);
+      return { itemId: (outcome as { result: { itemId: string } }).result.itemId };
+    }),
     raiseMessage$: $((next: Message) => {
       message.current = next;
     }),
@@ -2188,6 +2272,9 @@ export const Shell = component$<{
                                 pointing={rowPointing(pointing, item.open?.itemId ?? null)}
                                 onMark$={markDocument$}
                                 forward={entryMarked(forwardMarks, item.open?.itemId ?? null, tabs.tabs.map((held) => held.itemId))}
+                                // A row drags as a tab of its kind does. DO_0043_002
+                                drags={item.open === undefined ? undefined : rowDrags(item.open.kind)}
+                                onDrag$={startDrag$}
                               />
                             </li>
                           );

@@ -91,7 +91,9 @@ export type LibraryOrderBy = "label-ascending" | "label-descending" | "key-desce
  * search over the labels, toggle groups over the values the items carry, the
  * orders, the default, and what the body says when every row is hidden. The
  * choice is stored in the section's `Layout.filters` entry as the values hidden,
- * `<group>:<value>`, and `order:<id>` (`src/lib/library-filter.ts`). The typed
+ * `<group>:<value>`, and `order:<id>` (`src/lib/library-filter.ts`); a value
+ * hidden by default is stored only when shown, as `shown:<group>:<value>`, so
+ * it is hidden for a set stored before it was declared (DO_0042_001). The typed
  * search is never stored. DO_0038_001
  */
 export interface LibraryFilter {
@@ -100,7 +102,7 @@ export interface LibraryFilter {
   readonly groups: readonly { readonly name: string; readonly label: string }[];
   readonly orders: readonly { readonly id: string; readonly label: string; readonly by: LibraryOrderBy }[];
   readonly defaultOrder: string;
-  /** The values hidden while nothing is stored, as `<group>:<value>`. */
+  /** The values hidden until the person shows them, as `<group>:<value>`. */
   readonly defaultHidden?: readonly string[];
   /** What the body says when the filter hides every row. */
   readonly noMatch: string;
@@ -491,6 +493,57 @@ export interface FocusedWorkContribution {
    * is the extension's knowledge, so the shell asks for them rather than
    * reading a containment vocabulary it does not own. CA_0065_003 */
   readonly blocksOf: (targetId: string) => Promise<GraphOutcome<readonly string[]>>;
+  /** What removes this child once it is empty — what counts as empty is the
+   * kind's vocabulary — or `null` while it is not. A kind that answers none
+   * keeps its children however empty. CA_0083_001 */
+  readonly emptied?: (child: { readonly itemId: string; readonly blockId: string }) => Promise<GraphOutcome<EmptiedPlan | null>>;
+  /** The child an emptied one comes back as, planned from what `emptied`
+   * kept, so *Take back* brings it back as it was. CA_0083_001 */
+  readonly bringBack?: (kept: EmptiedKept) => Promise<GraphOutcome<ChildPlan>>;
+  /**
+   * The block an existing child would be adopted by, dropped into a target
+   * (`documents`' `DO_0043_003`): the statements making a new block of the
+   * target at the placement, which the shell commits with the `focuses` edge
+   * onto it, or the refusal in words — a child dropped into itself, or into a
+   * target that lies below it along `focuses`. The placement is the view's,
+   * in the target kind's own terms; absent, the block lands at the end. A
+   * kind that offers none adopts nothing.
+   */
+  readonly adopt?: (input: {
+    readonly targetId: string;
+    readonly childId: string;
+    readonly placement?: unknown;
+  }) => Promise<GraphOutcome<AdoptionPlan>>;
+  /** Whether a child may be adopted anywhere in a target, asked before the
+   * shell opens a block's focused work for a nest, so a refused drop leaves
+   * nothing behind: `null` when it may, or the refusal. DO_0043_003 */
+  readonly adoptable?: (input: { readonly targetId: string; readonly childId: string }) => Promise<GraphOutcome<null>>;
+}
+
+/** The new block a child is adopted by, as the extension owning the target
+ * kind plans it: its statements, committed inside the shell's script with the
+ * `focuses` edge. DO_0043_003 */
+export interface AdoptionPlan {
+  readonly blockId: string;
+  readonly statements: readonly string[];
+  readonly parameters: Readonly<Record<string, unknown>>;
+}
+
+/** What a kind keeps of a child it removed, for bringing it back: plain data
+ * a view carries until the reader takes the removal back. CA_0083_001 */
+export type EmptiedKept = Readonly<Record<string, unknown>>;
+
+/**
+ * An empty child's removal, planned by its kind: the statements the shell
+ * commits with closing the `focuses` edge, what they keep for *Take back*,
+ * and the target the focused block stands in. CA_0083_001
+ */
+export interface EmptiedPlan {
+  readonly statements: readonly string[];
+  readonly parameters: Readonly<Record<string, unknown>>;
+  readonly kept: EmptiedKept;
+  /** The target holding the block the child focuses, when one does. */
+  readonly parent: { readonly itemId: string; readonly title: string } | null;
 }
 
 /**

@@ -77,6 +77,18 @@ test("capturePage runs both ways at once, keeps the renderer's files whatever te
   assert.match(nothing.ways[1].refusal, /refused: a private address/);
 });
 
+test("capturePage answers a challenge on both ways as no capture, saying what the challenge was", async () => {
+  const challenging = { capture: async () => ({ url: "http://p/", finalUrl: "http://p/", title: "Just a moment...", text: "Checking", textTruncated: false, settled: false, challenged: "the page is a bot challenge (Just a moment...)", blocked: [], files: {} }) };
+  const plain = async () => ({ ok: true, capture: { way: "fetch", finalUrl: "http://p/", title: "Just a moment...", text: "Checking your browser", whole: true } });
+  const record = await capturePage({ target: "http://p/", capturer: challenging, plain });
+  assert.equal(record.kept, null);
+  assert.equal(record.text, "");
+  assert.match(record.challenged, /bot challenge/);
+  assert.match(record.ways[0].refusal, /^challenged: /);
+  assert.match(record.ways[1].refusal, /^challenged: /);
+  assert.deepEqual(record.files, {});
+});
+
 // The plain way against pages the test serves.
 const pages = http.createServer((request, response) => {
   switch (request.url) {

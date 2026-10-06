@@ -710,6 +710,36 @@ export function chipName(reference: PointedReference): string {
   return `Reference ${reference.number}${reference.stale ? ", stale" : ""}: ${what}“${reference.words}”${since}${where}`;
 }
 
+/** How long a title a chip in the words shows before it is cut (`DO_0041_Q5`). */
+export const INLINE_TITLE_CHARS = 20;
+
+/**
+ * A title cut for a chip in the words: whole when it fits, else cut at the
+ * last word boundary within `max` characters, or within the word when the
+ * first word alone is longer, with an ellipsis. Counted in code points, so a
+ * cut never splits a character. `BO_0352_008`
+ */
+export function cutTitle(title: string, max: number = INLINE_TITLE_CHARS): string {
+  const words = title.trim().replace(/\s+/gu, " ");
+  const points = [...words];
+  if (points.length <= max) return words;
+  const head = points.slice(0, max).join("");
+  const space = head.lastIndexOf(" ");
+  const cut = space > 0 ? head.slice(0, space) : points.slice(0, max - 1).join("");
+  return `${cut.replace(/[\s,.;:–—-]+$/u, "")}…`;
+}
+
+/**
+ * A chip in the words' accessible name and hover: which reference it is, by
+ * the number the mark standing on it has — or the one it was written with,
+ * when none stands — and its whole title. `BO_0352_008`
+ */
+export function inlineChipName(number: number, title: string, standing: boolean): string {
+  return standing
+    ? `Reference ${number}: “${title}”`
+    : `Reference ${number}: “${title}”, no mark stands under it`;
+}
+
 /** A rowless reference's ×: it has no row in the document left to press. */
 export const takeBackName = (reference: PointedReference): string =>
   `Take back reference ${reference.number}`;

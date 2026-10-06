@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BlockView, DocumentView } from "../../server/assemble";
+import type { MarkRef } from "~/lib/runs";
 import {
   activateBlock,
   documentsApi,
@@ -12,6 +13,7 @@ import {
   type SentCommand,
 } from "../testing/editor-harness";
 import { readShows } from "../block-editor";
+import { pressedMark, runsFrom } from "../editor-dom";
 
 /**
  * A block is the command (BO_0267_018), pressed through the editor's own JSX:
@@ -310,7 +312,16 @@ describe("pointing from a prompt block", () => {
     const row = view.find('[data-block-command="blk-b"] [data-block-command-row]');
     expect(row?.nextElementSibling?.hasAttribute("data-block-reference-list")).toBe(true);
     await view.userEvent('[data-block-command="blk-b"] [data-reference-option="1"]', "click");
-    await view.settle(() => view.find('[data-block-id="blk-b"] [data-block-editor]')?.textContent === "Tighten #1 ");
+    // The mark is written as its chip, titled by what it names, not as `#1`
+    // (`BO_0352_010`, `BO_0352_011`).
+    await view.settle(() => view.find('[data-block-id="blk-b"] [data-block-editor] [data-mark-ref]') !== null);
+    const chip = view.find('[data-block-id="blk-b"] [data-block-editor] [data-mark-ref]');
+    expect(chip?.getAttribute("data-chip-title")).toBe("Closing.");
+    expect(chip?.getAttribute("data-stale")).toBe("false");
+    expect(chip?.getAttribute("aria-label")).toBe("Reference 1: “Closing.”");
+    expect(chip?.classList.contains("chip--inline")).toBe(true);
+    expect(JSON.parse(chip?.getAttribute("data-mark-ref") ?? "{}")).toMatchObject({ number: 1, kind: "block", blockId: "blk-c" });
+    expect(view.find('[data-block-id="blk-b"] [data-block-editor]')?.textContent?.includes("#")).toBe(false);
     await view.idle();
   });
 
@@ -326,10 +337,96 @@ describe("pointing from a prompt block", () => {
     const list = view.find("[data-block-reference-list]");
     expect(Array.from(list?.querySelectorAll("button") ?? []).map((option) => option.getAttribute("data-reference-option") ?? option.getAttribute("data-block-reference-option"))).toEqual(["1", "blk-a"]);
     await view.userEvent('[data-block-command="blk-b"] [data-block-reference-option="blk-a"]', "click");
-    await view.settle(() => view.find('[data-block-id="blk-b"] [data-block-editor]')?.textContent === "Tighten #2 ");
+    await view.settle(() => view.find('[data-block-id="blk-b"] [data-block-editor] [data-mark-ref]') !== null);
+    expect(JSON.parse(view.find('[data-block-id="blk-b"] [data-block-editor] [data-mark-ref]')?.getAttribute("data-mark-ref") ?? "{}")).toMatchObject({ number: 2, kind: "block", blockId: "blk-a" });
     await view.settle(() => view.record.pointing?.references.length === 2);
     expect(view.record.pointing?.references.map((reference) => [reference.number, reference.blockId])).toEqual([[1, "blk-c"], [2, "blk-a"]]);
     expect(view.root.querySelectorAll("[data-block-ref]").length).toBe(0);
+    await view.idle();
+  });
+});
+
+describe("a prompt's reference reads as its title (BO_0352)", () => {
+  /** Marks the closing block from the prompt blk-b and writes it into the
+   * prompt's words from its `#` list. */
+  async function chosen(view: Awaited<ReturnType<typeof mount>>): Promise<void> {
+    await pointFrom(view, "blk-b");
+    await view.userEvent('[data-block-id="blk-c"]', "click");
+    await view.settle(() => view.record.pointing?.references.length === 1);
+    await view.userEvent("[data-pointing-from] [data-block-point]", "click");
+    await view.settle(() => view.find('[data-block-command="blk-b"] [data-reference-option="1"]') !== null);
+    await view.userEvent('[data-block-command="blk-b"] [data-reference-option="1"]', "click");
+    await view.settle(() => view.find('[data-block-id="blk-b"] [data-block-editor] [data-mark-ref]') !== null);
+  }
+
+  const prompt = { ...draft, blocks: [text("blk-a", "a", "Opening."), text("blk-b", "b", "Tighten #"), text("blk-c", "c", "Closing.")] };
+
+  it("Given a mark chosen, When the prompt is sent, Then the run is told it by its number", async () => {
+    const view = await mount(prompt);
+    await chosen(view);
+    await view.userEvent('[data-block-command="blk-b"] [data-block-send]', "click");
+    await view.settle(() => (view.record.commands?.length ?? 0) === 1);
+    expect(view.record.commands?.[0]?.words.trim()).toBe("Tighten #1");
+    await view.idle();
+  });
+
+  it("Given a mark chosen and then taken back, Then its chip warns as #1, and Send is refused naming it, with nothing sent", async () => {
+    const view = await mount(prompt);
+    await chosen(view);
+    await view.userEvent("[data-block-command=\"blk-b\"] [data-block-point]", "click");
+    await view.settle(() => view.find("[data-pointing-from]") !== null);
+    await view.userEvent('[data-block-id="blk-c"]', "click");
+    await view.settle(() => view.record.pointing?.references.length === 0);
+    await view.userEvent("[data-pointing-from] [data-block-point]", "click");
+    await view.settle(() => view.find('[data-block-id="blk-b"] [data-block-editor] [data-mark-ref]')?.getAttribute("data-stale") === "true");
+    const chip = view.find('[data-block-id="blk-b"] [data-block-editor] [data-mark-ref]');
+    expect(chip?.getAttribute("data-chip-title")).toBe("#1");
+    expect(chip?.getAttribute("aria-label")).toBe("Reference 1: “Closing.”, no mark stands under it");
+    await view.userEvent('[data-block-command="blk-b"] [data-block-send]', "click");
+    await view.settle(() => view.find("[data-block-send-refusal]") !== null);
+    expect(view.find("[data-block-send-refusal]")?.textContent).toContain("#1 names nothing marked");
+    expect(view.record.commands ?? []).toEqual([]);
+    await view.idle();
+  });
+
+  /** A prompt holding a reference this page has no marks for: its marks come
+   * from its words (`BO_0352_013`). */
+  const holding = (markRef: MarkRef): DocumentView => ({
+    ...draft,
+    blocks: [text("blk-a", "a", "Opening."), { ...text("blk-b", "b", ""), runs: [{ text: "Tighten " }, { text: "", markRef }] } as BlockView, text("blk-c", "c", "Closing.")],
+  });
+
+  it("Given a chip pressed in the reading row, Then the block it names is revealed and no mark is made", async () => {
+    const view = await mount(holding({ number: 1, kind: "block", blockId: "blk-c", words: "Closing." }));
+    await view.userEvent('[data-block-id="blk-b"] [data-mark-ref]', "click");
+    await view.settle(() => view.find('[data-block-id="blk-c"]')?.getAttribute("data-revealed") === "block");
+    expect(view.find('[data-block-id="blk-c"]')?.hasAttribute("data-reference")).toBe(false);
+    await view.idle();
+  });
+
+  it("Given a chip into another document in the words being edited, Then a press on it or on its character reads back what it names", async () => {
+    const view = await mount(holding({ number: 1, kind: "block", blockId: "blk-x", document: "doc-2", words: "Second" }));
+    await activateBlock(view, "blk-b");
+    const surface = view.find('[data-block-id="blk-b"] [data-block-editor]') as HTMLElement;
+    const chip = surface.querySelector("[data-mark-ref]") as HTMLElement;
+    expect(chip.getAttribute("data-chip-title")).toBe("Second");
+    for (const pressed of [chip, chip.firstChild]) {
+      expect(pressedMark(pressed, surface)).toEqual({ number: 1, kind: "block", blockId: "blk-x", document: "doc-2", words: "Second" });
+    }
+    expect(pressedMark(surface.firstChild, surface)).toBeNull();
+    // The surface reads the chip back as the run it is, never its title, so
+    // words typed around it keep it. BO_0352_011
+    expect(runsFrom(surface)).toEqual([{ text: "Tighten " }, { text: "", markRef: { number: 1, kind: "block", blockId: "blk-x", document: "doc-2", words: "Second" } }]);
+    await view.idle();
+  });
+
+  it("Given a prompt holding a reference this page has no marks for, Then the reading row draws its chip standing, titled from the document", async () => {
+    const view = await mount(holding({ number: 3, kind: "block", blockId: "blk-c", words: "Closing." }));
+    const chip = view.find('[data-block-id="blk-b"] [data-mark-ref]');
+    expect(chip?.getAttribute("data-chip-title")).toBe("Closing.");
+    expect(chip?.getAttribute("data-stale")).toBe("false");
+    expect(chip?.getAttribute("aria-label")).toBe("Reference 3: “Closing.”");
+    expect(chip?.getAttribute("role")).toBe("button");
     await view.idle();
   });
 });

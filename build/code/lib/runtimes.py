@@ -26,13 +26,21 @@ from docker.errors import APIError, DockerException, ImageNotFound, NotFound
 from .caps import Caps
 
 LABEL = "calliopa.code"
-# The service instance a runtime belongs to: the stack's service and a test's
-# service share one daemon, and each sees, counts and reaps its own runtimes
-# alone. A runtime made before the label reads as the stack's. Found in the
-# walk, when a test run reaped the instance's kernels.
+# The service instance a runtime belongs to: two stacks on one daemon, and a
+# test's service beside them, each see, count and reap their own runtimes
+# alone. Found in the walk, when a test run reaped the instance's kernels, and
+# again when the dev stack and the user's instance shared the scope `stack`.
+# The scope is the service's compose project (`CALLIOPA_CODE_SCOPE` overrides);
+# a service outside compose keeps `stack`. A runtime made before the label, or
+# labelled `stack` before the scope followed the project, is the instance's:
+# the stack whose project is `calliopa`. BO_0353_001
 SCOPE_LABEL = "calliopa.code.scope"
 DEFAULT_SCOPE = "stack"
+INSTANCE_SCOPE = "calliopa"
+PROJECT_LABEL = "com.docker.compose.project"
 NETWORK_LABEL = "calliopa.code.network"
+# Each scope's runtimes share a bridge with that scope's alone; the unscoped
+# one every stack shared before is the instance's. BO_0353_002
 NETWORK_NAME = "calliopa-code-runtimes"
 KEEP_ALIVE = ["sh", "-c", "while :; do sleep 3600; done"]
 
@@ -135,6 +143,29 @@ def normalize_image(image: str) -> str:
     return image
 
 
+def own_container(client: docker.DockerClient) -> Any:
+    """The container this process runs in, or none outside one."""
+    try:
+        return client.containers.get(socket.gethostname())
+    except (NotFound, APIError):
+        return None
+
+
+def resolve_scope(client: docker.DockerClient, configured: str | None) -> str:
+    """`CALLIOPA_CODE_SCOPE` when set, else the compose project of the service's own container, else `stack`."""
+    if configured:
+        return configured
+    own = own_container(client)
+    project = (own.labels.get(PROJECT_LABEL, "") if own is not None else "").strip()
+    return project or DEFAULT_SCOPE
+
+
+def owns(scope: str, labelled: str | None) -> bool:
+    """Whether a service of `scope` owns a container labelled `labelled` (absent reads as `stack`)."""
+    labelled = labelled or DEFAULT_SCOPE
+    return labelled == scope or (scope == INSTANCE_SCOPE and labelled == DEFAULT_SCOPE)
+
+
 class Runtimes:
     """Every runtime the daemon holds, plus the ones still being made."""
 
@@ -151,34 +182,61 @@ class Runtimes:
 
     # -- the network --------------------------------------------------------
 
+    def runtimes_networks(self) -> list[Any]:
+        """Every scope's runtimes' network on the daemon."""
+        return self.client.networks.list(filters={"label": f"{NETWORK_LABEL}=runtimes"})
+
     def ensure_network(self) -> Any:
-        found = self.client.networks.list(filters={"label": f"{NETWORK_LABEL}=runtimes"})
+        """This scope's runtimes' network: found by its labels, the instance's also by the old unscoped one, else made."""
+        found = self.client.networks.list(filters={"label": [f"{NETWORK_LABEL}=runtimes", f"{SCOPE_LABEL}={self.scope}"]})
+        if not found and owns(self.scope, DEFAULT_SCOPE):
+            found = [n for n in self.runtimes_networks() if SCOPE_LABEL not in (n.attrs.get("Labels") or {})]
         self.network = found[0] if found else self.client.networks.create(
-            NETWORK_NAME, driver="bridge", labels={NETWORK_LABEL: "runtimes"}
+            f"{NETWORK_NAME}-{self.scope}", driver="bridge",
+            labels={NETWORK_LABEL: "runtimes", SCOPE_LABEL: self.scope},
         )
         return self.network
 
     def own_container(self) -> Any:
-        try:
-            return self.client.containers.get(socket.gethostname())
-        except (NotFound, APIError):
-            return None
+        return own_container(self.client)
 
     def join_network(self) -> bool:
-        """The service reaches a session's ports only from the runtimes' network; join it if not there."""
+        """The service reaches a session's ports only from its scope's runtimes' network: on it, and on no other scope's."""
         own = self.own_container()
         if own is None:
             return False
-        own.reload()
-        if self.network.name in own.attrs["NetworkSettings"]["Networks"]:
-            return True
-        self.network.connect(own)
+        self.place_on_network(own)
         return True
+
+    def place_on_network(self, container: Any) -> None:
+        """Onto this scope's runtimes' network, and off every other scope's."""
+        container.reload()
+        attached = container.attrs["NetworkSettings"]["Networks"]
+        for network in self.runtimes_networks():
+            if network.id != self.network.id and network.name in attached:
+                network.disconnect(container, force=True)
+        if self.network.name not in attached:
+            self.network.connect(container)
+
+    def settle_networks(self) -> int:
+        """Every runtime of this scope onto its network; the ones moved, counted."""
+        moved = 0
+        for container in self.containers():
+            container.reload()
+            attached = container.attrs["NetworkSettings"]["Networks"]
+            if list(attached) == [self.network.name]:
+                continue
+            try:
+                self.place_on_network(container)
+                moved += 1
+            except DockerException:
+                continue
+        return moved
 
     # -- records ------------------------------------------------------------
 
     def _mine(self, container: Any) -> bool:
-        return container.labels.get(SCOPE_LABEL, DEFAULT_SCOPE) == self.scope
+        return owns(self.scope, container.labels.get(SCOPE_LABEL))
 
     def containers(self) -> list[Any]:
         return [c for c in self.client.containers.list(all=True, filters={"label": f"{LABEL}=runtime"}) if self._mine(c)]
@@ -362,6 +420,7 @@ class Runtimes:
     def start(self, runtime_id: str) -> dict[str, Any]:
         container = self._existing(runtime_id)
         if container.status != "running":
+            self.place_on_network(container)
             container.start()
             self._prepare_volume(container)
         return self.record(container)

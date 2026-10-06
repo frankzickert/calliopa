@@ -85,6 +85,8 @@ import { kindOfDocument, fixedOf } from "./guards";
 import type { WorkingMode } from "../lib/working-mode";
 import { branchOf, documentPolicy, readStanding, signedInAccount, type BranchOfDocument, type BranchStanding, type DocumentPolicy } from "./branch";
 import { withBranch } from "~/server/ccgw/branch-scope";
+import { removeEmptyFocusedWork, type EmptiedFocusedWork } from "~/server/focused-work";
+import { DOCUMENT_TARGET_KIND } from "./focus";
 import { listAdmonitionPatterns, saveAdmonitionPattern, updateAdmonitionPattern, type AdmonitionPattern } from "./admonitions";
 import { reviseRelationReason, setRelationState, type WrittenRelation } from "./work-ops";
 
@@ -1360,7 +1362,47 @@ export async function handleDocumentCommand(
   // A command from a tab in a branch names it, and every write of the
   // command stages into it instead of establishing. BO_0250_011
   const branch = text(record(body)?.["branch"]);
-  return respond(await withBranch(branch ?? undefined, () => runDocumentCommand(documentId, parsed.command)));
+  const ran = await withBranch(branch ?? undefined, () => runDocumentCommand(documentId, parsed.command));
+  // A write in a branch stages and empties nothing in truth.
+  if (ran.outcome !== "success" || branch !== null) return respond(ran);
+  const emptied = await emptiedBy(documentId, parsed.command);
+  if (emptied === null) return respond(ran);
+  const answered: GraphOutcome<unknown> = { outcome: "success", result: { ...(ran.result as object), emptied } };
+  return respond(answered);
+}
+
+/**
+ * The document a command can have taken the last standing block out of: the
+ * one it retired from or answered a proposal on, or the one a block moved in
+ * from. `null` for every command that leaves a document no emptier.
+ * CA_0083_005
+ */
+export function emptiedCandidate(documentId: string, command: DocumentCommand): string | null {
+  switch (command.command) {
+    case "retire":
+    case "retireBlocks":
+    case "answerProposal":
+    case "answerGroup":
+      return documentId;
+    case "moveIn":
+      return command.fromDocumentId;
+    default:
+      return null;
+  }
+}
+
+/**
+ * After a write lands, the focused work it emptied goes, and the parent block
+ * stays (user decision, 2026-10-06): the shell removes the child when it is
+ * focused work and holds nothing, and the answer names what went, for the
+ * view to turn its tabs and offer *Take back*. A removal that fails leaves the
+ * child standing and the write answered as it landed. CA_0083_005
+ */
+async function emptiedBy(documentId: string, command: DocumentCommand): Promise<EmptiedFocusedWork | null> {
+  const candidate = emptiedCandidate(documentId, command);
+  if (candidate === null) return null;
+  const removed = await removeEmptyFocusedWork(DOCUMENT_TARGET_KIND, candidate);
+  return removed.outcome === "success" ? removed.result : null;
 }
 
 /**

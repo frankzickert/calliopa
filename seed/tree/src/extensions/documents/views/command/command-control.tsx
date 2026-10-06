@@ -7,12 +7,14 @@ import { Icon } from "~/components/shell/icons";
 import { ReferenceChips } from "~/components/shell/reference-chips";
 import { ViewBridgeContext, type SentCommand } from "~/components/shell/view-bridge";
 import { readyDescriptors, stillUploading, uploadingNames, type AttachmentHolder } from "~/lib/attachments";
-import { DOCUMENT_KIND, type AttachmentDescriptor, type RevealTarget } from "~/lib/command-target";
+import type { AttachmentDescriptor, RevealTarget } from "~/lib/command-target";
 import { pendingBlockReference, pendingReference, referenceMatches } from "~/lib/command-typeahead";
-import { replaceRange, replaceRangeWithAtom, replaceRangeWithRuns, runsPoints, type Run } from "~/lib/runs";
+import { replaceRangeWithAtom, replaceRangeWithRuns, runsPoints, type MarkRef, type Run } from "~/lib/runs";
 import { BlockDecorations, placeContributed } from "../decorations";
 import { MarkingContext } from "../marking/use-marking";
 import { matchingChoices, type ReferenceChoice } from "../../lib/reference-choices";
+import { markRefFrom } from "../../lib/reference-title";
+import { askReveal } from "../reveal";
 import { matchingEntries, offersCreate, pendingTrigger, type TriggerEntry } from "../../lib/inline-triggers";
 import { InlineTriggersContext, triggersByCharacter } from "../inline-triggers";
 import type { EditorState } from "../block-editor";
@@ -122,34 +124,20 @@ export const CommandControl = component$<{
     if (answer.note !== undefined) notice.value = answer.note;
   });
 
-  /**
-   * Shows what a chip points at. In this document, the view reveals it. In
-   * another document (`BO_0304_009`), the shell brings that document forward
-   * first — its open tab, or a new one — and the reveal is aimed there: the
-   * view that mounts acts on a reveal aimed at its document that no view has
-   * consumed. A document marked whole is brought forward and nothing more.
-   */
-  const reveal$ = $(async (target: RevealTarget) => {
-    if (target.kind === "document") {
-      await bridge.openTarget$({ kind: DOCUMENT_KIND, itemId: target.document, title: target.documentTitle ?? target.document });
-      return;
-    }
-    const where = target.kind === "takeBack" || target.document === undefined ? documentId : target.document;
-    if (where !== documentId && target.kind !== "takeBack") {
-      await bridge.openTarget$({ kind: DOCUMENT_KIND, itemId: where, title: target.documentTitle ?? where });
-    }
-    bridge.reveal.itemId = where;
-    bridge.reveal.target = target;
-    bridge.reveal.seq += 1;
-  });
+  /** Shows what a chip points at, here or in its own document. */
+  const reveal$ = $((target: RevealTarget) => askReveal(bridge, documentId, target));
 
+  /** A mark chosen from a prompt's list is written as one atom bound to what
+   * was marked, not as `#n` (`BO_0352_010`, `DO_0041_Q2`), the `#` and the
+   * digits taken back, a space after it and the caret after the space. */
   const choose$ = $(async (number: number) => {
     if (editor.blockId !== blockId) return;
     const pending = pendingAt(editor.runs, editor.start);
     if (pending === null) return;
-    const written = `#${number} `;
-    const runs = replaceRange(editor.runs, pending.start, editor.end, written);
-    const caret = pending.start + [...written].length;
+    const reference = marking.report.references.find((shown) => shown.number === number);
+    if (reference === undefined) return;
+    const runs = replaceRangeWithRuns(editor.runs, pending.start, editor.end, [{ text: "", markRef: markRefFrom(reference) }, { text: " " }]);
+    const caret = pending.start + 2;
     await editRuns$(runs, caret, caret);
   });
 
@@ -176,12 +164,17 @@ export const CommandControl = component$<{
     if (editor.blockId !== blockId) return;
     const pending = pendingBlockAt(editor.runs, editor.start);
     if (pending === null) return;
-    const held = marking.marking.references.find((reference) => reference.kind === "block" && reference.blockId === target && reference.document === undefined);
+    const held = marking.report.references.find((reference) => reference.kind === "block" && reference.blockId === target && reference.document === undefined && reference.target === undefined);
     const number = held?.number ?? marking.marking.next;
     if (held === undefined) await toggleReference$(target);
-    const written = `#${number} `;
-    const runs = replaceRange(editor.runs, pending.start, editor.end, written);
-    const caret = pending.start + [...written].length;
+    // The mark is reported after this press, so a block marked now is
+    // written from what the list shows of it. BO_0352_010
+    const shown = (references ?? []).find((choice) => choice.blockId === target);
+    const markRef: MarkRef = held !== undefined
+      ? markRefFrom(held)
+      : { number, kind: "block", blockId: target, ...(shown !== undefined ? { words: shown.glimpse !== "" ? shown.glimpse : shown.label } : {}) };
+    const runs = replaceRangeWithRuns(editor.runs, pending.start, editor.end, [{ text: "", markRef }, { text: " " }]);
+    const caret = pending.start + 2;
     await editRuns$(runs, caret, caret);
   });
 

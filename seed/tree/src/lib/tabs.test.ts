@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY_TABS, activeTab, closeAllTabs, closeTab, moveTab, neighbourTab, openAlongRoute, openTab, openTabBeside, routeOf, selectTab, tabsBeside, type Tab, updateTab, withoutReplays } from "./tabs";
+import { EMPTY_TABS, activeTab, closeAllTabs, closeTab, moveTab, neighbourTab, openAlongRoute, openTab, openTabBeside, routeOf, selectTab, tabsBeside, turnFromEmptied, type Tab, updateTab, withoutReplays } from "./tabs";
 
 const tab = (
   id: string,
@@ -121,6 +121,32 @@ describe("a tab's route", () => {
     expect(next.activeTabId).toBe("t2");
   });
 
+  it("gives a tab already showing focused work the route just come by when it is opened from a block, and leaves the parent's tab as it was", () => {
+    // The work was opened under doc-0, then its block moved into doc-1.
+    const stale = { ...tab, id: "t2", itemId: "doc-2", title: "Focused", route: [{ itemId: "doc-0", title: "Old parent", blockId: "blk-a" }, { itemId: "doc-2", title: "Focused" }] };
+    const state = { tabs: [tab, stale, other], activeTabId: "t1" };
+    const next = openAlongRoute(state, child, undefined, { fromBlock: true });
+    expect(next.activeTabId).toBe("t2");
+    expect(next.tabs.map((entry) => entry.id)).toEqual(["t1", "t2", "t9"]);
+    expect(next.tabs[1]).toEqual({ ...stale, route: child.route });
+    expect(next.tabs[0]).toEqual(tab);
+    expect(next.tabs[2]).toEqual(other);
+  });
+
+  it("keeps a revealed tab's route on Back and a crumb, which are not opens from a block", () => {
+    const stale = { ...tab, id: "t2", itemId: "doc-2", title: "Focused", route: [{ itemId: "doc-0", title: "Old parent", blockId: "blk-a" }, { itemId: "doc-2", title: "Focused" }] };
+    const state = { tabs: [tab, stale], activeTabId: "t1" };
+    expect(openAlongRoute(state, child).tabs).toEqual(state.tabs);
+    expect(openAlongRoute(state, child, undefined, { fromBlock: false }).tabs).toEqual(state.tabs);
+  });
+
+  it("opens focused work from a block in a tab of its own when none shows it, as any open along a route does", () => {
+    const next = openAlongRoute({ tabs: [tab, other], activeTabId: "t1" }, child, undefined, { fromBlock: true });
+    expect(next.tabs.map((entry) => entry.itemId)).toEqual(["doc-1", "doc-2", "doc-9"]);
+    expect(next.tabs[1]?.route).toEqual(child.route);
+    expect(next.tabs[0]).toEqual(tab);
+  });
+
   it("goes back to a parent open in a tab without changing either tab, and opens it beside the child when it is open in none", () => {
     const inChild = { ...tab, id: "t2", itemId: "doc-2", title: "Focused", route: child.route };
     const parent = { itemId: "doc-1", title: "Caching", route: [{ itemId: "doc-1", title: "Caching", blockId: "blk-a" }] };
@@ -195,5 +221,56 @@ describe("a replay's tab", () => {
     const later = openTab(opened, tab("later"));
     expect(withoutReplays(later).activeTabId).toBe("later");
     expect(withoutReplays(three)).toBe(three);
+  });
+});
+
+describe("a focused work that went", () => {
+  const doc = (id: string, itemId: string, title: string, route?: Tab["route"]): Tab => ({
+    id,
+    kind: "documents:document",
+    title,
+    itemId,
+    viewType: "block-editor",
+    selection: null,
+    drawerContext: null,
+    unsaved: false,
+    ...(route === undefined ? {} : { route }),
+  });
+  const parent = { itemId: "doc-1", title: "Caching" };
+  const childRoute = [{ itemId: "doc-1", title: "Caching", blockId: "blk-a" }, { itemId: "doc-2", title: "Focused" }];
+
+  it("Given the child's tab is active and the parent is open in none, Then the tab turns to the parent with the route cut back to it", () => {
+    const state = { tabs: [doc("t9", "doc-9", "Elsewhere"), doc("t2", "doc-2", "Focused", childRoute)], activeTabId: "t2" };
+    const { state: next, turned } = turnFromEmptied(state, { itemId: "doc-2", parent });
+    expect(turned).toBe(true);
+    expect(next.tabs.map((tab) => tab.itemId)).toEqual(["doc-9", "doc-1"]);
+    expect(activeTab(next)).toMatchObject({ itemId: "doc-1", title: "Caching", route: [childRoute[0]] });
+  });
+
+  it("Given the parent is open in another tab, Then the child's tab closes and the parent's becomes active", () => {
+    const state = { tabs: [doc("t1", "doc-1", "Caching"), doc("t2", "doc-2", "Focused", childRoute)], activeTabId: "t2" };
+    const { state: next, turned } = turnFromEmptied(state, { itemId: "doc-2", parent });
+    expect(turned).toBe(true);
+    expect(next.tabs.map((tab) => tab.id)).toEqual(["t1"]);
+    expect(next.activeTabId).toBe("t1");
+  });
+
+  it("Given the child's tab is not the active one, Then the active tab stays where it is", () => {
+    const state = { tabs: [doc("t1", "doc-1", "Caching"), doc("t2", "doc-2", "Focused", childRoute), doc("t9", "doc-9", "Elsewhere")], activeTabId: "t9" };
+    const { state: next, turned } = turnFromEmptied(state, { itemId: "doc-2", parent });
+    expect(turned).toBe(false);
+    expect(next.tabs.map((tab) => tab.id)).toEqual(["t1", "t9"]);
+    expect(next.activeTabId).toBe("t9");
+  });
+
+  it("Given a child's tab opened from the library, with no route, Then it turns to the parent as a route of one", () => {
+    const state = { tabs: [doc("t2", "doc-2", "Focused")], activeTabId: "t2" };
+    const { state: next } = turnFromEmptied(state, { itemId: "doc-2", parent });
+    expect(activeTab(next)).toMatchObject({ itemId: "doc-1", title: "Caching", route: [parent] });
+  });
+
+  it("Given no tab shows the child, Then nothing changes", () => {
+    const state = { tabs: [doc("t1", "doc-1", "Caching")], activeTabId: "t1" };
+    expect(turnFromEmptied(state, { itemId: "doc-2", parent })).toEqual({ state, turned: false });
   });
 });

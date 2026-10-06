@@ -1188,6 +1188,28 @@ function releaseRefusal(
 }
 
 /**
+ * Every document using *Structure*, named *structure*, for `documents`'
+ * listing (`DO_0042_004`): one read rooted at *Structure*'s document, as
+ * `documentsCarrying` reads it, never a read per document. A document using
+ * another structure is not named.
+ */
+export async function structureDocuments(): Promise<ReadonlyMap<string, string>> {
+  const found = await query({
+    statement: `MATCH (d:document)-[h:${HAS_BLOCK_STRUCTURE}]->(r) RETURN GRAPH d, h, r ROOT r`,
+    roots: [nodeRef(STRUCTURE_STRUCTURE)],
+    unbounded: true,
+    metadataOnly: true,
+    purpose: "structure documents",
+  });
+  if (found.outcome !== "success") return new Map();
+  const named = new Map<string, string>();
+  for (const relation of found.result.relations)
+    if (active(relation, HAS_BLOCK_STRUCTURE) && relation.to.nodeId === nodeRef(STRUCTURE_STRUCTURE))
+      named.set(bareId(relation.fromNodeId), "structure");
+  return named;
+}
+
+/**
  * What this extension keeps a document's guards to (`RO_0005_020`,
  * `documents`' `guardDocuments`): a structure's document is never deleted,
  * and a built-in's title and its release fields' blocks stay as the release

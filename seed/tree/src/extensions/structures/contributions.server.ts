@@ -3,7 +3,7 @@ import { HttpError } from "~/server/http-error";
 import { refusal, respond } from "~/server/outcome";
 import { isRecordId } from "~/server/uuid";
 
-import { guardDocuments, nameDocuments } from "~/extensions/documents/server/guards";
+import { guardDocuments, nameDocuments, nameListedDocuments } from "~/extensions/documents/server/guards";
 
 import { BUILTIN_CREATES, isStructureId, SOURCES_SOURCE, UNNAMED_STRUCTURE, type StructuresListing, type StructureView } from "./lib/structures";
 import { MIGRATIONS } from "./server/migrations";
@@ -18,6 +18,7 @@ import {
   setStructure,
   setFieldChild,
   setValues,
+  structureDocuments,
   structureKindOf,
   type StructureCommand,
   type Subject,
@@ -40,6 +41,9 @@ import { TOOLS, ToolRefusal, type ToolCall } from "./server/tools";
 guardDocuments("structures", guardOf);
 // A run chip names a document using *Structure* a structure. DO_0034_008
 nameDocuments("structures", structureKindOf);
+// The Documents section hides the documents defining a structure until shown,
+// named for the whole listing in one read. DO_0042_004
+nameListedDocuments("structures", structureDocuments);
 
 const record = (value: unknown): Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)

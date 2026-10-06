@@ -12,6 +12,7 @@ import {
 } from "@builder.io/qwik";
 
 import type { DragPayload } from "~/lib/drag";
+import { draggedDocument, draggedOverItself } from "../lib/dragged-document";
 import { patternImageSource, type PatternImage } from "~/lib/attachments";
 import { EXTEND_A_STRUCTURE, INSTRUCTION_RECORD, SHAPE_AN_INSTRUCTION } from "../lib/instruction";
 import { step, type Standing } from "../lib/disposition";
@@ -59,6 +60,7 @@ import {
   splitRuns,
   TEXT_ROLES,
   type Mark,
+  type MarkRef,
   type Run,
   type TextRole,
   citationKey,
@@ -73,8 +75,10 @@ import {
   type RunChip,
   type SaveState,
   type ViewDragState,
+  type EmptiedWork,
 } from "~/components/shell/view-bridge";
 import type { ViewProps } from "~/components/shell/view-host";
+import { emptiedOf, leftBy, NOTHING_LEFT } from "../lib/emptied";
 import type { ChangeSummary } from "../server/documents";
 import { Icon, type IconName } from "~/components/shell/icons";
 import { actsOnBody, BlockDecorations, dropOnDocument } from "./decorations";
@@ -158,7 +162,10 @@ import { openingWords } from "../lib/pointing";
 import type { Marked as MarkedTarget } from "../lib/references";
 import { PassageAffordance } from "./passages/passage-affordance";
 import { PASSAGE_DRAG_KIND, passageBlock, PassageNumbers } from "./passages/passage-numbers";
-import { revealedPassage, showArea } from "./reveal";
+import { askReveal, revealedPassage, showArea } from "./reveal";
+import { commandWords, unboundMarks } from "~/lib/command-typeahead";
+import { blockTitles, drawnMark, markReveal, promptMarks, type DrawnMark } from "../lib/reference-title";
+import { pressedMark } from "./editor-dom";
 import { selectedWords } from "./passages/selection";
 import { PassagesContext, usePassages } from "./passages/use-passages";
 import { Marked, ROLE_TAG, type BlockTag, Annotated } from "./block-text";
@@ -805,6 +812,14 @@ const idleEditor = (): EditorState => ({
   leaving: false,
 });
 
+/** Whether a document still holds a block, as a top-level block or a
+ * callout's child. CA_0084_002 */
+function holdsBlock(document: DocumentView, blockId: string): boolean {
+  return document.blocks.some(
+    (block) => block.blockId === blockId || (block.kind === "admonition" && block.children.some((child) => child.blockId === blockId)),
+  );
+}
+
 export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   const bridge = useContext(ViewBridgeContext);
   /** Whether this tab plays a finished run back (`BO_0340_008`): the
@@ -813,6 +828,9 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
    * mounts, since a replay's tab is opened for it and closed with it. */
   const replaying = bridge.replay.tabId === tab.id && bridge.replay.runId !== null;
   const replayRun = replaying ? bridge.replay.runId : null;
+  /** The crumbs whose block has moved away, by the document they name.
+   * CA_0084_002 */
+  const crumbs = useStore<{ gone: string[] }>({ gone: [] });
   const state = useStore<DocumentState>({
     document: null,
     codeLines: {},
@@ -1477,8 +1495,45 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       if (state.retiredOpen) await reloadRetired$();
       return true;
     }),
+    // *Take back* of an emptied focused work: the shell brings the child back
+    // on its block, and the blocks that left it go back in — restored where
+    // they were removed, moved back from where they were dragged. CA_0083_006
+    bringBack$: $(async (work: EmptiedWork): Promise<boolean> => {
+      if (documentId === null || !(await save$())) return false;
+      const back = await bridge.bringBack$(work);
+      if ("refusal" in back) {
+        state.notice = back.refusal;
+        return false;
+      }
+      state.notice = null;
+      for (const blockId of work.left.blockIds) {
+        const outcome = await sendCommand(
+          back.itemId,
+          work.left.wentTo === null
+            ? { command: "restore", blockId, placement: { at: "end" } }
+            : { command: "moveIn", blockId, fromDocumentId: work.left.wentTo, placement: { at: "end" } },
+        );
+        if (outcome.outcome !== "success") {
+          state.notice = describeOutcome(outcome);
+          break;
+        }
+      }
+      await reload$();
+      state.faces = await bridge.faces$(documentId);
+      return true;
+    }),
   });
   useContextProvider(StandingContext, standing);
+
+  // A removal held for this document's *Take back* — its focused work went
+  // in another view, or this tab turned to it — is offered here as the last
+  // change. CA_0083_006
+  useTask$(async ({ track }) => {
+    const held = track(() => (documentId === null ? undefined : bridge.emptied.byParent[documentId]));
+    if (held === undefined || documentId === null) return;
+    const taken = await bridge.takeEmptied$(documentId);
+    if (taken !== null) await standing.emptied$(taken);
+  });
 
   // What each citation's hover card shows, read from the bibliography when
   // the document cites anything and again when it changes. BO_0291_026
@@ -1593,17 +1648,27 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     // The command's own mode, chosen on its line. DO_0025_003
     const choice = choiceIn(commandChoices.byBlock, state.runs, state.document, blockId, state.mode);
     let revisionId: string;
-    let words: string;
+    let runs: readonly Run[];
     if (editor.blockId === blockId) {
       if (!(await save$())) return { ok: false, error: editor.failure ?? "The block could not be saved, so it was not sent." };
       revisionId = editor.baseRevisionId;
-      words = runsText(editor.runs);
+      runs = editor.runs;
     } else {
       const held = state.document?.blocks.find((candidate) => candidate.blockId === blockId);
       if (held === undefined || held.kind !== "text") return { ok: false, error: "Only a block of text can be sent as a command." };
       revisionId = held.revisionId;
-      words = runsText(held.runs);
+      runs = held.runs;
     }
+    // A prompt's references go as `#n`, the number of the mark standing on
+    // each now; one no mark stands on is refused here, as a dangling `#n` is
+    // by the shell (`BO_0352_007`). A prompt whose marks the page has not
+    // read takes them from its words (`BO_0352_013`).
+    const marks = promptMarks(marking.store, blockId) ?? runs.flatMap((entry) => (entry.markRef === undefined ? [] : [entry.markRef]));
+    const unbound = unboundMarks(runs, marks);
+    if (unbound.length > 0) {
+      return { ok: false, error: `${unbound.map((number) => `#${number}`).join(", ")} ${unbound.length === 1 ? "names" : "name"} nothing marked. Mark it again, or take it out of the command.` };
+    }
+    const words = commandWords(runs, marks);
     if (words.trim() === "") return { ok: false, error: "Write the command in the block before sending it." };
     // What the block's command places set on it — the profile its chip
     // chose. BO_0311_030
@@ -1854,12 +1919,33 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     const route = routeOf(tab, state.document?.title);
     const target = route[index];
     if (target === undefined || index >= route.length - 1) return;
+    const landing = target.blockId !== undefined && !crumbs.gone.includes(target.itemId);
     await bridge.openAlongRoute$({
       itemId: target.itemId,
       title: target.title,
       route: route.slice(0, index + 1),
-      ...(target.blockId === undefined ? {} : { focus: target.blockId }),
+      ...(landing ? { focus: target.blockId } : {}),
     });
+  });
+
+  /**
+   * The crumbs whose block no longer stands in the document they name — a
+   * block moved into another document takes its focused work along, and a
+   * route stored before the move still runs through the old parent. Each
+   * crumb that carries a block reads its document once the route is known;
+   * one whose read fails is left as it is, since nothing says its block went.
+   * Read after the render, so the route line never waits on it. CA_0084_002
+   */
+  // eslint-disable-next-line qwik/no-use-visible-task
+  useVisibleTask$(async ({ track }) => {
+    const route = track(() => routeOf(tab));
+    const gone: string[] = [];
+    for (const entry of route.slice(0, -1)) {
+      if (entry.blockId === undefined) continue;
+      const read = await fetchDocument(entry.itemId);
+      if (read.outcome === "success" && !holdsBlock(read.result, entry.blockId)) gone.push(entry.itemId);
+    }
+    crumbs.gone = gone;
   });
 
   /**
@@ -1911,6 +1997,19 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   useContextProvider(PassagesContext, passages);
 
   /**
+   * A write that took the last block out of a focused work answers what went
+   * (`emptied`); the shell turns its tabs and holds *Take back* for the
+   * parent, and `left` says how to put the block back. CA_0083_005
+   */
+  const reportEmptied$ = $(
+    async (outcome: { readonly outcome: string; readonly result?: unknown }, left: EmptiedWork["left"]) => {
+      const emptied = emptiedOf(outcome);
+      if (emptied === null) return;
+      await bridge.focusedWorkEmptied$({ ...emptied, left });
+    },
+  );
+
+  /**
    * Runs one structural command, then reads the document back and hands the
    * editor on in the same step. A refused command leaves the document exactly
    * as it was, so the read is what shows whether anything happened.
@@ -1927,6 +2026,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       state.notice = null;
       await readBack$(focus);
       if (state.retiredOpen) await reloadRetired$();
+      await reportEmptied$(outcome, leftBy(command, documentId));
       return true;
     },
   );
@@ -3129,6 +3229,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
         await dropProposal$(itemId);
       }
       await reload$();
+      await reportEmptied$(outcome, NOTHING_LEFT);
       // Every open group is read again to list the proposals, which is the
       // slow read; the answered one has already left the list, so the reader
       // is not kept waiting on the rest. BO_0233_012
@@ -3190,6 +3291,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       const answers = await Promise.all(
         items.map(async (itemId) => ({ itemId, outcome: await answerProposal(documentId, itemId, "rejected", false) })),
       );
+      for (const answer of answers) await reportEmptied$(answer.outcome, NOTHING_LEFT);
       const stayed = answers.filter((answer) => answer.outcome.outcome !== "success" && !alreadySettled(answer.outcome));
       if (stayed.length > 0) {
         const back = stayed.map((answer) => answer.itemId);
@@ -3255,6 +3357,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     proposalEdit.answered = [...proposalEdit.answered, itemId];
     proposalEdit.accepted = [...proposalEdit.accepted, itemId];
     await dropProposal$(itemId);
+    await reportEmptied$(outcome, NOTHING_LEFT);
     // The document is read again first: the act writes against the block the
     // acceptance established — the item's own, which a rewrite and a move
     // keep and an insert creates — not the one the read before it held.
@@ -3302,6 +3405,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       // What the run made elsewhere is listed in the library's sections — a
       // structure under *Structures* — which the shell reads again. DO_0034_009
       if ((group?.elsewhere ?? []).length > 0) void bridge.targetChanged$();
+      await reportEmptied$(outcome, NOTHING_LEFT);
     }
     // Reading the document again reads the changes and the proposals once
     // after it (the task on `state.loaded`).
@@ -4334,6 +4438,36 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
     state.nested = outcome.outcome === "success" ? { targetId, blockId, documentId: child.itemId } : null;
     await readBack$(null);
     state.faces = await bridge.faces$(documentId);
+    await reportEmptied$(outcome, { blockIds: [blockId], wentTo: child.itemId });
+  });
+
+  /**
+   * A document dragged in from its tab or its library row (`DO_0043_004`):
+   * it becomes the focused work of a new block here — between the rows it was
+   * dropped between, or, on a block's middle, at the end of that block's
+   * focused work, as a nested block lands. The shell makes the block and
+   * moves the document under it; a refusal is said on the document. A
+   * document dropped on itself lands nowhere.
+   */
+  const adoptDocument$ = $(async (childId: string, overId: string) => {
+    const doc = state.document;
+    if (documentId === null || doc === null || childId === documentId) return;
+    let at: { placement: unknown } | { into: string };
+    if (overId.startsWith("nest:")) {
+      at = { into: overId.slice("nest:".length) };
+    } else if (overId.startsWith("block:")) {
+      const placement = dropPlacement(drawnRows(state, doc, branchOf(documentId, tab.id)), overId.slice("block:".length));
+      if (placement === null) return;
+      at = { placement };
+    } else {
+      return;
+    }
+    if (!(await save$())) return;
+    const adopted = await bridge.adoptChild$(documentId, childId, at);
+    state.notice = "refusal" in adopted ? adopted.refusal : null;
+    if ("refusal" in adopted) return;
+    await readBack$(null);
+    state.faces = await bridge.faces$(documentId);
   });
 
   const nestDone$ = $(() => {
@@ -4438,6 +4572,13 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
       return;
     }
     if (drop.operation !== "move") return;
+    // A whole document, dragged from its tab or its library row, becomes a
+    // block here whose focused work it is. DO_0043_004
+    const dragged = draggedDocument(drop.payload);
+    if (dragged !== null) {
+      await adoptDocument$(dragged, drop.overId);
+      return;
+    }
     // Onto an instruction's header: the block is an example the instruction
     // is shaped by; onto a structure's, an example the structure is extended
     // by. It stays where it is. BO_0349_014 BO_0349_036
@@ -5293,7 +5434,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
   // lights while it is there. BO_0263_002
   const dropSlot = (id: string, row: JSXOutput, key = `slot:${id}`) => (
     <div class="drop-slot" key={key} data-drop-target={`block:${id}`} data-accepts="move link">
-      <DropMark id={id} drag={bridge.drag} />
+      <DropMark id={id} drag={bridge.drag} self={documentId} />
       {row}
     </div>
   );
@@ -5446,7 +5587,13 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                       <span key={`${index}:${entry.itemId}`} class="document-route__crumb">
                         {index > 0 && <span aria-hidden="true"> › </span>}
                         {index < route.length - 1 ? (
-                          <button type="button" data-route-crumb={entry.itemId} onClick$={() => back$(index)}>
+                          <button
+                            type="button"
+                            data-route-crumb={entry.itemId}
+                            data-route-gone={crumbs.gone.includes(entry.itemId) ? "" : undefined}
+                            class={crumbs.gone.includes(entry.itemId) ? "document-route__gone" : undefined}
+                            onClick$={() => back$(index)}
+                          >
                             {entry.title}
                           </button>
                         ) : (
@@ -5578,7 +5725,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                     data-accepts="move link"
                     onClick$={() => startWriting$()}
                   >
-                    <DropMark id="end" drag={bridge.drag} />
+                    <DropMark id="end" drag={bridge.drag} self={documentId} />
                     <span class="document-empty__hint">Write something</span>
                   </button>
                 ) : (
@@ -5811,7 +5958,7 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
                       );
                       return framedRow;
                     })}
-                    <DropMark id="end" drag={bridge.drag} />
+                    <DropMark id="end" drag={bridge.drag} self={documentId} />
                     {/* The area below the last block carries both gestures. It is
                         the way into writing below the document, and it is where a
                         drag aims to land a block last: the mark above it is already
@@ -5873,12 +6020,13 @@ export const BlockEditorView = component$<ViewProps>(({ tab }) => {
  * pointer move: reading that in the document's render would rebuild the block
  * list dozens of times a second.
  */
-const DropMark = component$<{ id: string; drag: ViewDragState }>(
-  ({ id, drag }) => (
+const DropMark = component$<{ id: string; drag: ViewDragState; self: string | null }>(
+  ({ id, drag, self }) => (
     <span
       class="drop-mark"
       data-drop-mark={id}
-      data-drop-active={drag.overId === `block:${id}` && drag.operation !== "link" ? "true" : undefined}
+      // A document held over itself lands nowhere in it. DO_0043_004
+      data-drop-active={drag.overId === `block:${id}` && drag.operation !== "link" && !draggedOverItself(drag.payload, self) ? "true" : undefined}
     />
   ),
 );
@@ -5912,8 +6060,13 @@ function passageAt(marking: Parameters<typeof passagesIn>[0], target: string): {
  * pointer crossing rows redraws the mark and never the row whose words the
  * caret may sit in.
  */
-const NestMark = component$<{ id: string; drag: ViewDragState }>(({ id, drag }) => (
-  <span class="nest-mark" data-nest-mark={id} data-drop-active={drag.overId === `nest:${id}` ? "true" : "false"} aria-hidden="true" />
+const NestMark = component$<{ id: string; drag: ViewDragState; self: string | null }>(({ id, drag, self }) => (
+  <span
+    class="nest-mark"
+    data-nest-mark={id}
+    data-drop-active={drag.overId === `nest:${id}` && !draggedOverItself(drag.payload, self) ? "true" : "false"}
+    aria-hidden="true"
+  />
 ));
 
 /** The agent reading a block: its face and the mark's words, until the mark
@@ -6142,6 +6295,16 @@ const BlockRow = component$<{
       addPassage$,
       removeReference$,
     } = useContext(MarkingContext);
+    // A prompt's references in its words (`BO_0352_011`): drawn against the
+    // prompt's marks, titled as the `#` list names the blocks, and pressed to
+    // show what they name (`BO_0352_012`).
+    const markBridge = useContext(ViewBridgeContext);
+    const markTitles = blockTitles(references ?? []);
+    const promptMarksHere = promptMarks(markingStore, block.blockId);
+    const revealMark$ = $(async (reference: MarkRef, drawn: DrawnMark) => {
+      const target = markReveal(reference, drawn);
+      if (target !== null) await askReveal(markBridge, documentId, target);
+    });
     const mode = markingStore.marking.mode;
     // The prompt pointed from: pointing leaves it unmarkable, with its command
     // control on it, and a press on it goes back to editing it. BO_0267_013
@@ -6300,8 +6463,8 @@ const BlockRow = component$<{
           void toggleReference$(block.blockId);
         }}
       >
-        <DropMark id={block.blockId} drag={drag} />
-        {isText(block) && <NestMark id={block.blockId} drag={drag} />}
+        <DropMark id={block.blockId} drag={drag} self={documentId} />
+        {isText(block) && <NestMark id={block.blockId} drag={drag} self={documentId} />}
         {agentRead != null && <AgentReadMark key={agentRead.until} blockId={block.blockId} read={agentRead} />}
 
         {/* The number, in the gutter the grips use and out of the row's flow,
@@ -6487,6 +6650,9 @@ const BlockRow = component$<{
                 }
                 blockRef={entry.blockRef}
                 refLabel={entry.blockRef === undefined ? undefined : referenceLabels?.[entry.blockRef]}
+                markRef={entry.markRef}
+                markDrawn={entry.markRef === undefined ? undefined : drawnMark(entry.markRef, promptMarksHere, markTitles)}
+                onMark$={revealMark$}
                 cite={entry.cite}
                 citeNumber={entry.cite === undefined ? undefined : citationNumbers?.[entry.cite.work]}
                 citeMissing={entry.cite === undefined ? undefined : missingWorks?.includes(entry.cite.work) === true}
@@ -6601,6 +6767,9 @@ const BlockRow = component$<{
                 }
                 blockRef={entry.blockRef}
                 refLabel={entry.blockRef === undefined ? undefined : referenceLabels?.[entry.blockRef]}
+                markRef={entry.markRef}
+                markDrawn={entry.markRef === undefined ? undefined : drawnMark(entry.markRef, promptMarksHere, markTitles)}
+                onMark$={revealMark$}
                 cite={entry.cite}
                 citeNumber={entry.cite === undefined ? undefined : citationNumbers?.[entry.cite.work]}
                 citeMissing={entry.cite === undefined ? undefined : missingWorks?.includes(entry.cite.work) === true}
@@ -6661,6 +6830,8 @@ const BlockRow = component$<{
             figureNumbers={figureNumbers}
             tableNumbers={tableNumbers}
             referenceLabels={referenceLabels}
+            references={references}
+            documentId={documentId}
             mathSvg={isText(block) ? block.mathSvg : undefined}
             missingWorks={missingWorks}
             input$={input$}
@@ -6766,6 +6937,10 @@ const ActiveBlockText = component$<{
   reviseLocator$: QRL<(at: number, locator: string) => void>;
   /** What a reference to any block is drawn as on the surface. BO_0300_007 */
   referenceLabels?: Readonly<Record<string, string>> | undefined;
+  /** The document's blocks as the `#` list names them, and the document,
+   * for a prompt's references drawn and pressed on the surface. BO_0352_011 */
+  references?: readonly ReferenceChoice[] | undefined;
+  documentId: string;
 }>((props) => {
   const {
     tag,
@@ -6815,6 +6990,61 @@ const ActiveBlockText = component$<{
   });
   // Whether the surface points from this block, read at the key. BO_0267_023
   const pointingFrom = useContext(MarkingContext).store;
+  const surfaceBridge = useContext(ViewBridgeContext);
+  const surfaceReferences = props.references;
+  const surfaceDocument = props.documentId;
+
+  // A prompt's chips warn as soon as a mark under them is taken back, and
+  // stand again when it is marked again (`BO_0352_011`): the surface is
+  // painted once more, keeping the caret, only when the block holds a chip and
+  // what its marks name has changed — the report is a new object on every
+  // read, and a repaint on each would take the caret from under the reader.
+  const paintedMarks = useStore({ key: "" });
+  useVisibleTask$(({ track }) => {
+    const key = track(() =>
+      editor.runs.some((entry) => entry.markRef !== undefined)
+        ? JSON.stringify((promptMarks(pointingFrom, editor.blockId ?? "") ?? []).map((mark) => [mark.number, mark.kind, mark.document, mark.blockId, mark.quote, mark.target, mark.group, mark.item]))
+        : "",
+    );
+    const element = host.value;
+    if (key === paintedMarks.key) return;
+    const first = paintedMarks.key === "";
+    paintedMarks.key = key;
+    if (first || key === "" || element === undefined) return;
+    const caret = selectionIn(element) ?? { start: editor.start, end: editor.end };
+    paintRuns(element, editor.runs, {
+      referenceLabelOf: (blockId) => referenceLabels?.[blockId],
+      markOf: (reference) => drawnMark(reference, promptMarks(pointingFrom, editor.blockId ?? ""), blockTitles(surfaceReferences ?? [])),
+      svgOf: (tex) => mathSvg?.[tex] ?? typesetInline(tex),
+      numberOf: (blockId) => equationNumbers?.[blockId],
+      figureNumberOf: (blockId) => figureNumbers?.[blockId],
+      tableNumberOf: (blockId) => tableNumbers?.[blockId],
+      citationOf: (work, locator) => ({
+        ...(citationNumbers?.[work] === undefined ? {} : { number: citationNumbers[work] }),
+        ...(missingWorks?.includes(work) === true ? { missing: true } : {}),
+        ...(cited?.labels[citationKey({ work, ...(locator === undefined ? {} : { locator }) })] === undefined ? {} : { label: cited.labels[citationKey({ work, ...(locator === undefined ? {} : { locator }) })]! }),
+      }),
+    });
+    if (element.ownerDocument.activeElement === element) selectRange(element, caret.start, caret.end);
+  });
+
+  // A prompt's reference on the surface shows what it names, as it does when
+  // read (`BO_0352_012`). The chips are painted, not rendered, so the press is
+  // heard where they are: on the surface, from the element pressed — often
+  // the one character inside the chip the caret counts.
+  useVisibleTask$(({ cleanup }) => {
+    const element = host.value;
+    if (element === undefined) return;
+    const pressed = (event: Event) => {
+      const reference = pressedMark(event.target as Node | null, element);
+      if (reference === null) return;
+      const drawn = drawnMark(reference, promptMarks(pointingFrom, editor.blockId ?? ""), blockTitles(surfaceReferences ?? []));
+      const target = markReveal(reference, drawn);
+      if (target !== null) void askReveal(surfaceBridge, surfaceDocument, target);
+    };
+    element.addEventListener("click", pressed);
+    cleanup(() => element.removeEventListener("click", pressed));
+  });
 
   // A selection made by touch — a long press, then the handles — fires no
   // keyup and no mouseup; the browser says it only through `selectionchange`.
@@ -6847,6 +7077,7 @@ const ActiveBlockText = component$<{
       figureNumberOf: (blockId) => figureNumbers?.[blockId],
       tableNumberOf: (blockId) => tableNumbers?.[blockId],
       referenceLabelOf: (blockId) => referenceLabels?.[blockId],
+      markOf: (reference) => drawnMark(reference, promptMarks(pointingFrom, editor.blockId ?? ""), blockTitles(props.references ?? [])),
       citationOf: (work, locator) => ({
         ...(citationNumbers?.[work] === undefined ? {} : { number: citationNumbers[work] }),
         ...(missingWorks?.includes(work) === true ? { missing: true } : {}),
@@ -6869,6 +7100,7 @@ const ActiveBlockText = component$<{
         figureNumberOf: (blockId) => figureNumbers?.[blockId],
         tableNumberOf: (blockId) => tableNumbers?.[blockId],
         referenceLabelOf: (blockId) => referenceLabels?.[blockId],
+        markOf: (reference) => drawnMark(reference, promptMarks(pointingFrom, editor.blockId ?? ""), blockTitles(props.references ?? [])),
         citationOf: (work, locator) => ({
           ...(citationNumbers?.[work] === undefined ? {} : { number: citationNumbers[work] }),
           ...(missingWorks?.includes(work) === true ? { missing: true } : {}),

@@ -307,3 +307,15 @@ filter them. `documents`' Documents section is the first to declare one
   (`changedFilter`), the values the listed items carry, the rows a choice and a search keep in its
   order, and whether the choice is the default — are `src/lib/library-filter.ts`, proven in
   `src/lib/library-filter.test.ts`; `src/registry.test.ts` proves the three refusals.
+* A value a filter hides by default is hidden for every workspace, including one that stored a
+  choice before the filter declared it, until the person shows it. User decision, 2026-10-06
+  (`documents`' [`DO_0042`](../../../src/extensions/documents/docs/changes/completed/DO_0042_FEAT_structures-in-the-documents-filter.md)).
+- A shown default records itself (`DO_0042_001`): a value in `defaultHidden` the person shows is
+  stored as `shown:<group>:<value>`, and the choice read back (`filterChoiceOf`) hides every
+  `defaultHidden` value not stored as shown beside the values stored as hidden, so a stored set
+  from before the default existed reads it hidden. `storedChoice` takes the filter and stores only
+  the values hidden that are not hidden by default and the defaults shown, so hiding a default again
+  drops its `shown:` entry and *Clear filter* stores the order alone. `src/lib/library-filter.test.ts`
+  proves a stored set without the default hiding it, a shown default surviving the round trip and
+  reading as not the default, hiding it again reading as the default, and *Clear filter* returning
+  to it. The filter row draws nothing new.

@@ -35,9 +35,9 @@ const items: LibraryItem[] = [
   },
 ];
 
-const mount = async () => {
+const mount = async (props: { drags?: readonly ("move" | "open-in-tab")[] } = {}) => {
   const dom = await createDOM();
-  await dom.render(jsx(LibraryRowHost, { items }));
+  await dom.render(jsx(LibraryRowHost, { items, ...props }));
   const root = dom.screen as unknown as HTMLElement;
   const find = (selector: string) => (root.querySelector(selector) as HTMLElement | null) ?? null;
   await dom.userEvent("[data-load]", "click");
@@ -150,5 +150,36 @@ describe("a library row held with a dragged block (CA_0072_004)", () => {
     expect(row("doc-plain")?.getAttribute("data-spring")).toBe("library:doc-plain");
     expect(row("doc-started")?.getAttribute("data-spring-hold")).toBe("true");
     expect(row("doc-plain")?.hasAttribute("data-spring-hold")).toBe(false);
+  });
+});
+
+/**
+ * A document's row drags as its tab does (`documents`' `DO_0043_002`): pressed
+ * down, it starts a drag carrying its document out of the library with what
+ * the view of its kind offers, and a press still opens it.
+ */
+describe("a library row dragged", () => {
+  it("Given a kind whose view offers a move, When the row is pressed down, Then a drag of its document starts from the library", async () => {
+    const { find, userEvent } = await mount({ drags: ["move", "open-in-tab"] });
+    await userEvent('[data-item-id="doc-plain"]', "pointerdown");
+    expect(JSON.parse(find("[data-dragged]")?.textContent ?? "null")).toEqual({
+      itemId: "doc-plain",
+      kind: "documents:document",
+      source: "library",
+      operations: ["move", "open-in-tab"],
+      preview: "Notes",
+    });
+  });
+
+  it("Given a draggable row, When it is pressed, Then it still opens its document", async () => {
+    const { find, userEvent } = await mount({ drags: ["move", "open-in-tab"] });
+    await userEvent('[data-item-id="doc-plain"]', "click");
+    expect(JSON.parse(find("[data-opened]")?.textContent ?? "null")).toEqual(open("doc-plain", "Notes"));
+  });
+
+  it("Given a kind whose view offers nothing, When the row is pressed down, Then no drag starts", async () => {
+    const { find, userEvent } = await mount({ drags: [] });
+    await userEvent('[data-item-id="doc-plain"]', "pointerdown");
+    expect(find("[data-dragged]")?.textContent).toBe("null");
   });
 });

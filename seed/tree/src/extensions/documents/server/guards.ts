@@ -64,3 +64,31 @@ export async function kindOfDocument(documentId: string, group?: string): Promis
   }
   return undefined;
 }
+
+/**
+ * What an extension names every document it names, for the whole listing at
+ * once (`DO_0042_002`): each document id with its word, in one read — never
+ * a read per document, which `DocumentNamer` is for.
+ */
+export type DocumentLister = () => Promise<ReadonlyMap<string, string>>;
+
+const listers = new Map<string, DocumentLister>();
+
+/** Registers an extension's lister under its name, as `nameDocuments` does. */
+export function nameListedDocuments(name: string, lister: DocumentLister): void {
+  listers.set(name, lister);
+}
+
+/**
+ * The word the registered listers give each document they name, the first
+ * lister's word winning. A lister that fails names nothing, and the listing
+ * still answers.
+ */
+export async function namesOfDocuments(): Promise<ReadonlyMap<string, string>> {
+  const names = new Map<string, string>();
+  for (const lister of listers.values()) {
+    const named = await lister().catch(() => new Map<string, string>());
+    for (const [documentId, word] of named) if (word !== "" && !names.has(documentId)) names.set(documentId, word);
+  }
+  return names;
+}

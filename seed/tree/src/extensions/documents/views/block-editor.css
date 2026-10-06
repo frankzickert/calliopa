@@ -1385,6 +1385,11 @@ hr[data-block-divider] {
 .document-route [data-route-current] {
   color: var(--text);
 }
+/* A crumb whose block has moved away: dimmed, and still opening its document
+   at the top. CA_0084_002 */
+.document-route .document-route__gone {
+  opacity: 0.55;
+}
 
 /* The surface reads the pinch itself (`block-pinch.ts`): vertical panning
    stays the browser's, the browser's zoom does not, so two fingers on the

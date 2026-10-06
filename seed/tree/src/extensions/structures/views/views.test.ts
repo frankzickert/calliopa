@@ -1038,7 +1038,7 @@ describe("the field choice after a nest", () => {
     expect(instructedRuns).toEqual([]);
   });
 
-  it("Given a field holding a block, When the block is pressed in the popover, Then its focused work opens at that block along the route (BO_0349_024)", async () => {
+  it("Given a field holding a block, When the block is pressed in the popover, Then its focused work opens at that block along the route, as an open from a block (BO_0349_024, CA_0084_001)", async () => {
     const holding = taken(article, {
       values: { lead: "The first words." },
       missing: [],
@@ -1060,6 +1060,9 @@ describe("the field choice after a nest", () => {
           { itemId: work, title: "The lead" },
         ],
         focus: nestedBlock,
+        // An open from the field's block: a tab already showing the work
+        // takes this route. CA_0084_001
+        fromBlock: true,
       },
     ]);
   });

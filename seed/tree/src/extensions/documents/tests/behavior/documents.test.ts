@@ -33,6 +33,7 @@ import {
 import type { BlockView } from "~/extensions/documents/server/assemble";
 import { saveAdmonitionPattern } from "~/extensions/documents/server/admonitions";
 import { documentsCiting } from "~/extensions/documents/server/cited-by";
+import { nameListedDocuments } from "~/extensions/documents/server/guards";
 import { randomBytes, randomUUID } from "node:crypto";
 
 import { orderBetween } from "~/lib/order";
@@ -863,6 +864,27 @@ describe.skipIf(!configured)("documents over CCGW", () => {
     ok(await deleteDocument({ documentId: plain.documentId, baseRevisionId: renamed.revisionId }));
     const source = ok<{ revisionId: string }>(await readDocument(recorded.documentId));
     ok(await deleteDocument({ documentId: recorded.documentId, baseRevisionId: source.revisionId }));
+  });
+
+  it("Given a registered lister, Then the listing answers the word it names a document by, and none for one it does not name (DO_0042_002)", async () => {
+    type Listed = readonly { documentId: string; named?: string }[];
+    const named = ok<{ documentId: string }>(await createDocument({ title: "Named by a lister" }));
+    const plain = ok<{ documentId: string }>(await createDocument({ title: "Named by nobody" }));
+    nameListedDocuments("behavior", async () => new Map([[named.documentId, "structure"]]));
+    nameListedDocuments("behavior-failing", async () => {
+      throw new Error("a lister that cannot read");
+    });
+
+    const listed = ok<Listed>(await listDocuments());
+    expect(listed.find((entry) => entry.documentId === named.documentId)?.named).toBe("structure");
+    expect(listed.find((entry) => entry.documentId === plain.documentId)?.named).toBeUndefined();
+
+    nameListedDocuments("behavior", async () => new Map());
+    nameListedDocuments("behavior-failing", async () => new Map());
+    for (const id of [named.documentId, plain.documentId]) {
+      const document = ok<{ revisionId: string }>(await readDocument(id));
+      ok(await deleteDocument({ documentId: id, baseRevisionId: document.revisionId }));
+    }
   });
 
   it("Given a rename and a delete, Then the listing follows and history stays", async () => {

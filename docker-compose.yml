@@ -224,6 +224,11 @@ services:
       - hermes-data:/var/lib/hermes
       - agent-config:/var/lib/calliopa/agent-config
       - calliopa-secrets:/run/secrets/calliopa:ro
+    # Bounded, so one stack cannot take a shared machine from another: a run
+    # cut off by the limit fails in words, and the service comes back if the
+    # gateway itself is the process killed. BO_0353_006
+    mem_limit: ${CALLIOPA_HERMES_MEMORY:-4g}
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8642/health',timeout=4).status==200 else 1)"]
       interval: 10s

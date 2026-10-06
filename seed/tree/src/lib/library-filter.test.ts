@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { LibraryFilter, LibraryItem } from "~/contract";
 import {
   applyFilter,
+  changedFilter,
   defaultChoice,
   filterChoiceOf,
   groupValues,
@@ -73,7 +74,38 @@ describe("an item section's filter", () => {
 
   it("stores a choice it reads back unchanged", () => {
     const choice = { hidden: ["started:started"], order: "title-desc" };
-    expect(filterChoiceOf(filter, storedChoice(choice))).toEqual(choice);
+    expect(filterChoiceOf(filter, storedChoice(filter, choice))).toEqual(choice);
+  });
+
+  describe("a value hidden by default", () => {
+    const hiding = { ...filter, defaultHidden: ["kind:source"] };
+
+    it("is hidden in a set stored before the filter declared it", () => {
+      expect(filterChoiceOf(hiding, ["started:started", "order:changed"])).toEqual({
+        hidden: ["started:started", "kind:source"],
+        order: "changed",
+      });
+      expect(filterChoiceOf(hiding, ["order:title"])).toEqual(defaultChoice(hiding));
+    });
+
+    it("is stored as shown once the person shows it, and survives the round trip", () => {
+      const stored = changedFilter(hiding, null, { toggle: ["kind", "source"] });
+      expect(stored).toEqual(["shown:kind:source", "order:title"]);
+      expect(filterChoiceOf(hiding, stored)).toEqual({ hidden: [], order: "title" });
+      expect(isDefaultChoice(hiding, filterChoiceOf(hiding, stored))).toBe(false);
+    });
+
+    it("drops the shown entry when hidden again, rather than storing it as hidden", () => {
+      const shown = changedFilter(hiding, null, { toggle: ["kind", "source"] });
+      const again = changedFilter(hiding, shown, { toggle: ["kind", "source"] });
+      expect(again).toEqual(["order:title"]);
+      expect(isDefaultChoice(hiding, filterChoiceOf(hiding, again))).toBe(true);
+    });
+
+    it("is hidden again by Clear filter", () => {
+      const shown = changedFilter(hiding, ["started:started", "order:changed"], { toggle: ["kind", "source"] });
+      expect(filterChoiceOf(hiding, changedFilter(hiding, shown, { clear: true }))).toEqual(defaultChoice(hiding));
+    });
   });
 
   it("toggles one value, and reads as default only when the choice is the default", () => {

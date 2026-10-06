@@ -62,6 +62,89 @@ export interface Run {
    * text of its own — it is drawn as the work's number in the document, which
    * is resolved on every read and stored nowhere. */
   readonly cite?: Citation;
+  /** A prompt's reference to what the reader marked (`BO_0352_006`): what
+   * was marked and the number the mark had when it was written. No text of
+   * its own — it is drawn as its title in a chip, and a command tells the run
+   * the number the mark standing on its target has at the send. Written by
+   * the reader alone; a run keeps the ones a prompt holds. */
+  readonly markRef?: MarkRef;
+}
+
+/** What a prompt's reference names: a mark as the shell sends it
+ * (`SentReference` in `command-target.ts`), with the words it opened with, so
+ * it is told and drawn without the device that marked it. `BO_0352_006` */
+export interface MarkRef {
+  readonly number: number;
+  readonly kind: "block" | "passage" | "document" | "proposal";
+  readonly blockId?: string;
+  readonly quote?: string;
+  readonly document?: string;
+  readonly target?: "proposal" | "retired";
+  readonly group?: string;
+  readonly item?: string;
+  readonly items?: readonly { readonly item: string; readonly blockId: string; readonly revisionId: string }[];
+  readonly revisionId?: string;
+  readonly words?: string;
+}
+
+const MARK_KINDS = ["block", "passage", "document", "proposal"] as const;
+const MARK_WORD_FIELDS = ["blockId", "quote", "document", "group", "item", "revisionId", "words"] as const;
+
+/** A markRef copied field by field, in one order, so two that name the same
+ * mark compare equal however they were built. */
+export function markRefOf(value: MarkRef): MarkRef {
+  return {
+    number: value.number,
+    kind: value.kind,
+    ...(value.blockId !== undefined ? { blockId: value.blockId } : {}),
+    ...(value.quote !== undefined ? { quote: value.quote } : {}),
+    ...(value.document !== undefined ? { document: value.document } : {}),
+    ...(value.target !== undefined ? { target: value.target } : {}),
+    ...(value.group !== undefined ? { group: value.group } : {}),
+    ...(value.item !== undefined ? { item: value.item } : {}),
+    ...(value.items !== undefined ? { items: value.items.map((one) => ({ item: one.item, blockId: one.blockId, revisionId: one.revisionId })) } : {}),
+    ...(value.revisionId !== undefined ? { revisionId: value.revisionId } : {}),
+    ...(value.words !== undefined ? { words: value.words } : {}),
+  };
+}
+
+const sameMarkRef = (left: MarkRef | undefined, right: MarkRef | undefined): boolean =>
+  left === undefined || right === undefined
+    ? left === right
+    : JSON.stringify(markRefOf(left)) === JSON.stringify(markRefOf(right));
+
+/** Reads an untrusted value as a markRef, or says what is wrong with it — the
+ * rules the kernel's `checkMarkRefValue` refuses by. `BO_0352_006` */
+export function readMarkRef(value: unknown): { readonly markRef: MarkRef } | { readonly failure: string } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return { failure: "names no mark" };
+  const entry = value as Record<string, unknown>;
+  const known = new Set<string>(["number", "kind", "target", "items", ...MARK_WORD_FIELDS]);
+  const foreign = Object.keys(entry).find((key) => !known.has(key));
+  if (foreign !== undefined) return { failure: `carries ${foreign}, which names nothing a mark has` };
+  const number = entry["number"];
+  if (typeof number !== "number" || !Number.isInteger(number) || number < 1) return { failure: "names no number from 1" };
+  const kind = entry["kind"];
+  if (!MARK_KINDS.includes(kind as MarkRef["kind"])) return { failure: `names no kind of ${MARK_KINDS.join(", ")}` };
+  for (const key of MARK_WORD_FIELDS) {
+    if (entry[key] !== undefined && typeof entry[key] !== "string") return { failure: `names ${key} that is not words` };
+  }
+  const target = entry["target"];
+  if (target !== undefined && target !== "proposal" && target !== "retired") return { failure: "names a target that is no proposal or retired block" };
+  const has = (key: string): boolean => typeof entry[key] === "string" && (entry[key] as string).trim() !== "";
+  if (kind === "block" && !has("blockId")) return { failure: "names no marked block" };
+  if (kind === "passage" && (!has("blockId") || !has("quote"))) return { failure: "names no passage's block and words" };
+  if (kind === "document" && (!has("document") || has("blockId"))) return { failure: "names a document marked whole and a block" };
+  if (kind === "proposal" && (!has("group") || has("blockId"))) return { failure: "names a proposal marked whole and a block" };
+  const items = entry["items"];
+  if (items !== undefined) {
+    if (!Array.isArray(items)) return { failure: "names a proposal's items that are no list" };
+    for (const one of items) {
+      if (typeof one !== "object" || one === null || ["item", "blockId", "revisionId"].some((key) => typeof (one as Record<string, unknown>)[key] !== "string")) {
+        return { failure: "names a proposal item without its item, block and revision" };
+      }
+    }
+  }
+  return { markRef: markRefOf(entry as unknown as MarkRef) };
 }
 
 /** What a citation run names: the cited work, and where in it. */
@@ -101,6 +184,7 @@ export const isAtom = (entry: Run): boolean =>
   entry.figureRef !== undefined ||
   entry.tableRef !== undefined ||
   entry.blockRef !== undefined ||
+  entry.markRef !== undefined ||
   entry.cite !== undefined;
 
 /** Whether a run is an atom that carries no text of its own — every reference
@@ -110,6 +194,7 @@ const isEmptyAtom = (entry: Run): boolean =>
   entry.figureRef !== undefined ||
   entry.tableRef !== undefined ||
   entry.blockRef !== undefined ||
+  entry.markRef !== undefined ||
   entry.cite !== undefined;
 
 /** The attributes an atom carries, copied whenever a run is rebuilt. */
@@ -119,6 +204,7 @@ const atomOf = (entry: Run): Partial<Run> => ({
   ...(entry.figureRef !== undefined ? { figureRef: entry.figureRef } : {}),
   ...(entry.tableRef !== undefined ? { tableRef: entry.tableRef } : {}),
   ...(entry.blockRef !== undefined ? { blockRef: entry.blockRef } : {}),
+  ...(entry.markRef !== undefined ? { markRef: markRefOf(entry.markRef) } : {}),
   ...(entry.cite !== undefined ? { cite: citationOf(entry.cite) } : {}),
 });
 
@@ -493,6 +579,7 @@ export function sameRuns(left: readonly Run[], right: readonly Run[]): boolean {
         entry.figureRef === other.figureRef &&
         entry.tableRef === other.tableRef &&
         entry.blockRef === other.blockRef &&
+        sameMarkRef(entry.markRef, other.markRef) &&
         sameCitation(entry.cite, other.cite) &&
         sameMarks(entry, other)
       );
@@ -553,7 +640,7 @@ export function readRuns(
       if (link !== undefined) {
         return { failure: `Run ${index} names a keyword or carries a link, never both.` };
       }
-      if (["math", "equationRef", "figureRef", "tableRef", "blockRef", "cite"].some((key) => entry[key] !== undefined)) {
+      if (["math", "equationRef", "figureRef", "tableRef", "blockRef", "markRef", "cite"].some((key) => entry[key] !== undefined)) {
         return { failure: `Run ${index} names a keyword with words, and cannot be a reference, mathematics or a citation.` };
       }
     }
@@ -597,7 +684,7 @@ export function readRuns(
       if (entry["text"] !== "") {
         return { failure: `Run ${index} is a ${what} reference carrying text of its own.` };
       }
-      const others = [math, equationRef, entry["cite"], ...[figureRef, tableRef, blockRef].filter((_, at) => ["figureRef", "tableRef", "blockRef"][at] !== key)];
+      const others = [math, equationRef, entry["cite"], entry["markRef"], ...[figureRef, tableRef, blockRef].filter((_, at) => ["figureRef", "tableRef", "blockRef"][at] !== key)];
       if (others.some((other) => other !== undefined)) {
         return { failure: `Run ${index} is one reference, mathematics or a citation, never two at once.` };
       }
@@ -629,6 +716,19 @@ export function readRuns(
       }
       citation = { work, ...(locator !== undefined ? { locator: locator as string } : {}) };
     }
+    // A prompt's reference to what was marked (`BO_0352_006`): what was
+    // marked, no text of its own, and nothing else a run can be.
+    const rawMark = entry["markRef"];
+    let markRef: MarkRef | undefined;
+    if (rawMark !== undefined) {
+      const read = readMarkRef(rawMark);
+      if ("failure" in read) return { failure: `Run ${index} is a prompt's reference that ${read.failure}.` };
+      if (entry["text"] !== "") return { failure: `Run ${index} is a prompt's reference carrying text of its own.` };
+      if ([math, equationRef, entry["cite"], figureRef, tableRef, blockRef].some((other) => other !== undefined)) {
+        return { failure: `Run ${index} is one reference, mathematics or a citation, never two at once.` };
+      }
+      markRef = read.markRef;
+    }
     runs.push({
       text: entry["text"],
       ...(marks !== undefined ? { marks: marks as Mark[] } : {}),
@@ -642,6 +742,7 @@ export function readRuns(
       ...(tableRef !== undefined ? { tableRef: tableRef as string } : {}),
       ...(blockRef !== undefined ? { blockRef: blockRef as string } : {}),
       ...(citation !== undefined ? { cite: citation } : {}),
+      ...(markRef !== undefined ? { markRef } : {}),
     });
   }
   return { runs: normalizeRuns(runs) };

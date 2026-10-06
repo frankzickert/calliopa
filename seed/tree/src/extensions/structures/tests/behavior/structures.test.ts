@@ -6,6 +6,7 @@ import {
   createDocument,
   deleteDocument,
   insertBlock,
+  listDocuments,
   mergeTextBlocks,
   proposeDocumentChanges,
   readDocument,
@@ -49,6 +50,7 @@ import {
   setFieldChild,
   setStructure,
   setValues,
+  structureDocuments,
 } from "../../server/structures";
 import { proposeStructuresTool, readDocumentStructures, ToolRefusal } from "../../server/tools";
 import "../../contributions.server";
@@ -172,6 +174,19 @@ describe.skipIf(!configured)("structures over CCGW", () => {
       await settle();
       await deleteDocument({ documentId, baseRevisionId: document.result.revisionId });
     }
+  });
+
+  it("Given a person's structure, a built-in and a document using Story, Then the listing names the two structures and not the document (DO_0042_004)", async () => {
+    ok(await setStructure({ documentId, structure: story.id, taken: true }));
+    const named = await structureDocuments();
+    expect(named.get(story.id)).toBe("structure");
+    expect(named.get(KEYWORD_STRUCTURE)).toBe("structure");
+    expect(named.has(documentId)).toBe(false);
+    // Registered as the server module loads, so the listing answers it too.
+    const listed = ok<readonly { documentId: string; named?: string }[]>(await listDocuments());
+    expect(listed.find((entry) => entry.documentId === story.id)?.named).toBe("structure");
+    expect(listed.find((entry) => entry.documentId === documentId)?.named).toBeUndefined();
+    ok(await setStructure({ documentId, structure: story.id, taken: false }));
   });
 
   it("Given the migration, Then every built-in stands as a document under its fixed id, named by the release, and a second run answers nothing", async () => {

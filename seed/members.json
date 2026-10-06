@@ -848,6 +848,20 @@
     },
     {
       "extension": "documents",
+      "nodeId": "node:migration-ca-0083-remove-empty-focused-work",
+      "type": "ext.migration",
+      "content": {
+        "id": "migration-ca-0083-remove-empty-focused-work",
+        "migrates": [
+          "document",
+          "focuses"
+        ],
+        "rationale": "CA_0083_003: a focused work with no standing block goes, and its parent block stays. The route answers one script closing the focuses edge of every focused work already empty — no block in its reading order, retired ones not counting, and no pending proposal that would insert one — and then retiring the child; it answers nothing where none is empty. The kernel runs it once per instance when it serves the pin that carries it.",
+        "route": "kernel/migrations/remove-empty-focused-work"
+      }
+    },
+    {
+      "extension": "documents",
       "nodeId": "node:focuses",
       "type": "ext.relationtype",
       "content": {

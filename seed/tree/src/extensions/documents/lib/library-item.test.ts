@@ -88,4 +88,24 @@ describe("a document's library item", () => {
     expect(listed(["order:created"])).toEqual(["c", "a", "b"]);
     expect(listed(["kind:source", "unnamed:unnamed"])).toEqual(["b"]);
   });
+
+  it("Given a document an extension names a structure, Then it carries the value the filter hides it by; a plain one carries none (DO_0042_003)", () => {
+    const structure = documentItem({ documentId: "story", title: "Story", named: "structure" }, undefined);
+    expect(structure.facets?.["structure"]).toEqual({ value: "structure", label: "Structures" });
+    expect(documentItem({ documentId: "doc-1", title: "Draft" }, undefined).facets?.["structure"]).toBeUndefined();
+    expect(documentItem({ documentId: "doc-1", title: "Draft", named: "manuscript" }, undefined).facets?.["structure"]).toBeUndefined();
+  });
+
+  it("Given structure documents, Then the section hides them until shown, also for a choice stored before (DO_0042_003)", () => {
+    const items = [
+      documentItem({ documentId: "a", title: "Alpha" }, undefined),
+      documentItem({ documentId: "s", title: "Story", named: "structure" }, undefined),
+      documentItem({ documentId: "u", title: "Using Story" }, undefined),
+    ];
+    const listed = (stored: readonly string[] | null) =>
+      applyFilter(DOCUMENTS_FILTER, filterChoiceOf(DOCUMENTS_FILTER, stored), "", items).map((item) => item.id);
+    expect(listed(null)).toEqual(["a", "u"]);
+    expect(listed(["kind:source", "order:title"])).toEqual(["a", "u"]);
+    expect(listed(["shown:structure:structure", "order:title"])).toEqual(["a", "s", "u"]);
+  });
 });

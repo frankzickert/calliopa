@@ -1,6 +1,6 @@
 import type { RequestHandler } from "@builder.io/qwik-city";
 import { api } from "~/server/api";
-import { facesOf, openFocusedWork } from "~/server/focused-work";
+import { bringBackFocusedWork, facesOf, openFocusedWork } from "~/server/focused-work";
 
 /**
  * Focused work on one target, the frame's own endpoint (`CA_0065_003`).
@@ -12,7 +12,8 @@ import { facesOf, openFocusedWork } from "~/server/focused-work";
  *
  * `GET` answers the face of every block of the target that has focused work;
  * `POST` opens one block as focused work, or answers the child that already
- * focuses it.
+ * focuses it; with `bringBack`, what a removal kept, it brings an emptied
+ * child back on the block instead (`CA_0083_001`).
  */
 
 export const onGet: RequestHandler = (event) =>
@@ -25,11 +26,16 @@ export const onGet: RequestHandler = (event) =>
 export const onPost: RequestHandler = (event) =>
   api(event, async () => {
     const itemId = event.params["item"] ?? "";
-    const body = (await event.request.json()) as { kind?: unknown; blockId?: unknown; blank?: unknown };
+    const body = (await event.request.json()) as { kind?: unknown; blockId?: unknown; blank?: unknown; bringBack?: unknown };
     const kind = typeof body.kind === "string" ? body.kind : "";
     const blockId = typeof body.blockId === "string" ? body.blockId : "";
     if (blockId === "") {
       event.json(400, { error: "focused work names the block it opens" });
+      return;
+    }
+    // *Take back* of an emptied focused work. CA_0083_006
+    if (typeof body.bringBack === "object" && body.bringBack !== null && !Array.isArray(body.bringBack)) {
+      event.json(200, await bringBackFocusedWork({ kind, blockId, kept: body.bringBack as Record<string, unknown> }));
       return;
     }
     // A nest asks for a child with no blocks: the block it moves in is the

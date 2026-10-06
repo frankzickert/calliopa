@@ -13,7 +13,7 @@ import docker
 from lib.caps import Caps
 from lib.runtimes import LABEL, SCOPE_LABEL
 from server import Service
-from test.test_service import BEARER, KERNEL_IMAGE, Api, ensure_kernel_image
+from test.test_service import BEARER, KERNEL_IMAGE, Api, ensure_kernel_image, remove_network
 
 REACH = """
 import socket
@@ -56,6 +56,7 @@ class CallsTest(unittest.TestCase):
             except docker.errors.NotFound:
                 pass
         cls.service.shutdown()
+        remove_network(cls.service)
 
     def call(self, code: str, network: str = "none", value=None, env=None):
         return self.api.call("POST", "/v1/calls", {"runtime": self.runtime, "code": code, "input": value, "network": network, "env": env or {}})

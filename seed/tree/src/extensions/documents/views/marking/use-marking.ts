@@ -201,6 +201,11 @@ function storedMarking(documentId: string, prompt: string): Marking | null {
   }
 }
 
+/** Whether the marks are still the ones a prompt's words gave it: nothing
+ * marked or taken back since. */
+const sameReferences = (left: Marking, right: Marking): boolean =>
+  JSON.stringify(left.references) === JSON.stringify(right.references);
+
 /** A prompt's marks as its latest run the person may see carried them, or
  * nothing marked. BO_0267_013 */
 async function sentMarking(documentId: string, prompt: string): Promise<Marking> {
@@ -295,9 +300,16 @@ export function useMarking(input: {
       writeSession(session, store.marking);
     }
     if (held !== null) return;
+    // A prompt's references name what was marked (`BO_0352_013`): with
+    // nothing on the device they are its marks until the latest run's read
+    // answers, and stay its marks when that run carried none.
+    const block = surface.document?.blocks.find((candidate) => candidate.blockId === blockId);
+    const written = block?.kind === "text" ? block.runs.flatMap((entry) => (entry.markRef === undefined ? [] : [entry.markRef])) : [];
+    const fromWords = written.length === 0 ? NO_MARKING : markingFromSent(written);
+    if (written.length > 0) store.marking = { ...fromWords, mode: store.marking.mode };
     const sent = await sentMarking(documentId, blockId);
     // A later choice of prompt, or a mark made meanwhile, wins over the read.
-    if (store.prompt === blockId && store.marking.references.length === 0) {
+    if (store.prompt === blockId && sameReferences(store.marking, fromWords) && sent.references.length > 0) {
       store.marking = { ...sent, mode: store.marking.mode };
     }
   });

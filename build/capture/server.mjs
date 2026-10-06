@@ -214,6 +214,8 @@ async function main() {
   const port = Number(process.env.CALLIOPA_CAPTURE_PORT) || 8096;
   const caps = {
     loadMs: Number(process.env.CALLIOPA_CAPTURE_LOAD_MS) || undefined,
+    settleMs: Number(process.env.CALLIOPA_CAPTURE_SETTLE_MS) || undefined,
+    quietMs: Number(process.env.CALLIOPA_CAPTURE_QUIET_MS) || undefined,
     renderMs: Number(process.env.CALLIOPA_CAPTURE_RENDER_MS) || undefined,
     maxBytes: Number(process.env.CALLIOPA_CAPTURE_MAX_BYTES) || undefined,
   };

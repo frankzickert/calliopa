@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lib.calls import Calls  # noqa: E402
 from lib.caps import Caps  # noqa: E402
 from lib.format import Formatting, format_source  # noqa: E402
-from lib.runtimes import Refused, Runtimes  # noqa: E402
+from lib.runtimes import Refused, Runtimes, resolve_scope  # noqa: E402
 from lib.sessions import SESSION_DIR, Sessions  # noqa: E402
 
 MAX_JSON_BYTES = 1024 * 1024
@@ -84,10 +84,11 @@ class Service:
         joined = self.runtimes.join_network()
         reaped = self.runtimes.reap_stale_kernels(SESSION_DIR)
         calls = self.calls.reap()
+        moved = self.runtimes.settle_networks()
         print(
-            f"code: runtimes' network {self.runtimes.network.name}, "
+            f"code: scope {self.runtimes.scope}; runtimes' network {self.runtimes.network.name}, "
             f"{'joined' if joined else 'not in a container, so not joined'}; {reaped} stale kernel(s) reaped, "
-            f"{calls} call container(s) left behind removed",
+            f"{calls} call container(s) left behind removed, {moved} runtime(s) moved onto the network",
             file=sys.stderr,
         )
 
@@ -387,12 +388,14 @@ def main() -> int:
     port = int(os.environ.get("CALLIOPA_CODE_PORT", "8098"))
     caps = Caps.from_env(os.environ)
     workdir = os.environ.get("CALLIOPA_CODE_WORKDIR") or "/calliopa"
-    scope = os.environ.get("CALLIOPA_CODE_SCOPE") or "stack"
     try:
         client = docker.DockerClient(base_url=os.environ.get("DOCKER_HOST") or "unix:///var/run/docker.sock")
         client.ping()
     except DockerException as failure:
         raise SystemExit(f"code: the docker daemon is not reachable: {failure}") from failure
+    # The service's compose project unless set: two stacks on one daemon keep
+    # their runtimes apart. BO_0353_001
+    scope = resolve_scope(client, os.environ.get("CALLIOPA_CODE_SCOPE"))
     # Where the formatter is. Absent, the format route answers every source
     # unchanged, which is exactly what a tree with no formatter should do.
     # BO_0296_003

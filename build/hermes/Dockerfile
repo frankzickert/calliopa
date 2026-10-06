@@ -247,6 +247,128 @@ def _calliopa_thread_overrides(agent):
 )
 EOF
 
+# A run's `codex app-server` ends with the run. The pinned release makes an
+# agent per gateway run, spawns the agent's app-server on its first Codex turn,
+# and drops the agent when the run ends without closing it — and the agent's
+# own close never reaches the session — so every Codex run left its
+# app-server (the launcher and its binary, ~500 MB together) running until the
+# container stopped. The run's executor thread now closes the session when
+# `run_conversation` returns, completed, failed or cancelled alike, so nothing
+# of a run outlives it and the event loop never waits on the close. The
+# assertion is the point, as above. BO_0353_005
+RUN python3 - <<'EOF'
+import pathlib
+
+root = pathlib.Path("/usr/local/lib/python3.13/site-packages")
+path = root / "gateway/platforms/api_server.py"
+source = path.read_text()
+old = (
+    "                            r = agent.run_conversation(\n"
+    "                                user_message=user_message,\n"
+    "                                conversation_history=conversation_history,\n"
+    "                                task_id=effective_task_id,\n"
+    "                            )\n"
+    "                        finally:\n"
+)
+assert source.count(old) == 1 and source.count("\nlogger = ") == 1, (
+    "hermes pin changed: the calliopa app-server patch no longer applies to "
+    "gateway/platforms/api_server.py. Re-evaluate it against the new release "
+    "before bumping the pin."
+)
+source = source.replace(old, old + "                            _calliopa_end_codex_session(agent)\n")
+path.write_text(
+    source
+    + '''
+
+
+def _calliopa_end_codex_session(agent):
+    """The run's codex app-server, ended with the run. BO_0353_005"""
+    session = getattr(agent, "_codex_session", None)
+    if session is None:
+        return
+    agent._codex_session = None
+    try:
+        session.close()
+    except Exception:
+        logger.warning("codex app-server of a finished run did not close", exc_info=True)
+'''
+)
+EOF
+
+# A run cut off by the memory limit says so. The service runs under
+# CALLIOPA_HERMES_MEMORY, and the kernel's OOM killer takes the largest process
+# when it is reached — a run's app-server. The release already ends the turn
+# at once when its app-server dies; its words now name the limit when the
+# container's OOM count rose since that app-server started (cgroup v2's
+# memory.events, v1's memory.oom_control). The assertions are the point, as
+# above. BO_0353_007
+RUN python3 - <<'EOF'
+import pathlib
+
+root = pathlib.Path("/usr/local/lib/python3.13/site-packages/agent/transports")
+
+
+def patch(relative, old, new, count=1):
+    path = root / relative
+    source = path.read_text()
+    assert source.count(old) == count, (
+        f"hermes pin changed: the calliopa memory-limit patch no longer applies to "
+        f"{relative}. Re-evaluate it against the new release before bumping the pin."
+    )
+    path.write_text(source.replace(old, new))
+
+
+patch(
+    "codex_app_server.py",
+    "        self._closed = False\n",
+    "        self._closed = False\n"
+    "        self._calliopa_oom_base = calliopa_oom_kills()\n",
+)
+patch(
+    "codex_app_server.py",
+    "\nimport os\n",
+    "\nimport os\n"
+    "\n\n"
+    "def calliopa_oom_kills():\n"
+    '    """The container\'s OOM kills so far, or None where the cgroup does not say. BO_0353_007"""\n'
+    '    for path in ("/sys/fs/cgroup/memory.events", "/sys/fs/cgroup/memory/memory.oom_control"):\n'
+    "        try:\n"
+    "            for line in open(path):\n"
+    '                if line.startswith("oom_kill "):\n'
+    "                    return int(line.split()[1])\n"
+    "        except (OSError, ValueError):\n"
+    "            continue\n"
+    "    return None\n"
+    "\n\n",
+)
+patch(
+    "codex_app_server_session.py",
+    '                        "codex app-server subprocess exited unexpectedly",\n',
+    "                        _calliopa_exit_words(self._client),\n",
+    count=2,
+)
+path = root / "codex_app_server_session.py"
+path.write_text(
+    path.read_text()
+    + '''
+
+
+def _calliopa_exit_words(client):
+    """Why the app-server is gone: the memory limit when the OOM killer took it. BO_0353_007"""
+    from agent.transports.codex_app_server import calliopa_oom_kills
+
+    base = getattr(client, "_calliopa_oom_base", None)
+    now = calliopa_oom_kills()
+    if base is not None and now is not None and now > base:
+        return (
+            "the run was stopped because the agent service reached its memory limit "
+            "(CALLIOPA_HERMES_MEMORY in .env); raise it and run ./install.sh again"
+        )
+    return "codex app-server subprocess exited unexpectedly"
+'''
+)
+EOF
+
 # Both trap dependencies, asserted at build time so a broken image never
 # reaches a compose file. `aiohttp` is what the API server needs an adapter
 # from; `mcp.client.streamable_http` is the module the release's transport gate

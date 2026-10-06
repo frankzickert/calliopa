@@ -1,6 +1,7 @@
 import { component$, type QRL } from "@builder.io/qwik";
 
 import type { LibraryItem, OpenTarget } from "~/contract";
+import type { DragOperation, DragPayload } from "~/lib/drag";
 import { AGENT_FACES } from "~/lib/agent-menu";
 import { Icon, type IconName } from "./icons";
 
@@ -44,7 +45,12 @@ export const LibraryRow = component$<{
   held?: boolean | undefined;
   /** Hermes puts the entry's document forward and no tab holds it. BO_0350_024 */
   forward?: boolean | undefined;
-}>(({ item, current, onOpen$, pointing, onMark$, held, forward }) => {
+  /** What dragging the row offers: the operations of the view presenting its
+   * kind, as a tab of that kind offers. Absent or empty, the row does not
+   * drag. `documents`' DO_0043_002 */
+  drags?: readonly DragOperation[] | undefined;
+  onDrag$?: QRL<(payload: DragPayload, event: PointerEvent) => void> | undefined;
+}>(({ item, current, onOpen$, pointing, onMark$, held, forward, drags, onDrag$ }) => {
   const open = item.open;
   const parts = (
     <>
@@ -94,6 +100,14 @@ export const LibraryRow = component$<{
       data-forward={forward === true ? "true" : undefined}
       data-reference={marking && pointing.number !== null ? pointing.number : undefined}
       aria-current={current ? "true" : undefined}
+      // Dragged, the row carries its item into the work — a document into
+      // another, where it becomes a block. A press without travel stays a
+      // press, and on touch the drag waits for the long press, so the list
+      // still scrolls. DO_0043_002
+      onPointerDown$={(event) => {
+        if (onDrag$ === undefined || drags === undefined || drags.length === 0) return;
+        return onDrag$({ itemId: open.itemId, kind: open.kind, source: "library", operations: drags, preview: open.title }, event);
+      }}
       onClick$={() => onOpen$(open)}
     >
       {parts}

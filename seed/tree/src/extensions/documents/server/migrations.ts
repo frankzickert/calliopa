@@ -1,9 +1,10 @@
 import { query, type ReadNode, type ReadRelation } from "~/server/ccgw/client";
-import { contentOf, nodeRef, typeOf } from "~/server/ccgw/nodes";
+import { bareId, contentOf, nodeRef, typeOf } from "~/server/ccgw/nodes";
 import type { GraphOutcome } from "~/server/outcome";
 import { CONTAINS, RETIRED } from "./assemble";
 import { DOCUMENT_TYPE } from "./vocabulary";
 import { FOCUSES } from "./reach";
+import { emptiedDocumentChild } from "./focus";
 
 /**
  * `documents`' executable migrations (`calliopa-bootstrap`'s `BO_0312_001`):
@@ -280,6 +281,62 @@ export function clearProfileGenerationStatement(documents: readonly ReadNode[]):
   return { statement: statements.join("; "), parameters };
 }
 
+/** A focused work found empty, by the child and its `focuses` edge. */
+export interface EmptyFocusedWork {
+  readonly itemId: string;
+  readonly relationId: string;
+}
+
+/**
+ * The script that removes every focused work already empty when `CA_0083`
+ * lands, as an emptying write would: each `focuses` edge closed first, then
+ * each child retired. The parent blocks are left as they stand. Empty when
+ * none is. Pure. CA_0083_003
+ */
+export function removeEmptyFocusedWorkStatement(found: readonly EmptyFocusedWork[]): MigrationStatement {
+  const closes: string[] = [];
+  const retires: string[] = [];
+  const parameters: Record<string, unknown> = {};
+  [...found]
+    .sort((left, right) => (left.itemId < right.itemId ? -1 : 1))
+    .forEach((one, index) => {
+      parameters[`e${index}RelationId`] = one.relationId;
+      parameters[`e${index}From`] = nodeRef(one.itemId);
+      parameters[`g${index}NodeId`] = nodeRef(one.itemId);
+      closes.push(`CLOSE e${index}`);
+      retires.push(`RETIRE g${index}`);
+    });
+  return { statement: [...closes, ...retires].join("; "), parameters };
+}
+
+/**
+ * Every focused work a document child holds that is empty in `CA_0083`'s
+ * sense — no standing block and no pending insert — read through the
+ * contribution's own rule, so the migration and an emptying write agree.
+ */
+export async function readEmptyFocusedWork(): Promise<GraphOutcome<readonly EmptyFocusedWork[]>> {
+  const read = await query({
+    statement: `MATCH (d:${DOCUMENT_TYPE})-[f:${FOCUSES}]->(b) RETURN GRAPH d, f, b`,
+    unbounded: true,
+    purpose: "migration: empty focused work",
+  });
+  if (read.outcome === "noResult") return { outcome: "success", result: [] };
+  if (read.outcome !== "success") return read as GraphOutcome<never>;
+  const established = new Set(
+    read.result.nodes.filter((node) => typeOf(node) === DOCUMENT_TYPE && node.revision.status === "established").map((node) => node.id),
+  );
+  const found: EmptyFocusedWork[] = [];
+  for (const relation of read.result.relations) {
+    if (relation.type !== FOCUSES || relation.validity.status !== "active" || relation.to.nodeId === undefined) continue;
+    if (!established.has(relation.fromNodeId)) continue;
+    const itemId = bareId(relation.fromNodeId);
+    const emptied = await emptiedDocumentChild({ itemId, blockId: bareId(relation.to.nodeId) });
+    if (emptied.outcome !== "success") return emptied as GraphOutcome<never>;
+    if (emptied.result !== null) found.push({ itemId, relationId: relation.id });
+  }
+  return { outcome: "success", result: found };
+}
+
 /** The migrations this extension runs, by the route segment its member names. */
 export const MIGRATIONS: Readonly<Record<string, () => Promise<GraphOutcome<MigrationStatement>>>> = {
   /** The discarded standing goes: every block set aside is retired. BO_0315_008 */
@@ -293,6 +350,12 @@ export const MIGRATIONS: Readonly<Record<string, () => Promise<GraphOutcome<Migr
     const found = await readRefinement();
     if (found.outcome !== "success") return found as GraphOutcome<never>;
     return { outcome: "success", result: retireRefinementStatement(found.result) };
+  },
+  /** A focused work already empty goes; its parent block stays. CA_0083_003 */
+  "remove-empty-focused-work": async () => {
+    const found = await readEmptyFocusedWork();
+    if (found.outcome !== "success") return found as GraphOutcome<never>;
+    return { outcome: "success", result: removeEmptyFocusedWorkStatement(found.result) };
   },
   /** A profile's generation setup goes; a format holds it. BO_0336_040 */
   "profile-generation": async () => {

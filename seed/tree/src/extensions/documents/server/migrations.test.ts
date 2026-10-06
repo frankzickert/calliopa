@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clearProfileGenerationStatement, retireRefinementStatement, retireSetAsideStatement } from "./migrations";
+import { clearProfileGenerationStatement, removeEmptyFocusedWorkStatement, retireRefinementStatement, retireSetAsideStatement } from "./migrations";
 
 // The migration that retires every block set aside (BO_0315_008): the value
 // cleared first, then the containment closed and the block related retired
@@ -88,5 +88,29 @@ describe("clearProfileGenerationStatement", () => {
 
   it("answers an empty statement when no document holds it", () => {
     expect(clearProfileGenerationStatement([node("node:plain", "established", { title: "x" })])).toEqual({ statement: "", parameters: {} });
+  });
+});
+
+/** Focused work already empty when `CA_0083` lands goes as an emptying write
+ * removes it: the edge closed, the child retired. CA_0083_003 */
+describe("removing the focused work already empty", () => {
+  it("Given two empty children, Then every edge is closed before any child is retired", () => {
+    const script = removeEmptyFocusedWorkStatement([
+      { itemId: "child-b", relationId: "rel:2" },
+      { itemId: "child-a", relationId: "rel:1" },
+    ]);
+    expect(script.statement).toBe("CLOSE e0; CLOSE e1; RETIRE g0; RETIRE g1");
+    expect(script.parameters).toEqual({
+      e0RelationId: "rel:1",
+      e0From: "node:child-a",
+      g0NodeId: "node:child-a",
+      e1RelationId: "rel:2",
+      e1From: "node:child-b",
+      g1NodeId: "node:child-b",
+    });
+  });
+
+  it("Given none, Then the script is empty and the kernel writes nothing", () => {
+    expect(removeEmptyFocusedWorkStatement([])).toEqual({ statement: "", parameters: {} });
   });
 });

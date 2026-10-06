@@ -116,12 +116,16 @@ export function openTabBeside(state: TabsState, tab: Tab): TabsState {
 /** Opens a document reached along a route — a block's focused work, or a
  * crumb going back — in a tab of its own after the active one, carrying the
  * route, in the active tab's kind and the view given. A tab already showing
- * the document becomes active as it stands, its own route kept. The tab the
- * reader pressed in is left as it is. CA_0073_001 CA_0073_002 */
+ * the document becomes active as it stands, its own route kept — unless the
+ * document was opened from a block (`fromBlock`), when that tab takes the
+ * route the reader just came by, so focused work whose block moved into
+ * another document leads through the document it now stands in. The tab the
+ * reader pressed in is left as it is. CA_0073_001 CA_0073_002 CA_0084_001 */
 export function openAlongRoute(
   state: TabsState,
   target: { readonly itemId: string; readonly title: string; readonly route: readonly RouteEntry[] },
   viewType?: string,
+  options: { readonly fromBlock?: boolean } = {},
 ): TabsState {
   const from = activeTab(state);
   if (from === undefined) return state;
@@ -130,7 +134,7 @@ export function openAlongRoute(
   // The id `openTarget$` gives the same document, unless another view of it
   // holds that id already.
   const taken = state.tabs.some((tab) => tab.id === plain && tab.viewType !== view);
-  return openTabBeside(state, {
+  const opened = openTabBeside(state, {
     id: taken ? `${plain}-${view}` : plain,
     kind: from.kind,
     title: target.title,
@@ -141,6 +145,11 @@ export function openAlongRoute(
     unsaved: false,
     route: target.route,
   });
+  // A tab revealed rather than opened keeps its route, except on an open
+  // from a block. CA_0084_001
+  const revealed = activeTab(opened);
+  if (options.fromBlock !== true || opened.tabs.length !== state.tabs.length || revealed?.itemId !== target.itemId) return opened;
+  return updateTab(opened, revealed.id, { route: target.route });
 }
 
 /** The tabs as the workspace record keeps them: without a replay's tab,
@@ -227,6 +236,49 @@ export function routeOf(tab: Pick<Tab, "route" | "itemId" | "title">, title?: st
   return tab.route !== undefined && tab.route.length > 0
     ? [...tab.route]
     : [{ itemId: tab.itemId ?? "", title: title ?? tab.title }];
+}
+
+/**
+ * The tabs once a focused work has gone (`CA_0083_002`, user decision
+ * 2026-10-06): every tab showing the child turns to its parent — its route
+ * cut back to the parent's entry, or a route of one — unless the parent is
+ * already open in another tab, which then becomes active in the child's
+ * place while the child's tab closes. `turned` names the active tab when it
+ * turned or moved to the parent, so the shell lands on the parent block.
+ */
+export function turnFromEmptied(
+  state: TabsState,
+  emptied: { readonly itemId: string; readonly parent: RouteEntry },
+): { readonly state: TabsState; readonly turned: boolean } {
+  const showing = state.tabs.filter((tab) => tab.itemId === emptied.itemId);
+  if (showing.length === 0) return { state, turned: false };
+  const wasActive = showing.some((tab) => tab.id === state.activeTabId);
+  let next = state;
+  for (const tab of showing) {
+    const open = next.tabs.find(
+      (candidate) => candidate.itemId === emptied.parent.itemId && candidate.kind === tab.kind && candidate.replay === undefined,
+    );
+    if (open !== undefined) {
+      const active = next.activeTabId === tab.id;
+      next = closeTab(next, tab.id);
+      if (active) next = selectTab(next, open.id);
+      continue;
+    }
+    const route = routeOf(tab);
+    const at = route.findIndex((entry) => entry.itemId === emptied.parent.itemId);
+    const back = at >= 0 ? route.slice(0, at + 1) : [{ itemId: emptied.parent.itemId, title: emptied.parent.title }];
+    const plain = `${tab.kind}-${emptied.parent.itemId}`;
+    const id = next.tabs.some((candidate) => candidate.id === plain) ? tab.id : plain;
+    next = {
+      tabs: next.tabs.map((candidate) =>
+        candidate.id === tab.id
+          ? { ...candidate, id, itemId: emptied.parent.itemId, title: back[back.length - 1]?.title || emptied.parent.title, route: back, selection: null, unsaved: false }
+          : candidate,
+      ),
+      activeTabId: next.activeTabId === tab.id ? id : next.activeTabId,
+    };
+  }
+  return { state: next, turned: wasActive };
 }
 
 export function updateTab(

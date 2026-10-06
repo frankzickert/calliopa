@@ -1079,7 +1079,8 @@ proposes the fields a structure lacks. The drop itself is `documents`'
 - A child in the popover opens (`BO_0349_024`, landed 2026-10-05): a field's child carries the focused
   work it stands in and its title (`FieldChild.documentId`, `documentTitle`), and pressing its words
   (`data-open-child`) opens that work in a tab of its own along the route — the parent's with the
-  block the field stands on — landing on the child (`openAlongRoute$`). Proven in `views/views.test.ts`.
+  block the field stands on — landing on the child (`openAlongRoute$`, with `fromBlock`, so a tab already
+  showing the work takes that route, `CA_0084_001`). Proven in `views/views.test.ts`.
 - The field choice after a nest is this extension's `nested` place (`BO_0349_022`, landed 2026-10-05;
   `views/nested.tsx`, `NestedFieldChoice`): `ui.shell`'s contract draws the place under a block a drop
   has just nested a block into, handed the nested block and the focused work it now stands in, and
@@ -1123,3 +1124,18 @@ proposes the fields a structure lacks. The drop itself is `documents`'
   `BO_0349_036`) is what asks for it. Proven under the kernel harness in
   `tests/behavior/structures.test.ts`: a *Release* structure gaining *Launch date* as a date.
 
+
+## Structures In The Documents Filter
+
+Under `documents`' `DO_0042` (2026-10-06,
+[the change](../../../documents/docs/changes/completed/DO_0042_FEAT_structures-in-the-documents-filter.md)):
+the Documents section hides the documents that define a structure by default
+([The Documents Section](../../../documents/docs/system/documents/documents-section.md#structures-in-the-filter)).
+
+- This extension names its structure documents for the whole listing (`DO_0042_004`):
+  `contributions.server.ts` registers `nameListedDocuments("structures", structureDocuments)`
+  beside its namer, and `structureDocuments` (`server/structures.ts`) answers every document using
+  *Structure* as `structure` from one metadata-only read rooted at `STRUCTURE_STRUCTURE`'s document,
+  as `documentsCarrying` reads it. A document using another structure is not named.
+  `tests/behavior/structures.test.ts` proves, over the kernel harness, a person's structure and a
+  built-in named and a document using *Story* not, through `listDocuments` as well.

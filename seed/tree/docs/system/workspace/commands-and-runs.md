@@ -218,3 +218,49 @@ Under `calliopa-bootstrap`'s `BO_0322`, set to draft by the user on 2026-10-01 a
   the shell's run start, so the shell never registers it, and the kernel lists it to no one until
   claimed (`calliopa-bootstrap`'s `BO_0350_050`). A claimed one is the person's own pinch, started
   and listed through the shell as any pinch is.
+
+## A Reference Reads As Its Title
+
+- Under `calliopa-bootstrap`'s `BO_0352`, promoted to draft by the user on 2026-10-06 and
+  transferred here the same day, a reference chosen from a prompt's `#` list is written as an atom
+  bound to what was marked and drawn in the words as its title, looking like the chip on the
+  command control. The editor's half is `documents`'
+  ([Command Mode](../../../src/extensions/documents/docs/system/documents/command-mode.md#a-reference-reads-as-its-title));
+  the run schema is the kernel's (`calliopa-bootstrap`'s `ui-kernel.md`, *A Reference Reads As Its
+  Title*, `BO_0352_001`–`005`).
+* The atom is bound to what was marked, not to a number: taking a mark back or renumbering never
+  leaves it pointing at something else. The run is still told the reference by its number. User
+  decision, 2026-10-06 (`DO_0041_Q2`).
+* The chip in the words and the mark are independent: every mark goes with the command whether the
+  words name it or not, and a reference in the words whose mark no longer stands refuses *Send*, as
+  a dangling `#n` does. User decision, 2026-10-06 (`BO_0352_Q2`).
+- The run key is `markRef`, its value what `SentReference` sends of a reference with the number it
+  had when written (`calliopa-bootstrap`'s `ui-kernel.md`; technical decision at transfer,
+  2026-10-06).
+
+- The run kind (`BO_0352_006`, landed 2026-10-06; `src/lib/runs.ts`): `markRef` is an atom beside
+  `blockRef` — `MarkRef`, its value, carries `number`, `kind` and the fields `SentReference` sends,
+  with `words` — kept by normalization although it carries no text, one point wide, copied field by
+  field in one order (`markRefOf`) so `sameRuns` tells two apart by what they name, read back by
+  `readRuns` through `readMarkRef`, which refuses by the kernel's rules: no number, no kind, a kind
+  without what it needs, a field no mark has, text of its own, another atom at once, and a keyword.
+- The words a command sends (`BO_0352_007`, landed 2026-10-06; `src/lib/command-typeahead.ts`):
+  `standingMark` finds the mark standing on what a `markRef` names by its kind and what it names
+  (`MarkLike`, `markKey`), never by its number; `commandWords` writes each `markRef` as `#<n>`, the
+  number of that mark now, and `unboundMarks` names the ones no mark stands on, by the number each
+  was written with. `documents`' send uses both in place of `runsText`, refusing an unbound one in
+  the dangling note's words; the shell's `danglingNumbers` still checks an older prompt's text `#n`
+  (`BO_0352_Q4`).
+- The chip's face (`BO_0352_008`, landed 2026-10-06): one look for the command line's chips and a
+  chip in the words — `shell.css` draws `.block-command .chip` and `.chip--inline` by the same
+  rules, the pill, border and stale look, `.chip--inline` sized to its line of text with its title
+  drawn from `data-chip-title` and the `warning` icon drawn as a mask in the warning colour. It is
+  a face, not a component: a chip painted on the editing surface must add nothing to the caret's
+  offsets, as a citation's label does not. `cutTitle` cuts a title at a word boundary to
+  `INLINE_TITLE_CHARS` (20) with an ellipsis, and `inlineChipName` names a chip by its number and
+  whole title, adding *no mark stands under it* when none does (`src/lib/command-target.ts`).
+- Verified 2026-10-06 (`BO_0352_006`–`008`): `runs.test.ts` keeps, reads back and tells apart a
+  `markRef` and refuses each misfit by name; `command-typeahead.test.ts` names each reference by its
+  mark's number now, and finds unbound the one whose mark was taken back and whose number went to
+  another block; `command-target.test.ts` cuts a title and names a chip. Matching by number instead
+  was shown to fail. `reference-chips.test.ts` passes unchanged.
