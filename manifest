@@ -1,0 +1,14 @@
+# Every file of the public repo frankzickert/calliopa. The release publishes
+# exactly these; scripts/check-distribution.sh holds distribution/ to them.
+LICENSE.md
+README.md
+docs/commands.md
+docs/index.md
+docs/mcp.md
+docs/modules/flyby.md
+docs/outputs.md
+docs/spec.md
+docs/templates.md
+install.ps1
+install.sh
+manifest
